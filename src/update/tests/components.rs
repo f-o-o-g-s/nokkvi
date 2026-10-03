@@ -511,6 +511,58 @@ fn browsing_panel_songs_enter_adds_without_leaving_radio() {
     assert_add_left_playback_alone(&app, "Songs");
 }
 
+#[test]
+fn browsing_panel_album_track_enter_adds_without_leaving_radio() {
+    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+    expand_albums_with(&mut app, "a1", vec![make_song("t1", "Track", "Artist")]);
+    app.albums_page.common.slot_list.selected_offset = Some(1);
+    activate_center(
+        crate::app_message::Message::Albums(AlbumsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Albums track");
+}
+
+#[test]
+fn browsing_panel_artist_album_enter_adds_without_leaving_radio() {
+    use crate::{views::ArtistsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+    expand_artists_with(
+        &mut app,
+        "ar1",
+        vec![make_album("a1", "Album 1", "Artist 1")],
+    );
+    app.artists_page.common.slot_list.selected_offset = Some(1);
+    activate_center(
+        crate::app_message::Message::Artists(ArtistsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Artists album");
+}
+
+#[test]
+fn browsing_panel_genre_album_enter_adds_without_leaving_radio() {
+    use crate::{views::GenresMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    expand_genres_with(&mut app, "g1", vec![make_album("a1", "Album 1", "Artist")]);
+    app.genres_page.common.slot_list.selected_offset = Some(1);
+    activate_center(
+        crate::app_message::Message::Genres(GenresMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Genres album");
+}
+
 // ============================================================================
 // redirect_play_to_queue_in_browsing_panel (components.rs)
 // ============================================================================

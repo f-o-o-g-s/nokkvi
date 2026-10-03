@@ -416,9 +416,8 @@ impl Nokkvi {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
             ArtistsAction::PlayAlbum(album_id, force) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue
+                // Browsing panel: redirect play → add to queue, before the
+                // play prologue since it is an add.
                 if self.browsing_panel.is_some() {
                     let name = self
                         .artists_page
@@ -433,6 +432,8 @@ impl Nokkvi {
                         "add album to queue",
                     );
                 }
+                self.guard_play_action();
+                self.enter_new_playback_context();
                 let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album(&album_id, shuffle).await },
