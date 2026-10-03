@@ -3,7 +3,12 @@
 //! Assertions target observable `Nokkvi` state only (`test_app()` has no
 //! `AppService`).
 
-use crate::{Nokkvi, test_helpers::test_app, update::modals::ActiveModal};
+use crate::{
+    Nokkvi,
+    test_helpers::{make_album, test_app},
+    update::modals::ActiveModal,
+    widgets::EqModalMessage,
+};
 
 /// Open `modal` the way its own state reads open.
 pub(super) fn open_modal(app: &mut Nokkvi, modal: ActiveModal) {
@@ -92,4 +97,87 @@ fn the_highest_open_modal_is_top() {
         }
     }
     assert_eq!(app.top_modal(), None);
+}
+
+// ----------------------------------------------------------------------------
+// Escape
+// ----------------------------------------------------------------------------
+
+fn escape(app: &mut Nokkvi) {
+    let _ = app.update(crate::Message::RawKeyEvent(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+        false,
+    ));
+}
+
+#[test]
+fn escape_closes_the_modals_top_down() {
+    let mut app = app_with_every_modal_open();
+    for (i, &modal) in ActiveModal::STACK.iter().enumerate() {
+        escape(&mut app);
+        assert!(
+            !app.modal_is_open(modal),
+            "Escape {} closes {modal:?}",
+            i + 1
+        );
+        for &below in &ActiveModal::STACK[i + 1..] {
+            assert!(
+                app.modal_is_open(below),
+                "Escape {} leaves {below:?} open",
+                i + 1
+            );
+        }
+    }
+}
+
+#[test]
+fn escape_on_eq_drops_the_preset_name_prompt() {
+    // Escape used to set `open = false` directly, skipping Close, so the
+    // half-typed preset-name prompt came back on the next open.
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    let _ = app.handle_eq_modal(EqModalMessage::Open);
+    let _ = app.handle_eq_modal(EqModalMessage::SavePreset);
+    assert!(app.eq_modal.save_mode);
+
+    escape(&mut app);
+    assert!(!app.eq_modal.open);
+    let _ = app.handle_eq_modal(EqModalMessage::Open);
+
+    assert!(
+        !app.eq_modal.save_mode,
+        "reopening EQ shows the sliders, not the stale prompt"
+    );
+}
+
+#[test]
+fn escape_closes_a_modal_before_the_roulette_spin_under_it() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = crate::View::Albums;
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "One", "X"),
+        make_album("a2", "Two", "X"),
+        make_album("a3", "Three", "X"),
+        make_album("a4", "Four", "X"),
+    ]);
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(
+        crate::View::Albums,
+    ));
+    assert!(app.roulette.is_some(), "spin armed");
+    open_modal(&mut app, ActiveModal::Trawl);
+
+    escape(&mut app);
+
+    assert!(
+        app.trawl_modal.is_none(),
+        "the modal on screen closes first"
+    );
+    assert!(
+        app.roulette.is_some(),
+        "the spin under it keeps going until the next Escape"
+    );
 }

@@ -51,6 +51,9 @@ All notable changes to this project will be documented in this file.
 - In ReplayGain Album mode, auto-advancing into another album now plays it at that album's level instead of the previous album's.
 - In ReplayGain Track mode, auto-advancing now also honors clipping prevention and album-gain fallback for the next track.
 - With ReplayGain on, tracks with different gains now follow each other without a gap.
+- Closing the EQ with Escape no longer brings back an unfinished preset name prompt the next time it opens.
+- Escape now plays its sound when it closes the EQ, About or Get Info window, like the other windows.
+- Escape now closes an open window before cancelling a roulette spin running behind it.
 
 ### Removed
 

@@ -487,16 +487,11 @@ fn escape_closes_the_trawl_modal_and_the_crate_survives() {
     open_modal(&mut app);
     app.trawl_crate.add(seed("al1"));
 
-    // Escape resolves through the ClearSearch cascade; the modal's tier
-    // returns a Close task — drive the message it produces like prod would.
     let _ = send_raw_key(
         &mut app,
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
         iced::keyboard::Modifiers::empty(),
     );
-    // The cascade emits Task::done(Close); tests don't run tasks, so route
-    // the same Close message through the dispatcher to complete the hop.
-    let _ = app.update(crate::Message::TrawlModal(TrawlModalMessage::Close));
 
     assert!(app.trawl_modal.is_none(), "Escape closes the editor");
     assert_eq!(app.trawl_crate.len(), 1, "the crate persists");
@@ -504,8 +499,9 @@ fn escape_closes_the_trawl_modal_and_the_crate_survives() {
 
 #[test]
 fn escape_tier_prefers_the_picker_on_a_double_open() {
-    // Both-open is practically unreachable, but the tiers must agree: the
-    // picker wins everywhere (gate, slot-list intercept, Escape cascade).
+    // Both-open is practically unreachable, but `ActiveModal::STACK` puts
+    // the picker above Trawl, so it wins everywhere (draw, gate, slot-list
+    // intercept, Escape).
     let mut app = test_app();
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
@@ -513,10 +509,8 @@ fn escape_tier_prefers_the_picker_on_a_double_open() {
     app.default_playlist_picker =
         Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[]));
 
-    let task = app.handle_clear_search();
-    drop(task);
-    // The cascade returned the PICKER's close message — the trawl modal is
-    // untouched by this Escape.
+    let _ = app.handle_clear_search();
+    assert!(app.default_playlist_picker.is_none(), "the picker closes");
     assert!(
         app.trawl_modal.is_some(),
         "picker tier fires first; trawl modal survives this Escape"
@@ -1308,24 +1302,18 @@ fn escape_with_tray_cursor_active_is_not_two_stage() {
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
 
-    // Escape's close rides a Task tests never run, so modal closure itself
-    // is pinned by escape_closes_the_trawl_modal_and_the_crate_survives.
-    // What THIS test pins is the design decision that Escape is NOT
-    // two-stage: no synchronous first-press ring clear may creep in (the
-    // ring's None position is the in-modal dismiss; Escape always closes).
+    // The design decision pinned here: Escape is NOT two-stage. The first
+    // press closes the modal rather than clearing the ring (the ring's None
+    // position is the in-modal dismiss; Escape always closes).
     let _ = send_raw_key(
         &mut app,
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
         iced::keyboard::Modifiers::empty(),
     );
-    assert_eq!(
-        tray_cursor(&app),
-        Some(TrawlTrayControl::Blend),
-        "Escape must not clear the ring as a first stage"
+    assert!(
+        app.trawl_modal.is_none(),
+        "the first Escape closes the modal, not just the ring"
     );
-
-    let _ = app.update(crate::Message::TrawlModal(TrawlModalMessage::Close));
-    assert!(app.trawl_modal.is_none(), "the emitted Close still closes");
     assert_eq!(app.trawl_crate.len(), 1, "the crate persists");
 }
 

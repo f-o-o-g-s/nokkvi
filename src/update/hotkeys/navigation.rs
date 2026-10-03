@@ -40,9 +40,18 @@ impl Nokkvi {
     pub(crate) fn handle_clear_search(&mut self) -> Task<Message> {
         trace!(" ClearSearch (Escape) hotkey pressed - unfocusing search");
 
-        // Roulette spin has highest priority — Escape during a spin
-        // restores the original viewport without auto-playing. The cancel
-        // handler fires its own Escape SFX so we don't play it twice.
+        // The modal on top closes first, one per press, ahead of everything
+        // under it: a roulette spin, a drag, Theater Mode, Settings' own
+        // Escape (a dialog opened from Settings must cancel, not close the
+        // drill-down behind it), and the view's search.
+        if let Some(modal) = self.top_modal() {
+            self.sfx_engine.play(audio::SfxType::Escape);
+            return self.close_modal(modal);
+        }
+
+        // Escape during a roulette spin restores the original viewport
+        // without auto-playing. The cancel handler fires its own Escape SFX
+        // so we don't play it twice.
         if self.roulette.is_some() {
             return Task::done(Message::Roulette(
                 crate::app_message::RouletteMessage::Cancel,
@@ -52,47 +61,9 @@ impl Nokkvi {
         // Play escape sound
         self.sfx_engine.play(audio::SfxType::Escape);
 
-        // Default-playlist picker has top priority — closes before any other
-        // Escape-handling logic runs, so a stray Esc never bleeds through to
-        // the underlying view.
-        if self.default_playlist_picker.is_some() {
-            return Task::done(Message::DefaultPlaylistPicker(
-                crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Close,
-            ));
-        }
-
-        // The MilkDrop preset picker closes at the same tier (back to the
-        // preset that was on screen when it opened).
-        if self.milkdrop.picker.is_some() {
-            return self.handle_milkdrop_picker(
-                crate::widgets::milkdrop_picker::MilkdropPickerMessage::Close,
-            );
-        }
-
-        // Trawl modal closes at the same overlay tier (after the picker — the
-        // tiers agree across all three interception points). The crate itself
-        // survives; only the editor closes.
-        if self.trawl_modal.is_some() {
-            return Task::done(Message::TrawlModal(
-                crate::widgets::trawl_modal::TrawlModalMessage::Close,
-            ));
-        }
-
         // Cancel active cross-pane drag first
         if self.cross_pane_drag.active.is_some() || self.cross_pane_drag.press_origin.is_some() {
             return self.handle_cross_pane_drag_cancel();
-        }
-
-        // Text-input dialog Escape takes precedence over the Settings
-        // view's own Escape handler. The dialog can be opened from inside
-        // Settings (Save-Playlist-style flows, the local-music-path
-        // editor), so routing ESC to Settings first would close the
-        // settings drill-down instead of cancelling the prompt the user
-        // is actively typing into.
-        if self.text_input_dialog.visible {
-            return Task::done(Message::TextInputDialog(
-                crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
-            ));
         }
 
         // Theater Mode leaves after every overlay above has had its Escape and

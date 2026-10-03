@@ -318,30 +318,9 @@ impl Nokkvi {
     }
 
     /// Dispatch a `HotkeyMessage` to its handler.
-    ///
-    /// `ClearSearch` runs inline modal-close logic before delegating, since
-    /// Escape's job-cascade (close modal first, then clear search) is part
-    /// of the dispatch decision rather than belonging to a single handler.
     pub(super) fn dispatch_hotkey(&mut self, msg: HotkeyMessage) -> Task<Message> {
         match msg {
-            HotkeyMessage::ClearSearch => {
-                // If EQ modal is visible, Escape closes it first
-                if self.eq_modal.open {
-                    self.eq_modal.open = false;
-                    return Task::none();
-                }
-                // If about modal is visible, Escape closes it first
-                if self.about_modal.visible {
-                    self.about_modal.close();
-                    return Task::none();
-                }
-                // If info modal is visible, Escape closes it first
-                if self.info_modal.visible {
-                    self.info_modal.close();
-                    return Task::none();
-                }
-                self.handle_clear_search()
-            }
+            HotkeyMessage::ClearSearch => self.handle_clear_search(),
             HotkeyMessage::CycleSortMode(forward) => self.handle_cycle_sort_mode(forward),
             HotkeyMessage::SeekStep(forward) => self.handle_seek_step(forward),
             HotkeyMessage::CenterOnPlaying => self.handle_center_on_playing(),

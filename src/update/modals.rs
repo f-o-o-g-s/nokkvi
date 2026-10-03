@@ -12,7 +12,18 @@
 //! (the order is a UX decision) and in the order pin in
 //! `update/tests/modals.rs`, then follow the compile errors.
 
-use crate::Nokkvi;
+use iced::Task;
+
+use crate::{
+    Nokkvi,
+    app_message::Message,
+    widgets::{
+        EqModalMessage, about_modal::AboutModalMessage,
+        default_playlist_picker::DefaultPlaylistPickerMessage, info_modal::InfoModalMessage,
+        milkdrop_picker::MilkdropPickerMessage, text_input_dialog::TextInputDialogMessage,
+        trawl_modal::TrawlModalMessage,
+    },
+};
 
 /// A root overlay modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,5 +82,27 @@ impl Nokkvi {
         ActiveModal::STACK
             .into_iter()
             .find(|&modal| self.modal_is_open(modal))
+    }
+
+    /// Close `modal` the way its own close button does, through its own
+    /// Close message, so whatever that modal tidies on close (EQ's
+    /// preset-name prompt, the MilkDrop picker's preset and lock, the Trawl
+    /// save dialog's way back to the mix) happens on Escape too.
+    pub(crate) fn close_modal(&mut self, modal: ActiveModal) -> Task<Message> {
+        match modal {
+            ActiveModal::TextInputDialog => {
+                self.handle_text_input_dialog(TextInputDialogMessage::Cancel)
+            }
+            ActiveModal::Eq => self.handle_eq_modal(EqModalMessage::Close),
+            ActiveModal::About => self.handle_about_modal(AboutModalMessage::Close),
+            ActiveModal::Info => self.handle_info_modal(InfoModalMessage::Close),
+            ActiveModal::DefaultPlaylistPicker => {
+                self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Close)
+            }
+            ActiveModal::MilkdropPicker => {
+                self.handle_milkdrop_picker(MilkdropPickerMessage::Close)
+            }
+            ActiveModal::Trawl => self.handle_trawl_modal(TrawlModalMessage::Close),
+        }
     }
 }
