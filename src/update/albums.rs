@@ -506,8 +506,10 @@ impl Nokkvi {
                 ) {
                     return task;
                 }
+                // Every branch below plays; only the replacing one enters a
+                // new playback context (`play_entity_task`), since Append
+                // and Play keeps the queue and anything still filling it.
                 self.guard_play_action();
-                self.enter_new_playback_context();
                 // AppendAndPlay: append album songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay
@@ -517,6 +519,7 @@ impl Nokkvi {
                     let id = album.id.clone();
                     let name = album.name.clone();
                     let shuffle = self.activate_shuffle_directive(force, false);
+                    self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_album_and_play(&id, shuffle).await },
                         format!("Playing '{name}'"),

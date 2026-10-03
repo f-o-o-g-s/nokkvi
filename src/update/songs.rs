@@ -204,8 +204,10 @@ impl Nokkvi {
                         )
                         .unwrap_or_else(Task::none);
                 }
+                // Every branch plays; only the replacing ones enter a new
+                // playback context, since Append and Play keeps the queue
+                // and anything still filling it.
                 self.guard_play_action();
-                self.enter_new_playback_context();
                 if let Some(song) = self.library.songs.get(index) {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);
 
@@ -214,6 +216,7 @@ impl Nokkvi {
                         EnterBehavior::PlaySingle => {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
+                            self.enter_new_playback_context();
                             let play_task = self.shell_task(
                                 move |shell| async move {
                                     shell.play_songs(vec![song], 0, OneShotShuffle::None).await
@@ -239,6 +242,7 @@ impl Nokkvi {
                             // Append to existing queue and start playing
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             let title = song.title.clone();
+                            self.clear_active_playlist();
                             return self.shell_fire_and_forget_task(
                                 move |shell| async move { shell.add_song_and_play(song).await },
                                 format!("Playing '{title}'"),
@@ -247,6 +251,7 @@ impl Nokkvi {
                         }
                         EnterBehavior::PlayAll => {
                             // Current behavior: replace queue with all songs
+                            self.enter_new_playback_context();
                             // CRITICAL FIX: Use the already-displayed songs list directly.
                             // Re-fetching would return a different random order for "random" sort mode,
                             // causing the wrong song to play. Convert SongUIViewData -> Song.

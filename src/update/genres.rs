@@ -214,11 +214,14 @@ impl Nokkvi {
                 ) {
                     return task;
                 }
+                // Both branches play; only the replacing one enters a new
+                // playback context, since Append and Play keeps the queue
+                // and anything still filling it.
                 self.guard_play_action();
-                self.enter_new_playback_context();
                 // AppendAndPlay: append genre songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
+                    self.clear_active_playlist();
                     let name = genre_name.clone();
                     let shuffle = self.activate_shuffle_directive(force, false);
                     return self.shell_fire_and_forget_task(
@@ -228,6 +231,7 @@ impl Nokkvi {
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with genre
+                self.enter_new_playback_context();
                 let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_genre(&genre_name, shuffle).await },

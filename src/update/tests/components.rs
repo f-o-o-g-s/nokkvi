@@ -387,6 +387,72 @@ fn in_queue_play_keeps_the_songs_load_running() {
     assert_eq!(app.library.queue_loading_total(), Some(500));
 }
 
+/// Enter set to Append and Play, a running Songs load, a station on air.
+fn append_and_play_app() -> (crate::Nokkvi, u64) {
+    let (mut app, chain) = app_with_running_songs_load();
+    app.settings.enter_behavior = nokkvi_data::types::player_settings::EnterBehavior::AppendAndPlay;
+    seed_radio_playback(&mut app);
+    (app, chain)
+}
+
+fn assert_append_kept_the_load(app: &crate::Nokkvi, chain: u64, path: &str) {
+    assert!(
+        app.library.progressive_queue_generation.is_current(chain),
+        "{path}: Append and Play only appends, so the Songs load must keep going"
+    );
+    assert_eq!(app.library.queue_loading_total(), Some(500), "{path}");
+    assert!(
+        app.active_playback.is_queue(),
+        "{path}: Append and Play starts queue playback, so it leaves radio mode"
+    );
+}
+
+#[test]
+fn append_and_play_keeps_the_songs_load_running_in_every_view() {
+    use crate::{
+        app_message::Message,
+        views::{AlbumsMessage, ArtistsMessage, GenresMessage, PlaylistsMessage, SongsMessage},
+        widgets::SlotListPageMessage::ActivateCenter,
+    };
+
+    let (mut app, chain) = append_and_play_app();
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+    let _ = app.update(Message::Albums(AlbumsMessage::SlotList(ActivateCenter(
+        false,
+    ))));
+    assert_append_kept_the_load(&app, chain, "Albums");
+
+    let (mut app, chain) = append_and_play_app();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+    let _ = app.update(Message::Artists(ArtistsMessage::SlotList(ActivateCenter(
+        false,
+    ))));
+    assert_append_kept_the_load(&app, chain, "Artists");
+
+    let (mut app, chain) = append_and_play_app();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    let _ = app.update(Message::Genres(GenresMessage::SlotList(ActivateCenter(
+        false,
+    ))));
+    assert_append_kept_the_load(&app, chain, "Genres");
+
+    let (mut app, chain) = append_and_play_app();
+    app.library
+        .playlists
+        .set_from_vec(vec![make_test_playlist("p1", "Playlist 1")]);
+    let _ = app.update(Message::Playlists(PlaylistsMessage::SlotList(
+        ActivateCenter(false),
+    )));
+    assert_append_kept_the_load(&app, chain, "Playlists");
+
+    let (mut app, chain) = append_and_play_app();
+    seed_songs(&mut app, songs_indexed(1));
+    let _ = app.update(Message::Songs(SongsMessage::SlotList(ActivateCenter(
+        false,
+    ))));
+    assert_append_kept_the_load(&app, chain, "Songs");
+}
+
 #[test]
 fn stale_chain_done_leaves_the_newer_loads_count() {
     let (mut app, stale_chain) = app_with_running_songs_load();

@@ -216,8 +216,10 @@ impl Nokkvi {
                         "add playlist to queue",
                     );
                 }
+                // Both branches play; only the replacing one enters a new
+                // playback context, since Append and Play keeps the queue
+                // and anything still filling it.
                 self.guard_play_action();
-                self.enter_new_playback_context();
                 // AppendAndPlay: append playlist songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
@@ -228,6 +230,7 @@ impl Nokkvi {
                         .find(|p| p.id == playlist_id)
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
                     let shuffle = self.activate_shuffle_directive(force, false);
+                    self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move {
                             shell.add_playlist_and_play(&playlist_id, shuffle).await
@@ -236,7 +239,9 @@ impl Nokkvi {
                         "append playlist and play",
                     );
                 }
-                // PlayAll / PlaySingle: replace queue with playlist
+                // PlayAll / PlaySingle: replace queue with playlist. The new
+                // context must be entered BEFORE the header is set below.
+                self.enter_new_playback_context();
                 // Set the active playlist info for the queue header bar
                 self.active_playlist_info = self
                     .library
