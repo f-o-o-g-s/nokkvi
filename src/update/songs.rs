@@ -206,7 +206,11 @@ impl Nokkvi {
                 }
                 // Every branch plays; only the replacing ones enter a new
                 // playback context, since Append and Play keeps the queue
-                // and anything still filling it.
+                // and anything still filling it. A stale index plays nothing,
+                // so it must not leave radio mode either.
+                if self.library.songs.get(index).is_none() {
+                    return Task::none();
+                }
                 self.guard_play_action();
                 if let Some(song) = self.library.songs.get(index) {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);

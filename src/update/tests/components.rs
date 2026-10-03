@@ -310,7 +310,7 @@ fn guard_remembers_the_station_it_leaves() {
         app.playback
             .station_left_for_play
             .as_ref()
-            .map(|r| r.station.id.as_str()),
+            .map(|left| left.radio.station.id.as_str()),
         Some("r1")
     );
 }
@@ -358,7 +358,8 @@ fn failed_play_keeps_a_station_started_since() {
         .playback
         .station_left_for_play
         .clone()
-        .expect("setup: the guard remembered the station");
+        .expect("setup: the guard remembered the station")
+        .radio;
     other.station.id = "r2".into();
     app.active_playback = crate::state::ActivePlayback::Radio(other);
 
@@ -369,6 +370,101 @@ fn failed_play_keeps_a_station_started_since() {
         Some("r2"),
         "the station the user switched to stays"
     );
+}
+
+#[test]
+fn failed_play_restores_nothing_when_an_older_play_left_the_station() {
+    // Play A left the station and may still be resolving; play B started in
+    // queue mode and failed fast. B did not leave the station, so it must
+    // not bring it back: A's outcome decides.
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    app.guard_play_action(); // play A
+    let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
+    let play_b = app.playback.play_attempt;
+
+    station_failure(&mut app, play_b);
+
+    assert!(app.active_playback.is_queue());
+}
+
+/// Album and artist Enter must leave the station in the play's own guard,
+/// or a failure of that play could not hand radio mode back.
+fn assert_the_play_itself_left_the_station(app: &crate::Nokkvi, path: &str) {
+    assert_eq!(
+        app.playback
+            .station_left_for_play
+            .as_ref()
+            .map(|left| left.attempt),
+        Some(app.playback.play_attempt),
+        "{path}: the play's own guard must be the one that left the station"
+    );
+}
+
+#[test]
+fn album_enter_leaves_the_station_in_its_own_play() {
+    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+    ));
+
+    assert_the_play_itself_left_the_station(&app, "Albums");
+}
+
+#[test]
+fn artist_enter_leaves_the_station_in_its_own_play() {
+    use crate::{views::ArtistsMessage, widgets::SlotListPageMessage};
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+
+    let _ = app.update(crate::app_message::Message::Artists(
+        ArtistsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+    ));
+
+    assert_the_play_itself_left_the_station(&app, "Artists");
+}
+
+#[test]
+fn entity_play_on_a_missing_row_keeps_radio() {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+
+    let _ = app.play_entity_task(
+        |app| &app.library.albums,
+        "3",
+        "album",
+        |album| album.id.clone(),
+        |_shell, _id| async { Ok(()) },
+    );
+
+    assert!(
+        app.active_playback.is_radio(),
+        "nothing played, so radio stays"
+    );
+}
+
+#[test]
+fn logout_forgets_the_station_left_for_play() {
+    // A pre-logout play that fails afterwards must not bring back a station
+    // from the previous session.
+    let _sse = super::SSE_SLOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
+    let attempt = app.playback.play_attempt;
+
+    let _ = app.reset_session_state();
+    station_failure(&mut app, attempt);
+
+    assert!(app.playback.station_left_for_play.is_none());
+    assert!(!app.active_playback.is_radio());
 }
 
 #[test]

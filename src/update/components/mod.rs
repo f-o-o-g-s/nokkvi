@@ -163,10 +163,13 @@ impl Nokkvi {
         // play action that follows, which is why the station is remembered:
         // a play that fails before reaching the engine leaves it streaming
         // (see `queue_play_task`).
-        if let crate::state::ActivePlayback::Radio(station) =
+        if let crate::state::ActivePlayback::Radio(radio) =
             std::mem::take(&mut self.active_playback)
         {
-            self.playback.station_left_for_play = Some(station);
+            self.playback.station_left_for_play = Some(crate::state::StationLeftForPlay {
+                attempt: self.playback.play_attempt,
+                radio,
+            });
         }
     }
 
@@ -310,11 +313,15 @@ impl Nokkvi {
         self.guard_play_action();
         self.enter_new_playback_context();
         let attempt = self.playback.play_attempt;
+        // Only the play whose own guard left the station may bring it back:
+        // if an earlier play left it, that play may still be resolving, and
+        // its outcome decides.
         let left_station_url = self
             .playback
             .station_left_for_play
             .as_ref()
-            .map(|radio| radio.station.stream_url.clone());
+            .filter(|left| left.attempt == attempt)
+            .map(|left| left.radio.station.stream_url.clone());
         self.shell_task(
             move |shell| async move {
                 let result = play(shell.clone()).await;
@@ -1736,6 +1743,10 @@ impl Nokkvi {
         // fresh counter would leave that clone current.
         let progressive_queue_generation = self.library.progressive_queue_generation.clone();
         progressive_queue_generation.bump();
+        // A pre-logout play that fails afterwards must not hand back the
+        // previous session's station.
+        self.playback.station_left_for_play = None;
+        self.playback.play_attempt = self.playback.play_attempt.wrapping_add(1);
         self.library = crate::state::LibraryData {
             progressive_queue_generation,
             ..Default::default()

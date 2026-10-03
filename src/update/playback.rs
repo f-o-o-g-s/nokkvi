@@ -2137,13 +2137,20 @@ impl Nokkvi {
 
     /// A queue play failed before it reached the engine, so the station it
     /// switched away from is still streaming: hand radio mode back, unless a
-    /// newer play has started (it decides) or a station is already on.
+    /// newer play has started (it decides), the station was left by another
+    /// play, or a station is already on.
     pub(crate) fn handle_queue_play_failed_on_station(&mut self, attempt: u64) -> Task<Message> {
+        let left_by_this_play = self
+            .playback
+            .station_left_for_play
+            .as_ref()
+            .is_some_and(|left| left.attempt == attempt);
         if attempt == self.playback.play_attempt
+            && left_by_this_play
             && self.active_playback.is_queue()
-            && let Some(station) = self.playback.station_left_for_play.take()
+            && let Some(left) = self.playback.station_left_for_play.take()
         {
-            self.active_playback = crate::state::ActivePlayback::Radio(station);
+            self.active_playback = crate::state::ActivePlayback::Radio(left.radio);
         }
         Task::none()
     }
