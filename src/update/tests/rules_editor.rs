@@ -779,6 +779,50 @@ fn play_preview_row_consults_the_play_guard() {
     );
 }
 
+/// The preview play replaces the queue, so it drops the previous playlist's
+/// header and stops a running Songs progressive load like every other
+/// queue-replacing play.
+#[test]
+fn play_preview_row_enters_a_new_playback_context() {
+    let mut app = capable_app();
+    open_edit(&mut app);
+    app.with_rules_session(|s| {
+        s.preview.songs = vec![nokkvi_data::types::song::Song {
+            id: "s1".into(),
+            title: "Song One".into(),
+            ..Default::default()
+        }];
+        s.preview.cursor = 0;
+    });
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl_42".to_string(),
+        "Sunday Set".to_string(),
+        String::new(),
+    ));
+    let chain = app.library.start_progressive_queue_load(500);
+
+    let _ = app.update(Message::RulesEditor(R::PlayPreviewRow));
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "the old playlist header must not stay over the preview's songs"
+    );
+    assert!(!app.library.progressive_queue_generation.is_current(chain));
+}
+
+/// With nothing in the preview there is nothing to play, so a station that
+/// is streaming keeps the app in radio mode.
+#[test]
+fn play_preview_row_with_no_rows_keeps_radio() {
+    let mut app = capable_app();
+    open_edit(&mut app);
+    crate::test_helpers::seed_radio_playback(&mut app);
+
+    let _ = app.update(Message::RulesEditor(R::PlayPreviewRow));
+
+    assert!(app.active_playback.is_radio());
+}
+
 // --- Save lanes ------------------------------------------------------------
 
 /// Save with a blocking Error diagnostic refuses (warn toast, not saving).

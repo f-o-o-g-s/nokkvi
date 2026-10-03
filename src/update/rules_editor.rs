@@ -850,15 +850,16 @@ impl Nokkvi {
             RulesEditorMessage::PlayPreviewRow => {
                 // The tweak-preview-HEAR loop: play the evaluated list from
                 // the centered row (SongSource::Preloaded — real songs with
-                // real ids after the mediaFileId remap).
-                self.guard_play_action();
+                // real ids after the mediaFileId remap). It replaces the
+                // queue, so it is a `queue_play_task` (prologue + radio
+                // hand-back), run only once there is something to play.
                 let Some((songs, cursor)) = self.rules_session().and_then(|s| {
                     (!s.preview.songs.is_empty())
                         .then(|| (s.preview.songs.clone(), s.preview.cursor))
                 }) else {
                     return Task::none();
                 };
-                self.shell_action_task(
+                self.queue_play_task(
                     move |shell| async move {
                         shell
                             .play_songs(
@@ -868,8 +869,8 @@ impl Nokkvi {
                             )
                             .await
                     },
-                    Message::LoadQueue,
-                    "play preview row",
+                    || Message::LoadQueue,
+                    "Failed to play preview row".to_string(),
                 )
             }
             RulesEditorMessage::PreviewFailed { generation, error } => {

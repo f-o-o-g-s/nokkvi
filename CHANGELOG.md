@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - Pressing Enter in the split view's library pane now only adds to the queue, leaving a playing radio station and the playlist header alone.
 - Cancelling a roulette spin while a radio station plays now keeps the app in radio mode.
 - When playing a selection or an album fails while a radio station plays, the app now stays in radio mode instead of switching to the queue.
+- Playing a row from the smart-playlist rules preview no longer leaves the previous playlist's "Playing From" header on the queue.
 
 ### Removed
 
