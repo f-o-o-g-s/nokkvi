@@ -331,14 +331,16 @@ const MIN_PIXEL_CHROMA: f32 = 0.04;
 const MIN_PIXEL_LIGHTNESS: f32 = 0.2;
 const MAX_PIXEL_LIGHTNESS: f32 = 0.96;
 /// Share of the sampled pixels that must carry a hue at all; below it the
-/// cover is black-and-white and yields no seed.
+/// cover is black-and-white and yields a neutral palette.
 const MIN_CHROMATIC_SHARE: f32 = 0.03;
+/// Mean chroma the cover's strongest hue needs to count as a color. Below it
+/// the "color" is the tint of a monochrome print — a sepia or cool-toned
+/// scan sits around 0.025–0.045, a genuinely brown cover at 0.06 — and the
+/// cover yields a neutral palette.
+const ACHROMATIC_CHROMA: f32 = 0.055;
 /// Share of the sampled pixels a hue needs before it can win, so a sticker or
 /// a barcode cannot color the whole app.
 const MIN_HUE_SHARE: f32 = 0.015;
-/// Lowest chroma a seed carries: a muted cover still yields an accent that
-/// reads as a color.
-const MIN_SEED_CHROMA: f32 = 0.09;
 /// Most hues taken from one cover (the visualizer gradient's anchors).
 const MAX_COVER_HUES: usize = 4;
 /// Closest two picked hues may sit, in bins (40°): nearer than that they are
@@ -349,14 +351,21 @@ const MIN_HUE_SEPARATION_BINS: usize = 4;
 const MIN_SECONDARY_SCORE: f32 = 0.12;
 
 /// The colors a cover contributes: its prominent vivid hues, the most
-/// prominent first. Never empty. The accent takes the first; the visualizer
-/// gradient runs through all of them.
+/// prominent first — or, for a black-and-white cover, one neutral grey (zero
+/// chroma), so a monochrome album gets a monochrome accent and visualizer.
+/// Never empty. The accent takes the first; the visualizer gradient runs
+/// through all of them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverPalette {
     colors: Vec<AccentSeed>,
 }
 
 impl CoverPalette {
+    /// A monochrome cover's palette: one zero-chroma seed.
+    fn neutral(seed: AccentSeed) -> Self {
+        Self { colors: vec![seed] }
+    }
+
     /// A palette of one color.
     #[cfg(test)]
     pub(crate) fn single(seed: AccentSeed) -> Self {
@@ -392,8 +401,9 @@ struct HueBin {
 }
 
 /// Pick the palette of an RGBA8 image: up to [`MAX_COVER_HUES`] prominent
-/// vivid hues, the strongest first. `None` for an empty, transparent or
-/// black-and-white image.
+/// vivid hues, the strongest first, or one neutral grey for a black-and-white
+/// image (see [`ACHROMATIC_CHROMA`]). `None` only for an empty or transparent
+/// image.
 pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CoverPalette> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
@@ -404,6 +414,7 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
     let mut bins = [HueBin::default(); HUE_BINS];
     let mut sampled = 0u32;
     let mut chromatic = 0u32;
+    let mut lightness_sum = 0.0_f32;
     for y in (0..h).step_by(stride) {
         for x in (0..w).step_by(stride) {
             let Some(&[r, g, b, a]) = rgba.get((y * w + x) * 4..).and_then(|p| p.first_chunk())
@@ -415,6 +426,7 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
             }
             sampled += 1;
             let Oklch { l, c, h: hue, .. } = Color::from_rgb8(r, g, b).into_oklch();
+            lightness_sum += l;
             if c < MIN_PIXEL_CHROMA || !(MIN_PIXEL_LIGHTNESS..=MAX_PIXEL_LIGHTNESS).contains(&l) {
                 continue;
             }
@@ -430,8 +442,19 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
             bin.lightness += weight * l;
         }
     }
-    if sampled == 0 || (chromatic as f32) < sampled as f32 * MIN_CHROMATIC_SHARE {
+    if sampled == 0 {
         return None;
+    }
+    // A monochrome cover: a grey at the print's own average lightness.
+    let neutral = || {
+        CoverPalette::neutral(AccentSeed {
+            lightness: lightness_sum / sampled as f32,
+            chroma: 0.0,
+            hue: 0.0,
+        })
+    };
+    if (chromatic as f32) < sampled as f32 * MIN_CHROMATIC_SHARE {
+        return Some(neutral());
     }
 
     // A hue's support is its bin plus both neighbors: a color sitting on a bin
@@ -487,12 +510,15 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
             }
             (score > 0.0).then(|| AccentSeed {
                 lightness: lightness / score,
-                chroma: (chroma / score).max(MIN_SEED_CHROMA),
+                chroma: chroma / score,
                 hue: sin.atan2(cos),
             })
         })
         .collect();
-    (!colors.is_empty()).then_some(CoverPalette { colors })
+    match colors.first() {
+        Some(primary) if primary.chroma >= ACHROMATIC_CHROMA => Some(CoverPalette { colors }),
+        _ => Some(neutral()),
+    }
 }
 
 /// [`palette_from_rgba`] for an encoded cover (PNG / JPEG / …). Blocking; run
@@ -931,11 +957,24 @@ mod tests {
         assert!(hue_distance(seed.hue, hue_of(0x20, 0x70, 0xd0)) < 0.02);
     }
 
+    /// The palette is a single zero-chroma grey: a monochrome album gets a
+    /// monochrome accent, not the theme's color.
+    fn assert_neutral(palette: Option<CoverPalette>, what: &str) {
+        let palette = palette.unwrap_or_else(|| panic!("{what}: a neutral palette, not None"));
+        assert_eq!(palette.colors().len(), 1, "{what}: {:?}", palette.colors());
+        assert_eq!(
+            palette.primary().chroma,
+            0.0,
+            "{what}: {:?}",
+            palette.primary()
+        );
+    }
+
     #[test]
-    fn black_and_white_covers_yield_no_seed() {
+    fn black_and_white_covers_yield_a_neutral_palette() {
         for grey in [0x00, 0x30, 0x80, 0xc8, 0xff] {
             let (w, h, px) = image_of(&[([grey, grey, grey], 1024)]);
-            assert_eq!(seed_from_rgba(w, h, &px), None, "grey {grey:#x}");
+            assert_neutral(palette_from_rgba(w, h, &px), &format!("grey {grey:#x}"));
         }
         // A photo-like mix of greys.
         let (w, h, px) = image_of(&[
@@ -943,7 +982,31 @@ mod tests {
             ([0x90, 0x90, 0x90], 400),
             ([0xf0, 0xf0, 0xf0], 224),
         ]);
-        assert_eq!(seed_from_rgba(w, h, &px), None);
+        assert_neutral(palette_from_rgba(w, h, &px), "a mix of greys");
+    }
+
+    /// A sepia or cool-toned print is a monochrome cover with a tint, not a
+    /// colored one; it must not come out brown or blue.
+    #[test]
+    fn a_tinted_monochrome_print_is_neutral() {
+        let (w, h, px) = image_of(&[
+            ([0x5a, 0x4c, 0x38], 340),
+            ([0x8a, 0x78, 0x5c], 340),
+            ([0xc8, 0xb8, 0x9a], 344),
+        ]);
+        assert_neutral(palette_from_rgba(w, h, &px), "sepia");
+        let (w, h, px) = image_of(&[([0x7a, 0x84, 0x92], 1024)]);
+        assert_neutral(palette_from_rgba(w, h, &px), "cool tint");
+    }
+
+    /// The neutral grey sits at the print's own average lightness.
+    #[test]
+    fn a_neutral_palette_keeps_the_prints_lightness() {
+        let (w, h, px) = image_of(&[([0x20, 0x20, 0x20], 1024)]);
+        let dark = palette_from_rgba(w, h, &px).expect("palette").primary();
+        let (w, h, px) = image_of(&[([0xe0, 0xe0, 0xe0], 1024)]);
+        let light = palette_from_rgba(w, h, &px).expect("palette").primary();
+        assert!(dark.lightness < light.lightness);
     }
 
     /// A vivid minority beats a muted majority: the accent should be the color
@@ -969,9 +1032,9 @@ mod tests {
 
     /// One red speck on an otherwise grey cover is not a colored cover.
     #[test]
-    fn a_speck_on_a_grey_cover_yields_no_seed() {
+    fn a_speck_on_a_grey_cover_is_neutral() {
         let (w, h, px) = image_of(&[([0x80, 0x80, 0x80], 1016), ([0xff, 0x00, 0x00], 8)]);
-        assert_eq!(seed_from_rgba(w, h, &px), None);
+        assert_neutral(palette_from_rgba(w, h, &px), "speck");
     }
 
     #[test]
@@ -987,11 +1050,18 @@ mod tests {
         assert!(hue_distance(seed.hue, hue_of(0x20, 0xb0, 0x40)) < 0.02);
     }
 
+    /// A genuinely brown cover is a color, and keeps its own (muted) chroma:
+    /// nothing boosts it.
     #[test]
-    fn a_muted_cover_still_yields_a_colored_seed() {
+    fn a_muted_cover_keeps_its_own_chroma() {
         let (w, h, px) = image_of(&[([0x80, 0x60, 0x40], 1024)]);
         let seed = seed_from_rgba(w, h, &px).expect("brown is a hue");
-        assert!(seed.chroma >= MIN_SEED_CHROMA);
+        assert!(seed.chroma >= ACHROMATIC_CHROMA, "brown counts as a color");
+        assert!(
+            (seed.chroma - 0.062).abs() < 0.01,
+            "chroma {:.3}",
+            seed.chroma
+        );
     }
 
     #[test]

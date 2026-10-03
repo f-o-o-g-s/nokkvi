@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - The new Accent From Album Art setting in the Theme tab takes the accent color from the playing cover, adjusted to stay readable.
 - With Accent From Album Art on, rating stars and love hearts take the accent color too.
 - The new Visualizer From Album Art setting gives the bars, lines, scope and nokkvi's MilkDrop presets a gradient from the playing cover.
+- Black-and-white covers turn the cover-driven accent and visualizer grey instead of keeping the theme's color.
 
 ### Changed
 
