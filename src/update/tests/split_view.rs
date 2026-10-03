@@ -199,3 +199,28 @@ fn get_info_similar_browser_tab_still_opens() {
         "Get Info on the Similar browser tab should still open the info modal"
     );
 }
+
+// ============================================================================
+// A browser-pane focus left behind does not steer a full view
+// ============================================================================
+
+#[test]
+fn keyboard_steers_the_full_view_after_leaving_the_split_view() {
+    // Split view on Queue with the Albums tab focused, then the nav switches
+    // to Songs: the panel and the focus survive, but only Songs is on
+    // screen, so Enter and the other list keys must act on Songs.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    open_browser_pane(&mut app, BrowsingView::Albums);
+    app.current_view = View::Songs;
+
+    assert_eq!(app.current_target_view(), Some(View::Songs));
+    let steered = app
+        .current_view_page()
+        .map(|page| std::ptr::from_ref(page.common()));
+    assert_eq!(
+        steered,
+        Some(std::ptr::from_ref(&app.songs_page.common)),
+        "the keyboard must steer the visible Songs page, not the hidden Albums tab"
+    );
+}

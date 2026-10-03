@@ -27,8 +27,10 @@ impl Nokkvi {
     /// In playlist edit mode with browser focus, returns the browsing panel's
     /// active view page so all existing hotkey handlers work on the browser pane.
     pub(crate) fn current_view_page(&self) -> Option<&dyn views::ViewPage> {
-        // Pane-aware routing: when editing with browser focus, delegate to the active tab
-        if self.browsing_panel.is_some()
+        // Pane-aware routing: with browser focus in the split view, delegate
+        // to the active tab. The panel and the focus outlive the split view
+        // (another nav view), so gate on it being on screen.
+        if self.split_view_active()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = &self.browsing_panel
         {
@@ -50,8 +52,10 @@ impl Nokkvi {
     /// In playlist edit mode with browser focus, returns the browsing panel's
     /// active view page so all existing hotkey handlers work on the browser pane.
     pub(crate) fn current_view_page_mut(&mut self) -> Option<&mut dyn views::ViewPage> {
-        // Pane-aware routing: when editing with browser focus, delegate to the active tab
-        if self.browsing_panel.is_some()
+        // Pane-aware routing: with browser focus in the split view, delegate
+        // to the active tab. The panel and the focus outlive the split view
+        // (another nav view), so gate on it being on screen.
+        if self.split_view_active()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = &self.browsing_panel
         {
@@ -70,7 +74,7 @@ impl Nokkvi {
     /// Resolve the `View` whose slot list the keyboard is currently steering,
     /// accounting for the split-view browsing panel.
     ///
-    /// When the browsing panel is open with browser focus, the focused list is
+    /// When the split view is shown with browser focus, the focused list is
     /// the panel's active tab — not `self.current_view` (which is pinned to the
     /// host view, e.g. `View::PlaylistEditor` during playlist edit). Maps each
     /// non-`Similar` browser tab to its `View` counterpart.
@@ -81,7 +85,8 @@ impl Nokkvi {
     /// intentionally unsupported there). Trait-based dispatch should prefer
     /// `current_view_page()` / `current_view_page_mut()`, which cover Similar.
     pub(crate) fn current_target_view(&self) -> Option<View> {
-        if self.pane_focus == crate::state::PaneFocus::Browser
+        if self.split_view_active()
+            && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = self.browsing_panel.as_ref()
         {
             return match panel.active_view {
@@ -141,7 +146,8 @@ impl Nokkvi {
         }
 
         #[allow(clippy::collapsible_if)]
-        if self.pane_focus == crate::state::PaneFocus::Browser
+        if self.split_view_active()
+            && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = self.browsing_panel.as_ref()
             && panel.active_view == crate::views::BrowsingView::Similar
         {
