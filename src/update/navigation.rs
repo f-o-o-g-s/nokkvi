@@ -605,12 +605,15 @@ impl Nokkvi {
                 self.session_user_id = user_id;
                 info!(target: "nokkvi::auth", "Login successful");
 
-                // Save server_url + username to config.toml (no password)
+                // Save server_url + username to config.toml (no password).
+                // A broken config.toml is left untouched and reported, not
+                // rewritten with just these two keys.
                 if let Err(e) = nokkvi_data::credentials::save_credentials(
                     &self.login_page.server_url,
                     &self.login_page.username,
                 ) {
-                    warn!(" Failed to save credentials: {}", e);
+                    warn!(" Failed to save credentials: {e:#}");
+                    self.toast_warn(format!("Couldn't save login to config.toml: {e}"));
                 }
 
                 // Save session tokens (JWT + subsonic credential) to redb

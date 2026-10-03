@@ -1,14 +1,15 @@
 //! Config writer — updates individual values in config.toml using toml_edit
 //!
 //! Uses `toml_edit` to preserve comments, formatting, and ordering when
-//! modifying a single key. Writes route through
-//! `nokkvi_data::utils::paths::write_atomic`, which performs an atomic
-//! temp + rename and records the `(path, content-hash)` in the internal-write
+//! modifying a single key. Edits route through the data crate's fail-loud
+//! `edit_config_doc` / `edit_existing_config_doc`, which refuse to write when
+//! the file can't be read or parsed, and write via `write_atomic` (atomic
+//! temp + rename, recording the `(path, content-hash)` in the internal-write
 //! registry so the config-watcher identity-matches and suppresses the
-//! self-inflicted reload event.
+//! self-inflicted reload event).
 
 use anyhow::{Context, Result};
-use nokkvi_data::utils::paths::write_atomic;
+use nokkvi_data::utils::paths::{edit_config_doc, edit_existing_config_doc};
 use toml_edit::{DocumentMut, Item, Value};
 use tracing::debug;
 
@@ -94,57 +95,10 @@ fn debug_assert_theme_path(key: &str) {
     );
 }
 
-// =============================================================================
-// Read-edit-write skeleton
-//
-// Two deliberately separate entry points — do NOT unify the missing-file
-// policy: config.toml writers start from an empty document (the write creates
-// the file), while theme writers must error on a missing file (silently
-// creating one would mask a broken `theme = "name"` pointer). Path resolution
-// stays AT THE CALL SITE (`get_config_path()` vs `get_active_theme_path()`)
-// so config-vs-theme routing remains visible at every caller.
-// =============================================================================
-
-/// Shared core: parse `content` as a `toml_edit` document, apply `f`, and
-/// write the result back atomically (temp + rename + watcher suppression via
-/// `write_atomic`).
-fn edit_parsed_doc(
-    path: &std::path::Path,
-    content: &str,
-    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
-) -> Result<()> {
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .with_context(|| format!("Failed to parse {} as TOML", path.display()))?;
-    f(&mut doc)?;
-    write_atomic(path, &doc.to_string())
-}
-
-/// Read-edit-write for config.toml targets: a missing file starts from an
-/// empty document.
-fn edit_toml_doc(
-    path: &std::path::Path,
-    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
-) -> Result<()> {
-    let content = if path.exists() {
-        std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?
-    } else {
-        String::new()
-    };
-    edit_parsed_doc(path, &content, f)
-}
-
-/// Read-edit-write for targets that must already exist (the active theme
-/// file): a missing file propagates as an error, never silently created.
-fn edit_existing_toml_doc(
-    path: &std::path::Path,
-    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
-) -> Result<()> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    edit_parsed_doc(path, &content, f)
-}
+// The fail-loud read-edit-write skeleton (and why its two missing-file
+// policies stay separate) lives in `nokkvi_data::utils::paths`:
+// `edit_config_doc` for config.toml, `edit_existing_config_doc` for the
+// active theme file.
 
 /// Update a single value in config.toml, preserving all other content.
 ///
@@ -161,7 +115,7 @@ pub(crate) fn update_config_value(
 ) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
-    edit_toml_doc(&config_path, |doc| {
+    edit_config_doc(&config_path, |doc| {
         set_dotted_value(doc, toml_key, value, comment)?;
         debug!(" [CONFIG WRITER] Updated {toml_key} in config.toml");
         Ok(())
@@ -174,7 +128,7 @@ pub(crate) fn update_config_value(
 /// `~/.config/nokkvi/themes/{name}.toml`, and edits in-place.
 pub(crate) fn update_theme_value(toml_key: &str, value: &SettingValue) -> Result<()> {
     let theme_path = get_active_theme_path()?;
-    edit_existing_toml_doc(&theme_path, |doc| {
+    edit_existing_config_doc(&theme_path, |doc| {
         set_dotted_value(doc, toml_key, value, None)?;
         debug!(" [CONFIG WRITER] Updated {toml_key} in theme file");
         Ok(())
@@ -188,7 +142,7 @@ pub(crate) fn update_theme_color_array_entry(
     hex_color: &str,
 ) -> Result<()> {
     let theme_path = get_active_theme_path()?;
-    edit_existing_toml_doc(&theme_path, |doc| {
+    edit_existing_config_doc(&theme_path, |doc| {
         let parts: Vec<&str> = toml_key.split('.').collect();
         let item = navigate_to_item_mut(doc, &parts)?;
 
@@ -327,7 +281,7 @@ pub(crate) fn reset_visualizer_defaults_preserving_colors() -> Result<()> {
 
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
-    edit_toml_doc(&config_path, |doc| {
+    edit_config_doc(&config_path, |doc| {
         // Build a default [visualizer] table, then strip color sub-tables
         // so the user's existing dark/light color palettes are preserved.
         let mut default_doc: DocumentMut = format!("[visualizer]\n{toml_str}")
@@ -377,7 +331,7 @@ pub(crate) fn write_full_visualizer(
 ) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
-    edit_toml_doc(&config_path, |doc| {
+    edit_config_doc(&config_path, |doc| {
         // Serialize full visualizer config with current values
         let viz_toml = toml::to_string_pretty(visualizer_config)
             .context("Failed to serialize VisualizerConfig")?;
@@ -403,18 +357,18 @@ pub(crate) fn strip_to_sparse(clear_comments: bool) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
 
-    // A missing config.toml is a no-op — routing through `edit_toml_doc`
+    // A missing config.toml is a no-op — routing through `edit_config_doc`
     // would create an empty config.toml on a fresh install.
     if !config_path.exists() {
         return Ok(());
     }
 
-    edit_existing_toml_doc(&config_path, |doc| strip_to_sparse_doc(doc, clear_comments))
+    edit_existing_config_doc(&config_path, |doc| strip_to_sparse_doc(doc, clear_comments))
 }
 
 /// Thin parse wrapper over [`strip_to_sparse_doc`], kept for content-level
 /// testing (e.g. corrupted-config input) — production routes through
-/// `edit_existing_toml_doc` above.
+/// `edit_existing_config_doc` above.
 #[cfg(test)]
 fn strip_to_sparse_content(content: &str, clear_comments: bool) -> Result<String> {
     let mut doc: DocumentMut = content

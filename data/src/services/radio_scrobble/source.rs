@@ -85,41 +85,37 @@ pub fn write_config_fields(fields: &[(&str, &str)]) -> anyhow::Result<()> {
 fn write_config_fields_at(path: &std::path::Path, fields: &[(&str, &str)]) -> anyhow::Result<()> {
     use toml_edit::{Item, Table};
 
-    let mut doc: toml_edit::DocumentMut = if path.exists() {
-        std::fs::read_to_string(path)?.parse().unwrap_or_default()
-    } else {
-        toml_edit::DocumentMut::new()
-    };
-
-    // Ensure a standard (non-inline) `[radio_scrobble]` table — index-assignment
-    // would otherwise create an inline `radio_scrobble = { … }` whose value
-    // isn't an `Item::Table`, so a later remove couldn't find it.
-    if !doc.get("radio_scrobble").is_some_and(Item::is_table) {
-        let mut tbl = Table::new();
-        tbl.set_implicit(false);
-        doc.insert("radio_scrobble", Item::Table(tbl));
-    }
-    {
-        let tbl = doc["radio_scrobble"]
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("config.toml [radio_scrobble] is not a table"))?;
-        for (field, value) in fields {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                tbl.remove(field);
-            } else {
-                tbl.insert(field, toml_edit::value(trimmed));
+    crate::utils::paths::edit_config_doc(path, |doc| {
+        // Ensure a standard (non-inline) `[radio_scrobble]` table — index-assignment
+        // would otherwise create an inline `radio_scrobble = { … }` whose value
+        // isn't an `Item::Table`, so a later remove couldn't find it.
+        if !doc.get("radio_scrobble").is_some_and(Item::is_table) {
+            let mut tbl = Table::new();
+            tbl.set_implicit(false);
+            doc.insert("radio_scrobble", Item::Table(tbl));
+        }
+        {
+            let tbl = doc["radio_scrobble"]
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("config.toml [radio_scrobble] is not a table"))?;
+            for (field, value) in fields {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    tbl.remove(field);
+                } else {
+                    tbl.insert(field, toml_edit::value(trimmed));
+                }
             }
         }
-    }
-    // Drop an emptied table so we don't leave a bare header behind.
-    if doc["radio_scrobble"]
-        .as_table()
-        .is_some_and(Table::is_empty)
-    {
-        doc.remove("radio_scrobble");
-    }
-    crate::utils::paths::write_atomic(path, &doc.to_string())
+        // Drop an emptied table so we don't leave a bare header behind.
+        if doc["radio_scrobble"]
+            .as_table()
+            .is_some_and(Table::is_empty)
+        {
+            doc.remove("radio_scrobble");
+        }
+        Ok(())
+    })
 }
 
 /// Which layer supplied a resolved credential. Drives the settings badges so a
@@ -309,6 +305,28 @@ mod tests {
     }
 
     // ── write_config_fields ─────────────────────────────────────────────────
+
+    /// A typo elsewhere in config.toml must not let a credential save
+    /// rewrite the file with only `[radio_scrobble]`.
+    #[test]
+    fn write_config_fields_refuses_to_rewrite_an_unparseable_config() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "server_url = \"https://x\"\n[settings\nvolume = 50\n";
+        std::fs::write(&path, original).unwrap();
+
+        let result = write_config_fields_at(&path, &[("listenbrainz_token", "lb")]);
+
+        assert!(
+            result.is_err(),
+            "a parse error must surface, not be papered over"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            original,
+            "config.toml must be left exactly as it was"
+        );
+    }
 
     #[test]
     fn write_config_fields_roundtrips_and_preserves_other_sections() {

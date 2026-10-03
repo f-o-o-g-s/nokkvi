@@ -75,41 +75,39 @@ pub fn load_credentials() -> Option<(String, String)> {
     Some((config.server_url, config.username))
 }
 
+/// Header written above `server_url` when the login creates config.toml.
+const NEW_CONFIG_HEADER: &str = "# Nokkvi Configuration\n\
+                                 # You can edit server_url and username.\n\
+                                 # Session tokens are managed by the application in app.redb.\n\n";
+
 /// Save server_url and username to config.toml.
-/// Preserves comments and formatting. Routes through `write_atomic`, which
-/// also suppresses the config-watcher's reload event — closing the audit-
-/// cited login → ~100 ms-later spurious-`ThemeConfigReloaded` feedback loop.
-/// Safe to suppress: the login flow at `src/update/navigation.rs:356-370`
-/// reads credentials directly from `load_credentials()` / redb on auto-login,
-/// never via the file watcher.
+///
+/// Preserves comments and formatting, and fails loudly: an unreadable or
+/// unparseable config.toml returns `Err` and is left untouched rather than
+/// rewritten with only these two keys (see `edit_config_doc`). The write
+/// routes through `write_atomic`, which also suppresses the config-watcher's
+/// reload event. Safe to suppress: auto-login reads credentials directly from
+/// `load_credentials()` / redb, never via the file watcher.
 pub fn save_credentials(server_url: &str, username: &str) -> Result<()> {
-    use toml_edit::{DocumentMut, value};
+    save_credentials_at(&get_config_path()?, server_url, username)
+}
 
-    let config_path = get_config_path()?;
-    let (mut doc, is_new) = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-        (
-            content.parse().unwrap_or_else(|_| DocumentMut::new()),
-            false,
-        )
-    } else {
-        (DocumentMut::new(), true)
-    };
+fn save_credentials_at(
+    config_path: &std::path::Path,
+    server_url: &str,
+    username: &str,
+) -> Result<()> {
+    use toml_edit::value;
 
-    doc["server_url"] = value(server_url);
-    doc["username"] = value(username);
-
-    let output = if is_new {
-        format!(
-            "# Nokkvi Configuration\n\
-             # You can edit server_url and username.\n\
-             # Session tokens are managed by the application in app.redb.\n\n{doc}"
-        )
-    } else {
-        doc.to_string()
-    };
-
-    crate::utils::paths::write_atomic(&config_path, &output)?;
+    let is_new = !config_path.exists();
+    crate::utils::paths::edit_config_doc(config_path, |doc| {
+        doc["server_url"] = value(server_url);
+        doc["username"] = value(username);
+        if is_new && let Some(mut key) = doc.as_table_mut().key_mut("server_url") {
+            key.leaf_decor_mut().set_prefix(NEW_CONFIG_HEADER);
+        }
+        Ok(())
+    })?;
     debug!("Saved credentials to {}", config_path.display());
     Ok(())
 }
@@ -306,50 +304,97 @@ mod tests {
         assert!(jwt.is_none());
     }
 
-    /// Pins the HIGH-RISK suppress contract on the credentials save path.
-    ///
-    /// `save_credentials` itself resolves the config path via `BaseDirs` and
-    /// is not test-overridable, but the load-bearing behavior is the
-    /// `write_atomic` call — exercising the same template through the same
-    /// helper against a temp path proves the internal-write registry records
-    /// the (path, content-hash) on the production code path. If the helper is
-    /// silently swapped for a non-suppressing `std::fs::write`, this assertion
-    /// catches it.
+    /// Pins the HIGH-RISK suppress contract on the credentials save path:
+    /// the write must land in the internal-write registry so the config
+    /// watcher identity-matches it instead of echoing a reload.
     #[test]
-    fn save_credentials_template_records_internal_write() {
+    fn save_credentials_records_internal_write_and_writes_header_on_new_file() {
         let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
-
-        use toml_edit::{DocumentMut, value};
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
 
-        // Reconstruct the exact template `save_credentials` builds for a
-        // fresh config file so we're testing the production write payload.
-        let mut doc = DocumentMut::new();
-        doc["server_url"] = value("https://example.com");
-        doc["username"] = value("alice");
-        let output = format!(
-            "# Nokkvi Configuration\n\
-             # You can edit server_url and username.\n\
-             # Session tokens are managed by the application in app.redb.\n\n{doc}"
-        );
+        save_credentials_at(&path, "https://example.com", "alice").unwrap();
 
-        crate::utils::paths::write_atomic(&path, &output).unwrap();
-
+        let on_disk = std::fs::read_to_string(&path).unwrap();
         assert!(
             crate::utils::paths::was_internal_write(
                 &path,
-                crate::utils::paths::hash_config_bytes(output.as_bytes())
+                crate::utils::paths::hash_config_bytes(on_disk.as_bytes())
             ),
             "save_credentials must route through write_atomic so the watcher \
              can identity-match its own write"
         );
-
-        // Sanity: the file actually landed with the production template.
-        let on_disk = std::fs::read_to_string(&path).unwrap();
-        assert!(on_disk.contains("# Nokkvi Configuration"));
+        assert!(on_disk.starts_with("# Nokkvi Configuration\n"));
         assert!(on_disk.contains("server_url = \"https://example.com\""));
         assert!(on_disk.contains("username = \"alice\""));
+    }
+
+    #[test]
+    fn save_credentials_preserves_the_rest_of_an_existing_config() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# my notes\nserver_url = \"https://old\"\ntheme = \"svalbard\"\n\n[settings]\nseek_step_secs = 9\n",
+        )
+        .unwrap();
+
+        save_credentials_at(&path, "https://new", "bob").unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("# my notes"), "comments survive");
+        assert!(on_disk.contains("server_url = \"https://new\""));
+        assert!(on_disk.contains("username = \"bob\""));
+        assert!(on_disk.contains("theme = \"svalbard\""));
+        assert!(on_disk.contains("seek_step_secs = 9"));
+        assert!(
+            !on_disk.contains("# Nokkvi Configuration"),
+            "the new-file header is only for a file nokkvi creates"
+        );
+    }
+
+    /// A single typo in config.toml must not let the next login rewrite the
+    /// file with only `server_url` + `username`.
+    #[test]
+    fn save_credentials_refuses_to_rewrite_an_unparseable_config() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "theme = \"svalbard\"\n[settings\nseek_step_secs = 9\n";
+        std::fs::write(&path, original).unwrap();
+
+        let result = save_credentials_at(&path, "https://new", "bob");
+
+        assert!(
+            result.is_err(),
+            "a parse error must surface, not be papered over"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            original,
+            "config.toml must be left exactly as it was"
+        );
+    }
+
+    /// A read error (here: a stray non-UTF-8 byte) must not be treated as an
+    /// empty file.
+    #[test]
+    fn save_credentials_refuses_to_rewrite_an_unreadable_config() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let original: &[u8] = b"theme = \"svalbard\"\nusername = \"caf\xe9\"\n";
+        std::fs::write(&path, original).unwrap();
+
+        let result = save_credentials_at(&path, "https://new", "bob");
+
+        assert!(
+            result.is_err(),
+            "a read error must surface, not be papered over"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "config.toml must be left exactly as it was"
+        );
     }
 }

@@ -19,6 +19,10 @@ All notable changes to this project will be documented in this file.
 - The multi-item drag count badge now stays readable on every theme's accent.
 - Check marks in dialogs now stay readable on every theme's accent.
 - Selected text in the EQ preset name field no longer hides behind an opaque highlight.
+- Logging in no longer wipes the rest of config.toml when the file has a typo or can't be read.
+- When config.toml has a typo or can't be read, logging in now warns that the login wasn't saved to it.
+- Choosing a theme no longer wipes config.toml when the file can't be read.
+- Saving radio scrobbling credentials no longer wipes config.toml when the file has a typo.
 
 ### Removed
 

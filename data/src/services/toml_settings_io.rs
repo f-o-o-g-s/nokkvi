@@ -4,8 +4,6 @@
 //! for surgical section replacement that preserves comments and formatting
 //! in other sections.
 
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use toml_edit::{DocumentMut, Item};
 use tracing::debug;
@@ -222,19 +220,6 @@ fn prune_default_keys(full: toml::Value, defaults: &toml::Value, keep: &[&str]) 
     toml::Value::Table(table)
 }
 
-/// Read config.toml (or start from an empty document when the file doesn't
-/// exist yet) and parse it as a `toml_edit` document for surgical edits.
-fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
-    let content = if config_path.exists() {
-        std::fs::read_to_string(config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
-    content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")
-}
-
 /// Serialize `value` to a TOML string, re-parse it as a `toml_edit` table (so
 /// we get properly formatted table entries), and insert it into `doc` as the
 /// top-level section `name`, replacing any existing section.
@@ -250,18 +235,16 @@ fn insert_section(doc: &mut DocumentMut, name: &str, value: &toml::Value) -> Res
 
 /// Replace a single top-level section in config.toml using `toml_edit`.
 ///
-/// Routes through the shared `write_atomic` helper for the temp + rename and
-/// watcher-suppress contract. Preserves comments, formatting, and ordering
-/// in all other sections.
+/// Routes through the shared fail-loud `edit_config_doc` (temp + rename,
+/// watcher suppression, no write on a read/parse error). Preserves comments,
+/// formatting, and ordering in all other sections.
 fn write_section(section_name: &str, value: &toml::Value) -> Result<()> {
     let config_path = get_config_path().context("Failed to get config path")?;
-    let mut doc = load_config_doc(&config_path)?;
-
-    insert_section(&mut doc, section_name, value)?;
-
-    debug!(" [TOML I/O] Updated [{section_name}] in config.toml");
-
-    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
+    crate::utils::paths::edit_config_doc(&config_path, |doc| {
+        insert_section(doc, section_name, value)?;
+        debug!(" [TOML I/O] Updated [{section_name}] in config.toml");
+        Ok(())
+    })
 }
 
 pub fn write_all_toml_sections(
@@ -271,19 +254,17 @@ pub fn write_all_toml_sections(
     verbose: bool,
 ) -> Result<()> {
     let config_path = get_config_path().context("Failed to get config path")?;
-    let mut doc = load_config_doc(&config_path)?;
-
-    insert_section(&mut doc, "settings", &settings_value(settings, verbose)?)?;
-    insert_section(
-        &mut doc,
-        "hotkeys",
-        &toml::Value::try_from(hotkeys.to_toml_map(verbose))?,
-    )?;
-    insert_section(&mut doc, "views", &views_value(views, verbose)?)?;
-
-    debug!(" [TOML I/O] Wrote [settings], [hotkeys], [views] to config.toml");
-
-    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
+    crate::utils::paths::edit_config_doc(&config_path, |doc| {
+        insert_section(doc, "settings", &settings_value(settings, verbose)?)?;
+        insert_section(
+            doc,
+            "hotkeys",
+            &toml::Value::try_from(hotkeys.to_toml_map(verbose))?,
+        )?;
+        insert_section(doc, "views", &views_value(views, verbose)?)?;
+        debug!(" [TOML I/O] Wrote [settings], [hotkeys], [views] to config.toml");
+        Ok(())
+    })
 }
 
 #[cfg(test)]

@@ -350,20 +350,18 @@ fn extract_theme_name_from_toml(content: &str) -> Result<String> {
     }
 }
 
-/// Write the `theme = "..."` key to config.toml using toml_edit (preserves structure).
+/// Write the `theme = "..."` key to config.toml using toml_edit (preserves
+/// structure). An unreadable or unparseable config.toml returns `Err` and is
+/// left untouched (see `edit_config_doc`).
 pub fn write_theme_name_to_config(name: &str) -> Result<()> {
-    let config_path = crate::utils::paths::get_config_path()?;
+    write_theme_name_to_config_at(&crate::utils::paths::get_config_path()?, name)
+}
 
-    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-
-    let mut doc: toml_edit::DocumentMut = content
-        .parse()
-        .context("Failed to parse config.toml for editing")?;
-
-    doc["theme"] = toml_edit::value(name);
-
-    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
-        .with_context(|| "Failed to write theme name to config.toml")?;
+fn write_theme_name_to_config_at(config_path: &std::path::Path, name: &str) -> Result<()> {
+    crate::utils::paths::edit_config_doc(config_path, |doc| {
+        doc["theme"] = toml_edit::value(name);
+        Ok(())
+    })?;
 
     info!(theme = name, "Updated theme name in config.toml");
     Ok(())
@@ -641,6 +639,45 @@ mod tests {
         // Verify that the fallback mechanism would trigger Everforest (which it does in load_theme)
         let default_theme = ThemeFile::default();
         assert_eq!(default_theme.name, "Everforest");
+    }
+
+    /// A read error (here: a stray non-UTF-8 byte) must not be treated as an
+    /// empty file — picking a theme would otherwise rewrite config.toml with
+    /// only `theme = ...`.
+    #[test]
+    fn write_theme_name_refuses_to_rewrite_an_unreadable_config() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let original: &[u8] = b"server_url = \"https://x\"\nusername = \"caf\xe9\"\n";
+        fs::write(&path, original).unwrap();
+
+        let result = write_theme_name_to_config_at(&path, "svalbard");
+
+        assert!(
+            result.is_err(),
+            "a read error must surface, not be papered over"
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            original,
+            "config.toml must be left exactly as it was"
+        );
+    }
+
+    #[test]
+    fn write_theme_name_creates_a_missing_config_and_preserves_an_existing_one() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        write_theme_name_to_config_at(&path, "svalbard").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "theme = \"svalbard\"\n");
+
+        fs::write(&path, "# notes\ntheme = \"svalbard\"\nusername = \"bob\"\n").unwrap();
+        write_theme_name_to_config_at(&path, "cryo").unwrap();
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("# notes"));
+        assert!(on_disk.contains("theme = \"cryo\""));
+        assert!(on_disk.contains("username = \"bob\""));
     }
 
     /// Pins the HIGH-RISK suppress contract on the `restore_builtin` path.

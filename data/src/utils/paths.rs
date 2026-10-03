@@ -174,6 +174,63 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+// =============================================================================
+// Read-edit-write skeleton
+//
+// Every surgical edit of a TOML file under `~/.config/nokkvi/` goes through
+// one of the two entry points below. They fail loudly: a read error or a
+// parse error returns `Err` before anything is written, so a typo in the file
+// (or a stray non-UTF-8 byte) can never be "repaired" by rewriting it with
+// only the keys the current edit touches.
+//
+// The two entry points deliberately keep separate missing-file policies — do
+// NOT unify them: config.toml writers start from an empty document (the write
+// creates the file), while theme writers must error on a missing file
+// (silently creating one would mask a broken `theme = "name"` pointer). Path
+// resolution stays AT THE CALL SITE (`get_config_path()` vs the active theme
+// path) so config-vs-theme routing remains visible at every caller.
+// =============================================================================
+
+/// Read-edit-write for config.toml: parse `path` as a `toml_edit` document
+/// (comments and layout survive), apply `f`, and write the result back
+/// through [`write_atomic`] so the config watcher suppresses its own echo.
+///
+/// A missing file starts from an empty document. A read error, a parse error,
+/// or an `Err` from `f` aborts before anything is written.
+pub fn edit_config_doc(
+    path: &Path,
+    f: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<()>,
+) -> Result<()> {
+    edit_toml_file(path, true, f)
+}
+
+/// Read-edit-write for targets that must already exist (the active theme
+/// file): same contract as [`edit_config_doc`], except a missing file is an
+/// error rather than a fresh document.
+pub fn edit_existing_config_doc(
+    path: &Path,
+    f: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<()>,
+) -> Result<()> {
+    edit_toml_file(path, false, f)
+}
+
+fn edit_toml_file(
+    path: &Path,
+    missing_starts_empty: bool,
+    f: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<()>,
+) -> Result<()> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(e) if missing_starts_empty && e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("Failed to read {}", path.display())),
+    };
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .with_context(|| format!("Failed to parse {} as TOML", path.display()))?;
+    f(&mut doc)?;
+    write_atomic(path, &doc.to_string())
+}
+
 /// Get the configuration directory (`~/.config/nokkvi`).
 ///
 /// Holds user-editable configuration: `config.toml`, `themes/`, `sfx/`.
@@ -641,5 +698,81 @@ mod tests {
             "second = true\n",
             "second write must replace first via rename"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  edit_config_doc / edit_existing_config_doc — fail-loud RMW
+    // ══════════════════════════════════════════════════════════════════
+
+    fn set_key(doc: &mut toml_edit::DocumentMut) -> Result<()> {
+        doc["added"] = toml_edit::value(true);
+        Ok(())
+    }
+
+    #[test]
+    fn edit_config_doc_preserves_comments_and_records_internal_write() {
+        let _guard = INTERNAL_WRITE_TEST_LOCK.lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# keep me\nkept = 1\n").unwrap();
+
+        edit_config_doc(&path, set_key).unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, "# keep me\nkept = 1\nadded = true\n");
+        assert!(
+            was_internal_write(&path, hash_config_bytes(on_disk.as_bytes())),
+            "the edit must go through write_atomic so the watcher suppresses it"
+        );
+    }
+
+    #[test]
+    fn edit_config_doc_creates_a_missing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        edit_config_doc(&path, set_key).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "added = true\n");
+    }
+
+    #[test]
+    fn edit_existing_config_doc_errors_on_a_missing_file_without_creating_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("theme.toml");
+
+        assert!(edit_existing_config_doc(&path, set_key).is_err());
+        assert!(!path.exists(), "a missing theme file must not be created");
+    }
+
+    /// Every failure mode leaves the file byte-identical: a parse error, a
+    /// read error (non-UTF-8 byte), and an `Err` from the edit closure.
+    #[test]
+    fn edit_config_doc_never_writes_on_failure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let cases: [(&str, &[u8], fn(&mut toml_edit::DocumentMut) -> Result<()>); 3] = [
+            ("parse error", b"kept = 1\n[settings\n", set_key),
+            ("read error", b"name = \"caf\xe9\"\n", set_key),
+            ("closure error", b"kept = 1\n", |_| {
+                anyhow::bail!("edit refused")
+            }),
+        ];
+        for (label, original, edit) in cases {
+            std::fs::write(&path, original).unwrap();
+            assert!(
+                edit_config_doc(&path, edit).is_err(),
+                "{label}: must return Err"
+            );
+            assert!(
+                edit_existing_config_doc(&path, edit).is_err(),
+                "{label}: must return Err"
+            );
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                original,
+                "{label}: the file must be left exactly as it was"
+            );
+        }
     }
 }
