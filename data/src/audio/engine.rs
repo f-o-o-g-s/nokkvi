@@ -873,8 +873,9 @@ enum RadioReconnectOutcome {
 /// Backoff is `2^min(retry, 4)` seconds, up to `MAX_RETRIES` attempts. Each
 /// iteration re-checks `decode_gen.current() == my_gen` first and aborts
 /// (`Superseded`) if a user skip/stop spawned a newer loop, BEFORE consuming a
-/// retry or touching the `reconnect_url` re-init — so a superseded loop never
-/// stores EOF. See `RadioReconnectOutcome` for the EOF-store contract.
+/// retry — so a superseded loop never stores EOF — and checks again after the
+/// backoff, under the decoder lock, right before the `reconnect_url` re-init.
+/// See `RadioReconnectOutcome` for the EOF-store contract.
 async fn radio_reconnect_loop(
     decoder: &tokio::sync::Mutex<AudioDecoder>,
     decoder_guard: tokio::sync::MutexGuard<'_, AudioDecoder>,
@@ -919,6 +920,14 @@ async fn radio_reconnect_loop(
         // Re-acquire decoder lock for re-init. The decoder is at EOF (or
         // closed by a failed attempt), so `init` reopens the same URL.
         let mut dec = decoder.lock().await;
+        // Check AGAIN after the backoff and the lock wait, right before the
+        // network I/O: a skip/stop during the sleep owns the source now, and
+        // a re-init would reconnect the old station in the background.
+        if decode_gen.current() != my_gen {
+            drop(dec);
+            tracing::debug!("📻 [RECONNECT] Aborted after backoff — generation superseded");
+            return RadioReconnectOutcome::Superseded;
+        }
         match dec.init(reconnect_url).await {
             Ok(()) => {
                 tracing::info!("📻 [RECONNECT] Success!");
@@ -7885,6 +7894,47 @@ mod tests {
             engine.renderer.lock().current_replay_gain_for_test(),
             Some(rg(-9.0)),
             "the swapped-in track's bookkeeping must carry its own tags"
+        );
+    }
+
+    /// A user who leaves a dropped station while the reconnect sleeps owns
+    /// the engine from then on. When the backoff ends, the old loop must
+    /// not reconnect the old station: it would stream it in the background
+    /// and write its titles into the ICY slot the new station reads.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_reconnect_stands_down_when_superseded_during_backoff() {
+        use crate::audio::decoder::tests::{AfterAudio, spawn_slow_start_station};
+
+        let url = spawn_slow_start_station(AfterAudio::Stall).await;
+        let decoder = tokio::sync::Mutex::new(AudioDecoder::default());
+        {
+            let mut dec = decoder.lock().await;
+            dec.init(&url).await.expect("the station opens");
+            // The connection dropped.
+            dec.set_eof_for_test(true);
+        }
+        let decode_gen = DecodeLoopHandle::new();
+        let my_gen = decode_gen.current();
+        let decoder_eof = AtomicBool::new(false);
+
+        let guard = decoder.lock().await;
+        let (outcome, ()) = tokio::join!(
+            radio_reconnect_loop(&decoder, guard, &decode_gen, my_gen, &decoder_eof, &url),
+            async {
+                // The user switches stations during the first backoff sleep.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                decode_gen.supersede();
+            }
+        );
+
+        assert_eq!(outcome, RadioReconnectOutcome::Superseded);
+        assert!(
+            decoder.lock().await.is_eof(),
+            "the superseded loop must not reopen the old station"
+        );
+        assert!(
+            !decoder_eof.load(Ordering::Acquire),
+            "a superseded loop never stores EOF"
         );
     }
 

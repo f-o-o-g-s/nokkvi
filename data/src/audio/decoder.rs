@@ -1478,7 +1478,7 @@ pub(crate) fn format_hint_from_radio_url(url: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // =========================================================================
@@ -2079,7 +2079,7 @@ mod tests {
     /// What the fake station in [`spawn_slow_start_station`] does once it has
     /// sent its audio.
     #[derive(Clone, Copy)]
-    enum AfterAudio {
+    pub(crate) enum AfterAudio {
         /// Keep the socket open and send nothing more (a stalled stream).
         Stall,
         /// Close the socket (the station dropped the listener).
@@ -2091,7 +2091,7 @@ mod tests {
     /// [`FIRST_BYTE_DELAY`], then `after_audio`. Every connection gets the
     /// same treatment, so a reconnect finds the station live again. Returns
     /// the stream URL.
-    async fn spawn_slow_start_station(after_audio: AfterAudio) -> String {
+    pub(crate) async fn spawn_slow_start_station(after_audio: AfterAudio) -> String {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
