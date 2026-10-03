@@ -10,6 +10,42 @@ use crate::{
     types::{NextTrackResetEffect, player_settings::FadeOnSkip, song::Song},
 };
 
+/// The server URL and Subsonic credential a queue song's stream URL is
+/// built from, resolved once per operation. Constructing one is the single
+/// "can we stream?" check: [`Self::new`] refuses when either half is
+/// missing (logged out, or a session that never finished resuming), so no
+/// path can build the relative `/rest/stream?…` an empty server URL gives,
+/// or a URL without credentials.
+#[derive(Clone)]
+pub struct StreamSession {
+    server_url: String,
+    credential: String,
+}
+
+impl StreamSession {
+    pub fn new(server_url: String, credential: String) -> Option<Self> {
+        (!server_url.is_empty() && !credential.is_empty()).then_some(Self {
+            server_url,
+            credential,
+        })
+    }
+
+    /// The stream URL for `song_id`.
+    pub fn stream_url(&self, song_id: &str) -> String {
+        crate::utils::artwork_url::build_stream_url(song_id, &self.server_url, &self.credential)
+    }
+}
+
+impl std::fmt::Debug for StreamSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The credential is a secret; the server URL is enough to tell
+        // sessions apart in a log.
+        f.debug_struct("StreamSession")
+            .field("server_url", &self.server_url)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A manual skip that the queue layer has fully sequenced (cursor advanced,
 /// history recorded, consume applied, `current_song_id` set) but whose
 /// AUDIO transition is a skip-crossfade the caller must complete: build the
@@ -353,12 +389,9 @@ impl QueueNavigator {
     pub async fn on_track_finished(
         &self,
         engine: &mut CustomAudioEngine,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
     ) -> Result<Option<(Song, TransitionReason)>> {
-        let plan = self
-            .decide_transition(engine, server_url, subsonic_credential)
-            .await;
+        let plan = self.decide_transition(engine, session).await;
         Self::execute_transition(plan, engine).await
     }
 
@@ -375,8 +408,7 @@ impl QueueNavigator {
     pub async fn decide_transition(
         &self,
         engine: &mut CustomAudioEngine,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
     ) -> TrackTransitionPlan {
         // ── Determine engine state and handle audio layer ──
         let mut was_crossfade = false;
@@ -432,13 +464,8 @@ impl QueueNavigator {
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
                 let reason = TransitionReason::Repeat;
                 return if needs_load {
-                    let stream_url = crate::utils::artwork_url::build_stream_url(
-                        &song.id,
-                        server_url,
-                        subsonic_credential,
-                    );
                     TrackTransitionPlan::LoadFresh {
-                        stream_url,
+                        stream_url: session.stream_url(&song.id),
                         song,
                         reason,
                     }
@@ -527,13 +554,8 @@ impl QueueNavigator {
         );
 
         if needs_load {
-            let stream_url = crate::utils::artwork_url::build_stream_url(
-                &song.id,
-                server_url,
-                subsonic_credential,
-            );
             TrackTransitionPlan::LoadFresh {
-                stream_url,
+                stream_url: session.stream_url(&song.id),
                 song,
                 reason,
             }
@@ -595,16 +617,14 @@ impl QueueNavigator {
         &self,
         engine: &mut CustomAudioEngine,
         song: &Song,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
     ) -> Result<()> {
         debug!(
             " Playing: {} - {} (id: {})",
             song.title, song.artist, song.id
         );
 
-        let stream_url =
-            crate::utils::artwork_url::build_stream_url(&song.id, server_url, subsonic_credential);
+        let stream_url = session.stream_url(&song.id);
 
         *self.current_song_id.lock().await = Some(song.id.clone());
 
@@ -636,8 +656,7 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
         song: &Song,
         reason: TransitionReason,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
         skip_fade: FadeOnSkip,
     ) -> Result<Option<SkipFadePlan>> {
         match skip_fade {
@@ -655,26 +674,19 @@ impl QueueNavigator {
                 // `CustomAudioEngine::plan_skip_fade`.
                 engine.plan_skip_fade().await;
                 *self.current_song_id.lock().await = Some(song.id.clone());
-                let stream_url = crate::utils::artwork_url::build_stream_url(
-                    &song.id,
-                    server_url,
-                    subsonic_credential,
-                );
                 Ok(Some(SkipFadePlan {
                     song: song.clone(),
                     reason,
-                    stream_url,
+                    stream_url: session.stream_url(&song.id),
                 }))
             }
             FadeOnSkip::BoundaryFade => {
                 engine.run_skip_out_fade().await;
-                self.play_song_direct(engine, song, server_url, subsonic_credential)
-                    .await?;
+                self.play_song_direct(engine, song, session).await?;
                 Ok(None)
             }
             FadeOnSkip::Off | FadeOnSkip::Crossfade => {
-                self.play_song_direct(engine, song, server_url, subsonic_credential)
-                    .await?;
+                self.play_song_direct(engine, song, session).await?;
                 Ok(None)
             }
         }
@@ -688,8 +700,7 @@ impl QueueNavigator {
     pub async fn play_next(
         &self,
         engine: &mut CustomAudioEngine,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
         skip_fade: FadeOnSkip,
     ) -> Result<NextOutcome> {
         let mut queue_manager = self.queue_manager.lock().await;
@@ -741,14 +752,7 @@ impl QueueNavigator {
         drop(queue_manager);
 
         let plan = self
-            .skip_to_song(
-                engine,
-                &result.song,
-                result.reason,
-                server_url,
-                subsonic_credential,
-                skip_fade,
-            )
+            .skip_to_song(engine, &result.song, result.reason, session, skip_fade)
             .await?;
 
         // Consume: remove the previously played song after starting the next.
@@ -785,8 +789,7 @@ impl QueueNavigator {
     pub async fn play_previous(
         &self,
         engine: &mut CustomAudioEngine,
-        server_url: &str,
-        subsonic_credential: &str,
+        session: &StreamSession,
         skip_fade: FadeOnSkip,
     ) -> Result<(PreviousOutcome, Option<SkipFadePlan>)> {
         use crate::services::queue::PreviousSongResult;
@@ -819,8 +822,7 @@ impl QueueNavigator {
                         engine,
                         &song,
                         TransitionReason::Previous,
-                        server_url,
-                        subsonic_credential,
+                        session,
                         skip_fade,
                     )
                     .await?;
@@ -860,8 +862,7 @@ impl QueueNavigator {
                         engine,
                         &song,
                         TransitionReason::Previous,
-                        server_url,
-                        subsonic_credential,
+                        session,
                         skip_fade,
                     )
                     .await?;
@@ -934,6 +935,26 @@ mod tests {
         Song::test_default(id, &format!("Song {id}"))
     }
 
+    fn session(server_url: &str) -> StreamSession {
+        StreamSession::new(server_url.to_string(), "u=test&p=test".to_string())
+            .expect("a full session")
+    }
+
+    /// A stream URL needs both halves of the session: an empty server URL
+    /// would build a relative `/rest/stream?…`, an empty credential a URL
+    /// the server refuses.
+    #[test]
+    fn a_stream_session_needs_a_server_url_and_a_credential() {
+        assert!(StreamSession::new(String::new(), "u=x".to_string()).is_none());
+        assert!(StreamSession::new("http://server".to_string(), String::new()).is_none());
+        let session = session("http://server");
+        assert!(
+            session
+                .stream_url("abc")
+                .starts_with("http://server/rest/stream?id=abc&u=test&p=test")
+        );
+    }
+
     fn manager_with_songs(songs: Vec<Song>, current_index: Option<usize>) -> QueueManager {
         let storage = temp_storage();
         let mut qm = QueueManager::new(storage).expect("queue manager");
@@ -968,7 +989,7 @@ mod tests {
         // Engine is in default Stopped state — `immediate_playing` is false,
         // `load_prepared_track` returns Err (no prepared decoder), `stop` early-returns.
         let result = nav
-            .on_track_finished(&mut engine, "http://example", "u=test&p=test")
+            .on_track_finished(&mut engine, &session("http://example"))
             .await
             .expect("no error from path 3 empty queue");
 
@@ -1002,7 +1023,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let plan = nav
-            .decide_transition(&mut engine, "http://example", "u=test&p=test")
+            .decide_transition(&mut engine, &session("http://example"))
             .await;
 
         assert!(
@@ -1023,7 +1044,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let plan = nav
-            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .decide_transition(&mut engine, &session("http://server"))
             .await;
 
         match plan {
@@ -1058,7 +1079,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let plan = nav
-            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .decide_transition(&mut engine, &session("http://server"))
             .await;
 
         match plan {
@@ -1095,7 +1116,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let plan = nav
-            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .decide_transition(&mut engine, &session("http://server"))
             .await;
 
         match plan {
@@ -1126,7 +1147,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let plan = nav
-            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .decide_transition(&mut engine, &session("http://server"))
             .await;
 
         assert!(
@@ -1149,12 +1170,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(
-                &mut engine,
-                "http://server",
-                "u=test&p=test",
-                FadeOnSkip::Off,
-            )
+            .play_next(&mut engine, &session("http://server"), FadeOnSkip::Off)
             .await
             .expect("play_next ok");
 
@@ -1179,12 +1195,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(
-                &mut engine,
-                "http://server",
-                "u=test&p=test",
-                FadeOnSkip::Off,
-            )
+            .play_next(&mut engine, &session("http://server"), FadeOnSkip::Off)
             .await
             .expect("play_next ok");
 
@@ -1205,12 +1216,7 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(
-                &mut engine,
-                "http://server",
-                "u=test&p=test",
-                FadeOnSkip::Off,
-            )
+            .play_next(&mut engine, &session("http://server"), FadeOnSkip::Off)
             .await
             .expect("play_next ok");
 
@@ -1246,8 +1252,7 @@ mod tests {
         let result = nav
             .play_next(
                 &mut engine,
-                "http://server",
-                "u=test&p=test",
+                &session("http://server"),
                 FadeOnSkip::Crossfade,
             )
             .await
@@ -1301,8 +1306,7 @@ mod tests {
         let result = nav
             .play_next(
                 &mut engine,
-                "http://server",
-                "u=test&p=test",
+                &session("http://server"),
                 FadeOnSkip::Crossfade,
             )
             .await
@@ -1336,8 +1340,7 @@ mod tests {
         let (outcome, plan) = nav
             .play_previous(
                 &mut engine,
-                "http://server",
-                "u=test&p=test",
+                &session("http://server"),
                 FadeOnSkip::Crossfade,
             )
             .await

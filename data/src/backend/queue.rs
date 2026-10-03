@@ -205,6 +205,15 @@ impl QueueService {
     }
 
     /// Helper to get server URL and credential
+    /// The session queue songs stream from, or `None` while there is no
+    /// server to stream from (see [`StreamSession`]).
+    ///
+    /// [`StreamSession`]: crate::services::playback::StreamSession
+    pub async fn stream_session(&self) -> Option<crate::services::playback::StreamSession> {
+        let (server_url, credential) = self.get_server_config().await;
+        crate::services::playback::StreamSession::new(server_url, credential)
+    }
+
     pub async fn get_server_config(&self) -> (String, String) {
         let auth_guard = self.auth_gateway.lock().await;
         if let Some(auth) = auth_guard.as_ref() {

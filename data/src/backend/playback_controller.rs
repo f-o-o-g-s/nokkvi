@@ -16,7 +16,7 @@ use crate::{
     audio::engine::CustomAudioEngine,
     backend::{queue::QueueService, settings::SettingsService},
     services::{
-        playback::{QueueNavigator, RemovalAftermath},
+        playback::{QueueNavigator, RemovalAftermath, StreamSession},
         queue::PreviousOutcome,
         task_manager::TaskManager,
     },
@@ -108,11 +108,10 @@ impl PlaybackController {
                 let tx = loop_tx_cb.clone();
                 let queue_tx = queue_changed_tx_cb.clone();
                 tm.spawn_result("track_completion", move || async move {
-                    let (url, cred) = qvm.get_server_config().await;
-                    if url.is_empty() {
-                        debug!(" [COMPLETION] No server config, cannot auto-advance");
+                    let Some(session) = qvm.stream_session().await else {
+                        debug!(" [COMPLETION] No server session, cannot auto-advance");
                         return Ok::<_, anyhow::Error>(());
-                    }
+                    };
                     let Some(ea) = ew.upgrade() else {
                         // Engine has already been dropped — nothing to advance.
                         return Ok(());
@@ -125,9 +124,7 @@ impl PlaybackController {
                     // behind `engine.play()`'s network probe + prebuffer.
                     let plan = {
                         let nav_guard = nav.lock().await;
-                        nav_guard
-                            .decide_transition(&mut engine, &url, &cred)
-                            .await
+                        nav_guard.decide_transition(&mut engine, &session).await
                     };
                     match QueueNavigator::execute_transition(plan, &mut engine).await {
                         Ok(Some((song, reason))) => {
@@ -200,6 +197,15 @@ impl PlaybackController {
         self.audio_engine.clone()
     }
 
+    /// The session a requested play streams from: an error when there is
+    /// none, so the caller's toast says why nothing played.
+    async fn require_stream_session(&self) -> Result<StreamSession> {
+        self.queue_service
+            .stream_session()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No server session to stream from"))
+    }
+
     // =========================================================================
     // Transport Controls
     // =========================================================================
@@ -231,28 +237,23 @@ impl PlaybackController {
             return Ok(());
         }
 
+        // Nothing loaded: a cold start streams a queue song, which needs a
+        // server session. Checked before anything moves the queue cursor.
+        let Some(session) = self.queue_service.stream_session().await else {
+            return Ok(());
+        };
+
         // No source set - check if we have a current song to play
         {
             let queue_navigator = self.queue_navigator.lock().await;
             if let Some(song_id) = queue_navigator.get_current_song_id().await {
                 drop(queue_navigator);
 
-                let (server_url, subsonic_credential) =
-                    self.queue_service.get_server_config().await;
-                if server_url.is_empty() {
-                    return Ok(());
-                }
-
                 // Find the song in the pool (O(1) lookup)
                 let queue_manager_arc = self.queue_service.queue_manager();
                 let queue_manager = queue_manager_arc.lock().await;
                 if let Some(song) = queue_manager.get_song(&song_id) {
-                    // Construct streaming URL
-                    let stream_url = crate::utils::artwork_url::build_stream_url(
-                        &song.id,
-                        &server_url,
-                        &subsonic_credential,
-                    );
+                    let stream_url = session.stream_url(&song.id);
 
                     // Load and play the track
                     let rg = song.replay_gain.clone();
@@ -301,18 +302,7 @@ impl PlaybackController {
             drop(queue_manager);
 
             if let Some(song) = song {
-                let (server_url, subsonic_credential) =
-                    self.queue_service.get_server_config().await;
-                if server_url.is_empty() {
-                    return Ok(());
-                }
-
-                // Construct streaming URL
-                let stream_url = crate::utils::artwork_url::build_stream_url(
-                    &song.id,
-                    &server_url,
-                    &subsonic_credential,
-                );
+                let stream_url = session.stream_url(&song.id);
 
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await?;
@@ -362,10 +352,9 @@ impl PlaybackController {
     pub async fn next(&self) -> Result<bool> {
         use crate::services::playback::NextOutcome;
 
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        if server_url.is_empty() {
+        let Some(session) = self.queue_service.stream_session().await else {
             return Ok(false);
-        }
+        };
 
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
@@ -379,7 +368,7 @@ impl PlaybackController {
         let skip_fade = engine.skip_fade_mode();
 
         match queue_navigator
-            .play_next(&mut engine, &server_url, &subsonic_credential, skip_fade)
+            .play_next(&mut engine, &session, skip_fade)
             .await
         {
             Ok(NextOutcome::NoNext) => {
@@ -420,10 +409,9 @@ impl PlaybackController {
 
     /// Play previous track
     pub async fn previous(&self) -> Result<PreviousOutcome> {
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        if server_url.is_empty() {
+        let Some(session) = self.queue_service.stream_session().await else {
             return Ok(PreviousOutcome::Stepped);
-        }
+        };
 
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
@@ -435,7 +423,7 @@ impl PlaybackController {
         let skip_fade = engine.skip_fade_mode();
 
         match queue_navigator
-            .play_previous(&mut engine, &server_url, &subsonic_credential, skip_fade)
+            .play_previous(&mut engine, &session, skip_fade)
             .await
         {
             Ok((outcome, plan)) => {
@@ -703,10 +691,9 @@ impl PlaybackController {
             engine.transition_prep_cfg()
         };
 
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        if server_url.is_empty() {
+        let Some(session) = self.queue_service.stream_session().await else {
             return false;
-        }
+        };
 
         // Get the next track URL from queue manager WITHOUT holding the engine
         // lock. Also resolve the CURRENT song + the transition reason — the
@@ -729,11 +716,7 @@ impl PlaybackController {
                 let next_song = peeked.song().clone();
                 let reason = peeked.reason();
                 drop(peeked); // explicit: clears queued; gapless prep proceeds with the captured data
-                let url = crate::utils::artwork_url::build_stream_url(
-                    &next_song.id,
-                    &server_url,
-                    &subsonic_credential,
-                );
+                let url = session.stream_url(&next_song.id);
                 // The per-transition verdicts ride down to
                 // `store_prepared_decoder` (the engine boundary carries no
                 // Song metadata). An unresolvable current song can't prove a
@@ -877,6 +860,8 @@ impl PlaybackController {
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs to play"));
         }
+        // Before the queue is replaced: no session, no change.
+        let session = self.require_stream_session().await?;
 
         let play_index = start_index.min(songs.len() - 1);
 
@@ -890,16 +875,7 @@ impl PlaybackController {
 
         // 2. Build stream URL for the target song
         let song = &songs[play_index];
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        let stream_url = crate::utils::artwork_url::build_stream_url(
-            &song.id,
-            &server_url,
-            &subsonic_credential,
-        );
-
-        if stream_url.is_empty() {
-            return Err(anyhow::anyhow!("Failed to build stream URL"));
-        }
+        let stream_url = session.stream_url(&song.id);
 
         // 3-4. Load, play (or blend, per "Fade on Skip"), discharge the
         //      set_queue reset, and update the navigator so consume mode
@@ -1017,6 +993,8 @@ impl PlaybackController {
     /// distinct `entry_id`s, so the user gets the exact instance they
     /// clicked.
     pub async fn play_entry_from_queue(&self, entry_id: u64) -> Result<()> {
+        // Before the cursor moves: no session, no change.
+        let session = self.require_stream_session().await?;
         let queue_manager = self.queue_service.queue_manager();
 
         // Under shuffle, a click that STARTS a new session re-anchors the play
@@ -1071,16 +1049,7 @@ impl PlaybackController {
         self.queue_service.refresh_from_queue().await?;
 
         // 3. Build stream URL and play (mirrors play_song_from_queue)
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        let stream_url = crate::utils::artwork_url::build_stream_url(
-            &song_id,
-            &server_url,
-            &subsonic_credential,
-        );
-
-        if stream_url.is_empty() {
-            return Err(anyhow::anyhow!("Failed to build stream URL"));
-        }
+        let stream_url = session.stream_url(&song_id);
 
         let song = {
             let qm = queue_manager.lock().await;
@@ -1103,6 +1072,9 @@ impl PlaybackController {
     /// known just-appended index, so no other mutation has had a chance
     /// to shift positions.
     pub async fn play_song_from_queue(&self, song_id: &str, queue_index: usize) -> Result<()> {
+        // Before the cursor moves: no session, no change.
+        let session = self.require_stream_session().await?;
+
         // 0. Record current song in history before jumping
         let queue_manager = self.queue_service.queue_manager();
         {
@@ -1128,13 +1100,7 @@ impl PlaybackController {
         self.queue_service.refresh_from_queue().await?;
 
         // 3. Build stream URL and play
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        let stream_url =
-            crate::utils::artwork_url::build_stream_url(song_id, &server_url, &subsonic_credential);
-
-        if stream_url.is_empty() {
-            return Err(anyhow::anyhow!("Failed to build stream URL"));
-        }
+        let stream_url = session.stream_url(song_id);
 
         let song = {
             let qm = queue_manager.lock().await;
@@ -1232,18 +1198,10 @@ impl PlaybackController {
                     })
                 };
 
-                let (server_url, subsonic_credential) =
-                    self.queue_service.get_server_config().await;
-                let stream_url = crate::utils::artwork_url::build_stream_url(
-                    &new_song_id,
-                    &server_url,
-                    &subsonic_credential,
-                );
-                if stream_url.is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "Failed to build stream URL for removal-aftermath transition"
-                    ));
-                }
+                let stream_url = self
+                    .require_stream_session()
+                    .await?
+                    .stream_url(&new_song_id);
 
                 {
                     // Always swap the engine source to the new current so the
@@ -1337,14 +1295,7 @@ impl PlaybackController {
             })
         };
 
-        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
-        let stream_url =
-            crate::utils::artwork_url::build_stream_url(song_id, &server_url, &subsonic_credential);
-        if stream_url.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Failed to build stream URL for pulled queue"
-            ));
-        }
+        let stream_url = self.require_stream_session().await?.stream_url(song_id);
 
         {
             let mut engine = self.audio_engine.lock().await;
@@ -2302,19 +2253,27 @@ mod tests {
     }
 
     async fn click_fixture() -> Result<ClickFixture> {
+        controller_fixture(true).await
+    }
+
+    /// `with_session: false` leaves the gateway logged out: no server URL,
+    /// no credential.
+    async fn controller_fixture(with_session: bool) -> Result<ClickFixture> {
         let temp = tempfile::tempdir()?;
         let storage_q =
             crate::services::state_storage::StateStorage::new(temp.path().join("queue.redb"))?;
         let storage_s =
             crate::services::state_storage::StateStorage::new(temp.path().join("settings.redb"))?;
         let auth = crate::backend::auth::AuthGateway::new()?;
-        auth.resume_session(
-            "http://127.0.0.1:9".to_string(),
-            "alice".to_string(),
-            "jwt".to_string(),
-            "u=alice&s=salt&t=token".to_string(),
-        )
-        .await?;
+        if with_session {
+            auth.resume_session(
+                "http://127.0.0.1:9".to_string(),
+                "alice".to_string(),
+                "jwt".to_string(),
+                "u=alice&s=salt&t=token".to_string(),
+            )
+            .await?;
+        }
         let queue = QueueService::new(auth, storage_q)?;
         let settings = SettingsService::new(storage_s)?;
         let tm = Arc::new(TaskManager::new());
@@ -2326,6 +2285,27 @@ mod tests {
             playback,
             tasks: tm,
         })
+    }
+
+    /// A play with no server session to stream from changes nothing: the
+    /// session is checked before the queue is replaced, not after.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_play_without_a_stream_session_leaves_the_queue_alone() -> Result<()> {
+        let fx = controller_fixture(false).await?;
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("x"), click_song("y")], Some(0))
+            .await?;
+
+        let result = fx
+            .playback
+            .play_songs_from_index(vec![click_song("a"), click_song("b")], 1)
+            .await;
+
+        assert!(result.is_err(), "nothing can stream without a session");
+        let ids: Vec<String> = fx.queue.get_songs().iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec!["x", "y"], "the queue must not be replaced");
+        Ok(())
     }
 
     /// A seek that cancels a live AUTO crossfade (back to the track the UI
