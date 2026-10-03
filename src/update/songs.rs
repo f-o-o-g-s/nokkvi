@@ -173,7 +173,7 @@ impl Nokkvi {
                 // Browsing panel: redirect play → add to queue (insert at
                 // drag-drop position when one is pending, else append). An
                 // add, so it runs before the play prologue.
-                if self.browsing_panel.is_some() {
+                if self.library_play_adds_to_queue() {
                     let Some(song_view) = self.library.songs.get(index) else {
                         return Task::none();
                     };

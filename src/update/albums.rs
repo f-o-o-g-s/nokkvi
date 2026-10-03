@@ -614,7 +614,7 @@ impl Nokkvi {
             AlbumsAction::PlayAlbumFromTrack(album_id, track_idx, force) => {
                 // Browsing panel: redirect play → add song to queue, before
                 // the play prologue since it is an add.
-                if self.browsing_panel.is_some() {
+                if self.library_play_adds_to_queue() {
                     let song_id = self
                         .albums_page
                         .expansion

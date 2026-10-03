@@ -203,7 +203,7 @@ impl Nokkvi {
                 // unconditional (we do NOT consume
                 // `cross_pane_drag.pending_queue_insert_position` to preserve
                 // the pre-helper behavior).
-                if self.browsing_panel.is_some() {
+                if self.library_play_adds_to_queue() {
                     let name = self
                         .library
                         .playlists

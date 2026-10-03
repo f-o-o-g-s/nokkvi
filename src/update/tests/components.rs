@@ -695,6 +695,32 @@ fn browsing_panel_songs_enter_adds_without_leaving_radio() {
 }
 
 #[test]
+fn enter_in_a_full_library_view_plays_even_with_the_panel_left_open() {
+    // The split view renders only on the Queue view; the panel survives a
+    // switch to another view. Enter in the full Albums view must play.
+    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    app.current_view = View::Albums;
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+
+    activate_center(
+        crate::app_message::Message::Albums(AlbumsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+
+    assert!(
+        app.active_playback.is_queue(),
+        "a full-view Enter is a play, so it leaves radio mode"
+    );
+    assert!(
+        app.active_playlist_info.is_none(),
+        "a full-view Enter replaces the queue"
+    );
+}
+
+#[test]
 fn browsing_panel_album_track_enter_adds_without_leaving_radio() {
     use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
     let mut app = radio_app_with_browsing_panel();

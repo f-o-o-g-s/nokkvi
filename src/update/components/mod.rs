@@ -1036,7 +1036,8 @@ impl Nokkvi {
     /// Per-entity differences (id parsing, name lookup, async backend call)
     /// stay in the caller's `add_task` / `insert_task` closures, so this helper
     /// owns only the shared shape:
-    /// - Returns `None` when `browsing_panel` is closed (caller proceeds with
+    /// - Returns `None` unless the split view is on screen
+    ///   ([`Self::library_play_adds_to_queue`]; caller proceeds with
     ///   normal play flow).
     /// - Returns `Some(insert_task(pos))` when a drag-drop position is pending
     ///   (consumes it via `take()`).
@@ -1055,11 +1056,22 @@ impl Nokkvi {
         A: FnOnce(&mut Self) -> Task<Message>,
         I: FnOnce(&mut Self, usize) -> Task<Message>,
     {
-        self.browsing_panel.as_ref()?;
+        if !self.library_play_adds_to_queue() {
+            return None;
+        }
         if let Some(pos) = self.cross_pane_drag.pending_queue_insert_position.take() {
             return Some(insert_task(self, pos));
         }
         Some(add_task(self))
+    }
+
+    /// Whether a library play is redirected to an add: only while the split
+    /// view is on screen, where the library pages sit in the browsing pane
+    /// beside the queue (or a Tracks editor session). The panel itself
+    /// survives a switch to another view, so `browsing_panel.is_some()` alone
+    /// would turn Enter in a full library view into an add.
+    pub(crate) fn library_play_adds_to_queue(&self) -> bool {
+        self.split_view_active()
     }
 
     /// Enqueue a batch, inserting at a drag-drop position when one is pending.

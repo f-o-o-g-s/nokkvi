@@ -252,7 +252,7 @@ impl Nokkvi {
             GenresAction::PlayAlbum(album_id, force) => {
                 // Browsing panel: redirect play → add to queue, before the
                 // play prologue since it is an add.
-                if self.browsing_panel.is_some() {
+                if self.library_play_adds_to_queue() {
                     let name = self
                         .genres_page
                         .expansion

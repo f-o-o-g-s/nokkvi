@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - Cancelling a roulette spin while a radio station plays now keeps the app in radio mode.
 - When playing a selection or an album fails while a radio station plays, the app now stays in radio mode instead of switching to the queue.
 - Playing a row from the smart-playlist rules preview no longer leaves the previous playlist's "Playing From" header on the queue.
+- Enter in a full library view now plays instead of only adding to the queue when the split view was left open on the Queue.
 
 ### Removed
 
