@@ -63,6 +63,7 @@ mod lyrics;
 mod menus;
 pub(crate) mod milkdrop;
 mod milkdrop_picker;
+pub(crate) mod modals;
 mod mpris;
 mod navigation;
 mod notifications;

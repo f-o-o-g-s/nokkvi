@@ -848,13 +848,7 @@ impl Nokkvi {
         // Escape/Enter/arrows would drive the hidden form (arming the
         // invisible discard confirm, or discarding the dirty session under
         // the modal) instead of closing/using the modal.
-        let any_blocking_modal = self.eq_modal.open
-            || self.about_modal.visible
-            || self.info_modal.visible
-            || self.text_input_dialog.visible
-            || self.default_playlist_picker.is_some()
-            || self.milkdrop.picker.is_some()
-            || self.trawl_modal.is_some();
+        let any_blocking_modal = self.top_modal().is_some();
 
         // Rules-session grammar: view-gated keys for the smart-playlist
         // rules editor. Intercepted before any SFX/toolbar arms could fire
