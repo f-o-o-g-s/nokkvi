@@ -1749,8 +1749,16 @@ impl Nokkvi {
     /// server-sync action menu) is open. An open one holds the auto-hide
     /// toolbar expanded, so it can't collapse out from under the overlay.
     fn queue_header_menu_open(&self) -> bool {
-        column_dropdown_state(&self.open_menu, View::Queue).0
-            || queue_sync_menu_state(&self.open_menu).0
+        self.header_menu_open(crate::app_message::MenuHeader::View(View::Queue))
+    }
+
+    /// Whether the open menu hangs from `header`'s toolbar (see
+    /// [`crate::app_message::OpenMenu::anchor`]), which holds an auto-hide
+    /// header expanded under its overlay.
+    fn header_menu_open(&self, header: crate::app_message::MenuHeader) -> bool {
+        self.open_menu
+            .as_ref()
+            .is_some_and(|menu| menu.is_on_header(header))
     }
 
     /// The inputs of the queue's slot-list chrome, derived once here for
@@ -1854,43 +1862,45 @@ impl Nokkvi {
         &self,
         page: LibraryPage,
     ) -> crate::widgets::slot_list::SlotListChrome {
-        use crate::app_message::OpenMenu;
+        use crate::app_message::MenuHeader;
 
-        let columns_menu_open = |view: View| column_dropdown_state(&self.open_menu, view).0;
+        let view_menu_open = |view: View| self.header_menu_open(MenuHeader::View(view));
         // (header can collapse, an open header menu holds it expanded,
         // select-all bar showing). Similar's and Harbour's views always render
-        // the expanded header; Radios has no header menu and no select column.
+        // the expanded header; Radios has no select column.
         let (collapsible, menu_open, select_visible) = match page {
             LibraryPage::Albums => (
                 true,
-                columns_menu_open(View::Albums),
+                view_menu_open(View::Albums),
                 self.albums_page.column_visibility.select,
             ),
             LibraryPage::Artists => (
                 true,
-                columns_menu_open(View::Artists),
+                view_menu_open(View::Artists),
                 self.artists_page.column_visibility.select,
             ),
             LibraryPage::Genres => (
                 true,
-                columns_menu_open(View::Genres),
+                view_menu_open(View::Genres),
                 self.genres_page.column_visibility.select,
             ),
             LibraryPage::Playlists => (
                 true,
-                // The create menu is anchored to the toolbar too.
-                columns_menu_open(View::Playlists)
-                    || matches!(self.open_menu, Some(OpenMenu::PlaylistsCreate { .. })),
+                view_menu_open(View::Playlists),
                 self.playlists_page.column_visibility.select,
             ),
             LibraryPage::Songs => (
                 true,
-                columns_menu_open(View::Songs),
+                view_menu_open(View::Songs),
                 self.songs_page.column_visibility.select,
             ),
-            LibraryPage::Radios => (true, false, false),
-            LibraryPage::Similar => (false, false, self.similar_page.column_visibility.select),
-            LibraryPage::Harbour => (false, false, false),
+            LibraryPage::Radios => (true, view_menu_open(View::Radios), false),
+            LibraryPage::Similar => (
+                false,
+                self.header_menu_open(MenuHeader::Similar),
+                self.similar_page.column_visibility.select,
+            ),
+            LibraryPage::Harbour => (false, view_menu_open(View::Harbour), false),
         };
         let (pane_width, pane_height) = if self.library_page_in_browsing_pane(page) {
             (

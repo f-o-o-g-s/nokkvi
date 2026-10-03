@@ -454,7 +454,8 @@ impl Nokkvi {
                 // app's window. Drop search-input focus where the box unmounts
                 // (see clear_all_search_input_focus) so it can't re-reveal the
                 // header on refocus. Close the header-anchored dropdowns
-                // (columns-cog + the queue server-sync menu) — their overlays
+                // (`MenuAnchor::Header`: columns cog, Playlists create, queue
+                // server sync) — their overlays
                 // render from stored trigger bounds independent of the
                 // (now-collapsed) header, so they would otherwise strand visible
                 // with autohide off, or (autohide on) re-fire open on refocus
@@ -476,15 +477,9 @@ impl Nokkvi {
                 // stranded within-list drag on focus loss too.
                 self.clear_stranded_within_list_drag();
                 self.clear_all_search_input_focus();
-                if matches!(
-                    self.open_menu,
-                    Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown { .. }
-                            | crate::app_message::OpenMenu::CheckboxDropdownSimilar { .. }
-                            | crate::app_message::OpenMenu::CheckboxDropdownPreview { .. }
-                            | crate::app_message::OpenMenu::QueueSync { .. }
-                    )
-                ) {
+                if self.open_menu.as_ref().is_some_and(|menu| {
+                    matches!(menu.anchor(), crate::app_message::MenuAnchor::Header(_))
+                }) {
                     self.open_menu = None;
                 }
                 Task::none()

@@ -1306,6 +1306,66 @@ pub enum OpenMenu {
     LibrarySelector { trigger_bounds: iced::Rectangle },
 }
 
+impl OpenMenu {
+    /// The surface this menu hangs from. Sites that close or hold menus by
+    /// surface (focus loss, Theater Mode's sliding bar, the auto-hide header)
+    /// match on this instead of listing variants, so a new menu is placed
+    /// once, here, by the compiler-checked match.
+    pub fn anchor(&self) -> MenuAnchor {
+        match self {
+            Self::CheckboxDropdown { view, .. } => MenuAnchor::Header(MenuHeader::View(*view)),
+            Self::CheckboxDropdownSimilar { .. } => MenuAnchor::Header(MenuHeader::Similar),
+            Self::CheckboxDropdownPreview { .. } => MenuAnchor::Header(MenuHeader::RulesPreview),
+            Self::PlaylistsCreate { .. } => MenuAnchor::Header(MenuHeader::View(View::Playlists)),
+            Self::QueueSync { .. } => MenuAnchor::Header(MenuHeader::View(View::Queue)),
+            Self::Hamburger | Self::PlayerModes | Self::LibrarySelector { .. } => {
+                MenuAnchor::Chrome
+            }
+            Self::Context { id, .. } => match id {
+                ContextMenuId::Strip => MenuAnchor::Chrome,
+                ContextMenuId::LibraryRow { .. }
+                | ContextMenuId::QueueRow(_)
+                | ContextMenuId::EditorRow(_)
+                | ContextMenuId::RadioRow(_)
+                | ContextMenuId::SimilarRow(_)
+                | ContextMenuId::ArtworkPanel(_)
+                | ContextMenuId::TheaterPanel => MenuAnchor::Content,
+            },
+        }
+    }
+
+    /// Whether this menu hangs from `header`'s toolbar.
+    pub fn is_on_header(&self, header: MenuHeader) -> bool {
+        self.anchor() == MenuAnchor::Header(header)
+    }
+}
+
+/// What an [`OpenMenu`] hangs from; see [`OpenMenu::anchor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAnchor {
+    /// A slot-list header's toolbar: the columns cog, the Playlists create
+    /// menu, the queue's server-sync menu. The overlay renders from trigger
+    /// bounds stored at click time, so it outlives a collapsed header.
+    Header(MenuHeader),
+    /// The app chrome bars: the hamburger (top nav, side nav or player bar),
+    /// the player-bar modes menu, the library selector and the now-playing
+    /// strip's context menu. In Theater Mode all of them ride the sliding bar.
+    Chrome,
+    /// A context menu over content: a slot-list row, an artwork panel, or
+    /// Theater Mode's now-playing panel.
+    Content,
+}
+
+/// Which header a [`MenuAnchor::Header`] menu belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuHeader {
+    View(View),
+    /// Similar lives only in the browsing panel and has no `View`.
+    Similar,
+    /// The smart-playlist rules editor's preview pane.
+    RulesPreview,
+}
+
 /// Identifies a specific `context_menu` widget instance for `OpenMenu::Context`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContextMenuId {
@@ -1629,6 +1689,65 @@ pub enum Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The surfaces the menu-closing sites key on: every header dropdown
+    /// (Playlists create and queue sync included) is `Header`, the bar menus
+    /// and the strip's context menu are `Chrome`, other context menus are
+    /// `Content`.
+    #[test]
+    fn open_menu_anchor_places_each_menu_on_its_surface() {
+        let bounds = iced::Rectangle::default();
+        let at = |id| OpenMenu::Context {
+            id,
+            position: iced::Point::ORIGIN,
+        };
+        for (menu, expected) in [
+            (
+                OpenMenu::CheckboxDropdown {
+                    view: View::Songs,
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Header(MenuHeader::View(View::Songs)),
+            ),
+            (
+                OpenMenu::CheckboxDropdownSimilar {
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Header(MenuHeader::Similar),
+            ),
+            (
+                OpenMenu::CheckboxDropdownPreview {
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Header(MenuHeader::RulesPreview),
+            ),
+            (
+                OpenMenu::PlaylistsCreate {
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Header(MenuHeader::View(View::Playlists)),
+            ),
+            (
+                OpenMenu::QueueSync {
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Header(MenuHeader::View(View::Queue)),
+            ),
+            (OpenMenu::Hamburger, MenuAnchor::Chrome),
+            (OpenMenu::PlayerModes, MenuAnchor::Chrome),
+            (
+                OpenMenu::LibrarySelector {
+                    trigger_bounds: bounds,
+                },
+                MenuAnchor::Chrome,
+            ),
+            (at(ContextMenuId::Strip), MenuAnchor::Chrome),
+            (at(ContextMenuId::QueueRow(0)), MenuAnchor::Content),
+            (at(ContextMenuId::TheaterPanel), MenuAnchor::Content),
+        ] {
+            assert_eq!(menu.anchor(), expected, "{menu:?}");
+        }
+    }
 
     /// `FindMessage` sub-enum routing — the three flat root variants
     /// (`FindSimilar` / `FindTopSongs` / `SimilarSongsLoaded`) collapsed

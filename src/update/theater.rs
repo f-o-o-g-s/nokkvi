@@ -426,19 +426,11 @@ impl Nokkvi {
     /// the window is unfocused and would leave them hanging at the edge; the
     /// panel's own menu stays because the panel does not move.
     pub(crate) fn close_theater_bar_menus(&mut self) {
-        use crate::app_message::{ContextMenuId, OpenMenu};
         if self.theater.active
-            && matches!(
-                self.open_menu,
-                Some(
-                    OpenMenu::Hamburger
-                        | OpenMenu::PlayerModes
-                        | OpenMenu::Context {
-                            id: ContextMenuId::Strip,
-                            ..
-                        }
-                )
-            )
+            && self
+                .open_menu
+                .as_ref()
+                .is_some_and(|menu| menu.anchor() == crate::app_message::MenuAnchor::Chrome)
         {
             self.open_menu = None;
         }

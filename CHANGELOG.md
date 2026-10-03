@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Replacing the queue from Similar or Top Songs results now clears the previous playlist's header.
 - Show in Folder in an album's Get Info no longer opens a different, expanded album's folder.
 - Find Similar from the Songs view now titles the results "Similar to: …" like every other view.
+- The Playlists create menu now closes when the window loses focus, like the other header menus.
 
 ### Removed
 

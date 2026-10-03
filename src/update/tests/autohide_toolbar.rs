@@ -403,6 +403,23 @@ fn window_unfocus_closes_header_dropdowns_only() {
 }
 
 #[test]
+fn window_unfocus_closes_the_playlists_create_menu() {
+    // The Playlists header's create dropdown is header-anchored with stored
+    // trigger bounds, exactly like the columns cog, so it strands the same way.
+    let mut app = songs_app();
+    app.open_menu = Some(crate::app_message::OpenMenu::PlaylistsCreate {
+        trigger_bounds: iced::Rectangle::default(),
+    });
+
+    let _ = app.update(crate::app_message::Message::WindowUnfocused);
+
+    assert!(
+        app.open_menu.is_none(),
+        "the Playlists create menu closes on unfocus"
+    );
+}
+
+#[test]
 fn window_unfocus_drops_search_focus_so_refocus_doesnt_reveal() {
     // Field report: pressing `/` (focuses the empty search box) then leaving and
     // re-entering the window re-expanded the header with the cursor nowhere near
