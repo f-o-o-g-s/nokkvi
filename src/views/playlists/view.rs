@@ -342,10 +342,7 @@ impl PlaylistsPage {
         // multi-select column is on. Tri-state derives from the current
         // selection set against the *flattened* (visible) row count.
         let header = {
-            let flattened_len = self
-                .expansion
-                .build_flattened_list(data.playlists, |p| &p.id)
-                .len();
+            let flattened_len = self.expansion.flattened_len(data.playlists);
             crate::widgets::slot_list::compose_header_with_select(
                 data.chrome.select_visible,
                 self.common.select_all_state(flattened_len),
