@@ -1721,17 +1721,18 @@ impl AppService {
             )
         };
 
-        self.playback.apply_removal_aftermath(plan).await?;
+        let aftermath = self.playback.apply_removal_aftermath(plan).await;
         // `apply_removal_aftermath` invalidates engine prep on the
         // `LoadNewCurrent` path (via `load_track_with_rg`), but the
         // `NoCurrentChange` branch doesn't touch the engine — the
         // removed row could still be the song the engine had buffered
         // as the next gapless track. Always discharge the
-        // `NextTrackResetEffect` so that case can't leave a stale
-        // prepared decoder pointing at a vanished queue row.
+        // `NextTrackResetEffect`, even when the aftermath's `play()`
+        // failed, so that case can't leave a stale prepared decoder
+        // pointing at a vanished queue row.
         effect.apply_to(&self.audio_engine()).await;
 
-        Ok(())
+        aftermath
     }
 
     /// Remove Duplicates from the queue: drop every later copy of a song,
@@ -1810,7 +1811,8 @@ impl AppService {
                     qm.get_song(&song_id).cloned()
                 })
                 .collect();
-            let _ = qm.remove_entries_by_ids(&entry_ids);
+            // One reset covers the removal and the re-insert.
+            let _ = qm.remove_entries_by_ids(&entry_ids)?;
             qm.insert_after_current(extracted)?
         };
         self.queue_service.refresh_from_queue().await?;
@@ -2455,6 +2457,66 @@ mod tests {
         .expect("insert dispatch");
 
         assert_eq!(dispatch_queue_ids(&app), vec!["a", "x", "y", "b"]);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A removal whose save fails still resets the engine's prepared next
+    /// track. The row left the queue in memory, so a decoder prepared for it
+    /// would otherwise play it at the next gapless join.
+    #[tokio::test]
+    async fn removing_the_prepared_next_row_resets_it_even_when_the_save_fails() {
+        let suffix = format!(
+            "test_app_unsaved_removal_{}_{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        );
+        let db_path = std::env::temp_dir().join(suffix);
+        let _ = std::fs::remove_file(&db_path);
+        let storage = StateStorage::new(db_path.clone()).expect("redb open");
+        let app = AppService::new_with_storage(storage.clone())
+            .await
+            .expect("app service");
+
+        let seeded = app
+            .queue_service
+            .set_queue(dispatch_test_songs(&["a", "b", "c"]), Some(0))
+            .await
+            .expect("seed the queue");
+        seeded.apply_to(&app.audio_engine()).await;
+        let engine_arc = app.audio_engine();
+        {
+            // "b" is the gapless next track.
+            let mut engine = engine_arc.lock().await;
+            engine
+                .store_prepared_decoder(
+                    crate::audio::AudioDecoder::default(),
+                    "http://127.0.0.1:9/rest/stream?id=b".to_string(),
+                    None,
+                    crate::audio::engine::PreparedTransitionDirectives::default(),
+                )
+                .await;
+            assert!(engine.is_next_track_prepared().await, "precondition");
+        }
+        let b_entry = app
+            .queue_service
+            .queue_manager()
+            .lock()
+            .await
+            .entry_id_at(1)
+            .expect("row 1");
+
+        storage.fail_writes_for_test(true);
+        let _ = app.remove_queue_entries(&[b_entry], None).await;
+
+        assert_eq!(dispatch_queue_ids(&app), vec!["a", "c"]);
+        assert!(
+            !engine_arc.lock().await.is_next_track_prepared().await,
+            "the removed row must not stay prepared as the next track"
+        );
 
         drop(app);
         let _ = std::fs::remove_file(&db_path);

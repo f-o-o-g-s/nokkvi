@@ -15,8 +15,13 @@
 //! Drop is the safety net: on `?` propagation or panic between `write()`
 //! and `commit_*`, Drop still runs `clear_queued()`, so the navigator
 //! cannot transition to an entry stored against pre-mutation order.
-
-use anyhow::Result;
+//!
+//! A commit always hands back its [`NextTrackResetEffect`], even when the
+//! save fails: the mutation already happened in memory, so the engine's
+//! prepared next track is stale either way. The failed save is logged here
+//! ([`super::warn_if_unsaved`]); it never fails the mutation, because every
+//! caller acts on the queue as it now is in memory (the UI mirrors it, the
+//! engine follows it), and an `Err` would tell them nothing changed.
 
 use super::QueueManager;
 use crate::types::NextTrackResetEffect;
@@ -55,23 +60,24 @@ impl QueueWriteGuard<'_> {
     /// Commit with full save (queue ordering + song pool). Returns a
     /// [`NextTrackResetEffect`] the caller must dispatch to the audio
     /// engine — every queue mutation may have invalidated the prepared
-    /// next-track decoder.
-    pub fn commit_save_all(mut self) -> Result<NextTrackResetEffect> {
+    /// next-track decoder. A failed save is logged, never returned (see the
+    /// module docs).
+    pub fn commit_save_all(mut self) -> NextTrackResetEffect {
         let mgr = self.mgr.take().expect("guard already consumed");
         assert_order_consistent(mgr);
         mgr.clear_queued();
-        mgr.save_all()?;
-        Ok(NextTrackResetEffect::new())
+        super::warn_if_unsaved(mgr.save_all(), "a queue change");
+        NextTrackResetEffect::new()
     }
 
     /// Commit with order-only save (song pool unchanged). Returns a
     /// [`NextTrackResetEffect`] obligation — see [`Self::commit_save_all`].
-    pub fn commit_save_order(mut self) -> Result<NextTrackResetEffect> {
+    pub fn commit_save_order(mut self) -> NextTrackResetEffect {
         let mgr = self.mgr.take().expect("guard already consumed");
         assert_order_consistent(mgr);
         mgr.clear_queued();
-        mgr.save_order()?;
-        Ok(NextTrackResetEffect::new())
+        super::warn_if_unsaved(mgr.save_order(), "a queue order change");
+        NextTrackResetEffect::new()
     }
 
     /// Commit without persisting (in-memory mutation only). Returns a

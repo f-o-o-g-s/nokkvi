@@ -22,6 +22,10 @@ pub const ACTIVE_LIBRARY_IDS_KEY: &str = "active_library_ids";
 #[derive(Clone)]
 pub struct StateStorage {
     db: Arc<Database>,
+    /// Test-only fault switch, shared by every clone: while set, every write
+    /// fails before it starts.
+    #[cfg(test)]
+    fail_writes: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl StateStorage {
@@ -48,14 +52,35 @@ impl StateStorage {
             }
         }
 
-        Ok(Self { db: Arc::new(db) })
+        Ok(Self {
+            db: Arc::new(db),
+            #[cfg(test)]
+            fail_writes: Arc::default(),
+        })
+    }
+
+    /// Every write starts here, so the test-only fault switch covers them all.
+    fn begin_write(&self) -> Result<redb::WriteTransaction> {
+        #[cfg(test)]
+        if self.fail_writes.load(std::sync::atomic::Ordering::Relaxed) {
+            anyhow::bail!("injected write failure");
+        }
+        Ok(self.db.begin_write()?)
+    }
+
+    /// Make every write through this storage (and its clones) fail until
+    /// switched back off.
+    #[cfg(test)]
+    pub(crate) fn fail_writes_for_test(&self, fail: bool) {
+        self.fail_writes
+            .store(fail, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Save data as JSON (small/debuggable payloads like queue order)
     pub fn save<T: Serialize>(&self, key: &str, data: &T) -> Result<()> {
         let serialized = serde_json::to_vec(data)?;
 
-        let write_txn = self.db.begin_write()?;
+        let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(STATE_TABLE)?;
             table.insert(key, serialized.as_slice())?;
@@ -92,7 +117,7 @@ impl StateStorage {
         let serialized = bincode_next::encode_to_vec(data, bincode_next::config::standard())
             .map_err(|e| anyhow::anyhow!("bincode encode: {e}"))?;
 
-        let write_txn = self.db.begin_write()?;
+        let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(STATE_TABLE)?;
             table.insert(key, serialized.as_slice())?;
@@ -114,7 +139,7 @@ impl StateStorage {
     /// queue ORDER and SONG-POOL blobs together so a reload always sees a
     /// consistent pair.
     pub fn save_binary_batch(&self, entries: &[(&str, &[u8])]) -> Result<()> {
-        let write_txn = self.db.begin_write()?;
+        let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(STATE_TABLE)?;
             for (key, bytes) in entries {
@@ -153,7 +178,7 @@ impl StateStorage {
     /// the write table materializes an empty `STATE_TABLE` on a brand-new DB
     /// (redb's `open_table` is create-or-open) — a negligible one-time cost.
     pub fn remove(&self, key: &str) -> Result<()> {
-        let write_txn = self.db.begin_write()?;
+        let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(STATE_TABLE)?;
             table.remove(key)?;

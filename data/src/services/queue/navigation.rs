@@ -282,7 +282,7 @@ impl QueueManager {
         // Setting the cursor IS the whole playhead move — the physical
         // index derives from order[current_order] (== song_idx here).
         self.queue.current_order = Some(queued_order);
-        self.save_order().ok();
+        super::warn_if_unsaved(self.save_order(), "advancing the play cursor");
 
         // NOTE: "song_ids[..]" label is historical but grep-stable (see
         // compute_peek_next).
@@ -352,7 +352,7 @@ impl QueueManager {
             // None, so redb now holds repeat=None. Re-persist the restored
             // value so a manual skip can't silently drop the repeat-one
             // preference across a relaunch. Best-effort + idempotent.
-            let _ = self.save_order();
+            super::warn_if_unsaved(self.save_order(), "restoring repeat-one");
         }
 
         let transition = transition?;
@@ -394,7 +394,7 @@ impl QueueManager {
                 // Found in queue — anchor the cursor on that physical row
                 self.set_cursor_to_row(Some(idx));
                 self.clear_queued();
-                self.save_order().ok();
+                super::warn_if_unsaved(self.save_order(), "stepping back");
                 let song = self.pool.get(&prev_id).cloned().unwrap_or(popped.song);
                 return PreviousSongResult::InQueue(song, idx);
             }
@@ -436,7 +436,7 @@ impl QueueManager {
         {
             self.queue.current_order = Some(prev_order);
             self.clear_queued();
-            self.save_order().ok();
+            super::warn_if_unsaved(self.save_order(), "stepping back");
             return PreviousSongResult::InQueue(song, phys);
         }
 

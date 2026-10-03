@@ -468,7 +468,7 @@ impl QueueNavigator {
             };
             *self.current_song_id.lock().await = None;
             let reposition_effect = queue_manager.reposition_to_index(None);
-            queue_manager.save_all().ok();
+            crate::services::queue::warn_if_unsaved(queue_manager.save_all(), "the queue ran out");
             drop(queue_manager);
             if let Some(effect) = consume_effect {
                 effect.apply_locked(engine).await;

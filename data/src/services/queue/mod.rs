@@ -32,6 +32,16 @@ use crate::{
     },
 };
 
+/// For a caller with no one to hand a failed queue save to (an auto-advance,
+/// a skip, a play, the navigator's own cursor saves): log it. The queue
+/// changed in memory, so playback is right for this session; the change is
+/// what a restart would lose.
+pub(crate) fn warn_if_unsaved(saved: Result<()>, change: &str) {
+    if let Err(e) = saved {
+        warn!(" [QUEUE] Couldn't save the queue after {change}: {e:#}");
+    }
+}
+
 /// One playback-history record. Keyed by the per-row `entry_id` (when known)
 /// rather than `Song.id` so Previous lands on the exact physical row that
 /// played — even when two adjacent rows share a song id. `entry_id` is `None`
@@ -365,7 +375,7 @@ impl QueueManager {
 
         // Extend order array with new indices
         tx.extend_order(start_idx..start_idx + count);
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     pub fn set_queue(
@@ -398,7 +408,7 @@ impl QueueManager {
         if tx.queue.shuffle {
             tx.shuffle_order();
         }
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     pub fn remove_song(&mut self, index: usize) -> Result<NextTrackResetEffect> {
@@ -423,7 +433,7 @@ impl QueueManager {
         // gone.
         tx.remove_from_order(index);
 
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     /// Remove every queue row matching a song_id.
@@ -511,7 +521,7 @@ impl QueueManager {
         }
         tx.remove_rows_from_order(&removed_rows);
 
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     /// Remove Duplicates: drop every later copy of a song from the whole
@@ -549,7 +559,7 @@ impl QueueManager {
         } else {
             tx.unshuffle_order();
         }
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     /// Shuffle the queue order randomly.
@@ -580,7 +590,7 @@ impl QueueManager {
             tx.shuffle_order();
         }
         debug!(" [QUEUE] Queue shuffled, new order preserved");
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     /// Sort the queue by the given sort mode and direction.
@@ -666,19 +676,19 @@ impl QueueManager {
             mode,
             if ascending { "ASC" } else { "DESC" }
         );
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<NextTrackResetEffect> {
         let mut tx = self.write();
         tx.queue.repeat = mode;
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     pub fn toggle_consume(&mut self) -> Result<NextTrackResetEffect> {
         let mut tx = self.write();
         tx.queue.consume = !tx.queue.consume;
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     pub fn get_current_song(&self) -> Option<Song> {
@@ -881,7 +891,7 @@ impl QueueManager {
             "📦 [QUEUE] Moved item from {} to {} (inserted at {})",
             from, to, insert_at
         );
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     /// Multi-row reorder addressed by per-row `entry_id`s. Drift-immune
@@ -988,7 +998,7 @@ impl QueueManager {
             insert_at,
             target,
         );
-        tx.commit_save_order()
+        Ok(tx.commit_save_order())
     }
 
     /// Insert songs right after the currently playing position ("Play Next").
@@ -1027,7 +1037,7 @@ impl QueueManager {
         tx.insert_into_order(clamped, count);
 
         debug!("📦 [QUEUE] Inserted songs after current (pos {})", clamped);
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     /// Insert a song at `index` and set it as the currently-playing song.
@@ -1038,9 +1048,10 @@ impl QueueManager {
         song: Song,
     ) -> Result<NextTrackResetEffect> {
         let clamped = index.min(self.queue.rows.len());
+        // One reset covers the insert and the reposition.
         let _ = self.insert_songs_at(clamped, vec![song])?;
         let _ = self.reposition_to_index(Some(clamped));
-        self.save_order()?;
+        warn_if_unsaved(self.save_order(), "re-inserting a consumed song");
         Ok(NextTrackResetEffect::new())
     }
 
@@ -1084,7 +1095,7 @@ impl QueueManager {
             "📦 [QUEUE] Inserted {} songs at position {}",
             count, clamped
         );
-        tx.commit_save_all()
+        Ok(tx.commit_save_all())
     }
 
     /// Update the rating for a song in the persisted queue by song ID (O(1)).
@@ -2634,6 +2645,34 @@ pub(crate) mod tests {
             "current song must resolve from the atomically-persisted pool",
         );
         assert_eq!(qm2.songs_in_order().len(), 3);
+    }
+
+    /// A failed save must not cost the engine its reset: the rows changed
+    /// in memory either way, so every committing mutator still hands back
+    /// its `NextTrackResetEffect` (the failure is logged at the commit).
+    #[test]
+    fn a_failed_save_still_hands_back_the_reset() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.storage.fail_writes_for_test(true);
+
+        let removed = qm.remove_song(2);
+        assert!(
+            removed.is_ok(),
+            "the row left the queue in memory, so its reset is owed: {:?}",
+            removed.err()
+        );
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b"]);
+
+        let reordered = qm.move_item(0, 1);
+        assert!(reordered.is_ok(), "an order-only commit owes its reset too");
+        let toggled = qm.toggle_consume();
+        assert!(toggled.is_ok(), "so does a mode toggle");
+        assert!(qm.get_queue().consume);
     }
 
     #[test]

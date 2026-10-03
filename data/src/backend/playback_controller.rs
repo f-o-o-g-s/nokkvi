@@ -292,7 +292,10 @@ impl PlaybackController {
                 && queue_manager.current_index().is_none()
             {
                 let effect = queue_manager.reposition_to_index(Some(idx));
-                let _ = queue_manager.save_order();
+                crate::services::queue::warn_if_unsaved(
+                    queue_manager.save_order(),
+                    "a cold-start Play",
+                );
                 effect.apply_locked(&mut audio).await;
             }
             drop(queue_manager);
@@ -1060,7 +1063,7 @@ impl PlaybackController {
             } else {
                 qm.reposition_to_index(Some(queue_index))
             };
-            qm.save_order()?;
+            crate::services::queue::warn_if_unsaved(qm.save_order(), "a queue click");
             (song_id, effect)
         };
 
@@ -1118,7 +1121,7 @@ impl PlaybackController {
         //    discharged below where the engine lock is held.
         let mut qm = queue_manager.lock().await;
         let reposition_effect = qm.reposition_to_index(Some(queue_index));
-        qm.save_order()?;
+        crate::services::queue::warn_if_unsaved(qm.save_order(), "a queue click");
         drop(qm);
 
         // 2. Sync the reactive current_index property with queue state
