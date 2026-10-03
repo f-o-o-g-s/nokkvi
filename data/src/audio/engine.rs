@@ -144,12 +144,13 @@ pub enum SkipFadeOutcome {
 
 /// Effective duration for a manual-skip crossfade, or `None` when the
 /// duration gates refuse (M7). Pure — the direct-`Active` fire bypasses
-/// `arm_crossfade`, so this re-applies its duration gates (known durations,
-/// the configured minimum-track floor, the `shorter/2` clamp) plus the
-/// skip-specific remaining-audio clamp: the position trigger fires exactly
-/// `fade` before the end, but a manual skip can land anywhere — a fade
-/// longer than the outgoing's remaining audio would EOF mid-blend, drain the
-/// ring, and cut to silence.
+/// `arm_crossfade`, so it applies the same length rules
+/// ([`crate::audio::renderer::crossfade_length_ms`]: known durations, the
+/// minimum-track floor, the `shorter/2` clamp) plus the skip-specific
+/// remaining-audio clamp: the position trigger fires exactly `fade` before
+/// the end, but a manual skip can land anywhere — a fade longer than the
+/// outgoing's remaining audio would EOF mid-blend, drain the ring, and cut
+/// to silence.
 fn skip_fade_duration_ms(
     requested_ms: u64,
     outgoing_duration_ms: u64,
@@ -157,20 +158,15 @@ fn skip_fade_duration_ms(
     position_ms: u64,
     min_track_ms: u64,
 ) -> Option<u64> {
-    // Unknown durations can't blend: a zero incoming degenerates the
-    // `shorter/2` clamp to 0 and a zero outgoing has no known remainder.
-    if outgoing_duration_ms == 0 || incoming_duration_ms == 0 {
-        return None;
-    }
-    // The configured minimum-track floor applies to skips too — silently
-    // ignoring it here would make `crossfade_min_track_secs` a lie on
-    // every manual skip.
-    let min_dur = outgoing_duration_ms.min(incoming_duration_ms);
-    if min_dur < min_track_ms {
-        return None;
-    }
+    let length = crate::audio::renderer::crossfade_length_ms(
+        requested_ms,
+        outgoing_duration_ms,
+        incoming_duration_ms,
+        min_track_ms,
+    )
+    .ok()?;
     let remaining = outgoing_duration_ms.saturating_sub(position_ms);
-    let effective = requested_ms.min(min_dur / 2).min(remaining);
+    let effective = length.min(remaining);
     (effective > 0).then_some(effective)
 }
 
@@ -204,11 +200,11 @@ pub(crate) struct CrossfadeCoordinator {
     /// whether to self-arm a crossfade under Relaxed without taking the renderer
     /// lock). Kept in sync by `set_bit_perfect`.
     bit_perfect_mode: crate::types::player_settings::BitPerfectMode,
-    /// Engine-side mirror of the minimum-track-length floor, in seconds (the
-    /// renderer owns the enforcing copy at its `arm_crossfade` gate). This
-    /// copy feeds `crossfade_policy_cfg()` so the controller's prep-time
-    /// policy decision reads the same floor without taking the renderer lock.
-    /// Kept in sync by `set_crossfade_min_track_secs`.
+    /// The minimum-track-length floor, in seconds: the only copy of the
+    /// setting. It feeds `crossfade_policy_cfg()` (the controller's prep-time
+    /// policy decision) and, via [`Self::min_track_ms`], the renderer's
+    /// `arm_crossfade` gate and the manual-skip fire. Set by
+    /// `set_crossfade_min_track_secs`.
     min_track_secs: u32,
     /// The opt-in album-continuity gate (M4): sequential same-album tracks
     /// transition gapless instead of crossfading. Consumed controller-side
@@ -299,6 +295,12 @@ impl CrossfadeCoordinator {
     /// seek-rearm / EOF-fallback paths.
     fn effective_duration_ms(&self) -> u64 {
         self.duration_override_ms.unwrap_or(self.duration_ms)
+    }
+
+    /// The minimum-track-length floor in ms, as both blend starts (the
+    /// renderer's `arm_crossfade` and the manual-skip fire) read it.
+    fn min_track_ms(&self) -> u64 {
+        u64::from(self.min_track_secs) * 1000
     }
 
     /// Whether crossfade arming is eligible at all: the user's Crossfade toggle
@@ -2537,6 +2539,7 @@ impl CustomAudioEngine {
             &self.next_format,
             self.duration,
             incoming_duration_ms,
+            self.crossfade.min_track_ms(),
         );
     }
 
@@ -2834,16 +2837,18 @@ impl CustomAudioEngine {
         self.renderer.lock().set_crossfade_curve(curve);
     }
 
-    /// Set the minimum-track-length crossfade floor from settings (seconds) —
-    /// pushed to the renderer, which owns the enforcing copy at its
-    /// `arm_crossfade` gate; the engine mirror feeds the controller's
-    /// prep-time policy decision. Like `set_crossfade_duration`, a bare
-    /// write with no `reset_next_track`: an armed transition keeps the floor
-    /// it was armed under (fires once), and cancelling a live blend on every
-    /// slider step would hard-cut audio.
+    /// Set the minimum-track-length crossfade floor from settings (seconds).
+    /// The engine holds the only copy: the controller's prep-time policy
+    /// decision, the renderer's `arm_crossfade` gate and the manual-skip fire
+    /// all read it. Like `set_crossfade_duration`, a bare write with no
+    /// `reset_next_track`: an armed transition keeps the floor it was armed
+    /// under (fires once), and cancelling a live blend on every slider step
+    /// would hard-cut audio.
     pub fn set_crossfade_min_track_secs(&mut self, secs: u32) {
+        if self.crossfade.min_track_secs != secs {
+            tracing::info!("🔀 Engine: crossfade min track length {}s", secs);
+        }
         self.crossfade.min_track_secs = secs;
-        self.renderer.lock().set_crossfade_min_track_secs(secs);
     }
 
     /// Set the album-continuity gate from settings (sequential same-album
@@ -3347,7 +3352,7 @@ impl CustomAudioEngine {
             // The OUTGOING's audible position (the public `position()` is
             // the target's clock by now).
             self.stream_position(),
-            u64::from(self.crossfade.min_track_secs) * 1000,
+            self.crossfade.min_track_ms(),
         ) else {
             debug!("🔀 [SKIP FADE] Blocked by duration gates — falling back");
             return SkipFadeOutcome::Blocked;
@@ -5251,6 +5256,7 @@ mod tests {
             &AudioFormat::new(crate::audio::format::SampleFormat::F32, 48_000, 2),
             200_000,
             200_000,
+            0,
         );
         assert!(engine.renderer.lock().is_crossfade_armed());
         let gap = Arc::new(AtomicU64::new(500));
