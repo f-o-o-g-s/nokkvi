@@ -46,6 +46,7 @@ All notable changes to this project will be documented in this file.
 - A radio station that drops the connection now reconnects instead of staying silent.
 - Auto-advancing into a track with a different sample rate now plays it at its own ReplayGain level instead of the previous track's.
 - In ReplayGain Track mode, a gapless auto-advance into a track with a different gain now plays it at its own level.
+- On the non-PipeWire audio fallback, where bit-perfect Strict has no effect, clicking a track now crossfades with Fade on Skip like Next does.
 
 ### Removed
 

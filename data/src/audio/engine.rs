@@ -3403,14 +3403,17 @@ impl CustomAudioEngine {
     /// Whether a CLICK-initiated track start (play-from-queue /
     /// play-from-browse, M10) should even PLAN a skip-crossfade: M7's
     /// viability ([`Self::skip_crossfade_viable`]) plus a bit-perfect
-    /// **Strict** pre-gate. Strict refuses every blend at the fire's format
-    /// gate regardless of the incoming format, so planning would only buy
-    /// the click a wasted network decoder build before the same hard cut it
-    /// takes today — the pre-gate keeps that path byte-identical. Relaxed
-    /// must still plan (its verdict needs the incoming format).
+    /// **Strict** pre-gate. Active Strict refuses every blend at the fire's
+    /// format gate regardless of the incoming format, so planning would only
+    /// buy the click a wasted network decoder build before the same hard cut
+    /// it takes today — the pre-gate keeps that path byte-identical. It reads
+    /// the mode the fire's gate enforces, not the selected one: Strict
+    /// without PipeWire-native volume is a no-op, so that click plans and
+    /// blends like a Next skip does. Relaxed must still plan (its verdict
+    /// needs the incoming format).
     pub fn click_skip_crossfade_viable(&self) -> bool {
         self.skip_crossfade_viable()
-            && self.crossfade.bit_perfect_mode
+            && self.renderer.lock().enforced_bit_perfect_mode()
                 != crate::types::player_settings::BitPerfectMode::Strict
     }
 
@@ -3876,6 +3879,13 @@ impl CustomAudioEngine {
     pub fn force_playing_for_test(&mut self) {
         self.playing = true;
         self.paused = false;
+    }
+
+    /// Test-only: report PipeWire-native volume, so a selected bit-perfect
+    /// mode is ACTIVE (it is a no-op without it) in controller-level tests.
+    #[cfg(test)]
+    pub(crate) fn force_pw_volume_active_for_test(&mut self) {
+        self.renderer.lock().force_pw_volume_active_for_test();
     }
 
     /// Test-only: put the engine mid-way through a live AUTO crossfade

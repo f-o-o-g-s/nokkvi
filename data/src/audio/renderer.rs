@@ -1626,16 +1626,26 @@ impl AudioRenderer {
     /// renderer that arms while the engine refuses would swap `crossfade_state`
     /// to `Active` with no blend, orphaning the incoming stream).
     pub(crate) fn crossfade_blocked(&self, current: &AudioFormat, incoming: &AudioFormat) -> bool {
-        if !self.bit_perfect_active() {
-            return false;
-        }
-        match self.bit_perfect_mode {
+        match self.enforced_bit_perfect_mode() {
             BitPerfectMode::Off => false,
             BitPerfectMode::Strict => true,
             BitPerfectMode::Relaxed => {
                 current.sample_rate() != incoming.sample_rate()
                     || current.channel_count() != incoming.channel_count()
             }
+        }
+    }
+
+    /// The bit-perfect mode [`Self::crossfade_blocked`] enforces: the selected
+    /// mode while bit-perfect is active ([`Self::bit_perfect_active`]), `Off`
+    /// otherwise (on the cpal fallback the mode is a no-op). The engine's
+    /// click pre-gate (`click_skip_crossfade_viable`) reads this too, so it
+    /// refuses exactly when the fire's gate would refuse every blend.
+    pub(crate) fn enforced_bit_perfect_mode(&self) -> BitPerfectMode {
+        if self.bit_perfect_active() {
+            self.bit_perfect_mode
+        } else {
+            BitPerfectMode::Off
         }
     }
 

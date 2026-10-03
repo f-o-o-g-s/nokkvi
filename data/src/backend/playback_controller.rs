@@ -2068,13 +2068,14 @@ mod tests {
         assert_eq!(engine.source_generation(), gen_before);
     }
 
-    /// Bit-perfect Strict refuses EVERY blend at the fire's format gate, so
-    /// a click must not even plan (a plan would buy a wasted network decoder
-    /// build before the same hard cut) — today's path, byte-identical.
+    /// Active bit-perfect Strict refuses EVERY blend at the fire's format
+    /// gate, so a click must not even plan (a plan would buy a wasted network
+    /// decoder build before the same hard cut) — today's path, byte-identical.
     #[tokio::test(flavor = "current_thread")]
     async fn click_crossfade_mode_bit_perfect_strict_stays_hard() {
         let mut engine = CustomAudioEngine::new();
         engine.force_playing_for_test();
+        engine.force_pw_volume_active_for_test();
         engine
             .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
             .await;
@@ -2095,6 +2096,33 @@ mod tests {
         assert!(matches!(route, ClickPlayRoute::Hard(_)));
         assert_eq!(engine.source_generation(), gen_before);
         assert_eq!(seq_counter.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Strict selected without PipeWire-native volume (the cpal fallback) is
+    /// a no-op: streams stay on the DSP path and the fire's format gate lets
+    /// the blend through, so a Next skip crossfades. A click must plan too,
+    /// not hard-cut on the selected mode alone.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_inactive_strict_still_plans() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
+            .await;
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::FadePlanned { .. }));
     }
 
     /// Relaxed is NOT pre-gated: its blend verdict needs the incoming
