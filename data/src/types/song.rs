@@ -140,13 +140,26 @@ where
         track_peak: Option<f64>,
     }
 
+    // Navidrome before 0.57 (7640c474) sent 0 rather than null for a missing
+    // value. A scope whose gain and peak are BOTH exactly 0 is untagged: no
+    // real track peaks at 0.0, and a genuine 0 dB gain carries its peak.
+    fn scope(gain: Option<f64>, peak: Option<f64>) -> (Option<f64>, Option<f64>) {
+        if gain == Some(0.0) && peak == Some(0.0) {
+            (None, None)
+        } else {
+            (gain, peak)
+        }
+    }
+
     let shapes = Shapes::deserialize(deserializer)?;
     Ok(shapes.subsonic.or_else(|| {
+        let (album_gain, album_peak) = scope(shapes.album_gain, shapes.album_peak);
+        let (track_gain, track_peak) = scope(shapes.track_gain, shapes.track_peak);
         let native = ReplayGain {
-            album_gain: shapes.album_gain,
-            track_gain: shapes.track_gain,
-            album_peak: shapes.album_peak,
-            track_peak: shapes.track_peak,
+            album_gain,
+            track_gain,
+            album_peak,
+            track_peak,
         };
         (native != ReplayGain::default()).then_some(native)
     }))
@@ -389,6 +402,40 @@ mod tests {
             "rgTrackGain": null, "rgTrackPeak": null}"#;
         let song: Song = serde_json::from_str(untagged).expect("untagged song deserializes");
         assert_eq!(song.replay_gain, None);
+    }
+
+    /// Navidrome before 0.57 sent `0` instead of `null` for a missing gain
+    /// or peak. A scope whose gain AND peak are both exactly zero is untagged
+    /// (a real track never peaks at 0.0), so the user's fallback settings
+    /// still apply; a real 0 dB gain carries a real peak and is kept.
+    #[test]
+    fn pre_057_navidrome_zeros_read_as_untagged() {
+        let untagged = r#"{"id": "o1", "rgAlbumGain": 0, "rgAlbumPeak": 0,
+            "rgTrackGain": 0, "rgTrackPeak": 0}"#;
+        let song: Song = serde_json::from_str(untagged).expect("old-server song deserializes");
+        assert_eq!(song.replay_gain, None, "all zeros = no tags");
+
+        let track_only = r#"{"id": "o2", "rgAlbumGain": 0, "rgAlbumPeak": 0,
+            "rgTrackGain": -7.25, "rgTrackPeak": 0.95}"#;
+        let song: Song = serde_json::from_str(track_only).expect("old-server song deserializes");
+        assert_eq!(
+            song.replay_gain,
+            Some(ReplayGain {
+                album_gain: None,
+                track_gain: Some(-7.25),
+                album_peak: None,
+                track_peak: Some(0.95),
+            }),
+            "a zeroed album scope must not shadow the track gain in Album mode"
+        );
+
+        let real_zero_db = r#"{"id": "n3", "rgTrackGain": 0.0, "rgTrackPeak": 0.8}"#;
+        let song: Song = serde_json::from_str(real_zero_db).expect("song deserializes");
+        assert_eq!(
+            song.replay_gain.and_then(|rg| rg.track_gain),
+            Some(0.0),
+            "a genuine 0 dB track gain is kept"
+        );
     }
 
     /// A song serializes its ReplayGain as the Subsonic `replayGain` object,
