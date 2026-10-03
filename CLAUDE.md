@@ -102,7 +102,7 @@ CustomAudioEngine
 ```
 
 Critical invariants:
-- **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Never hold the lock across decoder creation.
+- **Track changes and the engine lock**: transition decoders are built and initialized with **no** engine lock held, then installed under a brief lock: gapless prep (`prepare_next_for_gapless`) and the skip/click crossfade build (`complete_skip_fade`). A new path that builds a decoder follows that pattern. Hard loads are the one exception: `load_track_with_rg` + `play()` run under the caller's engine lock, and `play()` calls `decoder.init()` (HTTP HEAD + Range probe) inside it, so a slow server stalls the UI tick, MPRIS and mode toggles for the length of the probe. Moving that init out of the lock (a252f910) was reverted in 3737ed09 because the now-playing UI stopped matching the playing track, so redoing it needs a design that keeps the two in step.
 - **Visualizer FFT thread uses `try_lock()` only**; only the main render thread may use `lock()`.
 - **`SourceGeneration`** (typed newtype around `AtomicU64`, `audio/generation.rs`) — engine bumps via `bump_for_user_action()` on user-driven source changes (and `bump_for_gapless()` on gapless prep / `accept_internal_swap()` on completion-driven swaps). Renderer snapshots `current()` before releasing the engine lock and discards stale callbacks. Prevents consume+shuffle from replaying the just-consumed track.
 - **Crossfade trigger must be synchronous**: `render_tick` swaps `crossfade_state` from `Armed` to `Active` via `mem::replace` in the same tick as the position check, then signals the engine async. Otherwise EOF fires first → hard cut.
