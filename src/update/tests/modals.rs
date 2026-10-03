@@ -181,3 +181,112 @@ fn escape_closes_a_modal_before_the_roulette_spin_under_it() {
         "the spin under it keeps going until the next Escape"
     );
 }
+
+// ----------------------------------------------------------------------------
+// List keys (the key gate + the slot-list routing)
+// ----------------------------------------------------------------------------
+
+fn picker_offset(app: &Nokkvi) -> Option<usize> {
+    app.default_playlist_picker
+        .as_ref()
+        .map(|p| p.slot_list.viewport_offset)
+}
+
+/// A playlist picker with one row under its Clear entry, so a step moves it.
+fn open_picker_with_a_row(app: &mut Nokkvi) {
+    let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: "p1".to_string(),
+        name: "One".to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: Vec::new(),
+        uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
+        searchable_lower: String::new(),
+        image: Default::default(),
+    };
+    app.default_playlist_picker =
+        Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[playlist]));
+}
+
+#[test]
+fn list_keys_stay_with_a_modal_above_the_picker() {
+    // Tab steps the picker when it is on top; with EQ over it, the key
+    // belongs to EQ (which takes none) and the hidden picker stays put.
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    open_picker_with_a_row(&mut app);
+    open_modal(&mut app, ActiveModal::Eq);
+    let before = picker_offset(&app);
+
+    let _ = app.update(crate::Message::RawKeyEvent(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+        false,
+    ));
+
+    assert_eq!(picker_offset(&app), before, "the picker under EQ stays put");
+}
+
+#[test]
+fn enter_reaches_the_modal_over_a_roulette_spin() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = crate::View::Albums;
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "One", "X"),
+        make_album("a2", "Two", "X"),
+        make_album("a3", "Three", "X"),
+        make_album("a4", "Four", "X"),
+    ]);
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(
+        crate::View::Albums,
+    ));
+    open_modal(&mut app, ActiveModal::DefaultPlaylistPicker);
+
+    let _ = app.handle_slot_list_message(crate::app_message::SlotListMessage::ActivateCenter);
+
+    assert!(
+        app.default_playlist_picker.is_none(),
+        "Enter chose the picker's centered entry"
+    );
+    assert!(
+        app.roulette.as_ref().is_some_and(|r| r.decel.is_none()),
+        "the spin under the picker keeps cruising"
+    );
+}
+
+#[test]
+fn list_timers_reach_the_view_under_a_modal() {
+    // The scrollbar fade timer is bookkeeping for the view, not a key: a
+    // modal opened before it fired must not strand the scrollbar visible.
+    for modal in ActiveModal::STACK {
+        let mut app = test_app();
+        app.current_view = crate::View::Queue;
+        app.screen = crate::Screen::Home;
+        let slot_list = &mut app.queue_page.common.slot_list;
+        slot_list.last_scrolled = Some(std::time::Instant::now());
+        slot_list.scroll_generation_id = 5;
+        open_modal(&mut app, modal);
+
+        let _ = app.handle_slot_list_message(
+            crate::app_message::SlotListMessage::ScrollbarFadeComplete(crate::View::Queue, 5),
+        );
+
+        assert!(
+            app.queue_page.common.slot_list.last_scrolled.is_none(),
+            "the fade lands under {modal:?}"
+        );
+    }
+}

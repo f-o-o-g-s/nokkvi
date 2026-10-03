@@ -7,12 +7,30 @@ use tracing::debug;
 use crate::{
     Nokkvi, View,
     app_message::{Message, RouletteMessage, SlotListMessage},
+    update::modals::ActiveModal,
     views,
 };
 
 impl Nokkvi {
     /// Top-level slot list message dispatcher
     pub(crate) fn handle_slot_list_message(&mut self, msg: SlotListMessage) -> Task<Message> {
+        // The list keys belong to the modal on top, ahead of a roulette spin
+        // running under it. The two timers are the view's own bookkeeping,
+        // not keys: they land whatever is open, or a modal opened mid-fade
+        // would strand the scrollbar (or the post-seek artwork load).
+        let is_key = match msg {
+            SlotListMessage::NavigateUp
+            | SlotListMessage::NavigateDown
+            | SlotListMessage::SetOffset(_)
+            | SlotListMessage::ActivateCenter
+            | SlotListMessage::ActivateCenterShuffled
+            | SlotListMessage::ToggleSortOrder => true,
+            SlotListMessage::ScrollbarFadeComplete(..) | SlotListMessage::SeekSettled(..) => false,
+        };
+        if is_key && let Some(modal) = self.top_modal() {
+            return self.handle_modal_list_key(modal, msg);
+        }
+
         // Roulette in cruise: Enter is what stops the wheel and rolls the
         // landing target. Intercept here so the keypress never reaches the
         // page's ActivateCenter (which would play whatever is mid-spin in
@@ -32,80 +50,6 @@ impl Nokkvi {
             };
         }
 
-        // Default-playlist picker takes priority — when its modal is open,
-        // arrow keys / Tab / Enter steer the picker, not the underlying view.
-        if self.default_playlist_picker.is_some() {
-            use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
-            return match msg {
-                SlotListMessage::NavigateUp => {
-                    self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListUp)
-                }
-                SlotListMessage::NavigateDown => {
-                    self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListDown)
-                }
-                // Inside the picker, Ctrl+Enter has no shuffle meaning — treat it
-                // like plain Enter (confirm the selection) rather than swallowing it.
-                SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => self
-                    .handle_default_playlist_picker(DefaultPlaylistPickerMessage::ActivateCenter),
-                _ => Task::none(),
-            };
-        }
-
-        // MilkDrop preset picker — same tier: the keys step (and so preview)
-        // the list, Enter chooses. Ctrl+Enter has no shuffle meaning here.
-        if self.milkdrop.picker.is_some() {
-            use crate::widgets::milkdrop_picker::MilkdropPickerMessage;
-            return match msg {
-                SlotListMessage::NavigateUp => {
-                    self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListUp)
-                }
-                SlotListMessage::NavigateDown => {
-                    self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListDown)
-                }
-                SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => {
-                    self.handle_milkdrop_picker(MilkdropPickerMessage::ActivateCenter)
-                }
-                _ => Task::none(),
-            };
-        }
-
-        // Trawl modal — same priority tier as the picker (which wins the
-        // theoretical double-open; the tiers stay consistent across the gate,
-        // this intercept, and the Escape cascade). Enter toggles the centered
-        // seed; Ctrl+Enter plays the mix — the one playable thing in here.
-        if self.trawl_modal.is_some() {
-            use crate::widgets::trawl_modal::TrawlModalMessage;
-            return match msg {
-                SlotListMessage::NavigateUp => {
-                    // Deliberately no unfocus: Backspace (default SlotListUp)
-                    // must keep deleting text in the search field — the same
-                    // asymmetry as handle_slot_list_navigate_down below.
-                    self.handle_trawl_modal(TrawlModalMessage::SlotListUp)
-                }
-                SlotListMessage::NavigateDown => {
-                    // Tab doubles as "exit search", mirroring the regular
-                    // views: drop focus so bare-key hotkeys stop landing in
-                    // the input, and navigate in the same keypress.
-                    let unfocus = if let Some(state) = self.trawl_modal.as_mut()
-                        && state.search_input_focused
-                    {
-                        state.search_input_focused = false;
-                        super::components::unfocus_all()
-                    } else {
-                        Task::none()
-                    };
-                    let nav = self.handle_trawl_modal(TrawlModalMessage::SlotListDown);
-                    Task::batch([unfocus, nav])
-                }
-                SlotListMessage::ActivateCenter => {
-                    self.handle_trawl_modal(TrawlModalMessage::ActivateCenter)
-                }
-                SlotListMessage::ActivateCenterShuffled => {
-                    self.handle_trawl_modal(TrawlModalMessage::PlayMix)
-                }
-                _ => Task::none(),
-            };
-        }
         match msg {
             SlotListMessage::NavigateUp => {
                 let task = self.handle_slot_list_navigate_up();
@@ -126,6 +70,89 @@ impl Nokkvi {
                 self.handle_scrollbar_fade_complete(view, gen_id)
             }
             SlotListMessage::SeekSettled(view, gen_id) => self.handle_seek_settled(view, gen_id),
+        }
+    }
+
+    /// A list key while `modal` is on top. The pickers and Trawl steer their
+    /// own lists with it; the other modals have no list, so the key stops
+    /// there instead of driving the view behind them.
+    fn handle_modal_list_key(&mut self, modal: ActiveModal, msg: SlotListMessage) -> Task<Message> {
+        match modal {
+            // Arrow keys / Tab / Enter steer the picker, not the view. Inside
+            // the picker Ctrl+Enter has no shuffle meaning, so it confirms like
+            // plain Enter rather than being swallowed.
+            ActiveModal::DefaultPlaylistPicker => {
+                use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+                match msg {
+                    SlotListMessage::NavigateUp => self
+                        .handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListUp),
+                    SlotListMessage::NavigateDown => self
+                        .handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListDown),
+                    SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => {
+                        self.handle_default_playlist_picker(
+                            DefaultPlaylistPickerMessage::ActivateCenter,
+                        )
+                    }
+                    _ => Task::none(),
+                }
+            }
+            // The keys step (and so preview) the list, Enter chooses.
+            // Ctrl+Enter has no shuffle meaning here.
+            ActiveModal::MilkdropPicker => {
+                use crate::widgets::milkdrop_picker::MilkdropPickerMessage;
+                match msg {
+                    SlotListMessage::NavigateUp => {
+                        self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListUp)
+                    }
+                    SlotListMessage::NavigateDown => {
+                        self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListDown)
+                    }
+                    SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => {
+                        self.handle_milkdrop_picker(MilkdropPickerMessage::ActivateCenter)
+                    }
+                    _ => Task::none(),
+                }
+            }
+            // Enter toggles the centered seed; Ctrl+Enter plays the mix, the
+            // one playable thing in here.
+            ActiveModal::Trawl => {
+                use crate::widgets::trawl_modal::TrawlModalMessage;
+                match msg {
+                    SlotListMessage::NavigateUp => {
+                        // Deliberately no unfocus: Backspace (default
+                        // SlotListUp) must keep deleting text in the search
+                        // field — the same asymmetry as
+                        // handle_slot_list_navigate_down below.
+                        self.handle_trawl_modal(TrawlModalMessage::SlotListUp)
+                    }
+                    SlotListMessage::NavigateDown => {
+                        // Tab doubles as "exit search", mirroring the regular
+                        // views: drop focus so bare-key hotkeys stop landing
+                        // in the input, and navigate in the same keypress.
+                        let unfocus = if let Some(state) = self.trawl_modal.as_mut()
+                            && state.search_input_focused
+                        {
+                            state.search_input_focused = false;
+                            super::components::unfocus_all()
+                        } else {
+                            Task::none()
+                        };
+                        let nav = self.handle_trawl_modal(TrawlModalMessage::SlotListDown);
+                        Task::batch([unfocus, nav])
+                    }
+                    SlotListMessage::ActivateCenter => {
+                        self.handle_trawl_modal(TrawlModalMessage::ActivateCenter)
+                    }
+                    SlotListMessage::ActivateCenterShuffled => {
+                        self.handle_trawl_modal(TrawlModalMessage::PlayMix)
+                    }
+                    _ => Task::none(),
+                }
+            }
+            ActiveModal::TextInputDialog
+            | ActiveModal::Eq
+            | ActiveModal::About
+            | ActiveModal::Info => Task::none(),
         }
     }
 

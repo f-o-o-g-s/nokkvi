@@ -16,6 +16,7 @@ use tracing::{debug, trace};
 use crate::{
     Nokkvi, View,
     app_message::{HotkeyMessage, Message},
+    update::modals::ActiveModal,
     views,
     views::expansion::SlotListEntry,
 };
@@ -820,14 +821,14 @@ impl Nokkvi {
         let resolved_action = crate::hotkeys::resolve_action(&key, modifiers, &self.hotkey_config);
         let resolved = resolved_action.map(crate::hotkeys::action_to_message);
 
-        // A root-level modal open OVER the rules split-view (the Trawl mix
-        // builder via `t`, EQ, Info, About, a text-input dialog, the
-        // default-playlist picker) owns the keyboard — its own gate below
-        // handles it. The rules intercept must NOT run underneath, or
-        // Escape/Enter/arrows would drive the hidden form (arming the
-        // invisible discard confirm, or discarding the dirty session under
-        // the modal) instead of closing/using the modal.
-        let any_blocking_modal = self.top_modal().is_some();
+        // The modal on top owns the keyboard (`ActiveModal::STACK`). One
+        // open OVER the rules split-view (the Trawl mix builder via `t`, EQ,
+        // a text-input dialog, ...) is handled by its own gate below; the
+        // rules intercept must NOT run underneath, or Escape/Enter/arrows
+        // would drive the hidden form (arming the invisible discard confirm,
+        // or discarding the dirty session under the modal) instead of
+        // closing/using the modal.
+        let top_modal = self.top_modal();
 
         // Rules-session grammar: view-gated keys for the smart-playlist
         // rules editor. Intercepted before any SFX/toolbar arms could fire
@@ -836,64 +837,63 @@ impl Nokkvi {
         // view-hosted, and its own sub-pickers get their modal-grade key
         // ownership inside the intercept.
         // Theater Mode hides the editor, so its grammar stands down there.
-        if !any_blocking_modal
+        if top_modal.is_none()
             && !self.theater.active
             && let Some(task) = self.rules_session_key_intercept(&key, modifiers, status, &resolved)
         {
             return task;
         }
 
-        // Modal-open suppression: the EQ / Info / About modals and the
-        // default-playlist picker are mouse-opaque but not keyboard-capturing
-        // and host no focused text_input, so bare-key hotkeys arrive
-        // Status::Ignored and would otherwise drive the obscured view (e.g.
-        // Space toggling playback behind an open EQ modal). When any blocking
-        // modal is open, only Escape passes (it closes the modal via the
-        // existing ClearSearch cascade). The picker additionally lets its own
-        // slot-list nav keys through — slot_list.rs already routes those to the
-        // picker when it is open.
-        if any_blocking_modal {
-            // The MilkDrop picker also takes the arrow keys (the rules-editor
-            // sub-picker precedent): stepping a live preview is its whole job,
-            // and the search field never uses Up/Down.
-            if self.milkdrop.picker.is_some()
-                && let iced::keyboard::Key::Named(
-                    named @ (iced::keyboard::key::Named::ArrowUp
-                    | iced::keyboard::key::Named::ArrowDown),
-                ) = &key
-            {
-                use crate::widgets::milkdrop_picker::MilkdropPickerMessage as P;
-                return self.handle_milkdrop_picker(
-                    if *named == iced::keyboard::key::Named::ArrowUp {
-                        P::SlotListUp
-                    } else {
-                        P::SlotListDown
-                    },
-                );
-            }
-            let is_picker_nav = (self.default_playlist_picker.is_some()
-                || self.milkdrop.picker.is_some())
-                && matches!(
-                    resolved,
-                    Some(Message::SlotList(
-                        crate::app_message::SlotListMessage::NavigateUp
-                            | crate::app_message::SlotListMessage::NavigateDown
-                            | crate::app_message::SlotListMessage::ActivateCenter
-                    ))
-                );
-            // The trawl modal additionally admits Ctrl+Enter
-            // (ActivateCenterShuffled) and Shift+A (AddToQueue): the slot-list
-            // intercept maps the former to PlayMix and handle_add_to_queue
-            // routes the latter to AddMixToQueue — the one playable/enqueueable
-            // thing inside the modal is the mix.
-            // Shift+Tab/Shift+Backspace (SettingsCategoryMotion) and Left/Right
-            // (CycleSortMode) drive the tray-controls keyboard cursor. All of
-            // these handlers route trawl-first, so admitting them here never
-            // leaks to the obscured view. These arms live INSIDE this
-            // trawl-gated allowlist on purpose — the EQ/Info/About modals must
-            // keep swallowing the same keys.
-            let is_trawl_nav = self.trawl_modal.is_some()
-                && matches!(
+        // Modal-open suppression: the modals are mouse-opaque, but most host
+        // no focused text_input, so bare-key hotkeys arrive Status::Ignored
+        // and would otherwise drive the obscured view (e.g. Space toggling
+        // playback behind an open EQ modal). With a modal open only Escape
+        // passes (it closes the top modal), plus the keys the top modal takes
+        // itself — slot_list.rs routes the list keys to it.
+        if let Some(modal) = top_modal {
+            let is_list_nav = matches!(
+                resolved,
+                Some(Message::SlotList(
+                    crate::app_message::SlotListMessage::NavigateUp
+                        | crate::app_message::SlotListMessage::NavigateDown
+                        | crate::app_message::SlotListMessage::ActivateCenter
+                ))
+            );
+            let takes_key = match modal {
+                ActiveModal::MilkdropPicker => {
+                    // The MilkDrop picker also takes the arrow keys (the
+                    // rules-editor sub-picker precedent): stepping a live
+                    // preview is its whole job, and the search field never
+                    // uses Up/Down.
+                    if let iced::keyboard::Key::Named(
+                        named @ (iced::keyboard::key::Named::ArrowUp
+                        | iced::keyboard::key::Named::ArrowDown),
+                    ) = &key
+                    {
+                        use crate::widgets::milkdrop_picker::MilkdropPickerMessage as P;
+                        return self.handle_milkdrop_picker(
+                            if *named == iced::keyboard::key::Named::ArrowUp {
+                                P::SlotListUp
+                            } else {
+                                P::SlotListDown
+                            },
+                        );
+                    }
+                    is_list_nav
+                }
+                ActiveModal::DefaultPlaylistPicker => is_list_nav,
+                // Trawl also admits Ctrl+Enter (ActivateCenterShuffled) and
+                // Shift+A (AddToQueue): the slot-list routing maps the former
+                // to PlayMix and handle_add_to_queue routes the latter to
+                // AddMixToQueue — the one playable/enqueueable thing inside
+                // the modal is the mix. Shift+Tab/Shift+Backspace
+                // (SettingsCategoryMotion) and Left/Right (CycleSortMode,
+                // SeekStep) drive the tray-controls keyboard cursor. All of
+                // these handlers route trawl-first, so admitting them here
+                // never leaks to the obscured view. They are admitted in this
+                // arm only, on purpose: the other modals must keep swallowing
+                // the same keys.
+                ActiveModal::Trawl => matches!(
                     resolved,
                     Some(
                         Message::SlotList(
@@ -910,8 +910,13 @@ impl Nokkvi {
                                 | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
                         )
                     )
-                );
-            if !is_escape && !is_picker_nav && !is_trawl_nav {
+                ),
+                ActiveModal::TextInputDialog
+                | ActiveModal::Eq
+                | ActiveModal::About
+                | ActiveModal::Info => false,
+            };
+            if !is_escape && !takes_key {
                 return Task::none();
             }
             // A key the trawl search field CAPTURED already did something in
@@ -925,7 +930,7 @@ impl Nokkvi {
             // focused text_input never captures Tab, and the settings
             // precedent (is_shift_nav + its pinned test) admits even a
             // theoretically-captured Shift+Tab.
-            if self.trawl_modal.is_some()
+            if modal == ActiveModal::Trawl
                 && status == iced::event::Status::Captured
                 && !is_tab
                 && matches!(
@@ -947,7 +952,7 @@ impl Nokkvi {
         // its keys (the block above), so this runs only without one.
         // Any key press counts as activity for Theater Mode's bar.
         self.stamp_theater_activity();
-        if self.theater.active && !any_blocking_modal {
+        if self.theater.active && top_modal.is_none() {
             // No text input is mounted in theater, so a Captured Escape is
             // one an overlay menu just consumed closing itself
             // (`menu_dismiss::handle_dismiss`): the menu closes on this press,
