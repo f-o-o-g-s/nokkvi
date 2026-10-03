@@ -727,6 +727,7 @@ fn switch_view_with_valid_view_name_responds_ok() {
         "genres",
         "playlists",
         "radios",
+        "harbour",
         "settings",
     ] {
         let resp = drive_with_args("switch-view", json!({"view": view_name}));

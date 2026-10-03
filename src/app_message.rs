@@ -1351,7 +1351,8 @@ pub enum MenuAnchor {
     Header(MenuHeader),
     /// The app chrome bars: the hamburger (top nav, side nav or player bar),
     /// the player-bar modes menu, the library selector and the now-playing
-    /// strip's context menu. In Theater Mode all of them ride the sliding bar.
+    /// strip's context menu. Theater Mode shows only the player bar, so any
+    /// Chrome menu open there rides its sliding bar.
     Chrome,
     /// A context menu over content: a slot-list row, an artwork panel, or
     /// Theater Mode's now-playing panel.
