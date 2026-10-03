@@ -47,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - Auto-advancing into a track with a different sample rate now plays it at its own ReplayGain level instead of the previous track's.
 - In ReplayGain Track mode, auto-advancing into a track with a different gain now plays it at its own level instead of the previous track's.
 - On the non-PipeWire audio fallback, where bit-perfect Strict has no effect, clicking a track now crossfades with Fade on Skip like Next does.
+- ReplayGain normalization now applies to songs played from albums, artists, genres and the Songs view.
 
 ### Removed
 

@@ -96,7 +96,15 @@ pub struct Song {
     pub bit_depth: Option<u32>,
     #[serde(rename = "updatedAt")]
     pub updated_at: Option<String>,
-    #[serde(rename = "replayGain", default)]
+    /// Read from either API shape (see [`deserialize_replay_gain`]); written
+    /// back as the Subsonic `replayGain` object. Flattened only so the
+    /// deserializer can see the native API's four top-level `rg*` keys; the
+    /// field itself (and so the bincode queue layout) is unchanged.
+    #[serde(
+        flatten,
+        deserialize_with = "deserialize_replay_gain",
+        serialize_with = "serialize_replay_gain"
+    )]
     pub replay_gain: Option<ReplayGain>,
     /// Dynamic metadata tags from Navidrome (barcode, ISRC, etc.)
     #[serde(default)]
@@ -108,6 +116,55 @@ pub struct Song {
     /// Only meaningful in queue context; `None` for songs not in a queue.
     #[serde(default)]
     pub original_position: Option<u32>,
+}
+
+/// Read a song's ReplayGain from whichever shape the API sent: the Subsonic
+/// `replayGain` object (`getPlaylist`, `getSimilarSongs2`, `getRandomSongs`,
+/// play queue) or the native `/api/song` flat `rgTrackGain` / `rgAlbumGain` /
+/// `rgTrackPeak` / `rgAlbumPeak` fields (all `null` for an untagged file).
+fn deserialize_replay_gain<'de, D>(deserializer: D) -> Result<Option<ReplayGain>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Shapes {
+        #[serde(rename = "replayGain", default)]
+        subsonic: Option<ReplayGain>,
+        #[serde(rename = "rgAlbumGain", default)]
+        album_gain: Option<f64>,
+        #[serde(rename = "rgTrackGain", default)]
+        track_gain: Option<f64>,
+        #[serde(rename = "rgAlbumPeak", default)]
+        album_peak: Option<f64>,
+        #[serde(rename = "rgTrackPeak", default)]
+        track_peak: Option<f64>,
+    }
+
+    let shapes = Shapes::deserialize(deserializer)?;
+    Ok(shapes.subsonic.or_else(|| {
+        let native = ReplayGain {
+            album_gain: shapes.album_gain,
+            track_gain: shapes.track_gain,
+            album_peak: shapes.album_peak,
+            track_peak: shapes.track_peak,
+        };
+        (native != ReplayGain::default()).then_some(native)
+    }))
+}
+
+/// Write the flattened `replay_gain` back as the `replayGain` key it has
+/// always serialized to (`null` when absent).
+fn serialize_replay_gain<S>(
+    replay_gain: &Option<ReplayGain>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry("replayGain", replay_gain)?;
+    map.end()
 }
 
 // Helper to deserialize duration (can be f64 or u32)
@@ -276,5 +333,84 @@ mod tests {
         assert_eq!(song.path, "/music/radiohead/paranoid.flac");
         assert_eq!(song.size, 42000000);
         assert!(song.starred);
+    }
+
+    /// Navidrome's native `/api/song` (album, song, genre and Songs-view
+    /// loads) sends ReplayGain as four flat fields, not the Subsonic
+    /// `replayGain` object. They must reach `replay_gain`, or every native
+    /// load plays with no ReplayGain at all.
+    #[test]
+    fn native_song_json_carries_flat_replay_gain() {
+        let json = r#"{
+            "id": "n1",
+            "title": "Waves",
+            "duration": 320.01,
+            "libraryId": 1,
+            "mbzAlbumId": "x",
+            "rgAlbumGain": -6.5,
+            "rgAlbumPeak": 0.98,
+            "rgTrackGain": -7.25,
+            "rgTrackPeak": 0.95,
+            "participants": {"artist": [{"id": "a1", "name": "A"}]}
+        }"#;
+
+        let song: Song = serde_json::from_str(json).expect("native song deserializes");
+
+        assert_eq!(
+            song.replay_gain,
+            Some(ReplayGain {
+                album_gain: Some(-6.5),
+                track_gain: Some(-7.25),
+                album_peak: Some(0.98),
+                track_peak: Some(0.95),
+            })
+        );
+        assert_eq!(song.duration, 320, "the other fields still parse");
+        assert!(song.participants.is_some());
+    }
+
+    /// The Subsonic `replayGain` object keeps working, and a native song
+    /// whose gains are all `null` (untagged file) carries none.
+    #[test]
+    fn subsonic_replay_gain_object_and_untagged_native_song() {
+        let subsonic = r#"{"id": "s1", "replayGain": {"trackGain": -3.0, "albumGain": -5.0}}"#;
+        let song: Song = serde_json::from_str(subsonic).expect("subsonic song deserializes");
+        assert_eq!(
+            song.replay_gain,
+            Some(ReplayGain {
+                album_gain: Some(-5.0),
+                track_gain: Some(-3.0),
+                album_peak: None,
+                track_peak: None,
+            })
+        );
+
+        let untagged = r#"{"id": "n2", "rgAlbumGain": null, "rgAlbumPeak": null,
+            "rgTrackGain": null, "rgTrackPeak": null}"#;
+        let song: Song = serde_json::from_str(untagged).expect("untagged song deserializes");
+        assert_eq!(song.replay_gain, None);
+    }
+
+    /// A song serializes its ReplayGain as the Subsonic `replayGain` object,
+    /// as it always has, and reads it back unchanged.
+    #[test]
+    fn replay_gain_serializes_as_the_subsonic_object() {
+        let mut song = Song::test_default("r1", "Round trip");
+        song.replay_gain = Some(ReplayGain {
+            album_gain: Some(-5.0),
+            track_gain: Some(-3.0),
+            album_peak: Some(0.9),
+            track_peak: None,
+        });
+
+        let value = serde_json::to_value(&song).expect("serializes");
+        assert_eq!(value["replayGain"]["trackGain"], -3.0);
+        assert!(value.get("rgTrackGain").is_none());
+
+        let back: Song = serde_json::from_value(value).expect("reads back");
+        assert_eq!(back.replay_gain, song.replay_gain);
+
+        let none = serde_json::to_value(Song::test_default("r2", "None")).expect("serializes");
+        assert!(none["replayGain"].is_null(), "no ReplayGain stays `null`");
     }
 }
