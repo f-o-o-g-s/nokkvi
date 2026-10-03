@@ -122,26 +122,44 @@ fn in_gamut(l: f32, c: f32, h: f32) -> bool {
     (back.l - l).abs() <= TOLERANCE && (back.c - c).abs() <= TOLERANCE
 }
 
-/// The seed's hue at lightness `l`, with as much of the seed's chroma as sRGB
-/// holds there (none at pure black or white).
-fn seed_color_at(seed: AccentSeed, l: f32) -> Color {
-    let l = l.clamp(0.0, 1.0);
-    let mut chroma = seed.chroma.max(0.0);
-    if !in_gamut(l, chroma, seed.hue) {
-        let (mut lo, mut hi) = (0.0_f32, chroma);
-        for _ in 0..14 {
-            let mid = f32::midpoint(lo, hi);
-            if in_gamut(l, mid, seed.hue) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
+/// The most chroma sRGB holds for hue `h` at lightness `l` (none at pure
+/// black or white).
+fn max_chroma(l: f32, h: f32) -> f32 {
+    let (mut lo, mut hi) = (0.0_f32, 0.5_f32);
+    for _ in 0..14 {
+        let mid = f32::midpoint(lo, hi);
+        if in_gamut(l, mid, h) {
+            lo = mid;
+        } else {
+            hi = mid;
         }
-        chroma = lo;
     }
+    lo
+}
+
+/// How saturated the cover's color is, as a share of the most chroma its hue
+/// can hold at its own lightness: 1.0 for a color at the edge of sRGB.
+///
+/// The fit keeps this share, not the absolute chroma, when it moves the
+/// lightness. A deep blood red is as saturated as a dark red can be; lifted
+/// to a lightness that reads on a dark theme it should stay as saturated as a
+/// red can be there, where sRGB holds far more chroma. Keeping the absolute
+/// chroma instead turned it a washed-out coral.
+fn saturation(seed: AccentSeed) -> f32 {
+    let room = max_chroma(seed.lightness.clamp(0.0, 1.0), seed.hue);
+    if room <= f32::EPSILON {
+        1.0
+    } else {
+        (seed.chroma.max(0.0) / room).min(1.0)
+    }
+}
+
+/// The seed's hue at lightness `l`, at the seed's [`saturation`].
+fn seed_color_at(seed: AccentSeed, saturation: f32, l: f32) -> Color {
+    let l = l.clamp(0.0, 1.0);
     Color::from_oklch(Oklch {
         l,
-        c: chroma,
+        c: saturation * max_chroma(l, seed.hue),
         h: seed.hue,
         a: 1.0,
     })
@@ -155,29 +173,34 @@ fn seed_color_at(seed: AccentSeed, l: f32) -> Color {
 /// at every accent change and theme reload. Contrast against the background
 /// grows along the walk, so the boundary is found in a few probes; the result
 /// always satisfies `clears` (the bisection only ever keeps a passing end).
-fn walk(seed: AccentSeed, away: f32, from: f32, clears: impl Fn(Color) -> bool) -> (f32, Color) {
+fn walk(
+    color_at: impl Fn(f32) -> Color,
+    away: f32,
+    from: f32,
+    clears: impl Fn(Color) -> bool,
+) -> (f32, Color) {
     /// Lightness resolution of the bisection: 2^-12 of the remaining range.
     const PROBES: usize = 12;
     let from = from.clamp(0.0, 1.0);
-    let start = seed_color_at(seed, from);
+    let start = color_at(from);
     if clears(start) {
         return (from, start);
     }
     let end_l = if away > 0.0 { 1.0 } else { 0.0 };
-    let end = seed_color_at(seed, end_l);
+    let end = color_at(end_l);
     if !clears(end) {
         return (end_l, end);
     }
     let (mut failing, mut passing) = (from, end_l);
     for _ in 0..PROBES {
         let mid = f32::midpoint(failing, passing);
-        if clears(seed_color_at(seed, mid)) {
+        if clears(color_at(mid)) {
             passing = mid;
         } else {
             failing = mid;
         }
     }
-    (passing, seed_color_at(seed, passing))
+    (passing, color_at(passing))
 }
 
 /// Lowest contrast `ink` reaches against any of `fills`.
@@ -205,7 +228,8 @@ fn fill_ink(palette: &ResolvedTheme, fills: &[Color]) -> Color {
         })
 }
 
-/// Fit `seed` to one palette, keeping the cover's hue throughout.
+/// Fit `seed` to one palette, keeping the cover's hue and [`saturation`]
+/// throughout.
 ///
 /// TEXT shade: `accent` takes the lightness nearest the cover's own that
 /// clears [`clears_accent_floors`]; `accent_bright` sits one [`BRIGHT_STEP`]
@@ -234,19 +258,22 @@ pub(super) fn fit_accent(seed: AccentSeed, palette: &ResolvedTheme) -> FittedAcc
         seed.lightness.max(BAND_DARKEST + BRIGHT_STEP)
     };
 
+    let saturation = saturation(seed);
+    let color_at = |l: f32| seed_color_at(seed, saturation, l);
+
     let text = |c: Color| clears_accent_floors(c, palette);
-    let (accent_l, accent) = walk(seed, away, start, text);
-    let (_, accent_bright) = walk(seed, away, accent_l + away * BRIGHT_STEP, text);
+    let (accent_l, accent) = walk(color_at, away, start, text);
+    let (_, accent_bright) = walk(color_at, away, accent_l + away * BRIGHT_STEP, text);
 
     let fill = |c: Color| clears_fill_floor(c, palette);
-    let (cover_l, _) = walk(seed, away, start, fill);
-    let (mut calm_l, mut calm) = walk(seed, away, cover_l - away * BRIGHT_STEP, fill);
+    let (cover_l, _) = walk(color_at, away, start, fill);
+    let (mut calm_l, mut calm) = walk(color_at, away, cover_l - away * BRIGHT_STEP, fill);
     let loud_from = if away > 0.0 {
         cover_l.max(calm_l + BRIGHT_STEP)
     } else {
         cover_l.min(calm_l - BRIGHT_STEP)
     };
-    let (loud_l, loud) = walk(seed, away, loud_from, fill);
+    let (loud_l, loud) = walk(color_at, away, loud_from, fill);
     let mut ink = fill_ink(palette, &[calm, loud]);
     while min_contrast(ink, &[calm, loud]) < LEGIBLE_TEXT_CONTRAST && calm_l != loud_l {
         calm_l = if away > 0.0 {
@@ -254,7 +281,7 @@ pub(super) fn fit_accent(seed: AccentSeed, palette: &ResolvedTheme) -> FittedAcc
         } else {
             (calm_l - LIGHTNESS_STEP).max(loud_l)
         };
-        calm = seed_color_at(seed, calm_l);
+        calm = color_at(calm_l);
         ink = fill_ink(palette, &[calm, loud]);
     }
 
@@ -642,6 +669,54 @@ mod tests {
                 fill.l,
                 text.l
             );
+        }
+    }
+
+    /// A deep, fully saturated red (a blood-red metal cover) lifted to a
+    /// lightness that reads on a dark theme stays a saturated red, not coral:
+    /// the fit keeps the cover's saturation, not its absolute chroma.
+    #[test]
+    fn a_deep_red_stays_saturated_when_lifted() {
+        let blood = AccentSeed::from_color(rgb(0x8a, 0x0c, 0x10));
+        for (name, mode, palette) in all_builtin_palettes() {
+            if legible_text_on(palette.bg0_hard) != Color::WHITE {
+                continue;
+            }
+            let fill = fit_accent(blood, &palette).accent_fill.into_oklch();
+            let room = max_chroma(fill.l, fill.h);
+            assert!(
+                fill.c >= room * 0.9,
+                "{name}/{mode}: fill chroma {:.3} of a possible {room:.3} at L {:.2}",
+                fill.c,
+                fill.l
+            );
+        }
+    }
+
+    /// A muted cover stays muted: the share of possible chroma is kept, so a
+    /// dusty color does not turn neon when lifted.
+    #[test]
+    fn a_muted_cover_stays_muted_when_lifted() {
+        let dusty = AccentSeed {
+            lightness: 0.35,
+            chroma: 0.04,
+            hue: 0.5,
+        };
+        let share = saturation(dusty);
+        assert!(
+            share < 0.5,
+            "fixture: dusty is under half saturated ({share:.2})"
+        );
+        for (name, mode, palette) in all_builtin_palettes() {
+            let fill = fit_accent(dusty, &palette).accent_fill.into_oklch();
+            let room = max_chroma(fill.l, fill.h);
+            if room > 0.02 {
+                assert!(
+                    fill.c <= room * (share + 0.05),
+                    "{name}/{mode}: dusty seed went vivid ({:.3} of {room:.3})",
+                    fill.c
+                );
+            }
         }
     }
 
