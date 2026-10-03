@@ -425,7 +425,7 @@ crate::player_settings_schema! {
     #[serde(default)]
     same rating_reminder_trigger: RatingReminderTrigger = RatingReminderTrigger::default(),
     /// Percent of track played that fires the reminder in percentage mode
-    /// (default 75; UI clamp 60–90).
+    /// (default 75; `RATING_REMINDER_PERCENT_MIN`..=`_MAX`).
     #[serde(default = "default_rating_reminder_percent")]
     same rating_reminder_percent: u32 = default_rating_reminder_percent(),
     /// Visualizer behavior config — sourced from the in-memory
@@ -433,6 +433,97 @@ crate::player_settings_schema! {
     /// NEVER redb). `PersistedPlayerSettings` deliberately has no twin field.
     live_only visualizer: crate::types::visualizer_config::VisualizerConfig,
 }
+impl PersistedPlayerSettings {
+    /// Clamp every bounded numeric knob into the range its setter enforces.
+    ///
+    /// Runs after config.toml is applied (startup and hot-reload), because a
+    /// hand-edited value never passes through a setter. Same pattern as
+    /// `VisualizerConfig::validate`: NaN snaps to the low bound. The bounds are
+    /// the shared constants the setters and sliders also use.
+    pub fn validate(&mut self) {
+        use crate::{
+            types::player_settings::{
+                ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX,
+                ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+                ARTWORK_VERTICAL_HEIGHT_PCT_MIN, AUTOHIDE_TOOLBAR_HEIGHT_MAX,
+                AUTOHIDE_TOOLBAR_HEIGHT_MIN, CROSSFADE_DURATION_MAX_SECS,
+                CROSSFADE_DURATION_MIN_SECS, CROSSFADE_MIN_TRACK_MAX_SECS,
+                CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS, CROSSFADE_OFFSET_MIN_SECS,
+                FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN, RATING_REMINDER_PERCENT_MAX,
+                RATING_REMINDER_PERCENT_MIN, REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN,
+                SCROBBLE_THRESHOLD_MAX, SCROBBLE_THRESHOLD_MIN, SEEK_STEP_MAX_SECS,
+                SEEK_STEP_MIN_SECS, SFX_VOLUME_MAX, SFX_VOLUME_MIN, TRANSPORT_FADE_MS_MAX,
+                TRANSPORT_FADE_MS_MIN,
+            },
+            utils::clamp::{finite_clamp32, finite_clamp64},
+        };
+
+        self.sfx_volume = finite_clamp64(self.sfx_volume, SFX_VOLUME_MIN, SFX_VOLUME_MAX);
+        self.scrobble_threshold = finite_clamp64(
+            self.scrobble_threshold,
+            SCROBBLE_THRESHOLD_MIN,
+            SCROBBLE_THRESHOLD_MAX,
+        );
+        self.radio_scrobble_threshold_secs = self
+            .radio_scrobble_threshold_secs
+            .clamp(RADIO_SCROBBLE_THRESHOLD_MIN, RADIO_SCROBBLE_THRESHOLD_MAX);
+        self.rating_reminder_percent = self
+            .rating_reminder_percent
+            .clamp(RATING_REMINDER_PERCENT_MIN, RATING_REMINDER_PERCENT_MAX);
+
+        self.seek_step_secs = self
+            .seek_step_secs
+            .clamp(SEEK_STEP_MIN_SECS, SEEK_STEP_MAX_SECS);
+        self.crossfade_duration_secs = self
+            .crossfade_duration_secs
+            .clamp(CROSSFADE_DURATION_MIN_SECS, CROSSFADE_DURATION_MAX_SECS);
+        self.crossfade_min_track_secs = self
+            .crossfade_min_track_secs
+            .clamp(CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_MIN_TRACK_MAX_SECS);
+        self.crossfade_offset_secs = self
+            .crossfade_offset_secs
+            .clamp(CROSSFADE_OFFSET_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS);
+        self.fade_pause_ms = self
+            .fade_pause_ms
+            .clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        self.fade_stop_ms = self
+            .fade_stop_ms
+            .clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        self.fade_skip_secs = self
+            .fade_skip_secs
+            .clamp(FADE_SKIP_SECS_MIN, FADE_SKIP_SECS_MAX);
+        self.replay_gain_preamp_db = finite_clamp32(
+            self.replay_gain_preamp_db,
+            REPLAY_GAIN_DB_MIN,
+            REPLAY_GAIN_DB_MAX,
+        );
+        self.replay_gain_fallback_db = finite_clamp32(
+            self.replay_gain_fallback_db,
+            REPLAY_GAIN_DB_MIN,
+            REPLAY_GAIN_DB_MAX,
+        );
+
+        self.autohide_toolbar_height = self
+            .autohide_toolbar_height
+            .clamp(AUTOHIDE_TOOLBAR_HEIGHT_MIN, AUTOHIDE_TOOLBAR_HEIGHT_MAX);
+        self.artwork_column_width_pct = finite_clamp32(
+            self.artwork_column_width_pct,
+            ARTWORK_COLUMN_WIDTH_PCT_MIN,
+            ARTWORK_COLUMN_WIDTH_PCT_MAX,
+        );
+        self.artwork_auto_max_pct = finite_clamp32(
+            self.artwork_auto_max_pct,
+            ARTWORK_AUTO_MAX_PCT_MIN,
+            ARTWORK_AUTO_MAX_PCT_MAX,
+        );
+        self.artwork_vertical_height_pct = finite_clamp32(
+            self.artwork_vertical_height_pct,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+        );
+    }
+}
+
 fn default_artwork_column_width_pct() -> f32 {
     crate::types::player_settings::ARTWORK_COLUMN_WIDTH_PCT_DEFAULT
 }
@@ -467,9 +558,9 @@ fn default_scrobble_threshold() -> f64 {
 fn default_radio_scrobble_threshold_secs() -> u32 {
     60
 }
-/// Bounds for the radio listen threshold (seconds). Enforced identically on the
-/// settings setter AND the config.toml load path (so a hand-edited config can't
-/// bypass them), and mirror the slider min/max in the playback settings table.
+/// Bounds for the radio listen threshold (seconds). Shared by the setter clamp,
+/// the load-time `PersistedPlayerSettings::validate`, and the slider's
+/// declared `min`/`max` in the playback settings table.
 pub(crate) const RADIO_SCROBBLE_THRESHOLD_MIN: u32 = 20;
 pub(crate) const RADIO_SCROBBLE_THRESHOLD_MAX: u32 = 240;
 fn default_radio_now_playing_enabled() -> bool {

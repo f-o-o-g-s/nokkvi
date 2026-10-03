@@ -2444,9 +2444,10 @@ impl Nokkvi {
         // out-of-range value that would wrap on the u8 cast (e.g. 256 → 0,
         // an invisible/unhittable strip). The setter clamps on write; this
         // guards the read path.
-        crate::theme::set_autohide_toolbar_height_px(
-            settings.autohide_toolbar_height.clamp(4, 24) as u8
-        );
+        crate::theme::set_autohide_toolbar_height_px(settings.autohide_toolbar_height.clamp(
+            nokkvi_data::types::player_settings::AUTOHIDE_TOOLBAR_HEIGHT_MIN,
+            nokkvi_data::types::player_settings::AUTOHIDE_TOOLBAR_HEIGHT_MAX,
+        ) as u8);
         crate::theme::set_autohide_toolbar_grip(settings.autohide_toolbar_grip);
         crate::theme::set_autohide_collapsed_appearance(settings.autohide_collapsed_appearance);
 

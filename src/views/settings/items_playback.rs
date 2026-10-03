@@ -16,11 +16,14 @@
 //! their enable / skip mode is on).
 
 // See `items_general.rs` for why the data struct lives in the data crate.
-use nokkvi_data::services::{
-    radio_scrobble::source::CredSource,
-    settings_tables::playback::build_playback_tab_settings_items,
-};
 pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
+use nokkvi_data::{
+    services::{
+        radio_scrobble::source::CredSource,
+        settings_tables::playback::build_playback_tab_settings_items,
+    },
+    types::player_settings::{REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN},
+};
 
 use super::{
     items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry},
@@ -155,8 +158,8 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             ),
             data.replay_gain_preamp_db,
             0,
-            -15,
-            15,
+            REPLAY_GAIN_DB_MIN as i64,
+            REPLAY_GAIN_DB_MAX as i64,
             1,
             "dB",
         ));
@@ -172,8 +175,8 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             ),
             data.replay_gain_fallback_db,
             0,
-            -15,
-            15,
+            REPLAY_GAIN_DB_MIN as i64,
+            REPLAY_GAIN_DB_MAX as i64,
             1,
             "dB",
         ));

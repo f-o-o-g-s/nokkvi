@@ -15,6 +15,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::clamp::{finite_clamp32, finite_clamp64};
+
 /// Field-level deserializer that falls back to `T::default()` on any error
 /// (empty string, unknown variant, malformed value). Preserves the
 /// pre-Group-G "silent fallback on unknown" behavior for the visualizer's
@@ -904,20 +906,6 @@ impl Default for VisualizerConfig {
             milkdrop: MilkdropConfig::default(),
         }
     }
-}
-
-/// NaN-safe clamp: a hand-written `nan` in `[visualizer]` snaps to `lo`
-/// instead of propagating. NaN must never survive `validate()` — it defeats
-/// the PartialEq change gate on the shared-config apply (NaN != NaN → FFT
-/// re-init on every settings interaction) and panics `clamp` when the NaN
-/// field is itself used as a bound (`bar_width_max.clamp(bar_width_min, ..)`).
-fn finite_clamp32(v: f32, lo: f32, hi: f32) -> f32 {
-    if v.is_nan() { lo } else { v.clamp(lo, hi) }
-}
-
-/// See [`finite_clamp32`].
-fn finite_clamp64(v: f64, lo: f64, hi: f64) -> f64 {
-    if v.is_nan() { lo } else { v.clamp(lo, hi) }
 }
 
 impl VisualizerConfig {

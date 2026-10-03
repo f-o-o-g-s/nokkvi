@@ -1,8 +1,9 @@
 //! Utilities — artwork URLs, formatters, fuzzy search, scaling, paths, URL redaction,
-//! block reorder, duplicate detection
+//! block reorder, duplicate detection, NaN-safe config clamps
 
 pub mod artwork_url;
 pub mod calendar;
+pub(crate) mod clamp;
 pub mod cycle;
 pub mod dedupe;
 pub mod formatters;

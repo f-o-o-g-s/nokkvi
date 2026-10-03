@@ -294,7 +294,8 @@ impl SettingsManager {
     }
 
     pub fn set_sfx_volume(&mut self, sfx_volume: f64) -> Result<()> {
-        self.settings.player.sfx_volume = sfx_volume;
+        use crate::types::player_settings::{SFX_VOLUME_MAX, SFX_VOLUME_MIN};
+        self.settings.player.sfx_volume = sfx_volume.clamp(SFX_VOLUME_MIN, SFX_VOLUME_MAX);
         self.save()
     }
 
@@ -317,7 +318,9 @@ impl SettingsManager {
     }
 
     pub fn set_scrobble_threshold(&mut self, threshold: f64) -> Result<()> {
-        self.settings.player.scrobble_threshold = threshold.clamp(0.25, 0.90);
+        use crate::types::player_settings::{SCROBBLE_THRESHOLD_MAX, SCROBBLE_THRESHOLD_MIN};
+        self.settings.player.scrobble_threshold =
+            threshold.clamp(SCROBBLE_THRESHOLD_MIN, SCROBBLE_THRESHOLD_MAX);
         self.save()
     }
 
@@ -456,8 +459,8 @@ impl SettingsManager {
     }
 
     /// Seconds the Seek Backward / Seek Forward keys jump. Clamped to the
-    /// shared bounds so a hand-edited config can't hand the keys a 0 (which
-    /// would make them do nothing) or an hour.
+    /// shared bounds (which `validate()` also applies to a hand-edited config)
+    /// so the keys never get a 0 (which would make them do nothing) or an hour.
     pub fn set_seek_step(&mut self, step_secs: u32) -> Result<()> {
         use crate::types::player_settings::{SEEK_STEP_MAX_SECS, SEEK_STEP_MIN_SECS};
         self.settings.player.seek_step_secs =
@@ -580,7 +583,11 @@ impl SettingsManager {
     }
 
     pub fn set_rating_reminder_percent(&mut self, percent: u32) -> Result<()> {
-        self.settings.player.rating_reminder_percent = percent.clamp(60, 90);
+        use crate::types::player_settings::{
+            RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN,
+        };
+        self.settings.player.rating_reminder_percent =
+            percent.clamp(RATING_REMINDER_PERCENT_MIN, RATING_REMINDER_PERCENT_MAX);
         self.save()
     }
 
@@ -616,7 +623,11 @@ impl SettingsManager {
     }
 
     pub fn set_autohide_toolbar_height(&mut self, px: u32) -> Result<()> {
-        self.settings.player.autohide_toolbar_height = px.clamp(4, 24);
+        use crate::types::player_settings::{
+            AUTOHIDE_TOOLBAR_HEIGHT_MAX, AUTOHIDE_TOOLBAR_HEIGHT_MIN,
+        };
+        self.settings.player.autohide_toolbar_height =
+            px.clamp(AUTOHIDE_TOOLBAR_HEIGHT_MIN, AUTOHIDE_TOOLBAR_HEIGHT_MAX);
         self.save()
     }
 
@@ -672,12 +683,16 @@ impl SettingsManager {
     }
 
     pub fn set_replay_gain_preamp_db(&mut self, db: f32) -> Result<()> {
-        self.settings.player.replay_gain_preamp_db = db;
+        use crate::types::player_settings::{REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN};
+        self.settings.player.replay_gain_preamp_db =
+            db.clamp(REPLAY_GAIN_DB_MIN, REPLAY_GAIN_DB_MAX);
         self.save()
     }
 
     pub fn set_replay_gain_fallback_db(&mut self, db: f32) -> Result<()> {
-        self.settings.player.replay_gain_fallback_db = db;
+        use crate::types::player_settings::{REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN};
+        self.settings.player.replay_gain_fallback_db =
+            db.clamp(REPLAY_GAIN_DB_MIN, REPLAY_GAIN_DB_MAX);
         self.save()
     }
 
@@ -1341,6 +1356,10 @@ fn apply_toml_settings_to_internal(
     // songs_show_genre whose silent drop the original hand-written body
     // caused (pinned by queue_and_songs_genre_columns_apply_correctly).
     crate::services::settings_tables::apply_toml_columns_tab(ts, p);
+
+    // A hand-edited value never went through a setter's clamp — apply the
+    // same ranges here (pinned by every_numeric_setting_is_clamped_on_load).
+    p.validate();
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.
@@ -3025,6 +3044,199 @@ name = "sentinel preset"
         assert!(
             live.view_columns.queue_show_select,
             "Queue view-column dump must copy queue_show_select"
+        );
+    }
+}
+
+/// Hand-edited config.toml values must land in the same ranges the setters
+/// enforce. Exhaustive over `[settings]`: every scalar numeric key that
+/// `TomlSettings` serializes has to be listed in `ranges()`, so a new numeric
+/// setting fails here until `PersistedPlayerSettings::validate` clamps it.
+#[cfg(test)]
+mod load_clamp_tests {
+    use std::collections::BTreeSet;
+
+    use super::apply_toml_settings_to_internal;
+    use crate::types::{
+        player_settings::{
+            ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX,
+            ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, AUTOHIDE_TOOLBAR_HEIGHT_MAX,
+            AUTOHIDE_TOOLBAR_HEIGHT_MIN, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
+            CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS,
+            CROSSFADE_OFFSET_MIN_SECS, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
+            RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN, REPLAY_GAIN_DB_MAX,
+            REPLAY_GAIN_DB_MIN, SCROBBLE_THRESHOLD_MAX, SCROBBLE_THRESHOLD_MIN, SEEK_STEP_MAX_SECS,
+            SEEK_STEP_MIN_SECS, SFX_VOLUME_MAX, SFX_VOLUME_MIN, TRANSPORT_FADE_MS_MAX,
+            TRANSPORT_FADE_MS_MIN,
+        },
+        settings::{
+            PersistedPlayerSettings, RADIO_SCROBBLE_THRESHOLD_MAX, RADIO_SCROBBLE_THRESHOLD_MIN,
+        },
+        toml_settings::TomlSettings,
+    };
+
+    /// `(config.toml key, min, max)` for every scalar numeric `[settings]` key.
+    fn ranges() -> Vec<(&'static str, f64, f64)> {
+        vec![
+            ("sfx_volume", SFX_VOLUME_MIN, SFX_VOLUME_MAX),
+            (
+                "scrobble_threshold",
+                SCROBBLE_THRESHOLD_MIN,
+                SCROBBLE_THRESHOLD_MAX,
+            ),
+            (
+                "radio_scrobble_threshold_secs",
+                RADIO_SCROBBLE_THRESHOLD_MIN.into(),
+                RADIO_SCROBBLE_THRESHOLD_MAX.into(),
+            ),
+            (
+                "seek_step_secs",
+                SEEK_STEP_MIN_SECS.into(),
+                SEEK_STEP_MAX_SECS.into(),
+            ),
+            (
+                "crossfade_duration_secs",
+                CROSSFADE_DURATION_MIN_SECS.into(),
+                CROSSFADE_DURATION_MAX_SECS.into(),
+            ),
+            (
+                "crossfade_min_track_secs",
+                CROSSFADE_MIN_TRACK_MIN_SECS.into(),
+                CROSSFADE_MIN_TRACK_MAX_SECS.into(),
+            ),
+            (
+                "fade_pause_ms",
+                TRANSPORT_FADE_MS_MIN.into(),
+                TRANSPORT_FADE_MS_MAX.into(),
+            ),
+            (
+                "fade_stop_ms",
+                TRANSPORT_FADE_MS_MIN.into(),
+                TRANSPORT_FADE_MS_MAX.into(),
+            ),
+            (
+                "fade_skip_secs",
+                FADE_SKIP_SECS_MIN.into(),
+                FADE_SKIP_SECS_MAX.into(),
+            ),
+            (
+                "crossfade_offset_secs",
+                CROSSFADE_OFFSET_MIN_SECS.into(),
+                CROSSFADE_OFFSET_MAX_SECS.into(),
+            ),
+            (
+                "autohide_toolbar_height",
+                AUTOHIDE_TOOLBAR_HEIGHT_MIN.into(),
+                AUTOHIDE_TOOLBAR_HEIGHT_MAX.into(),
+            ),
+            (
+                "replay_gain_preamp_db",
+                REPLAY_GAIN_DB_MIN.into(),
+                REPLAY_GAIN_DB_MAX.into(),
+            ),
+            (
+                "replay_gain_fallback_db",
+                REPLAY_GAIN_DB_MIN.into(),
+                REPLAY_GAIN_DB_MAX.into(),
+            ),
+            (
+                "artwork_column_width_pct",
+                ARTWORK_COLUMN_WIDTH_PCT_MIN.into(),
+                ARTWORK_COLUMN_WIDTH_PCT_MAX.into(),
+            ),
+            (
+                "artwork_auto_max_pct",
+                ARTWORK_AUTO_MAX_PCT_MIN.into(),
+                ARTWORK_AUTO_MAX_PCT_MAX.into(),
+            ),
+            (
+                "artwork_vertical_height_pct",
+                ARTWORK_VERTICAL_HEIGHT_PCT_MIN.into(),
+                ARTWORK_VERTICAL_HEIGHT_PCT_MAX.into(),
+            ),
+            (
+                "rating_reminder_percent",
+                RATING_REMINDER_PERCENT_MIN.into(),
+                RATING_REMINDER_PERCENT_MAX.into(),
+            ),
+        ]
+    }
+
+    fn default_settings_table() -> toml::Value {
+        toml::Value::try_from(TomlSettings::default()).expect("serialize TomlSettings")
+    }
+
+    /// Load a `[settings]` table holding `key = probe` through the real TOML
+    /// load path and read the persisted value back. `None` when `probe` doesn't
+    /// deserialize into the field's type (a negative number into a `u32`).
+    fn load_with(key: &str, probe: toml::Value) -> Option<f64> {
+        let mut table = default_settings_table();
+        table.as_table_mut()?.insert(key.to_string(), probe);
+        let ts: TomlSettings = table.try_into().ok()?;
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts, &mut p);
+        let json = serde_json::to_value(&p).expect("serialize PersistedPlayerSettings");
+        // serde_json writes NaN as null; keep it NaN so the range check names it.
+        Some(
+            json.get(key)
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(f64::NAN),
+        )
+    }
+
+    #[test]
+    fn every_numeric_setting_is_clamped_on_load() {
+        let defaults = default_settings_table();
+        let numeric: BTreeSet<&str> = defaults
+            .as_table()
+            .expect("[settings] serializes as a table")
+            .iter()
+            .filter(|(_, v)| v.is_integer() || v.is_float())
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let ranges = ranges();
+        let listed: BTreeSet<&str> = ranges.iter().map(|(k, _, _)| *k).collect();
+        assert_eq!(
+            numeric, listed,
+            "every numeric [settings] key needs a load-time clamp: list it in ranges() and \
+             clamp it in PersistedPlayerSettings::validate"
+        );
+
+        let mut escaped = Vec::new();
+        for (key, min, max) in ranges {
+            let probes = if defaults.get(key).is_some_and(toml::Value::is_float) {
+                vec![
+                    toml::Value::Float(1.0e6),
+                    toml::Value::Float(-1.0e6),
+                    toml::Value::Float(f64::NAN),
+                ]
+            } else {
+                vec![
+                    toml::Value::Integer(1_000_000),
+                    toml::Value::Integer(-1_000_000),
+                    toml::Value::Integer(0),
+                ]
+            };
+            for (i, probe) in probes.into_iter().enumerate() {
+                let shown = probe.to_string();
+                let Some(loaded) = load_with(key, probe) else {
+                    // Only a negative probe into an unsigned field may be
+                    // rejected; the huge one must reach the clamp.
+                    assert!(i != 0, "{key} = {shown} must deserialize");
+                    continue;
+                };
+                if !(min..=max).contains(&loaded) {
+                    escaped.push(format!(
+                        "{key} = {shown} loaded as {loaded} (range {min}..={max})"
+                    ));
+                }
+            }
+        }
+        assert!(
+            escaped.is_empty(),
+            "out-of-range values survived the load:\n{}",
+            escaped.join("\n")
         );
     }
 }

@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::define_labeled_enum;
 
+/// Auto-hide toolbar collapsed-strip height bounds, in pixels. Shared by the
+/// setter clamp, the load-time `validate()`, the slider's declared
+/// `min`/`max`, and the UI's guard before its `u8` cast.
+pub const AUTOHIDE_TOOLBAR_HEIGHT_MIN: u32 = 4;
+pub const AUTOHIDE_TOOLBAR_HEIGHT_MAX: u32 = 24;
+
 define_labeled_enum! {
     /// What happens when pressing Enter on a song in the Songs view.
     ///

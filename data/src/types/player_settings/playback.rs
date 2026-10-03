@@ -61,6 +61,31 @@ pub const FADE_SKIP_SECS_MIN: u32 = 1;
 pub const FADE_SKIP_SECS_MAX: u32 = 4;
 pub const FADE_SKIP_SECS_DEFAULT: u32 = 2;
 
+/// Scrobble-threshold bounds, as a whole percentage of the track. The slider
+/// works in these percentages; `PersistedPlayerSettings` stores the fraction
+/// (`SCROBBLE_THRESHOLD_MIN` / `_MAX`). Shared by the setter clamp, the
+/// load-time `validate()`, and the slider's declared `min`/`max`.
+pub const SCROBBLE_THRESHOLD_PCT_MIN: u32 = 25;
+pub const SCROBBLE_THRESHOLD_PCT_MAX: u32 = 90;
+pub const SCROBBLE_THRESHOLD_MIN: f64 = SCROBBLE_THRESHOLD_PCT_MIN as f64 / 100.0;
+pub const SCROBBLE_THRESHOLD_MAX: f64 = SCROBBLE_THRESHOLD_PCT_MAX as f64 / 100.0;
+
+/// Rating-reminder percentage bounds (percent of the track played before the
+/// reminder fires). Shared by the setter clamp, the load-time `validate()`,
+/// and the slider's declared `min`/`max`.
+pub const RATING_REMINDER_PERCENT_MIN: u32 = 60;
+pub const RATING_REMINDER_PERCENT_MAX: u32 = 90;
+
+/// ReplayGain pre-amp and untagged-fallback bounds, in dB. Shared by both
+/// setter clamps, the load-time `validate()`, and both sliders.
+pub const REPLAY_GAIN_DB_MIN: f32 = -15.0;
+pub const REPLAY_GAIN_DB_MAX: f32 = 15.0;
+
+/// Sound-effects volume bounds (linear gain). Shared by the setter clamp and
+/// the load-time `validate()`.
+pub const SFX_VOLUME_MIN: f64 = 0.0;
+pub const SFX_VOLUME_MAX: f64 = 1.0;
+
 define_labeled_enum! {
     /// Volume normalization level — controls the AGC target loudness.
     ///
