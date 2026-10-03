@@ -160,7 +160,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Cross-cutt
 - `play_selection_task` — Enter on a multi-selection: adds from the split view's library pane, else `play_batch_task`
 - `play_batch_task` / `play_batch_in_place_task` — queue-replacing batch plays (the second stays on the current view, for Similar). They and `play_entity_task` go through `queue_play_task`, which runs `guard_play_action` + `enter_new_playback_context` and hands radio mode back when the play fails while the station still streams
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
-- `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
+- `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`. It returns early for every common action, and each root handler's `match action` then names those variants (plus `None`) in one closing arm instead of `_ => {}`, so a new view-specific action without a root arm is a compile error
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
 - `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch; defined in `artwork_prefetch.rs`, re-exported so call sites keep using `components::<fn>`
 - `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders (`play_entity_task` also runs the play prologue)

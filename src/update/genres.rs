@@ -454,7 +454,17 @@ impl Nokkvi {
             GenresAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);
             }
-            _ => {} // None + already-handled common actions
+            // Common actions: `handle_common_view_action` above returned early for
+            // each of these. `None` has nothing to do.
+            GenresAction::SearchChanged(_)
+            | GenresAction::SortModeChanged(_)
+            | GenresAction::SortOrderChanged(_)
+            | GenresAction::RefreshViewData
+            | GenresAction::CenterOnPlaying
+            | GenresAction::NavigateAndFilter(..)
+            | GenresAction::NavigateAndExpandArtist(_)
+            | GenresAction::NavigateAndExpandAlbum(_)
+            | GenresAction::None => {}
         }
 
         self.append_expansion_album_prefetch(cmd.map(Message::Genres), expansion_album_ids)

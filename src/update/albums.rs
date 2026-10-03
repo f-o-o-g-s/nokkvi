@@ -718,7 +718,17 @@ impl Nokkvi {
             AlbumsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);
             }
-            _ => {} // None + already-handled common actions
+            // Common actions: `handle_common_view_action` above returned early for
+            // each of these. `None` has nothing to do.
+            AlbumsAction::SearchChanged(_)
+            | AlbumsAction::SortModeChanged(_)
+            | AlbumsAction::SortOrderChanged(_)
+            | AlbumsAction::RefreshViewData
+            | AlbumsAction::CenterOnPlaying
+            | AlbumsAction::NavigateAndFilter(..)
+            | AlbumsAction::NavigateAndExpandArtist(_)
+            | AlbumsAction::NavigateAndExpandGenre(_)
+            | AlbumsAction::None => {}
         }
 
         cmd.map(Message::Albums)

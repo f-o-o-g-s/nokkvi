@@ -576,7 +576,16 @@ impl Nokkvi {
 
                 return Task::batch(batch);
             }
-            _ => {} // None + already-handled common actions
+            // Common actions: `handle_common_view_action` above returned early for
+            // each of these. `None` has nothing to do.
+            ArtistsAction::SearchChanged(_)
+            | ArtistsAction::SortModeChanged(_)
+            | ArtistsAction::SortOrderChanged(_)
+            | ArtistsAction::RefreshViewData
+            | ArtistsAction::CenterOnPlaying
+            | ArtistsAction::NavigateAndFilter(..)
+            | ArtistsAction::NavigateAndExpandAlbum(_)
+            | ArtistsAction::None => {}
         }
 
         self.append_expansion_album_prefetch(cmd.map(Message::Artists), expansion_album_ids)

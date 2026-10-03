@@ -152,12 +152,11 @@ pub enum SongsAction {
     /// `false` honors `enter_shuffle`), or add it to the queue from the split
     /// view's library pane, like Enter on one row there.
     PlaySelection(nokkvi_data::types::batch::BatchPayload, bool),
-    AddToPlaylist(String), // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
-    ShowInFolder(String),  // relative path - open containing folder
-    RefreshArtwork(String), // album_id - refresh artwork from server
+    ShowInFolder(String),        // relative path - open containing folder
+    RefreshArtwork(String),      // album_id - refresh artwork from server
     FindSimilar(String, String), // (id, title) - Find similar to this song
-    TopSongs(String),      // artist - Find top songs by artist
+    TopSongs(String),            // artist - Find top songs by artist
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album
