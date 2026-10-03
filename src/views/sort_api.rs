@@ -7,21 +7,24 @@ use nokkvi_data::types::sort_mode::SortMode;
 
 use crate::View;
 
-/// Resolve the Subsonic API `type=` parameter for a given view + sort mode.
-///
-/// Per-view fallbacks preserve historical behavior:
-/// - Albums / Songs → `recentlyAdded`
-/// - Artists → `random`
-/// - Genres / Playlists → `name`
-///
-/// Carve-outs:
-/// - `Artists + Rating` returns `name`. Subsonic does not expose a rating sort
-///   for artists, so the artists view loads `name` and re-sorts client-side.
+/// Resolve the Subsonic API `type=` parameter for a given view + sort mode:
+/// the view's explicit mapping, else its fallback.
 pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'static str {
+    explicit_api_string(view, sort_mode).unwrap_or_else(|| fallback_api_string(view))
+}
+
+/// The API string `view` maps `sort_mode` to, or `None` when it has no
+/// mapping. Every option `sort_modes_for_view` offers must have one (pinned
+/// by `every_view_option_has_an_explicit_api_string`).
+///
+/// Carve-out: `Artists + Rating` returns `name`. Subsonic does not expose a
+/// rating sort for artists, so the artists view loads `name` and re-sorts
+/// client-side.
+fn explicit_api_string(view: View, sort_mode: SortMode) -> Option<&'static str> {
     use SortMode as S;
     use View as V;
 
-    match (view, sort_mode) {
+    Some(match (view, sort_mode) {
         // Universal: same API string in every view.
         (_, S::Random) => "random",
         (_, S::MostPlayed) => "mostPlayed",
@@ -39,14 +42,12 @@ pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'stat
         (V::Albums, S::Rating) => "rating",
         (V::Albums, S::Genre) => "genre",
         (V::Albums, S::AlbumCount) => "albumCount",
-        (V::Albums, _) => "recentlyAdded",
 
         // Artists. `Rating → "name"` is the load-all/sort-client carve-out.
         (V::Artists, S::Name) => "name",
         (V::Artists, S::AlbumCount) => "albumCount",
         (V::Artists, S::SongCount) => "songCount",
         (V::Artists, S::Rating) => "name",
-        (V::Artists, _) => "random",
 
         // Songs. `Title | Name` collapse to `title` for the Songs API.
         (V::Songs, S::RecentlyAdded) => "recentlyAdded",
@@ -61,25 +62,34 @@ pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'stat
         (V::Songs, S::Genre) => "genre",
         (V::Songs, S::Rating) => "rating",
         (V::Songs, S::Comment) => "comment",
-        (V::Songs, _) => "recentlyAdded",
 
         // Genres.
         (V::Genres, S::Name) => "name",
         (V::Genres, S::AlbumCount) => "albumCount",
         (V::Genres, S::SongCount) => "songCount",
-        (V::Genres, _) => "name",
 
         // Playlists.
         (V::Playlists, S::Name) => "name",
         (V::Playlists, S::SongCount) => "songCount",
         (V::Playlists, S::Duration) => "duration",
         (V::Playlists, S::UpdatedAt) => "updatedAt",
-        (V::Playlists, _) => "name",
 
-        // Other views (Queue, Radios, Harbour, Settings, PlaylistEditor) do not
-        // query the server's sort API. Returning a benign default keeps the type
-        // total.
-        (V::Queue | V::Radios | V::Harbour | V::Settings | V::PlaylistEditor, _) => "name",
+        _ => return None,
+    })
+}
+
+/// The API string a view falls back to for a sort mode it doesn't map,
+/// preserving historical behavior. Views that never query the server's sort
+/// API (Queue, Radios, Harbour, Settings, PlaylistEditor) get a benign
+/// `name`, which keeps the type total.
+fn fallback_api_string(view: View) -> &'static str {
+    match view {
+        View::Albums | View::Songs => "recentlyAdded",
+        View::Artists => "random",
+        View::Genres | View::Playlists => "name",
+        View::Queue | View::Radios | View::Harbour | View::Settings | View::PlaylistEditor => {
+            "name"
+        }
     }
 }
 
@@ -148,29 +158,18 @@ pub(crate) fn sort_modes_for_view(view: View) -> &'static [SortMode] {
 mod tests {
     use super::*;
 
-    /// Every variant in a view's sort options must resolve to a non-empty API
-    /// string. Catches a sort variant added to options without an API mapping.
+    /// Every option a view offers must have an explicit API mapping. The
+    /// fallback would otherwise hide a new sort option that loads in the
+    /// wrong order.
     #[test]
-    fn every_view_option_has_api_string() {
-        for &mode in sort_modes_for_view(View::Albums) {
-            let s = sort_mode_to_api_string(View::Albums, mode);
-            assert!(!s.is_empty(), "Albums + {mode:?} returned empty string");
-        }
-        for &mode in sort_modes_for_view(View::Artists) {
-            let s = sort_mode_to_api_string(View::Artists, mode);
-            assert!(!s.is_empty(), "Artists + {mode:?} returned empty string");
-        }
-        for &mode in sort_modes_for_view(View::Songs) {
-            let s = sort_mode_to_api_string(View::Songs, mode);
-            assert!(!s.is_empty(), "Songs + {mode:?} returned empty string");
-        }
-        for &mode in sort_modes_for_view(View::Genres) {
-            let s = sort_mode_to_api_string(View::Genres, mode);
-            assert!(!s.is_empty(), "Genres + {mode:?} returned empty string");
-        }
-        for &mode in sort_modes_for_view(View::Playlists) {
-            let s = sort_mode_to_api_string(View::Playlists, mode);
-            assert!(!s.is_empty(), "Playlists + {mode:?} returned empty string");
+    fn every_view_option_has_an_explicit_api_string() {
+        for &view in View::ALL {
+            for &mode in sort_modes_for_view(view) {
+                assert!(
+                    explicit_api_string(view, mode).is_some(),
+                    "{view:?} offers {mode:?} but has no API sort string for it"
+                );
+            }
         }
     }
 
