@@ -731,6 +731,27 @@ fn append_conflict_leaves_an_open_dialog_alone() {
     );
 }
 
+/// Dialogs draw over every other modal, so a conflict that lands over one
+/// (EQ, a picker, Trawl, ...) would put its Add button where the user was
+/// about to click: it only toasts, whichever modal is up.
+#[test]
+fn append_conflict_never_opens_over_another_modal() {
+    for modal in crate::update::modals::ActiveModal::STACK {
+        let mut app = home_app();
+        super::modals::open_modal(&mut app, modal);
+
+        let _ = app.update(conflict(&["a", "b"], &["a"]));
+
+        assert_eq!(app.top_modal(), Some(modal), "{modal:?} stays on top");
+        let (level, message) = last_toast(&app).expect("a toast says nothing was added");
+        assert_eq!(level, ToastLevel::Warning, "over {modal:?}");
+        assert_eq!(
+            message,
+            "Nothing added to 'Road Trip': some of the songs are already there"
+        );
+    }
+}
+
 /// A conflict that lands after a logout opens nothing on the login screen.
 #[test]
 fn append_conflict_after_logout_is_dropped() {

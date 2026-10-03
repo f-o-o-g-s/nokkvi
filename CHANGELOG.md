@@ -58,6 +58,7 @@ All notable changes to this project will be documented in this file.
 - Escape now closes an open window before cancelling a roulette spin running behind it.
 - Enter now reaches an open window instead of stopping a roulette spin running behind it.
 - A list's scrollbar now fades out even when a window opens before it hides.
+- A duplicate-songs check that finishes while another window is open now shows a warning toast instead of opening its dialog.
 
 ### Removed
 

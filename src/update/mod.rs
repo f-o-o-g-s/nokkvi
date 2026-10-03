@@ -377,10 +377,12 @@ impl Nokkvi {
                 if self.screen != crate::Screen::Home {
                     return Task::none();
                 }
-                // Never swap the dialog the user is working in for this one:
-                // its primary button sits where theirs was, so a click meant
-                // for it would confirm the add. Nothing was written yet.
-                if self.text_input_dialog.visible {
+                // Never open over a modal the user is working in: dialogs
+                // draw on top of every modal, so this one's primary button
+                // would sit where the user was about to click, and a click
+                // meant for theirs would confirm the add. Nothing was
+                // written yet.
+                if self.top_modal().is_some() {
                     self.toast_warn(format!(
                         "Nothing added to '{playlist_name}': some of the songs are already there"
                     ));
