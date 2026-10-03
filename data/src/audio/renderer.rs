@@ -704,6 +704,11 @@ impl AudioRenderer {
     /// gapless paths that keep the live stream, the inline swap and
     /// [`Self::init`]'s reuse branch, ask this one question.
     fn needs_own_stream_for(&self, incoming: Option<&ReplayGain>) -> bool {
+        // A bit-perfect stream applies no normalization, and while bit-perfect
+        // is active a new stream wouldn't either: the level can't differ.
+        if self.current_stream_bit_perfect && self.bit_perfect_active() {
+            return false;
+        }
         self.resolve_norm_for(self.current_replay_gain.as_ref()) != self.resolve_norm_for(incoming)
     }
 
@@ -4294,6 +4299,45 @@ mod tests {
         assert!(
             r.gapless_swap_allowed(Some(&tags(Some(-20.0), Some(-20.0), None))),
             "Off: tags change nothing"
+        );
+    }
+
+    /// Bit-perfect streams apply no normalization (the stream builder skips
+    /// gain, AGC and limiter), so while the live stream is bit-perfect and a
+    /// new one would be too, a ReplayGain difference must not cost a gapless
+    /// join: both play at the same, untouched level.
+    #[tokio::test]
+    async fn bit_perfect_stream_keeps_gapless_across_a_gain_change() {
+        use crate::audio::format::SampleFormat;
+        let album = |gain: f64| ReplayGain {
+            album_gain: Some(gain),
+            track_gain: None,
+            album_peak: None,
+            track_peak: None,
+        };
+        let mut r = AudioRenderer::new();
+        let _mixer = r.install_detached_output_for_test();
+        r.force_pw_volume_active_for_test();
+        r.set_bit_perfect(BitPerfectMode::Strict);
+        r.set_volume_normalization(
+            VolumeNormalizationMode::ReplayGainAlbum,
+            1.0,
+            0.0,
+            0.0,
+            false,
+            false,
+        );
+        r.set_pending_replay_gain(Some(album(-6.0)));
+        r.init(&AudioFormat::new(SampleFormat::F32, 44_100, 2), false, None)
+            .expect("the bit-perfect stream builds");
+        assert!(
+            r.current_stream_bit_perfect(),
+            "precondition: a bit-perfect stream"
+        );
+
+        assert!(
+            r.gapless_swap_allowed(Some(&album(-11.0))),
+            "no gain is applied either way, so the join stays gapless"
         );
     }
 

@@ -1102,9 +1102,9 @@ async fn try_gapless_swap(
             && next_fmt.is_valid()
             && current_format.sample_rate() == next_fmt.sample_rate()
             && current_format.channel_count() == next_fmt.channel_count();
-        // RG-track mode: the live stream's amplify factor is baked
-        // at create time; deny gapless when the next track needs a
-        // different gain.
+        // The live stream's normalization is baked at create time;
+        // deny gapless when the next track resolves to a different
+        // one (any ReplayGain mode; never for a bit-perfect stream).
         let (rg_allows_swap, cf_armed, cf_active) = {
             let r = renderer.lock();
             (
