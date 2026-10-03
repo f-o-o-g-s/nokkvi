@@ -50,6 +50,7 @@ All notable changes to this project will be documented in this file.
 - ReplayGain normalization now applies to songs played from albums, artists, genres and the Songs view.
 - In ReplayGain Album mode, auto-advancing into another album now plays it at that album's level instead of the previous album's.
 - In ReplayGain Track mode, auto-advancing now also honors clipping prevention and album-gain fallback for the next track.
+- With ReplayGain on, tracks with different gains now follow each other without a gap.
 
 ### Removed
 

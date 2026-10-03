@@ -642,15 +642,18 @@ impl AudioRenderer {
     }
 
     /// Record `rg`, the swapped-in track's own tags (from the prepared slot),
-    /// as the playing stream's. Called after a successful inline gapless swap,
-    /// which keeps the same rodio stream; the staged crossfade copy of the
-    /// same tags is spent, so it is cleared.
+    /// as the playing stream's, and switch the stream's normalization gain to
+    /// them from the next sample written: the swapped-in track's first.
+    /// Called after a successful inline gapless swap, which keeps the same
+    /// rodio stream; the staged crossfade copy of the same tags is spent, so
+    /// it is cleared.
     ///
     /// Unlike `finalize_crossfade`, this leaves `pending_replay_gain` alone:
     /// the decode loop calls it without re-checking its own generation, so a
     /// superseded loop could land here after `load_track_with_rg` stashed a
-    /// newly loaded track's tags.
+    /// newly loaded track's tags. A seek rebuilds from `current_replay_gain`.
     pub fn adopt_gapless_replay_gain(&mut self, rg: Option<ReplayGain>) {
+        self.switch_primary_gain_to(rg.as_ref());
         self.current_replay_gain = rg;
         self.pending_crossfade_replay_gain = None;
     }
@@ -683,33 +686,50 @@ impl AudioRenderer {
         self.pending_crossfade_replay_gain.clone()
     }
 
-    /// The rodio chain's normalization (`amplify` factor or AGC) is baked in
-    /// at stream creation, and the decode loop's inline gapless swap reuses
-    /// the primary stream, which would mis-level a next track that needs a
-    /// different gain.
-    ///
-    /// Returns `false` when `incoming` (the prepared track's own tags)
-    /// resolves to a different normalization than the playing track, in any
-    /// mode: in Album mode that is an album change, in Track mode a gain or
-    /// peak-clamp change. Denying the swap sends the engine down the natural
-    /// EOF → reload path (`load_prepared_track`), which stages the incoming
-    /// tags and calls `init()`, building a fresh stream with the right gain.
+    /// Whether the decode loop's inline gapless swap may keep the primary
+    /// stream for the prepared track tagged `incoming`. A different static
+    /// gain is fine (the swap switches the stream's gain at the join), so
+    /// this is `false` only when the stream can't follow the track's
+    /// normalization at all (see [`Self::needs_own_stream_for`]). Denying the
+    /// swap sends the engine down the natural EOF → reload path
+    /// (`load_prepared_track`), which builds the track a stream of its own.
     pub fn gapless_swap_allowed(&self, incoming: Option<&ReplayGain>) -> bool {
         !self.needs_own_stream_for(incoming)
     }
 
-    /// Whether a track tagged `incoming` needs a stream of its own: the
-    /// normalization it resolves to (mode + settings + tags, exactly what a
-    /// new stream would bake in) differs from the playing track's. Both
-    /// gapless paths that keep the live stream, the inline swap and
-    /// [`Self::init`]'s reuse branch, ask this one question.
+    /// Whether a track tagged `incoming` needs a stream of its own because
+    /// the live primary stream can't play it by switching its gain: AGC
+    /// switching on, off or retargeting ([`NormalizationConfig::can_follow`]),
+    /// or a bit-perfect mode change since the stream was built (a
+    /// bit-perfect stream applies no normalization at all). Both gapless
+    /// paths that keep the live stream, the inline swap and [`Self::init`]'s
+    /// reuse branch, ask this one question.
     fn needs_own_stream_for(&self, incoming: Option<&ReplayGain>) -> bool {
-        // A bit-perfect stream applies no normalization, and while bit-perfect
-        // is active a new stream wouldn't either: the level can't differ.
-        if self.current_stream_bit_perfect && self.bit_perfect_active() {
+        let Some(stream) = self.primary_stream.as_ref() else {
+            return false;
+        };
+        if stream.bit_perfect != self.bit_perfect_active() {
+            return true;
+        }
+        if stream.bit_perfect {
             return false;
         }
-        self.resolve_norm_for(self.current_replay_gain.as_ref()) != self.resolve_norm_for(incoming)
+        !stream.can_follow(self.resolve_norm_for(incoming))
+    }
+
+    /// Play the primary stream at the normalization of the track tagged `rg`
+    /// from the next sample written on (a gapless join: that sample is the
+    /// track's first). A no-op for a bit-perfect stream, or one that can't
+    /// follow (the gates give that track a stream of its own instead).
+    fn switch_primary_gain_to(&mut self, rg: Option<&ReplayGain>) {
+        let norm = self.resolve_norm_for(rg);
+        if let Some(stream) = self.primary_stream.as_mut()
+            && !stream.bit_perfect
+            && stream.can_follow(norm)
+            && let Some(gain) = norm.stream_gain()
+        {
+            stream.schedule_norm_gain(gain);
+        }
     }
 
     /// Resolve mode + settings + an optional `ReplayGain` into the final
@@ -865,9 +885,9 @@ impl AudioRenderer {
         self.prev_format = prev_format.cloned().unwrap_or_else(|| old_format.clone());
 
         // Check if gapless is possible (formats match and gapless enabled).
-        // The staged track must also resolve to the same normalization:
-        // gapless reuse keeps the existing rodio chain (with the previous
-        // track's `amplify` factor), which would mis-level the new track.
+        // The live stream must also be able to play the staged track: a
+        // different static gain is switched at the join, but an AGC or
+        // bit-perfect change needs a fresh stream.
         let rg_blocks_gapless = self.needs_own_stream_for(self.pending_replay_gain.as_ref());
         let is_gapless = !force_reload
             && self.gapless_enabled
@@ -884,9 +904,11 @@ impl AudioRenderer {
             // Formats match — reuse existing stream for gapless playback.
             debug!("📡 Renderer::init() GAPLESS path — reusing stream");
             self.format = format.clone();
-            // The stream now plays the staged track, so its tags are the ones
-            // the next gapless-swap verdict compares against.
-            self.current_replay_gain = self.pending_replay_gain.clone();
+            // The stream now plays the staged track: record its tags and
+            // switch to its gain from its first sample.
+            let staged = self.pending_replay_gain.clone();
+            self.switch_primary_gain_to(staged.as_ref());
+            self.current_replay_gain = staged;
             self.position_offset = 0;
             if let Some(ref stream) = self.primary_stream {
                 stream.reset_position();
@@ -1233,14 +1255,12 @@ impl AudioRenderer {
             old_stream.silence_and_stop();
         }
 
-        // Recreate the primary stream (if output exists). Seek reuses the
-        // current track's RG since we're not switching tracks — leave
-        // pending_replay_gain alone and resolve from current_replay_gain.
+        // Recreate the primary stream (if output exists) at the PLAYING
+        // track's tags: `current_replay_gain`. Every stream build records it,
+        // and so does an inline gapless swap, which leaves
+        // `pending_replay_gain` holding the last hand-loaded track's tags.
         if let Some(ref output) = self.output {
-            let rg_for_seek = self
-                .pending_replay_gain
-                .as_ref()
-                .or(self.current_replay_gain.as_ref());
+            let rg_for_seek = self.current_replay_gain.as_ref();
             let norm = self.resolve_norm_for(rg_for_seek);
             let stream = output.create_stream(
                 self.format.sample_rate(),
@@ -1270,10 +1290,6 @@ impl AudioRenderer {
                 trace!("🔍 [SEEK] paused — re-paused recreated stream to hold at seek target");
             }
             self.current_stream_bit_perfect = self.bit_perfect_active();
-            // Keep current_replay_gain consistent — don't blow it away.
-            if let Some(rg) = rg_for_seek {
-                self.current_replay_gain = Some(rg.clone());
-            }
         }
     }
 
@@ -2142,13 +2158,12 @@ impl AudioRenderer {
         // fade's liveness handle never described.
         self.stall_recovery_signalled = false;
         self.incoming_liveness = None;
-        // Promote the crossfade RG to "current" — it's now baked into the
-        // new primary stream's `amplify` factor — and stage the same tags
-        // for the next rebuild of this track. `seek` and `init` resolve
-        // `pending_replay_gain` first, and it still held the tags of the last
-        // HARD load (the track before this one), so a seek or a Stop-then-Play
-        // after a crossfade rebuilt the promoted track at the previous
-        // track's level. A later hard load restages it (`load_track_with_rg`,
+        // Promote the crossfade RG to "current" — the new primary stream was
+        // built at it — and stage the same tags for the next rebuild of this
+        // track. `init` resolves `pending_replay_gain`, and it still held the
+        // tags of the last HARD load (the track before this one), so a
+        // Stop-then-Play after a crossfade rebuilt the promoted track at the
+        // previous track's level (`seek` resolves `current_replay_gain`). A later hard load restages it (`load_track_with_rg`,
         // which stashes AFTER its teardown, so this can't overwrite it).
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
         self.pending_replay_gain = self.current_replay_gain.clone();
@@ -2213,13 +2228,15 @@ impl AudioRenderer {
             true,
             false,
         );
-        let stream = crate::audio::ActiveStream {
+        let stream = crate::audio::ActiveStream::new(
             producer,
             handle,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_perfect: false,
-        };
+            48_000,
+            2,
+            false,
+            NormalizationConfig::Off,
+            crate::audio::streaming_source::gain_switch_queue().0,
+        );
         self.crossfade_state = CrossfadeState::Active {
             stream,
             started_at: std::time::Instant::now(),
@@ -2771,13 +2788,15 @@ impl AudioRenderer {
             true,
             false,
         );
-        self.primary_stream = Some(crate::audio::ActiveStream {
+        self.primary_stream = Some(crate::audio::ActiveStream::new(
             producer,
-            handle: handle.clone(),
-            sample_rate: 48_000,
-            channels: 2,
-            bit_perfect: false,
-        });
+            handle.clone(),
+            48_000,
+            2,
+            false,
+            NormalizationConfig::Off,
+            crate::audio::streaming_source::gain_switch_queue().0,
+        ));
         self.playing = true;
         self.paused = false;
         (source, handle)
@@ -2799,6 +2818,13 @@ impl AudioRenderer {
         );
         self.detached_output = true;
         source
+    }
+
+    /// Test-only: the normalization gain the primary stream applies to the
+    /// samples being written now.
+    #[cfg(test)]
+    pub(crate) fn primary_write_gain_for_test(&self) -> Option<f32> {
+        self.primary_stream.as_ref().map(|s| s.write_gain())
     }
 
     /// Test-only: the primary stream's control handle, so a test can tell a
@@ -3603,13 +3629,15 @@ mod tests {
             true,
             false,
         );
-        let stream = ActiveStream {
+        let stream = ActiveStream::new(
             producer,
             handle,
-            sample_rate: 48_000,
-            channels: 2,
-            bit_perfect: false,
-        };
+            48_000,
+            2,
+            false,
+            NormalizationConfig::Off,
+            crate::audio::streaming_source::gain_switch_queue().0,
+        );
         (stream, source)
     }
 
@@ -4244,62 +4272,87 @@ mod tests {
         assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
     }
 
-    /// The gapless gates compare the gain each track would actually get, in
-    /// every mode. Album mode used to never refuse, so a same-format join
-    /// into another album kept the first album's gain; Track mode compared
-    /// only `track_gain`, missing peak clamping and the album-gain fallback.
-    #[tokio::test]
-    async fn gapless_swap_compares_the_resolved_gain_in_every_mode() {
-        let tags = |track: Option<f64>, album: Option<f64>, peak: Option<f64>| ReplayGain {
+    /// A renderer playing a 44.1 kHz stream built at `rg` in `mode`, on a
+    /// device-less output.
+    fn renderer_playing(
+        mode: VolumeNormalizationMode,
+        fallback_to_agc: bool,
+        rg: Option<ReplayGain>,
+    ) -> (AudioRenderer, rodio::mixer::MixerSource) {
+        use crate::audio::format::SampleFormat;
+        let mut r = AudioRenderer::new();
+        let mixer = r.install_detached_output_for_test();
+        r.set_volume_normalization(mode, 1.0, 0.0, 0.0, fallback_to_agc, false);
+        r.set_pending_replay_gain(rg);
+        r.init(&AudioFormat::new(SampleFormat::F32, 44_100, 2), false, None)
+            .expect("the stream builds");
+        (r, mixer)
+    }
+
+    fn tags(track: Option<f64>, album: Option<f64>) -> ReplayGain {
+        ReplayGain {
             album_gain: album,
             track_gain: track,
             album_peak: None,
-            track_peak: peak,
-        };
-        let mut r = AudioRenderer::new();
+            track_peak: None,
+        }
+    }
 
-        r.set_volume_normalization(
+    fn db(gain_db: f32) -> f32 {
+        10f32.powf(gain_db / 20.0)
+    }
+
+    /// A gapless join no longer needs a new stream for a different static
+    /// gain (another album in Album mode, another track gain in Track mode):
+    /// the stream switches gain at the join. Only AGC switching on, off or
+    /// retargeting still needs a stream of its own.
+    #[tokio::test]
+    async fn gapless_joins_follow_a_gain_change_but_not_an_agc_change() {
+        let (r, _mixer) = renderer_playing(
             VolumeNormalizationMode::ReplayGainAlbum,
-            1.0,
-            0.0,
-            0.0,
-            false,
-            false,
-        );
-        r.adopt_gapless_replay_gain(Some(tags(Some(-3.0), Some(-6.0), None)));
-        assert!(
-            r.gapless_swap_allowed(Some(&tags(Some(-9.0), Some(-6.0), None))),
-            "Album mode: the same album gain keeps the stream, whatever the track gain"
-        );
-        assert!(
-            !r.gapless_swap_allowed(Some(&tags(Some(-3.0), Some(-11.0), None))),
-            "Album mode: another album's gain needs its own stream"
-        );
-
-        r.set_volume_normalization(
-            VolumeNormalizationMode::ReplayGainTrack,
-            1.0,
-            0.0,
-            0.0,
-            false,
             true,
+            Some(tags(Some(-3.0), Some(-6.0))),
         );
-        r.adopt_gapless_replay_gain(Some(tags(Some(-3.0), None, Some(0.5))));
         assert!(
-            !r.gapless_swap_allowed(Some(&tags(Some(-3.0), None, Some(1.6)))),
-            "Track mode: an equal track gain that clipping prevention clamps differently"
+            r.gapless_swap_allowed(Some(&tags(Some(-3.0), Some(-11.0)))),
+            "another album's gain is a gain switch, not a new stream"
         );
-        r.adopt_gapless_replay_gain(Some(tags(None, Some(-3.0), None)));
         assert!(
-            !r.gapless_swap_allowed(Some(&tags(None, Some(-9.0), None))),
-            "Track mode: untagged tracks fall back to album gains that differ"
+            !r.gapless_swap_allowed(None),
+            "an untagged track falling back to AGC needs a stream of its own"
         );
+    }
 
-        r.set_volume_normalization(VolumeNormalizationMode::Off, 1.0, 0.0, 0.0, false, false);
-        assert!(
-            r.gapless_swap_allowed(Some(&tags(Some(-20.0), Some(-20.0), None))),
-            "Off: tags change nothing"
+    /// The inline swap's adoption switches the live stream's gain to the
+    /// swapped-in track's at the join.
+    #[tokio::test]
+    async fn adopting_a_gapless_track_switches_the_stream_gain() {
+        let (mut r, _mixer) = renderer_playing(
+            VolumeNormalizationMode::ReplayGainTrack,
+            false,
+            Some(tags(Some(-3.0), None)),
         );
+        r.adopt_gapless_replay_gain(Some(tags(Some(-9.0), None)));
+        let gain = r.primary_write_gain_for_test().expect("a primary stream");
+        assert!((gain - db(-9.0)).abs() < 1e-6, "got {gain}");
+    }
+
+    /// A seek rebuilds the stream at the PLAYING track's gain. After a
+    /// gapless swap that is the swapped-in track's, while
+    /// `pending_replay_gain` still holds the last hand-loaded track's.
+    #[tokio::test]
+    async fn seek_after_a_gapless_swap_rebuilds_at_the_playing_tracks_gain() {
+        let (mut r, _mixer) = renderer_playing(
+            VolumeNormalizationMode::ReplayGainTrack,
+            false,
+            Some(tags(Some(-3.0), None)),
+        );
+        r.adopt_gapless_replay_gain(Some(tags(Some(-9.0), None)));
+
+        r.seek(30_000);
+
+        let gain = r.primary_write_gain_for_test().expect("a rebuilt stream");
+        assert!((gain - db(-9.0)).abs() < 1e-6, "got {gain}");
     }
 
     /// Bit-perfect streams apply no normalization (the stream builder skips

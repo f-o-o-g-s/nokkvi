@@ -40,6 +40,28 @@ impl NormalizationConfig {
     pub(crate) fn static_gain(linear: f32) -> Self {
         Self::Static(linear)
     }
+
+    /// The gain a stream applies for this config inside its source: unity
+    /// for `Off`, the factor for `Static`, `None` for AGC (a processor in the
+    /// stream's chain, not a gain).
+    pub(crate) fn stream_gain(&self) -> Option<f32> {
+        match *self {
+            Self::Off => Some(1.0),
+            Self::Static(gain) => Some(gain),
+            Self::Agc { .. } => None,
+        }
+    }
+
+    /// Whether a stream built for `self` can go on to play a track that
+    /// resolves to `next` by changing its gain alone (a gapless join): any
+    /// two static gains can (`Off` is unity); AGC can't be switched on or
+    /// off, or retargeted, mid-stream.
+    pub(crate) fn can_follow(&self, next: Self) -> bool {
+        match (self.stream_gain(), next.stream_gain()) {
+            (Some(_), Some(_)) => true,
+            _ => *self == next,
+        }
+    }
 }
 
 /// Inputs to the per-track normalization resolver. Cheaper to pass a
@@ -275,5 +297,19 @@ mod tests {
         let ctx = ctx_default(VolumeNormalizationMode::ReplayGainTrack, None);
         let cfg = resolve_normalization(ctx);
         assert!(matches!(cfg, NormalizationConfig::Static(g) if (g - 1.0).abs() < 1e-6));
+    }
+
+    /// A stream follows any static gain (Off is unity), but AGC can't be
+    /// switched on, off or retargeted mid-stream.
+    #[test]
+    fn can_follow_static_gains_but_not_an_agc_change() {
+        use NormalizationConfig::{Agc, Off, Static};
+        assert!(Static(0.5).can_follow(Static(0.25)));
+        assert!(Off.can_follow(Static(0.25)));
+        assert!(Static(0.5).can_follow(Off));
+        assert!(Agc { target_level: 1.0 }.can_follow(Agc { target_level: 1.0 }));
+        assert!(!Static(0.5).can_follow(Agc { target_level: 1.0 }));
+        assert!(!Agc { target_level: 1.0 }.can_follow(Off));
+        assert!(!Agc { target_level: 1.0 }.can_follow(Agc { target_level: 0.5 }));
     }
 }

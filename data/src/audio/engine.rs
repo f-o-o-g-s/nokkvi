@@ -1042,12 +1042,12 @@ enum GaplessSwapOutcome {
     /// decoder was put BACK in the slot for a later retry / the renderer's
     /// crossfade trigger.
     FormatMismatch,
-    /// The staged track resolves to a different ReplayGain normalization than
-    /// the live stream, whose gain is fixed when the stream is built (Album
-    /// mode: another album; Track mode: another gain or peak clamp): the track
-    /// was put BACK so the end-of-track path (`load_prepared_track`) gives it
-    /// a stream of its own.
-    ReplayGainDiffers,
+    /// The live stream can't play the staged track by switching its gain:
+    /// AGC switches on, off or retargets, or the bit-perfect mode changed
+    /// since the stream was built (`AudioRenderer::gapless_swap_allowed`).
+    /// The track was put BACK so the end-of-track path
+    /// (`load_prepared_track`) gives it a stream of its own.
+    NeedsOwnStream,
     /// A crossfade is armed or active, so the renderer's position-based trigger
     /// owns the transition: the staged decoder was put BACK so that trigger can
     /// take it.
@@ -1102,9 +1102,9 @@ async fn try_gapless_swap(
             && next_fmt.is_valid()
             && current_format.sample_rate() == next_fmt.sample_rate()
             && current_format.channel_count() == next_fmt.channel_count();
-        // The live stream's normalization is baked at create time;
-        // deny gapless when the next track resolves to a different
-        // one (any ReplayGain mode; never for a bit-perfect stream).
+        // A different static gain is switched on the live stream at
+        // the join (`adopt_gapless_replay_gain` below); only an AGC or
+        // bit-perfect change needs the next track built a new stream.
         let (rg_allows_swap, cf_armed, cf_active) = {
             let r = renderer.lock();
             (
@@ -1154,10 +1154,9 @@ async fn try_gapless_swap(
             // Increment source generation for stale callback detection
             source_generation.bump_for_gapless();
 
-            // Reset renderer position for the new track and record
-            // its own tags as "current" (since we're keeping the
-            // same stream, the amplify factor is already correct —
-            // we just need our bookkeeping to reflect the new track).
+            // Reset renderer position for the new track, record its
+            // own tags as "current" and switch the kept stream to its
+            // gain from its first sample (the samples written next).
             {
                 let mut r = renderer.lock();
                 r.reset_position();
@@ -1199,9 +1198,9 @@ async fn try_gapless_swap(
                 GaplessSwapOutcome::FormatMismatch
             } else {
                 tracing::debug!(
-                    "🔄 [DECODE LOOP] ReplayGain normalization differs — no inline gapless swap; the next track gets its own stream"
+                    "🔄 [DECODE LOOP] Normalization can't follow on this stream (AGC or bit-perfect change) — no inline gapless swap; the next track gets its own stream"
                 );
-                GaplessSwapOutcome::ReplayGainDiffers
+                GaplessSwapOutcome::NeedsOwnStream
             };
             // Put the track back so a future swap can retry, the
             // renderer's crossfade trigger can take it, or the
@@ -2729,7 +2728,7 @@ impl CustomAudioEngine {
         }
 
         // Stash the incoming track's ReplayGain so the renderer's crossfade
-        // trigger builds the incoming stream at the right amplify factor
+        // trigger builds the incoming stream at the right gain
         // (the gapless consumers read the slot's copy).
         self.renderer
             .lock()
@@ -3379,7 +3378,7 @@ impl CustomAudioEngine {
 
         // Renderer goes Active FIRST (the same ordering the auto trigger
         // guarantees); the incoming's ReplayGain is staged so the stream
-        // build resolves the right amplify factor.
+        // build resolves the right gain.
         {
             let mut renderer = self.renderer.lock();
             renderer.set_pending_crossfade_replay_gain(replay_gain);
@@ -7773,12 +7772,16 @@ mod tests {
         );
     }
 
-    /// Track mode refuses the inline gapless swap when the next track's gain
-    /// differs, because the live stream's gain is fixed when it is built.
-    /// `load_prepared_track` must then give the track a stream of its own;
-    /// reusing the outgoing's would play it at the outgoing's gain.
+    /// Linear factor for `db` decibels (what the stream applies for a gain tag).
+    fn db(db: f32) -> f32 {
+        10f32.powf(db / 20.0)
+    }
+
+    /// A same-format track with a different Track-mode gain keeps the
+    /// outgoing's stream (a gapless join): the stream switches to the new
+    /// gain from the track's first sample instead of being rebuilt.
     #[tokio::test]
-    async fn load_prepared_track_gives_a_track_mode_gain_change_its_own_stream() {
+    async fn load_prepared_track_switches_a_track_mode_gain_on_the_same_stream() {
         let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
         let outgoing = engine
             .renderer
@@ -7793,21 +7796,23 @@ mod tests {
             .expect("the prepared track loads");
 
         assert!(
-            outgoing.stopped.load(Ordering::Acquire),
-            "a different Track-mode gain must get a new stream, not the outgoing's"
+            !outgoing.stopped.load(Ordering::Acquire),
+            "a gain change must not cost the gapless stream"
         );
-        assert_eq!(
-            engine.renderer.lock().current_replay_gain_for_test(),
-            Some(rg(-9.0)),
-            "the new stream must be built at the incoming track's ReplayGain"
+        let renderer = engine.renderer.lock();
+        let gain = renderer.primary_write_gain_for_test().expect("a stream");
+        assert!(
+            (gain - db(-9.0)).abs() < 1e-6,
+            "the incoming track's gain, got {gain}"
         );
+        assert_eq!(renderer.current_replay_gain_for_test(), Some(rg(-9.0)));
     }
 
-    /// Album mode: a same-format track from another album (another album
-    /// gain) gets a stream of its own. Album mode used to reuse the stream,
-    /// so the new album played at the previous album's gain.
+    /// Album mode: a same-format track from another album plays at that
+    /// album's gain on the same stream. Album mode used to reuse the stream
+    /// at the previous album's gain.
     #[tokio::test]
-    async fn load_prepared_track_gives_another_album_its_own_stream_in_album_mode() {
+    async fn load_prepared_track_plays_another_album_at_its_gain_in_album_mode() {
         let album = |gain: f64| crate::types::song::ReplayGain {
             album_gain: Some(gain),
             ..rg(-3.0)
@@ -7834,12 +7839,17 @@ mod tests {
             .expect("the prepared track loads");
 
         assert!(
-            outgoing.stopped.load(Ordering::Acquire),
-            "another album's gain must get a new stream, not the outgoing's"
+            !outgoing.stopped.load(Ordering::Acquire),
+            "an album change must not cost the gapless stream"
         );
-        assert_eq!(
-            engine.renderer.lock().current_replay_gain_for_test(),
-            Some(album(-11.0))
+        let gain = engine
+            .renderer
+            .lock()
+            .primary_write_gain_for_test()
+            .expect("a stream");
+        assert!(
+            (gain - db(-11.0)).abs() < 1e-6,
+            "the new album's gain, got {gain}"
         );
     }
 
@@ -7876,11 +7886,10 @@ mod tests {
         );
     }
 
-    /// The inline swap's Track-mode refusal reports what happened: the formats
-    /// match, so it is a gain refusal, not a format mismatch. The track goes
-    /// back in the slot for `load_prepared_track`.
+    /// The inline swap keeps the stream across a Track-mode gain change and
+    /// switches the stream to the swapped-in track's gain at the join.
     #[tokio::test]
-    async fn try_gapless_swap_reports_a_track_mode_gain_refusal() {
+    async fn try_gapless_swap_switches_the_gain_on_the_same_stream() {
         let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
         prepare_next(&mut engine, matching_format(), rg(-9.0)).await;
 
@@ -7896,14 +7905,55 @@ mod tests {
         )
         .await;
 
-        assert_eq!(outcome, GaplessSwapOutcome::ReplayGainDiffers);
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped);
+        let gain = engine
+            .renderer
+            .lock()
+            .primary_write_gain_for_test()
+            .expect("a stream");
+        assert!((gain - db(-9.0)).abs() < 1e-6, "got {gain}");
+    }
+
+    /// A stream can't switch AGC on mid-stream: an untagged track that
+    /// falls back to AGC goes back in the slot for `load_prepared_track` to
+    /// build a stream of its own.
+    #[tokio::test]
+    async fn try_gapless_swap_gives_an_agc_change_its_own_stream() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        engine.renderer.lock().set_volume_normalization(
+            crate::types::player_settings::VolumeNormalizationMode::ReplayGainTrack,
+            1.0,
+            0.0,
+            0.0,
+            true,
+            false,
+        );
+        prepare_next(
+            &mut engine,
+            matching_format(),
+            crate::types::song::ReplayGain::default(),
+        )
+        .await;
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::NeedsOwnStream);
         let slot = engine.gapless.lock().await;
         assert!(
             slot.is_prepared(),
             "the refused track goes back in the slot"
         );
         assert_eq!(slot.source, PREPARED_URL);
-        assert_eq!(slot.replay_gain, Some(rg(-9.0)));
     }
 
     /// The inline swap takes the swapped-in track's tags from the slot, where

@@ -182,6 +182,25 @@ impl StreamHandle {
     }
 }
 
+/// A scheduled normalization-gain change: from the ring sample at index
+/// `.0` (counted from the stream's first sample, never reset) on, the source
+/// applies gain `.1`. The renderer queues one at every gapless join, at the
+/// index where the next track's first sample sits in the ring.
+pub(crate) type GainSwitch = (u64, f32);
+
+/// Capacity of a stream's gain-switch queue. One switch is in flight per
+/// track boundary still buffered ahead of playback, so this only fills if
+/// dozens of tracks shorter than the ring's lead were queued at once.
+const GAIN_SWITCH_CAPACITY: usize = 64;
+
+/// The lock-free single-producer queue of [`GainSwitch`]es a stream reads:
+/// the renderer keeps the producer (on its `ActiveStream`), the source the
+/// consumer.
+pub(crate) fn gain_switch_queue() -> (ringbuf::HeapProd<GainSwitch>, HeapCons<GainSwitch>) {
+    use ringbuf::{HeapRb, traits::Split};
+    HeapRb::<GainSwitch>::new(GAIN_SWITCH_CAPACITY).split()
+}
+
 /// Visualizer callback type — receives a batch of f32 samples and the sample rate.
 /// Samples are interleaved stereo (or mono), scaled to S16 range for the FFT.
 pub type VisualizerCallback = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
@@ -255,6 +274,19 @@ pub struct StreamingSource {
     meter_window_peak: f32,
     /// M8 level meter: real samples accumulated into the current window.
     meter_window_count: u32,
+    /// Normalization gain (ReplayGain / fallback dB) for the samples being
+    /// read now. Set by [`Self::with_normalization`], then by each queued
+    /// [`GainSwitch`] as playback reaches its sample. Unity by default.
+    norm_gain: f32,
+    /// `norm_gain` eased with the same ~5 ms EMA as the volume, on real
+    /// samples only, so a gain switch at a gapless join can't click
+    /// mid-waveform. Seeded at the initial gain: no onset ramp of its own.
+    smoothed_norm_gain: f32,
+    /// Queued gain switches (`None` for streams built without normalization).
+    gain_switches: Option<HeapCons<GainSwitch>>,
+    /// Real samples read from the ring since the stream was built (never
+    /// reset, unlike `samples_consumed`): the index a [`GainSwitch`] names.
+    ring_read: u64,
 }
 
 /// Stride (in samples) between consecutive `consumed_notify` fires.
@@ -373,9 +405,45 @@ impl StreamingSource {
             samples_since_notify: 0,
             meter_window_peak: 0.0,
             meter_window_count: 0,
+            norm_gain: 1.0,
+            smoothed_norm_gain: 1.0,
+            gain_switches: None,
+            ring_read: 0,
         };
 
         (source, handle)
+    }
+
+    /// Apply a normalization gain (ReplayGain / fallback dB) inside the
+    /// source: `initial_gain` from the first sample, then each queued
+    /// [`GainSwitch`] from its own sample on. Streams built without this
+    /// play at unity.
+    pub(crate) fn with_normalization(
+        mut self,
+        initial_gain: f32,
+        switches: HeapCons<GainSwitch>,
+    ) -> Self {
+        self.norm_gain = initial_gain;
+        self.smoothed_norm_gain = initial_gain;
+        self.gain_switches = Some(switches);
+        self
+    }
+
+    /// Take the normalization gain of every [`GainSwitch`] due at the ring
+    /// sample about to be read (`ring_read`), then count that sample. Called
+    /// on real samples only, so a starved ring never moves the boundary.
+    #[inline]
+    fn advance_gain_switches(&mut self) {
+        if let Some(switches) = self.gain_switches.as_mut() {
+            while let Some(&(at, gain)) = switches.first() {
+                if at > self.ring_read {
+                    break;
+                }
+                let _ = switches.try_pop();
+                self.norm_gain = gain;
+            }
+        }
+        self.ring_read += 1;
     }
 
     /// Flush any remaining visualizer samples.
@@ -418,6 +486,9 @@ impl Iterator for StreamingSource {
         // during transient underruns (especially radio streams at 1.0× rate).
         let raw = self.consumer.try_pop();
         let mut sample = raw.unwrap_or(0.0);
+        if raw.is_some() {
+            self.advance_gain_switches();
+        }
 
         // Capture the raw sample for the visualizer BEFORE the EQ stage. The
         // spectrum should reflect the SOURCE track, not the user's EQ/headroom
@@ -471,13 +542,19 @@ impl Iterator for StreamingSource {
             // The FADE smoother stays pull-clocked on purpose: the crossfade
             // envelope is wall-clock-driven by the renderer tick, so it must
             // keep tracking `fade_coeff` through an underrun, not lag it.
+            //
+            // The normalization gain eases on the same real-sample clock:
+            // a gain switch at a gapless join then glides over ~5 ms instead
+            // of stepping mid-waveform (an exact no-op while it is settled).
             if raw.is_some() {
                 let target = perceptual_volume(load_f32(&self.handle.volume));
                 self.smoothed_volume += self.smoothing_coeff * (target - self.smoothed_volume);
+                self.smoothed_norm_gain +=
+                    self.smoothing_coeff * (self.norm_gain - self.smoothed_norm_gain);
             }
             let fade = load_f32(&self.handle.fade_coeff);
             self.smoothed_fade += self.smoothing_coeff * (fade - self.smoothed_fade);
-            sample * self.smoothed_volume * self.smoothed_fade
+            sample * self.smoothed_volume * self.smoothed_fade * self.smoothed_norm_gain
         };
 
         // Track underruns — count consecutive silence episodes for diagnostics
@@ -1048,6 +1125,109 @@ mod tests {
             true,
             false, // NOT bit-perfect — the default path the M1 fix exists for
         )
+    }
+
+    /// A constant-`raw` source at unity volume and fade, no onset ramp, with
+    /// normalization gain `gain` and its gain-switch producer.
+    fn make_norm_source(
+        raw: f32,
+        samples: usize,
+        bit_perfect: bool,
+        gain: f32,
+    ) -> (StreamingSource, ringbuf::HeapProd<GainSwitch>) {
+        let rb = HeapRb::<f32>::new(samples.max(1));
+        let (mut producer, consumer) = rb.split();
+        producer.push_slice(&vec![raw; samples]);
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (switches_in, switches_out) = gain_switch_queue();
+        let (source, _handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("48000 is nonzero"),
+            viz,
+            1.0,
+            1.0,
+            None,
+            Arc::new(Notify::new()),
+            true,
+            Arc::new(AtomicBool::new(true)),
+            false,
+            bit_perfect,
+        );
+        (source.with_normalization(gain, switches_out), switches_in)
+    }
+
+    fn pull(source: &mut StreamingSource, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|_| source.next().expect("an endless source"))
+            .collect()
+    }
+
+    /// The normalization gain (ReplayGain / fallback dB) applies inside the
+    /// source from the first sample, on top of volume and fade, with no
+    /// onset ramp of its own.
+    #[test]
+    fn normalization_gain_applies_from_the_first_sample() {
+        let (mut source, _switches) = make_norm_source(0.5, 64, false, 0.25);
+        let first = pull(&mut source, 1)[0];
+        assert!(
+            (first - 0.125).abs() < 1e-6,
+            "0.5 at gain 0.25, got {first}"
+        );
+    }
+
+    /// A gain switch lands on its sample: everything before the boundary
+    /// keeps the old gain exactly, and the new gain takes over from the
+    /// boundary sample on (eased over a few ms so a mid-waveform step can't
+    /// click). This is what lets a gapless join change ReplayGain.
+    #[test]
+    fn gain_switch_lands_on_its_sample() {
+        let (mut source, mut switches) = make_norm_source(0.5, 20_000, false, 0.5);
+        switches
+            .try_push((1_000, 0.25))
+            .expect("the queue has room");
+
+        let out = pull(&mut source, 20_000);
+
+        assert!(
+            out[..1_000].iter().all(|s| (s - 0.25).abs() < 1e-6),
+            "the outgoing track keeps its gain up to the boundary"
+        );
+        assert!(
+            out[1_000] < 0.25,
+            "the switch starts at the boundary sample"
+        );
+        assert!(
+            (out[19_999] - 0.125).abs() < 1e-4,
+            "the incoming track settles at its gain, got {}",
+            out[19_999]
+        );
+    }
+
+    /// Switches queued ahead of playback (tracks shorter than the ring's
+    /// lead) each land on their own sample, in order.
+    #[test]
+    fn queued_gain_switches_land_in_order() {
+        let (mut source, mut switches) = make_norm_source(1.0, 30_000, false, 1.0);
+        switches
+            .try_push((10_000, 0.5))
+            .expect("the queue has room");
+        switches
+            .try_push((20_000, 0.25))
+            .expect("the queue has room");
+
+        let out = pull(&mut source, 30_000);
+
+        assert!((out[9_999] - 1.0).abs() < 1e-6, "got {}", out[9_999]);
+        assert!((out[19_999] - 0.5).abs() < 1e-4, "got {}", out[19_999]);
+        assert!((out[29_999] - 0.25).abs() < 1e-4, "got {}", out[29_999]);
+    }
+
+    /// Bit-perfect streams never apply normalization.
+    #[test]
+    fn bit_perfect_ignores_normalization_gain() {
+        let (mut source, _switches) = make_norm_source(0.5, 64, true, 0.25);
+        assert_eq!(pull(&mut source, 1)[0], 0.5);
     }
 
     /// THE M1 bug fix: on the default (non-bit-perfect) path the fade
