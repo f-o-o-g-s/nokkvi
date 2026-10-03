@@ -154,7 +154,11 @@ impl ArtistsPage {
             slot_list: ArtistsMessage::SlotList,
             on_center: |_center| ArtistsAction::LoadLargeArtwork,
             activate: |row, row_idx, force| match row {
-                SlotListEntry::Parent(_) => ArtistsAction::PlayArtist(row_idx.to_string(), force),
+                // The root resolves the artist by its index in the parent buffer.
+                SlotListEntry::Parent(_) => ArtistsAction::PlayArtist(
+                    self.expansion.parent_index_at(row_idx, artists, |a| &a.id).to_string(),
+                    force,
+                ),
                 SlotListEntry::Child(album, _) => ArtistsAction::PlayAlbum(album.id.clone(), force),
             },
             batch_item: Self::batch_item,

@@ -65,6 +65,8 @@ All notable changes to this project will be documented in this file.
 - Enter or Ctrl+Enter with several rows selected in Artists, Genres or Playlists now plays the selection instead of the row under the cursor.
 - In the split view's library pane, playing several selected rows now adds them to the queue instead of replacing it.
 - After clicking a song or album, Enter now follows the Enter Behavior setting instead of always replacing the queue with it.
+- With an album or artist expanded, Enter on an album or artist row below it now plays that row instead of a different one.
+- Below an expanded playlist, the artwork panel now loads the collage of the playlist in focus instead of another playlist's.
 
 ### Removed
 

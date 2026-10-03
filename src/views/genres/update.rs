@@ -108,23 +108,19 @@ impl GenresPage {
         }
     }
 
-    /// Resolve the centered item to a LoadArtwork action.
-    /// When on a child album, looks up the parent genre's original index.
+    /// The LoadArtwork action for the centered row: its genre's index in the
+    /// genre buffer (a child album resolves to its genre).
     fn resolve_artwork_action(&self, genres: &[GenreUIViewData]) -> GenresAction {
         let total = self.expansion.flattened_len(genres);
-        if let Some(center_idx) = self.common.get_center_item_index(total) {
-            let genre_idx = match self.expansion.get_entry_at(center_idx, genres, |g| &g.id) {
-                Some(SlotListEntry::Parent(genre)) => genres.iter().position(|g| g.id == genre.id),
-                Some(SlotListEntry::Child(_, parent_id)) => {
-                    genres.iter().position(|g| g.id == parent_id)
-                }
-                None => None,
-            };
-            if let Some(idx) = genre_idx {
-                return GenresAction::LoadArtwork(idx.to_string());
-            }
-        }
-        GenresAction::None
+        self.common
+            .get_center_item_index(total)
+            .and_then(|center| {
+                self.expansion
+                    .owning_parent_index(center, genres, |g| &g.id)
+            })
+            .map_or(GenresAction::None, |idx| {
+                GenresAction::LoadArtwork(idx.to_string())
+            })
     }
 
     /// Update internal state and return actions for root

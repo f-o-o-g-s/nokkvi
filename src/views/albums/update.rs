@@ -139,7 +139,11 @@ impl AlbumsPage {
                 AlbumsAction::LoadLargeArtwork(idx.to_string())
             }),
             activate: |row, row_idx, force| match row {
-                SlotListEntry::Parent(_) => AlbumsAction::PlayAlbum(row_idx.to_string(), force),
+                // The root resolves the album by its index in the parent buffer.
+                SlotListEntry::Parent(_) => AlbumsAction::PlayAlbum(
+                    self.expansion.parent_index_at(row_idx, albums, |a| &a.id).to_string(),
+                    force,
+                ),
                 SlotListEntry::Child(_, album_id) => AlbumsAction::PlayAlbumFromTrack(
                     album_id,
                     self.expansion.count_children_before(row_idx, albums, |a| &a.id),

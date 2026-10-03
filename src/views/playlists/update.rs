@@ -226,9 +226,12 @@ impl PlaylistsPage {
             search_changed: PlaylistsMessage::SearchQueryChanged => PlaylistsAction::SearchChanged,
             search_focused: PlaylistsMessage::SearchFocused,
             slot_list: PlaylistsMessage::SlotList,
-            on_center: |center| center.map_or(PlaylistsAction::None, |idx| {
-                PlaylistsAction::LoadArtwork(idx.to_string())
-            }),
+            // The root loads the collage by the playlist's buffer index.
+            on_center: |center| center
+                .and_then(|idx| self.expansion.owning_parent_index(idx, playlists, |p| &p.id))
+                .map_or(PlaylistsAction::None, |idx| {
+                    PlaylistsAction::LoadArtwork(idx.to_string())
+                }),
             activate: |row, row_idx, force| match row {
                 SlotListEntry::Parent(playlist) => {
                     PlaylistsAction::PlayPlaylist(playlist.id.clone(), force)

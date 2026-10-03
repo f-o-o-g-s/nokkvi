@@ -896,7 +896,9 @@ enter_with_selection_plays_it!(
     expanded: "a1",
     children: vec![make_song("s1", "Track", "Band")],
     expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Album, "a2")],
-    clicked: crate::views::AlbumsAction::PlayAlbum(_, false) if true,
+    // Albums and Artists name the parent by its index in the parent buffer,
+    // which skips the expanded child above it.
+    clicked: crate::views::AlbumsAction::PlayAlbum(ref index, false) if index == "1",
 );
 
 enter_with_selection_plays_it!(
@@ -908,7 +910,7 @@ enter_with_selection_plays_it!(
     expanded: "ar1",
     children: vec![make_album("a1", "Record", "One")],
     expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Artist, "ar2")],
-    clicked: crate::views::ArtistsAction::PlayArtist(_, false) if true,
+    clicked: crate::views::ArtistsAction::PlayArtist(ref index, false) if index == "1",
 );
 
 enter_with_selection_plays_it!(
@@ -938,6 +940,38 @@ enter_with_selection_plays_it!(
     expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Playlist, "p2")],
     clicked: crate::views::PlaylistsAction::PlayPlaylist(ref id, false) if id == "p2",
 );
+
+/// Playlists loads the centered playlist's collage by its index in the
+/// playlist buffer: a row below an expanded playlist skips the tracks above
+/// it, and a track row resolves to its playlist.
+#[test]
+fn playlists_artwork_follows_the_centered_playlist_past_an_expansion() {
+    use crate::{
+        views::{PlaylistsAction, PlaylistsMessage, PlaylistsPage},
+        widgets::SlotListPageMessage,
+    };
+
+    let playlists = vec![
+        super::playlists::playlist_row("p1", "One", false),
+        super::playlists::playlist_row("p2", "Two", false),
+    ];
+    let mut page = PlaylistsPage::new();
+    page.expansion.expanded_id = Some("p1".into());
+    page.expansion.children = vec![make_song("s1", "A", "Band"), make_song("s2", "B", "Band")];
+
+    // Flattened: [p1, s1, s2, p2].
+    for (row, expected) in [(3, "1"), (2, "0"), (0, "0")] {
+        let (_, action) = page.update(
+            PlaylistsMessage::SlotList(SlotListPageMessage::SetOffset(row, Default::default())),
+            playlists.len(),
+            &playlists,
+        );
+        match action {
+            PlaylistsAction::LoadArtwork(index) => assert_eq!(index, expected, "row {row}"),
+            other => panic!("row {row}: expected LoadArtwork, got {other:?}"),
+        }
+    }
+}
 
 /// Songs: a clicked row plays from its index (honoring Enter Behavior), not
 /// as a one-song batch; a real multi-selection still plays as one batch.

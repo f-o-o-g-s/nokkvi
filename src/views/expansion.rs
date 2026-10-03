@@ -130,6 +130,35 @@ impl<C: Clone> ExpansionState<C> {
         0
     }
 
+    /// The index in `parents` of the parent row at flattened `flat_index`.
+    /// A flattened index also counts the expanded children above the row, so
+    /// it only equals the parent's own index above the expansion.
+    pub fn parent_index_at<P>(
+        &self,
+        flat_index: usize,
+        parents: &[P],
+        id_fn: impl Fn(&P) -> &str,
+    ) -> usize {
+        flat_index.saturating_sub(self.count_children_before(flat_index, parents, id_fn))
+    }
+
+    /// The index in `parents` of the row at flattened `flat_index`, or of its
+    /// parent when the row is an expanded child. Views that load artwork by
+    /// parent index resolve the centered row through this.
+    pub fn owning_parent_index<P>(
+        &self,
+        flat_index: usize,
+        parents: &[P],
+        id_fn: impl Fn(&P) -> &str,
+    ) -> Option<usize> {
+        match self.get_entry_at(flat_index, parents, &id_fn)? {
+            SlotListEntry::Parent(_) => Some(self.parent_index_at(flat_index, parents, &id_fn)),
+            SlotListEntry::Child(_, parent_id) => {
+                parents.iter().position(|p| id_fn(p) == parent_id)
+            }
+        }
+    }
+
     /// Build the dotted-decimal sub-index label for an expanded child row,
     /// e.g. `"236.1"` for the first child of the parent displayed at index 236.
     ///
@@ -909,6 +938,42 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, ["b", "c2", "a"]);
+    }
+
+    #[test]
+    fn parent_index_at_skips_the_expanded_children_above() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        state.set_children("a".into(), children(), &p, &mut common);
+        // Flattened: [Parent(a), Child(c1), Child(c2), Parent(b), Parent(c)]
+        assert_eq!(
+            state.parent_index_at(0, &p, id_fn),
+            0,
+            "the expanded parent"
+        );
+        assert_eq!(
+            state.parent_index_at(3, &p, id_fn),
+            1,
+            "b, below two children"
+        );
+        assert_eq!(state.parent_index_at(4, &p, id_fn), 2, "c");
+
+        let collapsed: ExpansionState<TestChild> = ExpansionState::default();
+        assert_eq!(collapsed.parent_index_at(2, &p, id_fn), 2, "no expansion");
+    }
+
+    #[test]
+    fn owning_parent_index_maps_children_to_their_parent() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        state.set_children("b".into(), children(), &p, &mut common);
+        // Flattened: [Parent(a), Parent(b), Child(c1), Child(c2), Parent(c)]
+        let owners: Vec<_> = (0..6)
+            .map(|i| state.owning_parent_index(i, &p, id_fn))
+            .collect();
+        assert_eq!(owners, [Some(0), Some(1), Some(1), Some(1), Some(2), None]);
     }
 
     #[test]
