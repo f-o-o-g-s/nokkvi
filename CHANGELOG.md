@@ -37,6 +37,7 @@ All notable changes to this project will be documented in this file.
 - `nokkvi --help` now lists `harbour` among the `switch-view` targets.
 - When the volume can't be saved, a warning now says so instead of the change silently not surviving a restart.
 - Playing something else while a long Songs list is still loading into the queue no longer appends the rest of that list to the new queue.
+- Pressing Enter in the split view's library pane now only adds to the queue, leaving a playing radio station and the playlist header alone.
 
 ### Removed
 

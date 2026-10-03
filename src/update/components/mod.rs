@@ -1003,10 +1003,10 @@ impl Nokkvi {
     ///   (consumes it via `take()`).
     /// - Otherwise returns `Some(add_task())`.
     ///
-    /// **Contract**: call this AFTER `guard_play_action()` — the helper does
-    /// not re-guard. Pairing with `enter_new_playback_context` is per-site
-    /// (Songs skips it inside the browsing-panel branch; the four entity sites
-    /// call it before this helper).
+    /// **Contract**: call this BEFORE the play prologue
+    /// (`guard_play_action` + `enter_new_playback_context`). The redirect is
+    /// an add to the queue, so like Add to Queue it leaves radio mode and the
+    /// loaded-playlist header alone; only a real play runs the prologue.
     pub(crate) fn redirect_play_to_queue_in_browsing_panel<A, I>(
         &mut self,
         add_task: A,

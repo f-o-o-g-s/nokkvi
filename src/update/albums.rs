@@ -475,10 +475,9 @@ impl Nokkvi {
 
         match action {
             AlbumsAction::PlayAlbum(album_id_str, force) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
-                // drag-drop position when one is pending, else append).
+                // drag-drop position when one is pending, else append). An
+                // add, so it runs before the play prologue.
                 let id_ref = album_id_str.as_str();
                 if let Some(task) = self.redirect_play_to_queue_in_browsing_panel(
                     |app| {
@@ -507,6 +506,8 @@ impl Nokkvi {
                 ) {
                     return task;
                 }
+                self.guard_play_action();
+                self.enter_new_playback_context();
                 // AppendAndPlay: append album songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay
@@ -516,7 +517,6 @@ impl Nokkvi {
                     let id = album.id.clone();
                     let name = album.name.clone();
                     let shuffle = self.activate_shuffle_directive(force, false);
-                    self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_album_and_play(&id, shuffle).await },
                         format!("Playing '{name}'"),

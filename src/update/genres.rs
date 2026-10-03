@@ -186,10 +186,9 @@ impl Nokkvi {
 
         match action {
             GenresAction::PlayGenre(genre_name, force) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
-                // drag-drop position when one is pending, else append).
+                // drag-drop position when one is pending, else append). An
+                // add, so it runs before the play prologue.
                 let name_ref = genre_name.as_str();
                 if let Some(task) = self.redirect_play_to_queue_in_browsing_panel(
                     |app| {
@@ -215,10 +214,11 @@ impl Nokkvi {
                 ) {
                     return task;
                 }
+                self.guard_play_action();
+                self.enter_new_playback_context();
                 // AppendAndPlay: append genre songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
-                    self.clear_active_playlist();
                     let name = genre_name.clone();
                     let shuffle = self.activate_shuffle_directive(force, false);
                     return self.shell_fire_and_forget_task(

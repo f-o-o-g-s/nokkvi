@@ -170,10 +170,9 @@ impl Nokkvi {
 
         match action {
             SongsAction::PlaySongFromIndex(index, force) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
-                // drag-drop position when one is pending, else append).
+                // drag-drop position when one is pending, else append). An
+                // add, so it runs before the play prologue.
                 if self.browsing_panel.is_some() {
                     let Some(song_view) = self.library.songs.get(index) else {
                         return Task::none();
@@ -205,6 +204,8 @@ impl Nokkvi {
                         )
                         .unwrap_or_else(Task::none);
                 }
+                self.guard_play_action();
+                self.enter_new_playback_context();
                 if let Some(song) = self.library.songs.get(index) {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);
 
@@ -213,7 +214,6 @@ impl Nokkvi {
                         EnterBehavior::PlaySingle => {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
-                            self.clear_active_playlist();
                             let play_task = self.shell_task(
                                 move |shell| async move {
                                     shell.play_songs(vec![song], 0, OneShotShuffle::None).await

@@ -197,10 +197,9 @@ impl Nokkvi {
 
         match action {
             views::PlaylistsAction::PlayPlaylist(playlist_id, force) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue. Playlists has
-                // no cross-pane-drag insert variant today, so the redirect is
+                // Browsing panel: redirect play → add to queue, before the
+                // play prologue since it is an add. Playlists has no
+                // cross-pane-drag insert variant today, so the redirect is
                 // unconditional (we do NOT consume
                 // `cross_pane_drag.pending_queue_insert_position` to preserve
                 // the pre-helper behavior).
@@ -217,6 +216,8 @@ impl Nokkvi {
                         "add playlist to queue",
                     );
                 }
+                self.guard_play_action();
+                self.enter_new_playback_context();
                 // AppendAndPlay: append playlist songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
@@ -227,7 +228,6 @@ impl Nokkvi {
                         .find(|p| p.id == playlist_id)
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
                     let shuffle = self.activate_shuffle_directive(force, false);
-                    self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move {
                             shell.add_playlist_and_play(&playlist_id, shuffle).await

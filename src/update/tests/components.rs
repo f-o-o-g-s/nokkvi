@@ -412,6 +412,106 @@ fn logout_stops_a_running_songs_load() {
 }
 
 // ============================================================================
+// Browsing-panel Enter adds to the queue: radio and the header stay put
+// ============================================================================
+
+/// Split view open, a station streaming, a playlist header on the queue.
+fn radio_app_with_browsing_panel() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    seed_radio_playback(&mut app);
+    app.active_playlist_info = Some(make_playlist_ctx());
+    app
+}
+
+fn assert_add_left_playback_alone(app: &crate::Nokkvi, path: &str) {
+    assert!(
+        app.active_playback.is_radio(),
+        "{path}: adding to the queue must not leave radio mode while the station plays"
+    );
+    assert!(
+        app.active_playlist_info.is_some(),
+        "{path}: adding to the queue must keep the playlist header, like Add to Queue does"
+    );
+}
+
+fn activate_center(msg: crate::app_message::Message, app: &mut crate::Nokkvi) {
+    let _ = app.update(msg);
+}
+
+#[test]
+fn browsing_panel_albums_enter_adds_without_leaving_radio() {
+    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+    activate_center(
+        crate::app_message::Message::Albums(AlbumsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Albums");
+}
+
+#[test]
+fn browsing_panel_artists_enter_adds_without_leaving_radio() {
+    use crate::{views::ArtistsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+    activate_center(
+        crate::app_message::Message::Artists(ArtistsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Artists");
+}
+
+#[test]
+fn browsing_panel_genres_enter_adds_without_leaving_radio() {
+    use crate::{views::GenresMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    activate_center(
+        crate::app_message::Message::Genres(GenresMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Genres");
+}
+
+#[test]
+fn browsing_panel_playlists_enter_adds_without_leaving_radio() {
+    use crate::{views::PlaylistsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    app.library
+        .playlists
+        .set_from_vec(vec![make_test_playlist("p1", "Playlist 1")]);
+    activate_center(
+        crate::app_message::Message::Playlists(PlaylistsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Playlists");
+}
+
+#[test]
+fn browsing_panel_songs_enter_adds_without_leaving_radio() {
+    use crate::{views::SongsMessage, widgets::SlotListPageMessage};
+    let mut app = radio_app_with_browsing_panel();
+    seed_songs(&mut app, songs_indexed(1));
+    activate_center(
+        crate::app_message::Message::Songs(SongsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        )),
+        &mut app,
+    );
+    assert_add_left_playback_alone(&app, "Songs");
+}
+
+// ============================================================================
 // redirect_play_to_queue_in_browsing_panel (components.rs)
 // ============================================================================
 
