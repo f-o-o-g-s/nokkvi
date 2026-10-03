@@ -501,8 +501,8 @@ impl SlotListPageState {
 
     /// Unified dispatch for non-expansion views (Songs, Queue, Radios, Similar).
     /// Expansion views (Albums, Artists, Genres, Playlists) do NOT call this —
-    /// they use expansion-aware methods (self.expansion.handle_navigate_up etc.)
-    /// and match SlotListPageMessage sub-variants individually.
+    /// `impl_expansion_update!` handles their carrier messages through the
+    /// expansion-aware methods (`expansion.handle_navigate_up` etc.).
     pub fn handle(&mut self, msg: SlotListPageMessage, total: usize) -> SlotListPageAction {
         match msg {
             SlotListPageMessage::NavigateUp => {
@@ -592,6 +592,22 @@ impl SlotListPageState {
         }
     }
 
+    /// The rows Enter (and a click on the highlighted row) plays as one batch,
+    /// in display order, or `None` when it should activate the centered row
+    /// instead. A plain click leaves its row as a one-row selection that is
+    /// also the focus marker (`selected_offset`); that is a focused row, not a
+    /// selection. A one-row checkbox pick clears the marker, so it stays a
+    /// batch.
+    pub fn activation_batch(&self) -> Option<Vec<usize>> {
+        let selected = &self.slot_list.selected_indices;
+        let only_the_focus_marker = selected.len() == 1
+            && self
+                .slot_list
+                .selected_offset
+                .is_some_and(|focus| selected.contains(&focus));
+        (!selected.is_empty() && !only_the_focus_marker).then(|| selected.iter().copied().collect())
+    }
+
     /// Resolve target indices for context menu batch operations.
     ///
     /// Evaluates the context menu click (preserving selection if the clicked item
@@ -615,6 +631,32 @@ mod tests {
         assert_eq!(state.current_sort_mode, SortMode::RecentlyAdded);
         assert!(!state.sort_ascending);
         assert!(!state.search_input_focused);
+    }
+
+    #[test]
+    fn activation_batch_ignores_a_plain_clicks_focus_marker() {
+        use iced::keyboard::Modifiers;
+
+        let mut state = SlotListPageState::default();
+        assert_eq!(state.activation_batch(), None, "nothing selected");
+
+        state.handle_slot_click(3, 10, Modifiers::default());
+        assert_eq!(
+            state.activation_batch(),
+            None,
+            "a plain click is a focused row, not a selection"
+        );
+
+        state.handle_slot_click(7, 10, Modifiers::CTRL);
+        assert_eq!(state.activation_batch(), Some(vec![3, 7]));
+
+        let mut checkbox = SlotListPageState::default();
+        checkbox.handle_selection_toggle(5, 10);
+        assert_eq!(
+            checkbox.activation_batch(),
+            Some(vec![5]),
+            "a one-row checkbox pick is a selection"
+        );
     }
 
     #[test]

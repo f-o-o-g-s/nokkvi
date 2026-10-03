@@ -95,8 +95,13 @@ impl AlbumsPage {
             (Entry::FindSimilar, Some(SlotListEntry::Child(song, _))) => {
                 AlbumsAction::FindSimilar(song.id.clone(), song.title.clone())
             }
+            // Like the Songs view: a track without an artist has no top songs.
             (Entry::TopSongs, Some(SlotListEntry::Child(song, _))) => {
-                AlbumsAction::TopSongs(song.artist.clone())
+                if song.artist.is_empty() {
+                    AlbumsAction::None
+                } else {
+                    AlbumsAction::TopSongs(song.artist.clone())
+                }
             }
             // Album rows don't offer Top Songs; the rest are other views' entries.
             (Entry::TopSongs, Some(SlotListEntry::Parent(_)))

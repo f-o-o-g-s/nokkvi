@@ -828,7 +828,8 @@ macro_rules! enter_with_selection_plays_it {
         parents: $parents:expr,
         expanded: $expanded:expr,
         children: $children:expr,
-        expected: $expected:expr $(,)?
+        expected: $expected:expr,
+        clicked: $clicked:pat if $clicked_guard:expr $(,)?
     ) => {
         #[test]
         fn $name() {
@@ -861,6 +862,27 @@ macro_rules! enter_with_selection_plays_it {
                     "force={force}: the selection, in display order"
                 );
             }
+
+            // A plain click leaves its row as a one-row selection plus the
+            // focus marker; Enter then plays that row as itself (Enter
+            // Behavior, headers), not as a one-item batch.
+            let mut page = <$page>::new();
+            page.expansion.expanded_id = Some($expanded.into());
+            page.expansion.children = $children;
+            let _ = page.update(
+                $msg(SlotListPageMessage::SetOffset(2, Default::default())),
+                parents.len(),
+                &parents,
+            );
+            let (_, action) = page.update(
+                $msg(SlotListPageMessage::ActivateCenter(false)),
+                parents.len(),
+                &parents,
+            );
+            assert!(
+                matches!(action, $clicked if $clicked_guard),
+                "a clicked row plays as itself, got {action:?}"
+            );
         }
     };
 }
@@ -874,6 +896,7 @@ enter_with_selection_plays_it!(
     expanded: "a1",
     children: vec![make_song("s1", "Track", "Band")],
     expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Album, "a2")],
+    clicked: crate::views::AlbumsAction::PlayAlbum(_, false) if true,
 );
 
 enter_with_selection_plays_it!(
@@ -885,6 +908,7 @@ enter_with_selection_plays_it!(
     expanded: "ar1",
     children: vec![make_album("a1", "Record", "One")],
     expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Artist, "ar2")],
+    clicked: crate::views::ArtistsAction::PlayArtist(_, false) if true,
 );
 
 enter_with_selection_plays_it!(
@@ -897,6 +921,7 @@ enter_with_selection_plays_it!(
     children: vec![make_album("a1", "Record", "Band")],
     // Genres batch by name, like the rest of the batch pipeline.
     expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Genre, "Jazz")],
+    clicked: crate::views::GenresAction::PlayGenre(ref name, false) if name == "Jazz",
 );
 
 enter_with_selection_plays_it!(
@@ -911,7 +936,49 @@ enter_with_selection_plays_it!(
     expanded: "p1",
     children: vec![make_song("s1", "Track", "Band")],
     expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Playlist, "p2")],
+    clicked: crate::views::PlaylistsAction::PlayPlaylist(ref id, false) if id == "p2",
 );
+
+/// Songs: a clicked row plays from its index (honoring Enter Behavior), not
+/// as a one-song batch; a real multi-selection still plays as one batch.
+#[test]
+fn songs_enter_plays_a_clicked_row_itself_and_a_selection_as_a_batch() {
+    use crate::{
+        views::{SongsAction, SongsMessage, SongsPage},
+        widgets::SlotListPageMessage,
+    };
+
+    let songs = songs_indexed(3);
+    let mut page = SongsPage::new();
+    let _ = page.update(
+        SongsMessage::SlotList(SlotListPageMessage::SetOffset(1, Default::default())),
+        &songs,
+    );
+    let (_, action) = page.update(
+        SongsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+        &songs,
+    );
+    assert!(
+        matches!(action, SongsAction::PlaySongFromIndex(1, false)),
+        "a clicked song plays from its index, got {action:?}"
+    );
+
+    let _ = page.update(
+        SongsMessage::SlotList(SlotListPageMessage::SetOffset(
+            2,
+            iced::keyboard::Modifiers::CTRL,
+        )),
+        &songs,
+    );
+    let (_, action) = page.update(
+        SongsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+        &songs,
+    );
+    let SongsAction::PlaySelection(payload, false) = action else {
+        panic!("a two-song selection plays as one batch, got {action:?}");
+    };
+    assert_eq!(payload.items.len(), 2);
+}
 
 // ============================================================================
 // Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)

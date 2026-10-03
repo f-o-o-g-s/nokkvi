@@ -197,6 +197,9 @@ pub(crate) trait HasCommonAction {
 ///
 /// Evaluates to `Ok((Task, Action))` when the message was one of those, or
 /// `Err(message)` handing every other message back for the view's own arms.
+/// The `SlotList` arm matches every `SlotListPageMessage` variant, so a new
+/// one is a compile error here; the view's own match names the variants this
+/// macro handles in one arm instead of a `_ =>`.
 ///
 /// Per-view differences come in as closure-shaped arguments: the macro binds
 /// the parameters and inlines the body (`|center| body` becomes
@@ -214,7 +217,9 @@ pub(crate) trait HasCommonAction {
 /// Rules this macro owns, so the four views can't drift apart again:
 /// - Enter / Ctrl+Enter with a multi-selection plays the selection, in
 ///   display order, as one `play_selection` batch (as the Songs view does);
-///   without one, it activates the centered row.
+///   without one (`SlotListPageState::activation_batch` is `None`, which
+///   includes the one-row focus marker a plain click leaves), it activates
+///   the centered row.
 /// - Add to Queue targets the selection, else the centered row.
 /// - Selection toggles and select-all count the flattened rows (parents plus
 ///   the expanded children), not the parent buffer `total_items` counts.
@@ -272,7 +277,18 @@ macro_rules! impl_expansion_update {
         center_on_playing: $center_on_playing_action:expr,
         none: $action_none:expr $(,)?
     ) => {{
-        match $message {
+        use crate::widgets::SlotListPageMessage as Slot;
+
+        // The view's own sort / search messages do exactly what their
+        // SlotList carriers do, so both go through the one carrier match.
+        let message = match $message {
+            $sort_msg(sort_mode) => $slot_list(Slot::SortModeSelected(sort_mode)),
+            $toggle_msg => $slot_list(Slot::ToggleSortOrder),
+            $search_msg(query) => $slot_list(Slot::SearchQueryChanged(query)),
+            $focus_msg(focused) => $slot_list(Slot::SearchFocused(focused)),
+            other => other,
+        };
+        match message {
             // ── Expansion ──────────────────────────────────────────────
             $expand_msg => {
                 Ok(match $self.expansion.handle_expand_center($items, $id_fn, &mut $self.common) {
@@ -289,151 +305,146 @@ macro_rules! impl_expansion_update {
                 Ok((Task::none(), $action_none))
             }
 
-            // ── Sort / search (view messages and SlotList carriers alike) ──
-            $sort_msg(sort_mode)
-            | $slot_list(crate::widgets::SlotListPageMessage::SortModeSelected(sort_mode)) => {
-                Ok(match $self.expansion.handle_sort_mode_selected(sort_mode, &mut $self.common) {
-                    Some(vt) => (Task::none(), $sort_action(vt)),
-                    None => (Task::none(), $action_none),
-                })
-            }
-            $toggle_msg | $slot_list(crate::widgets::SlotListPageMessage::ToggleSortOrder) => {
-                Ok(match $self.expansion.handle_toggle_sort_order(&mut $self.common) {
-                    Some(ascending) => (Task::none(), $sort_order_action(ascending)),
-                    None => (Task::none(), $action_none),
-                })
-            }
-            $search_msg(query)
-            | $slot_list(crate::widgets::SlotListPageMessage::SearchQueryChanged(query)) => {
-                Ok(match $self.expansion.handle_search_query_changed(query, $total_items, &mut $self.common) {
-                    Some(q) => (Task::none(), $search_action(q)),
-                    None => (Task::none(), $action_none),
-                })
-            }
-            $focus_msg(focused)
-            | $slot_list(crate::widgets::SlotListPageMessage::SearchFocused(focused)) => {
-                $self.common.handle_search_focused(focused);
-                Ok((Task::none(), $action_none))
-            }
-
-            // ── Navigation ─────────────────────────────────────────────
-            $slot_list(crate::widgets::SlotListPageMessage::NavigateUp) => {
-                let $center = $self.expansion.handle_navigate_up($items, &mut $self.common);
-                Ok((Task::none(), $on_center))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::NavigateDown) => {
-                let $center = $self.expansion.handle_navigate_down($items, &mut $self.common);
-                Ok((Task::none(), $on_center))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::SetOffset(offset, modifiers)) => {
-                let $center = $self.expansion.handle_select_offset(
-                    offset,
-                    modifiers,
-                    $items,
-                    &mut $self.common,
-                );
-                Ok((Task::none(), $on_center))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::ScrollSeek(offset)) => {
-                // Mid-drag: move the viewport only. Artwork and page fetches
-                // wait for the SeekSettled debounce's synthesized SetOffset.
-                $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
-                Ok((Task::none(), $action_none))
-            }
-
-            // ── Selection ──────────────────────────────────────────────
-            $slot_list(crate::widgets::SlotListPageMessage::SelectionToggle(offset)) => {
-                let len = $self.expansion.flattened_len($items);
-                $self.common.handle_selection_toggle(offset, len);
-                Ok((Task::none(), $action_none))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::SelectAllToggle) => {
-                let len = $self.expansion.flattened_len($items);
-                $self.common.handle_select_all_toggle(len);
-                Ok((Task::none(), $action_none))
-            }
-
-            // ── Activation ─────────────────────────────────────────────
-            $slot_list(crate::widgets::SlotListPageMessage::ActivateCenter($force)) => {
-                Ok(if $self.common.slot_list.selected_indices.is_empty() {
-                    let len = $self.expansion.flattened_len($items);
-                    let center = $self.common.get_center_item_index(len);
-                    if center.is_some() {
-                        $self.common.slot_list.flash_center();
-                    }
-                    let centered = center.and_then(|idx| {
-                        $self.expansion.get_entry_at(idx, $items, $id_fn).map(|row| (idx, row))
-                    });
-                    match centered {
-                        Some(($row_idx, $row)) => (Task::none(), $activate),
+            // Every carrier variant, no wildcard: a new SlotListPageMessage
+            // variant is a compile error here.
+            $slot_list(slot_msg) => Ok(match slot_msg {
+                // ── Sort / search ──────────────────────────────────────
+                Slot::SortModeSelected(sort_mode) => {
+                    match $self.expansion.handle_sort_mode_selected(sort_mode, &mut $self.common) {
+                        Some(vt) => (Task::none(), $sort_action(vt)),
                         None => (Task::none(), $action_none),
                     }
-                } else {
-                    // `selected_indices` is ordered, so the batch plays in
-                    // display order.
-                    let selected: Vec<usize> =
-                        $self.common.slot_list.selected_indices.iter().copied().collect();
-                    let payload = $self
-                        .expansion
-                        .rows_at(selected, $items, $id_fn)
-                        .map($batch_item)
-                        .collect();
-                    (Task::none(), $play_selection(payload, $force))
-                })
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::ClickPlay(offset)) => {
-                // Legacy click-to-play: center the clicked row, then Enter.
-                $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
-                Ok($self.update(
-                    $slot_list(crate::widgets::SlotListPageMessage::ActivateCenter(false)),
-                    $total_items,
-                    $items,
-                ))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::AddCenterToQueue) => {
-                let len = $self.expansion.flattened_len($items);
-                let targets = $self.common.get_queue_target_indices(len);
-                Ok(if targets.is_empty() {
-                    (Task::none(), $action_none)
-                } else {
-                    let payload = $self
-                        .expansion
-                        .rows_at(targets, $items, $id_fn)
-                        .map($batch_item)
-                        .collect();
-                    (Task::none(), $add_to_queue(payload))
-                })
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::RefreshViewData) => {
-                Ok((Task::none(), $refresh_action))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::CenterOnPlaying) => {
-                Ok((Task::none(), $center_on_playing_action))
-            }
-
-            // ── Hover / toolbar reveal ─────────────────────────────────
-            $slot_list(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)) => {
-                $self.common.slot_list.hovered_slot = Some(h);
-                Ok((Task::none(), $action_none))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::HoverExitSlot(h)) => {
-                if $self.common.slot_list.hovered_slot == Some(h) {
-                    $self.common.slot_list.hovered_slot = None;
                 }
-                Ok((Task::none(), $action_none))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::ToolbarHoverEnter) => {
-                $self.common.set_toolbar_hovered(true);
-                Ok((Task::none(), $action_none))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::ToolbarHoverExit) => {
-                $self.common.set_toolbar_hovered(false);
-                Ok((Task::none(), $action_none))
-            }
-            $slot_list(crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(open)) => {
-                $self.common.set_toolbar_dropdown_open(open);
-                Ok((Task::none(), $action_none))
-            }
+                Slot::ToggleSortOrder => {
+                    match $self.expansion.handle_toggle_sort_order(&mut $self.common) {
+                        Some(ascending) => (Task::none(), $sort_order_action(ascending)),
+                        None => (Task::none(), $action_none),
+                    }
+                }
+                Slot::SearchQueryChanged(query) => {
+                    match $self.expansion.handle_search_query_changed(query, $total_items, &mut $self.common) {
+                        Some(q) => (Task::none(), $search_action(q)),
+                        None => (Task::none(), $action_none),
+                    }
+                }
+                Slot::SearchFocused(focused) => {
+                    $self.common.handle_search_focused(focused);
+                    (Task::none(), $action_none)
+                }
+
+                // ── Navigation ─────────────────────────────────────────
+                Slot::NavigateUp => {
+                    let $center = $self.expansion.handle_navigate_up($items, &mut $self.common);
+                    (Task::none(), $on_center)
+                }
+                Slot::NavigateDown => {
+                    let $center = $self.expansion.handle_navigate_down($items, &mut $self.common);
+                    (Task::none(), $on_center)
+                }
+                Slot::SetOffset(offset, modifiers) => {
+                    let $center = $self.expansion.handle_select_offset(
+                        offset,
+                        modifiers,
+                        $items,
+                        &mut $self.common,
+                    );
+                    (Task::none(), $on_center)
+                }
+                Slot::ScrollSeek(offset) => {
+                    // Mid-drag: move the viewport only. Artwork and page fetches
+                    // wait for the SeekSettled debounce's synthesized SetOffset.
+                    $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
+                    (Task::none(), $action_none)
+                }
+
+                // ── Selection ──────────────────────────────────────────
+                Slot::SelectionToggle(offset) => {
+                    let len = $self.expansion.flattened_len($items);
+                    $self.common.handle_selection_toggle(offset, len);
+                    (Task::none(), $action_none)
+                }
+                Slot::SelectAllToggle => {
+                    let len = $self.expansion.flattened_len($items);
+                    $self.common.handle_select_all_toggle(len);
+                    (Task::none(), $action_none)
+                }
+
+                // ── Activation ─────────────────────────────────────────
+                Slot::ActivateCenter($force) => match $self.common.activation_batch() {
+                    // A multi-selection plays as one batch, in display order.
+                    Some(selected) => {
+                        let payload = $self
+                            .expansion
+                            .rows_at(selected, $items, $id_fn)
+                            .map($batch_item)
+                            .collect();
+                        (Task::none(), $play_selection(payload, $force))
+                    }
+                    None => {
+                        let len = $self.expansion.flattened_len($items);
+                        let center = $self.common.get_center_item_index(len);
+                        if center.is_some() {
+                            $self.common.slot_list.flash_center();
+                        }
+                        let centered = center.and_then(|idx| {
+                            $self.expansion.get_entry_at(idx, $items, $id_fn).map(|row| (idx, row))
+                        });
+                        match centered {
+                            Some(($row_idx, $row)) => (Task::none(), $activate),
+                            None => (Task::none(), $action_none),
+                        }
+                    }
+                },
+                Slot::ClickPlay(offset) => {
+                    // Legacy click-to-play: center the clicked row, then Enter.
+                    $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
+                    $self.update(
+                        $slot_list(Slot::ActivateCenter(false)),
+                        $total_items,
+                        $items,
+                    )
+                }
+                Slot::AddCenterToQueue => {
+                    let len = $self.expansion.flattened_len($items);
+                    let targets = $self.common.get_queue_target_indices(len);
+                    if targets.is_empty() {
+                        (Task::none(), $action_none)
+                    } else {
+                        let payload = $self
+                            .expansion
+                            .rows_at(targets, $items, $id_fn)
+                            .map($batch_item)
+                            .collect();
+                        (Task::none(), $add_to_queue(payload))
+                    }
+                }
+                Slot::RefreshViewData => (Task::none(), $refresh_action),
+                Slot::CenterOnPlaying => (Task::none(), $center_on_playing_action),
+
+                // ── Hover / toolbar reveal ─────────────────────────────
+                Slot::HoverEnterSlot(h) => {
+                    $self.common.slot_list.hovered_slot = Some(h);
+                    (Task::none(), $action_none)
+                }
+                Slot::HoverExitSlot(h) => {
+                    if $self.common.slot_list.hovered_slot == Some(h) {
+                        $self.common.slot_list.hovered_slot = None;
+                    }
+                    (Task::none(), $action_none)
+                }
+                Slot::ToolbarHoverEnter => {
+                    $self.common.set_toolbar_hovered(true);
+                    (Task::none(), $action_none)
+                }
+                Slot::ToolbarHoverExit => {
+                    $self.common.set_toolbar_hovered(false);
+                    (Task::none(), $action_none)
+                }
+                Slot::ToolbarDropdownToggled(open) => {
+                    $self.common.set_toolbar_dropdown_open(open);
+                    (Task::none(), $action_none)
+                }
+            }),
 
             other => Err(other),
         }

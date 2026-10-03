@@ -63,7 +63,8 @@ All notable changes to this project will be documented in this file.
 - A duplicate-songs check that finishes while another window is open now shows a warning toast instead of opening its dialog.
 - Top Songs on a track inside an expanded album now opens the artist's top songs instead of doing nothing.
 - Enter or Ctrl+Enter with several rows selected in Artists, Genres or Playlists now plays the selection instead of the row under the cursor.
-- In the split view's library pane, Enter on several selected rows now adds them to the queue instead of replacing it.
+- In the split view's library pane, playing several selected rows now adds them to the queue instead of replacing it.
+- After clicking a song or album, Enter now follows the Enter Behavior setting instead of always replacing the queue with it.
 
 ### Removed
 

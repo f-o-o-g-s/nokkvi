@@ -33,20 +33,13 @@ impl SongsPage {
                 );
                 match self.common.handle(msg, total_items) {
                     SlotListPageAction::ActivateCenter(force) => {
-                        if !self.common.slot_list.selected_indices.is_empty() {
-                            use nokkvi_data::types::batch::{BatchItem, BatchPayload};
-                            let payload = self
-                                .common
-                                .slot_list
-                                .selected_indices
-                                .iter()
-                                .filter_map(|&index| {
-                                    songs.get(index).map(|s| {
-                                        let item: nokkvi_data::types::song::Song = s.clone().into();
-                                        BatchItem::Song(Box::new(item))
-                                    })
-                                })
-                                .fold(BatchPayload::new(), |p, i| p.with_item(i));
+                        if let Some(selected) = self.common.activation_batch() {
+                            use nokkvi_data::types::batch::BatchItem;
+                            let payload = selected
+                                .into_iter()
+                                .filter_map(|index| songs.get(index))
+                                .map(|s| BatchItem::Song(Box::new(s.clone().into())))
+                                .collect();
                             (Task::none(), SongsAction::PlaySelection(payload, force))
                         } else if let Some(center_idx) =
                             self.common.get_center_item_index(total_items)
