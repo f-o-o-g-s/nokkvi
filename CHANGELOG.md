@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - The new Accent From Album Art setting in the Theme tab takes the accent color from the playing cover, adjusted to stay readable.
+- With Accent From Album Art on, rating stars and love hearts take the accent color too.
 
 ### Changed
 

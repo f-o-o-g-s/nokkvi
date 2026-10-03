@@ -12,7 +12,7 @@ use super::SSE_SLOT_TEST_LOCK;
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, Message, PlaybackMessage},
-    state::ARTLESS_HOLD_TICKS,
+    state::ACCENT_HOLD_TICKS,
     test_helpers::*,
     theme::{self, AccentSeed, THEME_MODE_LOCK},
 };
@@ -147,12 +147,18 @@ fn a_colorless_cover_keeps_the_theme_accent() {
     assert_eq!(app.dynamic_accent.pending, None);
 }
 
+/// A skip can pass through a stopped state for a tick or two; the accent
+/// holds through it, and only a real stop returns to the theme accent.
 #[test]
-fn stopping_returns_to_the_theme_accent() {
+fn stopping_returns_to_the_theme_accent_after_a_hold() {
     let _guard = THEME_MODE_LOCK.lock();
     let (mut app, _id) = shown_app();
     app.playback.playing = false;
     app.playback.paused = false;
+    for _ in 0..ACCENT_HOLD_TICKS {
+        tick(&mut app);
+        assert!(app.dynamic_accent.applied, "held through a brief stop");
+    }
     tick(&mut app);
     assert!(!app.dynamic_accent.applied);
     assert_eq!(app.dynamic_accent.shown, None);
@@ -171,6 +177,23 @@ fn pausing_keeps_the_accent() {
     theme::set_dynamic_accent(None);
 }
 
+/// A stop shorter than the hold, then play again: the accent never left.
+#[test]
+fn a_brief_stop_between_tracks_keeps_the_accent() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let (mut app, _id) = shown_app();
+    app.playback.playing = false;
+    tick(&mut app);
+    tick(&mut app);
+    app.playback.playing = true;
+    tick(&mut app);
+    assert!(app.dynamic_accent.applied);
+    assert_eq!(app.dynamic_accent.idle_ticks, 0);
+
+    theme::set_dynamic_accent(None);
+}
+
+/// Turning the setting off is immediate, with no hold.
 #[test]
 fn turning_the_setting_off_returns_to_the_theme_accent() {
     let _guard = THEME_MODE_LOCK.lock();
@@ -182,25 +205,20 @@ fn turning_the_setting_off_returns_to_the_theme_accent() {
 }
 
 /// A new track whose cover has not arrived keeps the previous accent for a
-/// moment (one change, not two), asks for the cover once, and falls back to
-/// the theme accent if none shows up.
+/// moment (one change, not two), and falls back to the theme accent if none
+/// shows up. It requests nothing: playback already warms that cover.
 #[test]
 fn a_track_without_art_holds_then_falls_back() {
     let _guard = THEME_MODE_LOCK.lock();
     let (mut app, _id) = shown_app();
     app.scrobble.current_song_id = Some("s2".to_string());
-    for _ in 0..ARTLESS_HOLD_TICKS {
+    for _ in 0..ACCENT_HOLD_TICKS {
         tick(&mut app);
         assert!(
             app.dynamic_accent.applied,
             "held while the cover may still arrive"
         );
     }
-    assert_eq!(
-        app.dynamic_accent.art_requested.as_deref(),
-        Some("album_s2"),
-        "the cover was asked for"
-    );
     tick(&mut app);
     assert!(
         !app.dynamic_accent.applied,
@@ -241,7 +259,7 @@ fn a_replayed_album_recolors_from_the_cache() {
     let (mut app, id) = shown_app();
     // Move to s2 (no art) and let the hold run out.
     app.scrobble.current_song_id = Some("s2".to_string());
-    for _ in 0..=ARTLESS_HOLD_TICKS {
+    for _ in 0..=ACCENT_HOLD_TICKS {
         tick(&mut app);
     }
     assert!(!app.dynamic_accent.applied);

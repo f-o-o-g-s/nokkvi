@@ -292,8 +292,8 @@ pub(crate) fn eq_modal_overlay<'a>(
             width: 1.0,
             radius: theme::ui_border_radius(),
         },
-        selected_text_color: theme::bg0_hard(),
-        selected_background: theme::accent_bright().into(),
+        selected_text_color: theme::on_accent_fill(),
+        selected_background: theme::accent_fill().into(),
         shadow: iced::Shadow::default(),
     });
 

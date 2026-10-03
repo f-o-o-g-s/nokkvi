@@ -54,8 +54,8 @@ impl SliderVariant {
     /// Get the accent color for this variant
     fn accent_color(&self) -> Color {
         match self {
-            SliderVariant::Music => crate::theme::accent_bright(),
-            SliderVariant::Sfx => crate::theme::accent(),
+            SliderVariant::Music => crate::theme::accent_fill(),
+            SliderVariant::Sfx => crate::theme::accent_fill_calm(),
         }
     }
 }

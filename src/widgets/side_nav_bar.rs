@@ -5,7 +5,7 @@
 //! bottom-to-top). Styling mirrors the horizontal nav bar's flat redesign:
 //!
 //!   - Flat mode: 32 px wide chrome, edge-to-edge tab cells with full-cell
-//!     `accent_bright()` fill when active and 1 px `theme::border()`
+//!     `accent_fill()` fill when active and 1 px `theme::border()`
 //!     horizontal rules between cells.
 //!   - Rounded mode: 40 px wide chrome with 4 px outer gutters around 32 px
 //!     `ui_radius_md()` tab cards; rules inset 14 px on each side so they
@@ -122,7 +122,7 @@ pub(crate) struct SideNavBarData {
 /// Canvas program that draws the side-nav tab's rotated label.
 ///
 /// The redesign moved active-tab signaling onto the card's full-cell
-/// `accent_bright()` fill, so this program no longer draws the
+/// `accent_fill()` fill, so this program no longer draws the
 /// right-edge accent indicator bar (or its hover variant) — both were
 /// dormant before the cleanup. Recover from `git show` if a future
 /// design wants an inline indicator strip.
@@ -188,7 +188,7 @@ fn side_nav_tab_content(
         .height(Length::Fill)
         .into(),
         NavDisplayMode::IconsOnly => {
-            // Flat redesign uses a full-cell `accent_bright()` fill for
+            // Flat redesign uses a full-cell `accent_fill()` fill for
             // the active state, so the icon centers in the card without
             // an inline indicator strip.
             container(colored_icon(icon_path, ICON_SIZE, text_color))
@@ -244,13 +244,13 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
      -> Element<'_, NavBarMessage> {
         let display_mode = theme::nav_display_mode();
 
-        // Active = filled `accent_bright()` + dark text, idle = `bg0_hard()`
-        // (matches the chrome) + `fg0()`. Rounded mode rounds to a pill so
-        // the active fill reads as a capsule (matches the top-nav tab
-        // treatment); flat mode keeps square corners since cells are
+        // Active = filled `accent_fill()` + `on_accent_fill()` text, idle =
+        // `bg0_hard()` (matches the chrome) + `fg0()`. Rounded mode rounds to
+        // a pill so the active fill reads as a capsule (matches the top-nav
+        // tab treatment); flat mode keeps square corners since cells are
         // 1-px-`border()`-separated.
         let text_color = if is_active {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg0()
         };
@@ -275,12 +275,12 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     .align_y(iced::Alignment::Center)
                     .style(move |_: &iced::Theme| container::Style {
                         background: if is_active {
-                            Some(Background::Color(theme::accent_bright()))
+                            Some(Background::Color(theme::accent_fill()))
                         } else {
                             Some(Background::Color(theme::bg0_hard()))
                         },
                         text_color: Some(if is_active {
-                            theme::bg0_hard()
+                            theme::on_accent_fill()
                         } else {
                             theme::fg0()
                         }),
@@ -329,12 +329,12 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
 
     // Settings indicator when settings are open (non-interactive).
     // Renders with the same active-state visuals the other tabs use
-    // (filled `accent_bright()` card, `bg0_hard()` text, pill outline in
+    // (filled `accent_fill()` card, `on_accent_fill()` text, pill outline in
     // rounded mode) so the user sees "Settings" highlighted in the same
     // vocabulary regardless of chrome mode.
     let settings_indicator: Option<Element<'_, NavBarMessage>> = if settings_open {
         let display_mode = theme::nav_display_mode();
-        let text_color = theme::bg0_hard();
+        let text_color = theme::on_accent_fill();
         // `ui_radius_pill()` returns `0.0.into()` in flat mode.
         let card_radius = theme::ui_radius_pill();
 
@@ -351,7 +351,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                 .height(Length::FillPortion(1))
                 .align_y(iced::Alignment::Center)
                 .style(move |_: &iced::Theme| container::Style {
-                    background: Some(Background::Color(theme::accent_bright())),
+                    background: Some(Background::Color(theme::accent_fill())),
                     border: Border {
                         radius: card_radius,
                         ..Default::default()

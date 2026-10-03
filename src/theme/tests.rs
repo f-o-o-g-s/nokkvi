@@ -702,8 +702,20 @@ fn dynamic_accent_overrides_only_the_accent_tokens() {
             );
         }
 
+        for fill in [accent_fill(), accent_fill_calm()] {
+            assert!(
+                contrast_ratio(on_accent_fill(), fill) >= LEGIBLE_TEXT_CONTRAST,
+                "light={light}: fill ink misses the text floor"
+            );
+        }
+
         set_dynamic_accent(None);
         assert_eq!((accent(), accent_bright(), accent_border_light()), before);
+        assert_eq!(
+            (accent_fill(), accent_fill_calm(), on_accent_fill()),
+            (accent_bright(), accent(), bg0_hard()),
+            "light={light}: a static theme's roles are its own colors"
+        );
     }
 
     UI_MODE.light_mode.store(saved, Ordering::Relaxed);
@@ -763,8 +775,8 @@ fn dynamic_accent_survives_a_theme_reload() {
 }
 
 /// Hovering an accent-filled control (active nav tab, mode toggle) must read
-/// against a cover accent too. On a dark palette the fitted fill is LIGHT, so
-/// the old mode-keyed `fg0()` pull was light on light.
+/// against a cover accent too. On a dark palette the fitted fill can be
+/// light, where the old mode-keyed `fg0()` pull was light on light.
 #[test]
 fn hover_tint_on_accent_contrasts_with_a_dynamic_accent_fill() {
     let _guard = THEME_MODE_LOCK.lock();
@@ -778,7 +790,7 @@ fn hover_tint_on_accent_contrasts_with_a_dynamic_accent_fill() {
             AccentSeed::from_color(rgb(0x10, 0x18, 0x40)),
         ] {
             set_dynamic_accent(Some(seed));
-            let cr = contrast_ratio(hover_tint_on_accent(), accent_bright());
+            let cr = contrast_ratio(hover_tint_on_accent(), accent_fill());
             assert!(
                 cr >= SELECTION_RING_MIN_CONTRAST,
                 "light={light} {seed:?}: hover pigment only {cr:.2}:1 against the fill"

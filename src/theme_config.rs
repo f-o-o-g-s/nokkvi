@@ -87,6 +87,11 @@ macro_rules! resolved_palette {
             /// capsules). Read via `theme::border()`; per-theme TOML value or
             /// auto-derived `darken(bg.hard, 30%)` when empty.
             pub border: Color,
+            /// The role tokens the dynamic accent sets apart from the theme's
+            /// own colors. `None` on every theme as loaded: the accessors then
+            /// derive each role from the theme (see [`AccentRoles`]), so a
+            /// static theme cannot drift from them.
+            pub roles: Option<AccentRoles>,
         }
 
         impl ResolvedTheme {
@@ -107,10 +112,32 @@ macro_rules! resolved_palette {
                     } else {
                         parse_hex_or_default(&palette.border, fallback_bg())
                     },
+                    roles: None,
                 }
             }
         }
     };
+}
+
+/// Role tokens that only the dynamic accent sets apart from a theme's own
+/// colors (`theme/dynamic_accent.rs`). Without it each role IS a theme color,
+/// derived on read by its accessor: `accent_fill` = `accent_bright`,
+/// `accent_fill_calm` = `accent`, `on_accent_fill` = `bg0_hard`, `rating` =
+/// `star_bright`, `love` = `danger_bright`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AccentRoles {
+    /// Loud accent for FILLED surfaces: active tabs, mode toggles, pills, the
+    /// progress fill, the now-playing row. Closer to the cover than
+    /// `accent_bright`, which must also read as text.
+    pub accent_fill: Color,
+    /// Calm counterpart of `accent_fill`.
+    pub accent_fill_calm: Color,
+    /// Ink for text and icons on either fill.
+    pub on_accent_fill: Color,
+    /// Filled rating stars.
+    pub rating: Color,
+    /// Filled love hearts.
+    pub love: Color,
 }
 
 // `accent.now_playing` / `accent.selected` are not resolved into the theme:

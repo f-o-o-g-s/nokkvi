@@ -1879,9 +1879,23 @@ fn outlined_svg_icon<'a, M: 'a>(
         .into()
 }
 
+/// The color of a FILLED star or heart on a row: its role color
+/// (`rating_color()` / `love_color()`), except on a loud-fill row (now
+/// playing, expanded parent, drag ghost) while the accent follows the cover.
+/// There the fill IS the cover's color, and so is the icon's, so the icon
+/// takes the row's forced ink like the text beside it — no yellow stars on a
+/// yellow row.
+pub(crate) fn filled_icon_color(role: Color, style: SlotListSlotStyle) -> Color {
+    if style.forces_legible_text && theme::dynamic_accent_active() {
+        style.text_color
+    } else {
+        role
+    }
+}
+
 /// Render a star rating display (1-5 stars) for slot list slots.
 ///
-/// Filled stars use the brand `star_bright` color; empty stars use
+/// Filled stars use [`filled_icon_color`] over `rating_color()`; empty stars use
 /// `slot_list_static_icon_color(style, fg4, 1.0)` so the outline matches the
 /// row's forced-legible text on selected / highlighted / centered rows (and
 /// stays a muted `fg4` elsewhere). Per-star opacity tracks `style.text_color.a`
@@ -1907,7 +1921,7 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     };
 
     let svg_opacity = style.text_color.a;
-    let filled_color = theme::star_bright();
+    let filled_color = filled_icon_color(theme::rating_color(), style);
     let empty_color = slot_list_static_icon_color(style, theme::fg4(), 1.0);
 
     // Each star takes `FillPortion(1)` so the five share width evenly; the row
@@ -1988,11 +2002,12 @@ impl FavoriteIconKind {
         }
     }
 
-    /// Brand fill color used when the item is starred.
+    /// Role fill color used when the item is starred (see
+    /// [`filled_icon_color`] for the loud-row exception).
     fn fill_color(self) -> Color {
         match self {
-            Self::Heart => theme::danger_bright(),
-            Self::Star => theme::star_bright(),
+            Self::Heart => theme::love_color(),
+            Self::Star => theme::rating_color(),
         }
     }
 }
@@ -2002,9 +2017,9 @@ impl FavoriteIconKind {
 /// Both color and opacity are derived from `style` so the icon stays in
 /// lockstep with the row's text — empty outlines take the row's forced-legible
 /// text color on selected / highlighted / centered rows via
-/// `slot_list_static_icon_color`, filled icons keep their brand colors
-/// (`danger_bright` / `star_bright`) and fade with `style.text_color.a` to
-/// match the surrounding text.
+/// `slot_list_static_icon_color`, filled icons take their role colors
+/// (`love_color` / `rating_color`, through [`filled_icon_color`]) and fade
+/// with `style.text_color.a` to match the surrounding text.
 ///
 /// # Arguments
 /// * `is_starred` - Whether the item is starred/favorited
@@ -2026,7 +2041,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
     let svg_opacity = style.text_color.a;
 
     let svg_element: Element<'a, Message> = if is_starred {
-        let fill_color = kind.fill_color();
+        let fill_color = filled_icon_color(kind.fill_color(), style);
         outlined_svg_icon(
             filled_icon,
             empty_icon,
@@ -2272,6 +2287,41 @@ fn make_slot_button<'a, M: Clone + 'a>(
 mod tests {
     use super::*;
 
+    /// Stars and hearts follow the cover accent, and on a loud-fill row
+    /// (now playing, expanded parent, drag ghost) they take the row's ink, so
+    /// a yellow cover can never put yellow stars on a yellow row. Static
+    /// themes keep their own star and heart colors everywhere.
+    #[test]
+    fn filled_icons_take_row_ink_on_loud_rows_under_the_cover_accent() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let gold = Color::from_rgb(1.0, 0.8, 0.0);
+
+        crate::theme::set_dynamic_accent(None);
+        let loud = SlotListSlotStyle::drag_preview();
+        assert_eq!(
+            filled_icon_color(gold, loud),
+            gold,
+            "static: role color kept"
+        );
+
+        crate::theme::set_dynamic_accent(Some(crate::theme::AccentSeed {
+            lightness: 0.86,
+            chroma: 0.17,
+            hue: 1.7,
+        }));
+        let loud = SlotListSlotStyle::drag_preview();
+        let quiet = SlotListSlotStyle {
+            forces_legible_text: false,
+            ..loud
+        };
+        assert_eq!(filled_icon_color(gold, loud), loud.text_color);
+        assert_eq!(filled_icon_color(gold, quiet), gold);
+        assert_eq!(theme::rating_color(), theme::accent_bright());
+        assert_eq!(theme::love_color(), theme::accent_bright());
+
+        crate::theme::set_dynamic_accent(None);
+    }
+
     #[test]
     fn select_checkbox_produces_element_in_both_states() {
         // Compile + panic guard for the shared box-visual recipe.
@@ -2492,6 +2542,9 @@ mod tests {
 
     #[test]
     fn highlight_slots_force_legible_ink() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         // Normal (unhighlighted) slot -> hover text is the bright accent.
         let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
         assert_eq!(style.hover_text_color, crate::theme::accent_bright());
@@ -2541,6 +2594,9 @@ mod tests {
     /// — calmer `playing_fill`, no glow, and they KEEP the highlight ring.
     #[test]
     fn now_playing_wears_loud_fill_and_seeds_glow() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         // Actively-playing row: is_highlighted + is_playing.
         let playing = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
         assert_eq!(
@@ -2595,6 +2651,9 @@ mod tests {
     /// `now_playing_wears_loud_fill_and_seeds_glow`.)
     #[test]
     fn selection_is_border_only_accent_ring() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let normal = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
         let multi_selected = SlotListSlotStyle::for_slot(false, false, false, true, false, 1.0, 0);
         let lone_cursor = SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, 0);
@@ -2626,6 +2685,9 @@ mod tests {
     /// shouts over whatever content it floats above.
     #[test]
     fn drag_preview_keeps_bold_fill() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let ghost = SlotListSlotStyle::drag_preview();
         assert_eq!(ghost.bg_color, crate::theme::selected_fill_resolved());
         assert_eq!(
@@ -2646,6 +2708,9 @@ mod tests {
     /// no other test would catch it.
     #[test]
     fn now_playing_and_parent_win_over_selection() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         // Now-playing AND selected (with an active multi-selection) renders
         // identically to a plain now-playing row.
         let playing_only = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
@@ -2679,6 +2744,9 @@ mod tests {
     /// an active explicit multi-selection, falling back to the plain 1px hairline.
     #[test]
     fn selection_is_opaque_under_gradient_and_yields_to_multi_selection() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         // (1) A selected row asked to render at a faded opacity ignores it: ring,
         // bg, and text all stay fully opaque so the selection can never fade out.
         let faded_selected = SlotListSlotStyle::for_slot(false, false, false, true, false, 0.3, 0);
@@ -2742,6 +2810,9 @@ mod tests {
     /// style is the static fill + border, with the glow living in the overlay.
     #[test]
     fn now_playing_container_style_is_a_normal_slot() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let playing = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
         let style = playing.to_container_style();
         assert_eq!(
@@ -2839,6 +2910,9 @@ mod tests {
     /// stays tonally consistent with its siblings.
     #[test]
     fn focused_ring_is_contrast_floored_and_fill_follows_ramp() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         for depth in 0u8..=2 {
             let bg = match depth {
                 0 => crate::theme::bg0(),
@@ -3049,6 +3123,9 @@ mod tests {
 
     #[test]
     fn child_slot_button_builds_an_element() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let ctx = dummy_row_context(false, Modifiers::default());
         let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 1);
         let row = iced::widget::Row::new().push(iced::widget::text("child row"));
@@ -3172,6 +3249,9 @@ mod tests {
 
     #[test]
     fn slot_style_forwards_ctx_fields_into_for_slot() {
+        // Reads the live accent more than once; the theme lock keeps a
+        // dynamic-accent test from swapping it in between.
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         // Configs whose (is_center, is_selected, has_multi_selection) triples
         // differ pairwise, so swapping any two context-owned fields inside
         // slot_style produces a different style in at least one config.

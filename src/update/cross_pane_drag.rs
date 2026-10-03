@@ -484,7 +484,9 @@ impl Nokkvi {
                 iced::widget::text(format!("×{selection_count}"))
                     .size(13)
                     .font(crate::theme::ui_font())
-                    .color(crate::theme::legible_text_on(crate::theme::accent())),
+                    .color(crate::theme::legible_text_on(
+                        crate::theme::accent_fill_calm(),
+                    )),
             )
             .padding(iced::Padding {
                 left: 6.0,
@@ -493,7 +495,7 @@ impl Nokkvi {
                 bottom: 2.0,
             })
             .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                background: Some(crate::theme::accent().into()),
+                background: Some(crate::theme::accent_fill_calm().into()),
                 border: iced::Border {
                     radius: crate::theme::ui_border_radius(),
                     ..Default::default()

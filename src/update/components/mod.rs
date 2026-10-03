@@ -32,6 +32,7 @@ use crate::{
 };
 
 mod artwork_prefetch;
+pub(crate) mod cover_job;
 pub(crate) mod custom_artwork;
 // Canonical artwork-prefetch helpers live in the `artwork_prefetch` submodule
 // (the one path-reached unit here); re-exported so call sites keep using

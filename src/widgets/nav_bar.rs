@@ -220,12 +220,12 @@ pub(crate) fn flat_tab_container_style(
 ) -> impl Fn(&iced::Theme) -> container::Style {
     move |_theme: &iced::Theme| container::Style {
         background: if is_active {
-            Some(Background::Color(theme::accent_bright()))
+            Some(Background::Color(theme::accent_fill()))
         } else {
             Some(Background::Color(theme::bg0_hard()))
         },
         text_color: Some(if is_active {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg0()
         }),
@@ -234,18 +234,18 @@ pub(crate) fn flat_tab_container_style(
     }
 }
 
-/// Rounded-mode pill-tab button style. Active = filled `accent_bright()`
-/// with `bg0_hard()` text; idle = transparent over the tray background.
+/// Rounded-mode pill-tab button style. Active = filled `accent_fill()`
+/// with `on_accent_fill()` text; idle = transparent over the tray background.
 /// The pill radius makes hover regions self-shaping inside the tray.
 fn rounded_pill_tab_style(is_active: bool) -> impl Fn(&iced::Theme) -> container::Style {
     move |_theme: &iced::Theme| container::Style {
         background: if is_active {
-            Some(Background::Color(theme::accent_bright()))
+            Some(Background::Color(theme::accent_fill()))
         } else {
             None
         },
         text_color: Some(if is_active {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg2()
         }),
@@ -442,7 +442,7 @@ pub(crate) fn harbour_nav_button(active: bool, cell: f32) -> Element<'static, Na
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .style(move |_: &iced::Theme| container::Style {
-            background: active.then(|| Background::Color(theme::accent_bright())),
+            background: active.then(|| Background::Color(theme::accent_fill())),
             border: Border {
                 radius,
                 ..Default::default()
@@ -518,13 +518,13 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             if is_rounded {
                 // Rounded mode: 32 px pill that lives inside the tray's
-                // padding. Active = filled `accent_bright()` + `bg0_hard()`
+                // padding. Active = filled `accent_fill()` + `on_accent_fill()`
                 // text; idle = transparent over the chrome bg. Hover comes
                 // from `HoverOverlay`, scoped to the pill radius so the
                 // tint follows the chip outline.
                 let tab_style = rounded_pill_tab_style(is_active);
                 let text_color = if is_active {
-                    theme::bg0_hard()
+                    theme::on_accent_fill()
                 } else {
                     theme::fg2()
                 };
@@ -558,7 +558,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 // cells handled by `tab_separator()` at the assembly level.
                 let tab_style = flat_tab_container_style(is_active);
                 let text_color = if is_active {
-                    theme::bg0_hard()
+                    theme::on_accent_fill()
                 } else {
                     theme::fg0()
                 };

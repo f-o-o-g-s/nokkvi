@@ -181,7 +181,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         let accent = if gain.abs() < 0.1 {
             crate::theme::fg3()
         } else {
-            crate::theme::accent_bright()
+            crate::theme::accent_fill()
         };
 
         // 1. Draw track background — single flat fill + 1 px border().

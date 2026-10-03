@@ -5,7 +5,7 @@
 //!   `theme::fg2()` label text, mono 11 px UPPERCASE with 0.1 em-equivalent
 //!   letter-spacing approximation.
 //! - **Rounded mode**: same look + [`theme::ui_radius_pill()`] corners.
-//! - **Selected (single)**: full `theme::accent_bright()` fill, `theme::bg0_hard()`
+//! - **Selected (single)**: full `theme::accent_fill()` fill, `theme::on_accent_fill()`
 //!   label. ToggleSet variants light up multiple chips simultaneously.
 //! - **Cursored (ToggleSet keyboard cursor)**: same fill as idle but the border
 //!   switches to `theme::accent_bright()` and the label switches to
@@ -131,11 +131,11 @@ where
     // border still signals which chip Enter targets, but the green fill is the
     // primary "this is on" affordance).
     let (bg_color, border_color, label_color) = if is_on {
-        // Selected: full accent fill, dark text for contrast.
+        // Selected: full accent fill, its own ink for contrast.
         (
-            theme::accent_bright(),
-            theme::accent_bright(),
-            theme::bg0_hard(),
+            theme::accent_fill(),
+            theme::accent_fill(),
+            theme::on_accent_fill(),
         )
     } else if is_cursored {
         // Cursored but off: transparent body with accent outline + label.
@@ -196,7 +196,7 @@ where
                     button::Status::Hovered => {
                         if is_on {
                             (
-                                scale_alpha(theme::accent(), effective_opacity),
+                                scale_alpha(theme::accent_fill_calm(), effective_opacity),
                                 border_color,
                             )
                         } else {
@@ -207,7 +207,11 @@ where
                         }
                     }
                     button::Status::Pressed => {
-                        let press_bg = if is_on { theme::accent() } else { theme::bg2() };
+                        let press_bg = if is_on {
+                            theme::accent_fill_calm()
+                        } else {
+                            theme::bg2()
+                        };
                         (
                             scale_alpha(press_bg, effective_opacity),
                             scale_alpha(theme::accent_bright(), effective_opacity),

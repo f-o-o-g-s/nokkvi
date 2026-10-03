@@ -11,10 +11,11 @@ use crate::theme::AccentSeed;
 /// Seeds remembered per album / station, so a replay recolors without a decode.
 const SEED_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).expect("capacity must be > 0");
 
-/// Ticks (100 ms each) a newly playing item may go without artwork before the
-/// accent returns to the theme's own. Covers the gap between a track change
-/// and its cover arriving, so the accent changes once rather than twice.
-pub(crate) const ARTLESS_HOLD_TICKS: u8 = 15;
+/// Ticks (100 ms each) the accent is held through a gap before it returns to
+/// the theme's own: a newly playing item whose cover has not arrived, or a
+/// stopped transport between two tracks. A track change then recolors once
+/// rather than twice.
+pub(crate) const ACCENT_HOLD_TICKS: u8 = 15;
 
 /// State of the accent that follows the playing cover (see
 /// `update/dynamic_accent.rs`).
@@ -31,8 +32,8 @@ pub struct DynamicAccentState {
     pub pending: Option<(String, Id)>,
     /// A newly playing item still without artwork, and for how many ticks.
     pub waiting: Option<(String, u8)>,
-    /// Album whose cover was asked for because none was cached.
-    pub art_requested: Option<String>,
+    /// Consecutive ticks with nothing playing or paused.
+    pub idle_ticks: u8,
     /// Extracted seeds by item, each with the handle it was read from. A
     /// `None` seed is a cover without a usable color.
     pub seeds: LruCache<String, (Id, Option<AccentSeed>)>,
@@ -45,7 +46,7 @@ impl Default for DynamicAccentState {
             applied: false,
             pending: None,
             waiting: None,
-            art_requested: None,
+            idle_ticks: 0,
             seeds: LruCache::new(SEED_CACHE_CAPACITY),
         }
     }

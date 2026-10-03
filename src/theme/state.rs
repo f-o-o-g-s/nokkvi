@@ -22,13 +22,16 @@ use crate::theme_config::{
 // Global theme state (with hot-reload support via lock-free ArcSwap)
 // ============================================================================
 
-/// The theme file's own palette and the palette on screen. They differ only
-/// while a dynamic accent is active: `shown` is `base` with the accent tokens
-/// refitted from the playing cover (see [`set_dynamic_accent`]).
+/// The theme file's own palette, the palette on screen, and the cover seed
+/// that tells them apart. `shown` is `base` with the accent tokens refitted
+/// from `seed` (see [`set_dynamic_accent`]); without a seed they are equal.
+/// One value behind one `ArcSwap`, so a theme reload and an accent change
+/// can never store a mix of the two.
 #[derive(Debug, Clone)]
 struct ActiveTheme {
     base: ResolvedDualTheme,
     shown: ResolvedDualTheme,
+    seed: Option<AccentSeed>,
 }
 
 impl ActiveTheme {
@@ -37,7 +40,7 @@ impl ActiveTheme {
         if let Some(seed) = seed {
             dynamic_accent::apply(seed, &mut shown);
         }
-        Self { base, shown }
+        Self { base, shown, seed }
     }
 }
 
@@ -56,10 +59,6 @@ static DUAL_THEME: LazyLock<ArcSwap<ActiveTheme>> = LazyLock::new(|| {
         None,
     )))
 });
-
-/// The cover-derived accent currently laid over the theme, if any. Written
-/// only from the UI thread's update handlers.
-static DYNAMIC_ACCENT: parking_lot::Mutex<Option<AccentSeed>> = parking_lot::Mutex::new(None);
 
 /// Global raw theme file — hex strings for visualizer colors and UI that
 /// needs the original color values (not parsed `iced::Color`).
@@ -98,10 +97,7 @@ pub(crate) fn reload_theme() {
     let new_file = load_active_theme_file();
     let new_resolved = ResolvedDualTheme::from_theme_file(&new_file);
 
-    DUAL_THEME.store(Arc::new(ActiveTheme::compose(
-        new_resolved,
-        *DYNAMIC_ACCENT.lock(),
-    )));
+    DUAL_THEME.rcu(|active| Arc::new(ActiveTheme::compose(new_resolved.clone(), active.seed)));
     {
         let mut file = THEME_FILE.write();
         *file = new_file;
@@ -112,28 +108,34 @@ pub(crate) fn reload_theme() {
 }
 
 /// Lay a cover-derived accent over the theme (`Some`), or return to the theme
-/// file's own accent (`None`). Only `accent` / `accent_bright` /
-/// `accent_border_light` change, in both modes, each fitted to its own
-/// backgrounds; nothing is written to disk. A no-op when `seed` is already
-/// the active one, so callers may level-set it.
+/// file's own accent (`None`). Only the accent tokens and the roles derived
+/// from them change (see `theme_config::AccentRoles`), in both modes, each
+/// fitted to its own backgrounds; nothing is written to disk. A no-op when
+/// `seed` is already the active one, so callers may level-set it.
 pub(crate) fn set_dynamic_accent(seed: Option<AccentSeed>) {
-    {
-        let mut active = DYNAMIC_ACCENT.lock();
-        if *active == seed {
-            return;
+    let previous = DUAL_THEME.rcu(|active| {
+        if active.seed == seed {
+            Arc::clone(active)
+        } else {
+            Arc::new(ActiveTheme::compose(active.base.clone(), seed))
         }
-        *active = seed;
+    });
+    if previous.seed != seed {
+        THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
+        debug!(" Dynamic accent changed: {seed:?}");
     }
-    let base = DUAL_THEME.load().base.clone();
-    DUAL_THEME.store(Arc::new(ActiveTheme::compose(base, seed)));
-    THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
-    debug!(" Dynamic accent changed: {seed:?}");
+}
+
+/// Whether the accent currently follows the playing cover.
+#[inline]
+pub(crate) fn dynamic_accent_active() -> bool {
+    DUAL_THEME.load().seed.is_some()
 }
 
 /// The cover-derived accent laid over the theme, if any.
 #[cfg(test)]
 pub(crate) fn dynamic_accent_seed() -> Option<AccentSeed> {
-    *DYNAMIC_ACCENT.lock()
+    DUAL_THEME.load().seed
 }
 
 /// Get the active mode's visualizer colors (hex strings).

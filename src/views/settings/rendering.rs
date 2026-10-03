@@ -777,9 +777,9 @@ fn hotkey_idle_badge<'a>(
     opacity: f32,
 ) -> Element<'a, SettingsMessage> {
     let badge_size = font_size * 0.92;
-    let bg = scale_alpha_local(theme::accent_bright(), opacity);
+    let bg = scale_alpha_local(theme::accent_fill(), opacity);
     let border = bg;
-    let text_color = scale_alpha_local(theme::bg0_hard(), opacity);
+    let text_color = scale_alpha_local(theme::on_accent_fill(), opacity);
 
     const MIN_WIDTH: f32 = 96.0;
 

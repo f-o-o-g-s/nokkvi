@@ -1,7 +1,7 @@
 //! Shared geometry + color recipe for the menu-style checkbox glyph.
 //!
-//! The glyph is a filled `accent_bright()` rounded square with a centered
-//! `check.svg` in `bg0()` when checked, and an outlined 1.5 px `fg2()` rounded
+//! The glyph is a filled `accent_fill()` rounded square with a centered
+//! `check.svg` in `on_accent_fill()` when checked, and an outlined 1.5 px `fg2()` rounded
 //! square (transparent fill) when unchecked. Three menu sites render it:
 //!
 //! - [`element`] — composed-`Element` adapter used by `checkbox_dropdown.rs`
@@ -68,24 +68,24 @@ pub(crate) const CHECK_SVG_PATH: &str = "assets/icons/check.svg";
 /// through it so the checked/unchecked recipe lives at exactly one site.
 #[derive(Clone, Copy)]
 struct Palette {
-    /// Box fill: `accent_bright()` checked, transparent unchecked.
+    /// Box fill: `accent_fill()` checked, transparent unchecked.
     fill: Color,
-    /// Box outline: `accent_bright()` checked (0 px), `fg2()` unchecked.
+    /// Box outline: `accent_fill()` checked (0 px), `fg2()` unchecked.
     border: Color,
     /// Outline width: 0 checked, [`BORDER_WIDTH`] unchecked.
     border_width: f32,
-    /// Centered check tint: `bg0()` checked, transparent unchecked (unused
-    /// when unchecked — no check is drawn).
+    /// Centered check tint: `on_accent_fill()` checked, transparent unchecked
+    /// (unused when unchecked — no check is drawn).
     check_tint: Color,
 }
 
 fn palette(checked: bool) -> Palette {
     if checked {
         Palette {
-            fill: theme::accent_bright(),
-            border: theme::accent_bright(),
+            fill: theme::accent_fill(),
+            border: theme::accent_fill(),
             border_width: 0.0,
-            check_tint: theme::bg0(),
+            check_tint: theme::on_accent_fill(),
         }
     } else {
         Palette {
@@ -230,12 +230,15 @@ mod tests {
     }
 
     #[test]
-    fn palette_checked_fills_accent_and_tints_bg0() {
+    fn palette_checked_fills_accent_and_tints_its_ink() {
+        // Reads the live accent twice; hold the theme lock so a dynamic-accent
+        // test cannot swap it in between.
+        let _guard = theme::THEME_MODE_LOCK.lock();
         let p = palette(true);
         assert_eq!(p.border_width, 0.0);
-        assert_eq!(p.fill, theme::accent_bright());
-        assert_eq!(p.border, theme::accent_bright());
-        assert_eq!(p.check_tint, theme::bg0());
+        assert_eq!(p.fill, theme::accent_fill());
+        assert_eq!(p.border, theme::accent_fill());
+        assert_eq!(p.check_tint, theme::on_accent_fill());
     }
 
     #[test]

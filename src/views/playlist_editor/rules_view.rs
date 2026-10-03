@@ -1412,7 +1412,7 @@ fn date_nav_button<'a>(glyph: &'a str, msg: Message) -> Element<'a, Message> {
 /// Enter commits; `today` = a thin accent ring when it isn't the focused day.
 fn day_cell<'a>(day: u32, focused: bool, today: bool, w: f32, h: f32) -> Element<'a, Message> {
     let label_color = if focused {
-        theme::bg0_hard()
+        theme::on_accent_fill()
     } else {
         theme::fg0()
     };
@@ -1427,7 +1427,7 @@ fn day_cell<'a>(day: u32, focused: bool, today: bool, w: f32, h: f32) -> Element
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .style(move |_t| iced::widget::container::Style {
-        background: focused.then(|| theme::accent_bright().into()),
+        background: focused.then(|| theme::accent_fill().into()),
         border: iced::Border {
             color: if today && !focused {
                 theme::accent()
@@ -1642,12 +1642,12 @@ fn pane_divider<'a>() -> Element<'a, Message> {
 /// A Trawl-tray-style labeled chip on the canonical clickable-cell chassis.
 fn chip<'a>(label: &str, accent: bool, on_press: Message) -> Element<'a, Message> {
     let color = if accent {
-        theme::bg0_hard()
+        theme::on_accent_fill()
     } else {
         theme::fg1()
     };
     let bg = if accent {
-        theme::accent_bright()
+        theme::accent_fill()
     } else {
         theme::bg1()
     };

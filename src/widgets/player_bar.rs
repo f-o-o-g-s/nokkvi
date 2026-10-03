@@ -730,14 +730,14 @@ fn transport_button_style(
         // `ui_radius_pill()` returns `0.0.into()` in flat mode.
         let radius = theme::ui_radius_pill_player();
         let background = if active {
-            Some(theme::accent_bright().into())
+            Some(theme::accent_fill().into())
         } else {
             None
         };
         button::Style {
             background,
             text_color: if active {
-                theme::bg0_hard()
+                theme::on_accent_fill()
             } else {
                 theme::fg0()
             },
@@ -751,7 +751,7 @@ fn transport_button_style(
 }
 
 /// Style for a 1px-bordered mode toggle (idle = `bg0()` fill with `border()`
-/// outline; active = `accent_bright()` fill + `bg0_hard()` text). Hover/press
+/// outline; active = `accent_fill()` fill + `on_accent_fill()` text). Hover/press
 /// feedback is owned by the wrapping `HoverOverlay` (the accent-wash helpers),
 /// matching the nav-bar convention — this style encodes only active-vs-idle.
 /// Rounded mode applies `ui_radius_sm()`.
@@ -761,9 +761,9 @@ fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button:
         let radius = theme::ui_radius_sm_player();
         let (bg, fg, border_color) = if active {
             (
-                theme::accent_bright(),
-                theme::bg0_hard(),
-                theme::accent_bright(),
+                theme::accent_fill(),
+                theme::on_accent_fill(),
+                theme::accent_fill(),
             )
         } else {
             // Idle `bg0()` fill in every state; hover is the overlay's job.
@@ -924,7 +924,7 @@ fn mode_toggle_button<'a>(
     let icon_color = if !enabled {
         theme::fg4()
     } else if active {
-        theme::bg0_hard()
+        theme::on_accent_fill()
     } else {
         theme::fg0()
     };
@@ -1196,7 +1196,7 @@ pub(crate) fn player_bar<'a>(
             ("assets/icons/play.svg", PlayerBarMessage::Play)
         };
         let middle_icon_color = if middle_active {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg0()
         };

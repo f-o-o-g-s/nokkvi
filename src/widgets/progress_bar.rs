@@ -1,7 +1,7 @@
 //! Custom Progress Bar Widget with flat styling and drag-to-seek
 //!
 //! Flat-design progress bar:
-//! - 6 px thin track (`theme::bg2()` fill) with `accent_bright()` progress fill
+//! - 6 px thin track (`theme::bg2()` fill) with `accent_fill()` progress fill
 //! - 14 px square (flat) / pill (rounded) handle with 1 px `bg0_hard()` border
 //! - Click-on-track jumps to position, drag-handle seeks
 //! - Seek tooltip drawn via `overlay()` for proper z-ordering
@@ -424,7 +424,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                     },
                     ..Default::default()
                 },
-                crate::theme::accent_bright(),
+                crate::theme::accent_fill(),
             );
         }
 
@@ -453,7 +453,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                         },
                         ..Default::default()
                     },
-                    crate::theme::accent_bright(),
+                    crate::theme::accent_fill(),
                 );
             });
         }
@@ -477,7 +477,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             const PAD: f32 = 10.0;
             /// Codec / bitrate opacity relative to the time — reads as secondary.
             const META_ALPHA: f32 = 0.6;
-            let on_fill = crate::theme::bg0_hard();
+            let on_fill = crate::theme::on_accent_fill();
             let on_track = crate::theme::fg1();
             let dim = |c: iced::Color| iced::Color {
                 a: c.a * META_ALPHA,

@@ -22,7 +22,7 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
             .width(13)
             .height(13)
             .style(|_, _| iced::widget::svg::Style {
-                color: Some(theme::danger_bright()),
+                color: Some(theme::love_color()),
             });
         items.push(
             iced::widget::row![
@@ -55,7 +55,7 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
                     .width(13)
                     .height(13)
                     .style(|_, _| iced::widget::svg::Style {
-                        color: Some(theme::star_bright()),
+                        color: Some(theme::rating_color()),
                     }),
             );
         }

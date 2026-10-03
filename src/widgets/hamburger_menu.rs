@@ -173,17 +173,17 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
         let bounds = layout.bounds();
 
-        // Open = `accent_bright()` filled chrome with `bg0_hard()` icon
+        // Open = `accent_fill()` filled chrome with `on_accent_fill()` icon
         // (matches the active-nav-tab visual); idle = `bg0_hard()` chrome
         // with `fg0()` icon. Hover comes from `HoverOverlay` at the call
         // site so this widget only renders open-vs-idle.
         let bg_color = if self.is_open {
-            theme::accent_bright()
+            theme::accent_fill()
         } else {
             theme::bg0_hard()
         };
         let icon_color = if self.is_open {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg0()
         };

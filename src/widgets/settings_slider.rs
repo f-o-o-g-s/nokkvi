@@ -213,7 +213,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
             track_color,
         );
 
-        let fill_color = apply_alpha(crate::theme::accent_bright(), self.opacity);
+        let fill_color = apply_alpha(crate::theme::accent_fill(), self.opacity);
         let fill_width = (handle_x - bounds.x + HANDLE_SIZE / 2.0).clamp(0.0, bounds.width);
         if fill_width > 0.0 {
             renderer.fill_quad(

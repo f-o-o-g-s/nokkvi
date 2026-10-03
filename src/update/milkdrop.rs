@@ -692,13 +692,7 @@ impl Nokkvi {
     /// than keeping the previous album's; the same owner whose art was merely
     /// evicted from the cache keeps what it has.
     fn milkdrop_cover_tasks(&mut self) -> Vec<Task<Message>> {
-        use iced::widget::image::Handle;
-        // Generic so the handle's (unnameable, refcounted) byte type clones
-        // cheaply into the blocking task.
-        enum Job<B> {
-            Bytes(B),
-            Rgba(u32, u32, Vec<u8>),
-        }
+        use crate::update::components::cover_job::cover_job;
         let mut tasks = Vec::new();
         let Some(cover) = self.playing_cover() else {
             return tasks;
@@ -713,16 +707,9 @@ impl Nokkvi {
         let job = handle.map(|h| {
             (
                 h.id(),
-                match h {
-                    Handle::Bytes(_, bytes) => Some(Job::Bytes(bytes.clone())),
-                    Handle::Rgba {
-                        width,
-                        height,
-                        pixels,
-                        ..
-                    } => Some(Job::Rgba(*width, *height, pixels.to_vec())),
-                    Handle::Path(..) => None,
-                },
+                cover_job(h, decode_cover, |width, height, pixels| {
+                    cover_from_rgba(width, height, pixels.to_vec())
+                }),
             )
         });
 
@@ -748,14 +735,11 @@ impl Nokkvi {
                 self.milkdrop.cover_pending_owner = Some(owner);
                 tasks.push(Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || match job {
-                            Job::Bytes(bytes) => decode_cover(&bytes),
-                            Job::Rgba(w, h, pixels) => cover_from_rgba(w, h, pixels),
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(Arc::new)
+                        tokio::task::spawn_blocking(job)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(Arc::new)
                     },
                     move |result| {
                         Message::Milkdrop(MilkdropMessage::CoverDecoded { source, result })

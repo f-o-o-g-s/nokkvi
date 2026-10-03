@@ -204,7 +204,7 @@ pub(crate) fn view_header<
                             .width(Length::Fixed(GRIP_WIDTH))
                             .height(Length::Fixed(GRIP_HEIGHT))
                             .style(|_| container::Style {
-                                background: Some(theme::accent_bright().into()),
+                                background: Some(theme::accent_fill().into()),
                                 border: iced::Border {
                                     radius: (GRIP_HEIGHT / 2.0).into(),
                                     ..Default::default()
@@ -404,8 +404,8 @@ pub(crate) fn view_header<
                 width: 1.0,
                 radius: 0.0.into(),
             },
-            selected_text_color: theme::bg0_hard(),
-            selected_background: theme::accent_bright().into(),
+            selected_text_color: theme::on_accent_fill(),
+            selected_background: theme::accent_fill().into(),
             shadow: iced::Shadow::default(),
         });
         // Auto-hide: opening the dropdown keeps the toolbar revealed while the

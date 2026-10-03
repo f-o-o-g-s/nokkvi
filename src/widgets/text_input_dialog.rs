@@ -584,15 +584,16 @@ fn dialog_checkbox_style(_theme: &iced::Theme, status: checkbox::Status) -> chec
     );
     checkbox::Style {
         background: if is_checked {
-            theme::accent().into()
+            theme::accent_fill_calm().into()
         } else {
             theme::bg0_soft().into()
         },
-        // The check mark sits on the accent fill, so it takes that fill's ink.
-        icon_color: theme::legible_text_on(theme::accent()),
+        // The check mark sits on the accent fill, so it takes that fill's own
+        // legible ink (black or white), on static themes too.
+        icon_color: theme::legible_text_on(theme::accent_fill_calm()),
         border: iced::Border {
             color: if is_checked {
-                theme::accent_bright()
+                theme::accent_fill()
             } else {
                 theme::bg3()
             },
@@ -647,8 +648,8 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 width: 2.0,
                 radius: theme::ui_border_radius(),
             },
-            selected_text_color: theme::bg0_hard(),
-            selected_background: theme::accent_bright().into(),
+            selected_text_color: theme::on_accent_fill(),
+            selected_background: theme::accent_fill().into(),
             shadow: iced::Shadow::default(),
         });
 

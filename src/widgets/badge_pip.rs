@@ -47,7 +47,7 @@ pub(crate) const BADGE_INSET: f32 = 5.0;
 
 /// Draw an accent-bright pip in the top-right corner of `trigger_bounds`.
 ///
-/// The pip is a filled circle (`accent_bright()`) with a 1 px hairline
+/// The pip is a filled circle (`accent_fill()`) with a 1 px hairline
 /// border in `bg0_hard()` — the hairline keeps the dot visible against
 /// either the idle bg0-hard chrome or the open-state accent-bright
 /// chrome.
@@ -77,6 +77,6 @@ pub(crate) fn draw_badge_pip(renderer: &mut iced::Renderer, trigger_bounds: Rect
             },
             ..Default::default()
         },
-        theme::accent_bright(),
+        theme::accent_fill(),
     );
 }

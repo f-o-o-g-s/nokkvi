@@ -220,9 +220,9 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         // matches the surrounding player bar buttons after the flat redesign.
         let (bg_color, glyph_color, outline) = if self.is_open {
             (
-                theme::accent_bright(),
-                theme::bg0_hard(),
-                theme::accent_bright(),
+                theme::accent_fill(),
+                theme::on_accent_fill(),
+                theme::accent_fill(),
             )
         } else {
             (theme::bg0(), theme::fg1(), theme::border())

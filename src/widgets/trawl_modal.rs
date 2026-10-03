@@ -727,8 +727,8 @@ fn tray_pick_list_menu_style() -> iced::widget::overlay::menu::Style {
             width: 1.0,
             radius: theme::ui_border_radius(),
         },
-        selected_text_color: theme::bg0_hard(),
-        selected_background: theme::accent_bright().into(),
+        selected_text_color: theme::on_accent_fill(),
+        selected_background: theme::accent_fill().into(),
         shadow: iced::Shadow::default(),
     }
 }
@@ -984,25 +984,25 @@ fn render_tray<'a>(
                 .size(13.0)
                 .font(theme::weighted_ui_font(Weight::Bold))
                 .wrapping(text::Wrapping::None)
-                .color(theme::bg0_hard()),
+                .color(theme::on_accent_fill()),
         )
         .padding([5, 16])
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(if empty {
                 theme::bg3().into()
             } else {
-                theme::accent().into()
+                theme::accent_fill_calm().into()
             }),
             text_color: if empty {
                 theme::fg4()
             } else {
-                theme::bg0_hard()
+                theme::on_accent_fill()
             },
             border: Border {
                 color: if empty {
                     theme::bg3()
                 } else {
-                    theme::accent_border_light()
+                    theme::accent_fill()
                 },
                 width: 1.0,
                 radius: theme::ui_radius_sm(),

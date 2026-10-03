@@ -248,10 +248,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         // floats directly on the nav-bar chrome, matching the idle
         // nav-tab treatment (transparent) instead of looking like a
         // distinct pill button. Open state still fills with
-        // `accent_bright()` so the active-popover affordance reads the
+        // `accent_fill()` so the active-popover affordance reads the
         // same as an active nav tab.
         let fg_color = if self.is_open {
-            theme::bg0_hard()
+            theme::on_accent_fill()
         } else {
             theme::fg0()
         };
@@ -266,7 +266,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
                     },
                     ..Default::default()
                 },
-                theme::accent_bright(),
+                theme::accent_fill(),
             );
         }
 

@@ -11,12 +11,10 @@ use iced::{Task, advanced::image::Id, widget::image::Handle};
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, Message},
-    state::ARTLESS_HOLD_TICKS,
+    state::ACCENT_HOLD_TICKS,
     theme::{self, AccentSeed},
+    update::components::cover_job::{CoverJob, cover_job},
 };
-
-/// The off-thread read of one cover.
-type SeedJob = Box<dyn FnOnce() -> Option<AccentSeed> + Send>;
 
 /// What one tick decided, worked out while the artwork caches are borrowed.
 enum Step {
@@ -25,31 +23,9 @@ enum Step {
     /// A remembered seed for this item: show it.
     Show(Id, Option<AccentSeed>),
     /// Read this handle off-thread; `None` when it holds nothing to decode.
-    Extract(Id, Option<SeedJob>),
+    Extract(Id, Option<CoverJob<AccentSeed>>),
     /// A newly playing item with no artwork cached (yet).
     Artless,
-}
-
-/// The job that reads `handle`'s seed. A path handle has no pixels in memory.
-fn seed_job(handle: &Handle) -> Option<SeedJob> {
-    match handle {
-        Handle::Bytes(_, bytes) => {
-            let bytes = bytes.clone();
-            Some(Box::new(move || theme::seed_from_encoded(&bytes)))
-        }
-        Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        } => {
-            let (width, height, pixels) = (*width, *height, pixels.clone());
-            Some(Box::new(move || {
-                theme::seed_from_rgba(width, height, &pixels)
-            }))
-        }
-        Handle::Path(..) => None,
-    }
 }
 
 impl Nokkvi {
@@ -58,12 +34,23 @@ impl Nokkvi {
     ///
     /// Gated on the transport (`playing || paused`), like the lyrics overlay:
     /// the current song survives a stop and is seeded from the restored queue
-    /// at login, and a stopped player wears the theme's own accent.
+    /// at login, and a stopped player wears the theme's own accent. A stop is
+    /// held for [`ACCENT_HOLD_TICKS`] first, since a skip can pass through a
+    /// stopped state between two tracks.
     pub(crate) fn dynamic_accent_tick(&mut self) -> Task<Message> {
-        if !self.settings.dynamic_accent || !self.playback.has_track() {
+        if !self.settings.dynamic_accent {
             self.dynamic_accent_release();
             return Task::none();
         }
+        if !self.playback.has_track() {
+            let state = &mut self.dynamic_accent;
+            state.idle_ticks = state.idle_ticks.saturating_add(1);
+            if state.idle_ticks > ACCENT_HOLD_TICKS {
+                self.dynamic_accent_release();
+            }
+            return Task::none();
+        }
+        self.dynamic_accent.idle_ticks = 0;
         let Some(cover) = self.playing_cover() else {
             self.dynamic_accent_release();
             return Task::none();
@@ -96,7 +83,10 @@ impl Nokkvi {
                 {
                     Step::Keep
                 } else {
-                    Step::Extract(handle.id(), seed_job(handle))
+                    Step::Extract(
+                        handle.id(),
+                        cover_job(handle, theme::seed_from_encoded, theme::seed_from_rgba),
+                    )
                 }
             }
             // The same item whose art was merely evicted keeps what it has.
@@ -104,7 +94,6 @@ impl Nokkvi {
             None => Step::Artless,
         };
         let owner = cover.owner;
-        let album = cover.album_id.map(str::to_string);
 
         let state = &mut self.dynamic_accent;
         match step {
@@ -141,27 +130,21 @@ impl Nokkvi {
                 Task::none()
             }
             Step::Artless => {
+                // Playback warms the playing album's 80 px cover on every
+                // song change (`now_playing_artwork_to_warm`), so this only
+                // waits for it; with no cover at all, the hold runs out.
                 let ticks = match &state.waiting {
                     Some((waiting, ticks)) if *waiting == owner => ticks.saturating_add(1),
                     _ => 1,
                 };
-                // Nothing loads the playing album's cover outside the Queue
-                // and Theater Mode; ask for it once.
-                let request =
-                    album.filter(|a| !a.is_empty() && state.art_requested.as_ref() != Some(a));
-                if let Some(album) = &request {
-                    state.art_requested = Some(album.clone());
-                }
-                if ticks > ARTLESS_HOLD_TICKS {
+                if ticks > ACCENT_HOLD_TICKS {
                     state.waiting = None;
                     state.shown = Some((owner, None));
                     self.dynamic_accent_show(None);
                 } else {
                     state.waiting = Some((owner, ticks));
                 }
-                request.map_or_else(Task::none, |album| {
-                    Task::done(Message::Artwork(ArtworkMessage::LoadLarge(album)))
-                })
+                Task::none()
             }
         }
     }
@@ -206,7 +189,7 @@ impl Nokkvi {
         state.shown = None;
         state.pending = None;
         state.waiting = None;
-        state.art_requested = None;
+        state.idle_ticks = 0;
         self.dynamic_accent_show(None);
     }
 

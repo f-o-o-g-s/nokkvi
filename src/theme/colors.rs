@@ -77,6 +77,45 @@ pub(crate) fn accent_border_light() -> Color {
     read_color(|t| t.accent_border_light)
 }
 
+/// Loud accent for a FILLED surface: active nav tab, active mode toggle,
+/// selected pill, progress fill, checked box, the now-playing row. Equal to
+/// `accent_bright()` on every theme; the dynamic accent moves it closer to the
+/// cover, because a fill only has to stand out from the chrome while
+/// `accent_bright()` must also read as text. Pair it with
+/// [`on_accent_fill`] for anything drawn on top — never `bg0_hard()`.
+#[inline]
+pub(crate) fn accent_fill() -> Color {
+    read_color(|t| t.roles.map_or(t.accent_bright, |r| r.accent_fill))
+}
+
+/// Calm counterpart of [`accent_fill`] (a theme's `accent()`): pressed pills,
+/// the SFX slider, expanded-parent rows.
+#[inline]
+pub(crate) fn accent_fill_calm() -> Color {
+    read_color(|t| t.roles.map_or(t.accent, |r| r.accent_fill_calm))
+}
+
+/// Ink for text and icons on [`accent_fill`] / [`accent_fill_calm`]. A theme's
+/// `bg0_hard()`; under the dynamic accent, whatever clears 4.5:1 on both fills.
+#[inline]
+pub(crate) fn on_accent_fill() -> Color {
+    read_color(|t| t.roles.map_or(t.bg0_hard, |r| r.on_accent_fill))
+}
+
+/// Filled rating stars: the theme's `star_bright`, or the accent while it
+/// follows the cover (so stars match it instead of clashing with it).
+#[inline]
+pub(crate) fn rating_color() -> Color {
+    read_color(|t| t.roles.map_or(t.star_bright, |r| r.rating))
+}
+
+/// Filled love hearts: the theme's `danger_bright`, or the accent while it
+/// follows the cover.
+#[inline]
+pub(crate) fn love_color() -> Color {
+    read_color(|t| t.roles.map_or(t.danger_bright, |r| r.love))
+}
+
 // The now-playing and selected slot highlights are no longer per-theme stored
 // colors. They are derived from the live accent tokens with built-in contrast
 // guards — see the "Highlight-fill family" section below
@@ -123,15 +162,10 @@ pub(crate) fn warning() -> Color {
 pub(crate) fn warning_bright() -> Color {
     read_color(|t| t.warning_bright)
 }
-// Base `star()` accessor was retained alongside `star_bright()` for any
-// future surface that wanted both ends of the star ratings palette, but
-// only `star_bright()` is consumed (slot-list star renders + metadata
-// pills). Removed during the cleanup; `palette.star.base` still lives in
-// the TOML schema so existing themes round-trip without a migration.
-#[inline]
-pub(crate) fn star_bright() -> Color {
-    read_color(|t| t.star_bright)
-}
+// Stars render through `rating_color()` (the accent role section above):
+// a theme's `star_bright`, or the accent while it follows the cover. The base
+// `palette.star.base` still lives in the TOML schema so existing themes
+// round-trip without a migration.
 
 // ============================================================================
 // Chrome Border (1px hairline separators)
@@ -230,7 +264,7 @@ pub(crate) fn hover_tint() -> Color {
 }
 
 /// Hover/press pigment for a surface that is ALREADY filled with
-/// `accent_bright()` — active nav tabs and active player mode toggles.
+/// `accent_fill()` — active nav tabs and active player mode toggles.
 ///
 /// Depositing the accent wash there is a near-no-op (accent over accent), so
 /// these surfaces get a CONTRASTING neutral pull instead: whichever of
@@ -241,7 +275,7 @@ pub(crate) fn hover_tint() -> Color {
 /// [`HoverOverlay::on_accent_surface`] with their own active flag.
 #[inline]
 pub(crate) fn hover_tint_on_accent() -> Color {
-    let fill = accent_bright();
+    let fill = accent_fill();
     let (chrome, ink) = (bg0_hard(), fg0());
     if contrast_ratio(fill, chrome) >= contrast_ratio(fill, ink) {
         chrome
@@ -503,7 +537,7 @@ pub(super) fn resolve_highlight_fills(
 /// Now-playing / expanded-parent slot fill — derived, distinctness-resolved.
 #[inline]
 pub(crate) fn playing_fill() -> Color {
-    resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).0
+    resolve_highlight_fills(accent_fill_calm(), accent_fill(), bg0_hard()).0
 }
 
 /// Loud accent fill for the now-playing row and the drag-preview ghost —
@@ -512,7 +546,7 @@ pub(crate) fn playing_fill() -> Color {
 /// [`selection_ring_on`].)
 #[inline]
 pub(crate) fn selected_fill_resolved() -> Color {
-    resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).1
+    resolve_highlight_fills(accent_fill_calm(), accent_fill(), bg0_hard()).1
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@
 use iced::{Color, color::Oklch};
 
 use super::{LEGIBLE_TEXT_CONTRAST, SELECTION_RING_MIN_CONTRAST, contrast_ratio, legible_text_on};
-use crate::theme_config::{ResolvedDualTheme, ResolvedTheme};
+use crate::theme_config::{AccentRoles, ResolvedDualTheme, ResolvedTheme};
 
 // ============================================================================
 // Seed
@@ -51,7 +51,7 @@ impl AccentSeed {
 const FIT_HEADROOM: f32 = 0.1;
 /// Oklch lightness step of the walk away from the background.
 const LIGHTNESS_STEP: f32 = 0.005;
-/// Oklch lightness between `accent` and the louder `accent_bright`.
+/// Oklch lightness between a calm accent and its louder counterpart.
 const BRIGHT_STEP: f32 = 0.07;
 /// Lightest a seed may start on a dark palette / darkest on a light one. A
 /// near-white or near-black cover color has no room left for chroma, so it is
@@ -60,18 +60,25 @@ const BRIGHT_STEP: f32 = 0.07;
 const BAND_LIGHTEST: f32 = 0.92;
 const BAND_DARKEST: f32 = 0.28;
 
-/// The three accent tokens, fitted to one palette.
+/// Every accent token, fitted to one palette. Two shades of the cover: the
+/// TEXT shade (`accent`, `accent_bright`) also reads as small text on the
+/// chrome, so it sits further from the background; the FILL shade
+/// (`accent_fill*`) only has to stand out as a surface, so it stays closer to
+/// the cover's own color, and `on_accent_fill` is the ink that reads on it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct FittedAccent {
     pub accent: Color,
     pub accent_bright: Color,
     pub accent_border_light: Color,
+    pub accent_fill: Color,
+    pub accent_fill_calm: Color,
+    pub on_accent_fill: Color,
 }
 
-/// Whether `color` clears the accent floors of `palette`: body-text contrast
-/// against the tiers that carry accent text and accent-filled controls (`bg2`
-/// included — depth-2 slot rows put accent link text on it), and the
-/// UI-component floor against `bg3`, which carries only accent outlines.
+/// Whether `color` clears the TEXT floors of `palette`: body-text contrast
+/// against the tiers that carry accent text (`bg2` included — depth-2 slot
+/// rows put accent link text on it), and the UI-component floor against
+/// `bg3`, which carries only accent outlines.
 pub(super) fn clears_accent_floors(color: Color, palette: &ResolvedTheme) -> bool {
     let text = [
         palette.bg0_hard,
@@ -86,6 +93,26 @@ pub(super) fn clears_accent_floors(color: Color, palette: &ResolvedTheme) -> boo
         && raised
             .iter()
             .all(|bg| contrast_ratio(color, *bg) >= SELECTION_RING_MIN_CONTRAST + FIT_HEADROOM)
+}
+
+/// Lowest contrast a fill keeps against `bg2`. A fill there is the progress
+/// bar's elapsed part over its `bg2` track, or a row among depth-2 rows that
+/// also carries its own ring, so it needs to stay separate, not to read as a
+/// lone control. Holding it to the full 3:1 is what pushed a red cover to
+/// salmon on dark themes, `bg2` being the lightest tier.
+const FILL_ON_BG2_CONTRAST: f32 = 2.0;
+
+/// Whether `color` clears the FILL floor of `palette`: the WCAG non-text
+/// (UI-component) contrast against the tiers filled controls sit on (the
+/// nav and player bars, settings rows, depth-0/1 slot rows), so an active
+/// tab, a toggle or the now-playing row is always seen as one, and
+/// [`FILL_ON_BG2_CONTRAST`] against `bg2`. Text on the fill is not this
+/// floor's job — `on_accent_fill` is.
+pub(super) fn clears_fill_floor(color: Color, palette: &ResolvedTheme) -> bool {
+    [palette.bg0_hard, palette.bg0, palette.bg0_soft, palette.bg1]
+        .iter()
+        .all(|bg| contrast_ratio(color, *bg) >= SELECTION_RING_MIN_CONTRAST + FIT_HEADROOM)
+        && contrast_ratio(color, palette.bg2) >= FILL_ON_BG2_CONTRAST + FIT_HEADROOM
 }
 
 /// Whether an Oklch triple survives the trip through sRGB unclipped.
@@ -120,12 +147,78 @@ fn seed_color_at(seed: AccentSeed, l: f32) -> Color {
     })
 }
 
-/// Fit `seed` to one palette. The accent keeps the cover's hue and takes the
-/// lightness nearest the cover's own that clears [`clears_accent_floors`];
-/// `accent_bright` sits one [`BRIGHT_STEP`] further from the background, so
-/// "bright" always means "more contrast" in both modes.
+/// The seed's hue walked away from the background, from lightness `from`,
+/// to the nearest lightness where `clears` holds. Ends on pure black or white
+/// (whichever lies away from the background) when nothing in between does.
 ///
-/// When no lightness clears every floor (a palette whose tiers straddle
+/// Bisects rather than stepping: it runs on the UI thread for both palettes
+/// at every accent change and theme reload. Contrast against the background
+/// grows along the walk, so the boundary is found in a few probes; the result
+/// always satisfies `clears` (the bisection only ever keeps a passing end).
+fn walk(seed: AccentSeed, away: f32, from: f32, clears: impl Fn(Color) -> bool) -> (f32, Color) {
+    /// Lightness resolution of the bisection: 2^-12 of the remaining range.
+    const PROBES: usize = 12;
+    let from = from.clamp(0.0, 1.0);
+    let start = seed_color_at(seed, from);
+    if clears(start) {
+        return (from, start);
+    }
+    let end_l = if away > 0.0 { 1.0 } else { 0.0 };
+    let end = seed_color_at(seed, end_l);
+    if !clears(end) {
+        return (end_l, end);
+    }
+    let (mut failing, mut passing) = (from, end_l);
+    for _ in 0..PROBES {
+        let mid = f32::midpoint(failing, passing);
+        if clears(seed_color_at(seed, mid)) {
+            passing = mid;
+        } else {
+            failing = mid;
+        }
+    }
+    (passing, seed_color_at(seed, passing))
+}
+
+/// Lowest contrast `ink` reaches against any of `fills`.
+fn min_contrast(ink: Color, fills: &[Color]) -> f32 {
+    fills
+        .iter()
+        .map(|fill| contrast_ratio(ink, *fill))
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// The ink for text on both fills: the palette's own chrome background or
+/// text color when one reads (it keeps the theme's tint), else pure black or
+/// white, whichever reads better.
+fn fill_ink(palette: &ResolvedTheme, fills: &[Color]) -> Color {
+    let floor = LEGIBLE_TEXT_CONTRAST + FIT_HEADROOM / 2.0;
+    [palette.bg0_hard, palette.fg0]
+        .into_iter()
+        .find(|ink| min_contrast(*ink, fills) >= floor)
+        .unwrap_or_else(|| {
+            if min_contrast(Color::BLACK, fills) >= min_contrast(Color::WHITE, fills) {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            }
+        })
+}
+
+/// Fit `seed` to one palette, keeping the cover's hue throughout.
+///
+/// TEXT shade: `accent` takes the lightness nearest the cover's own that
+/// clears [`clears_accent_floors`]; `accent_bright` sits one [`BRIGHT_STEP`]
+/// further from the background, so "bright" always means "more contrast".
+///
+/// FILL shade: `accent_fill` takes the lightness nearest the cover's own that
+/// clears the looser [`clears_fill_floor`] — usually the cover's color itself
+/// — and `accent_fill_calm` sits one step nearer the background (or the loud
+/// fill one step further, when the floor leaves no room below it). The ink
+/// is chosen to read on both; when no single ink does (the two fills
+/// straddle mid-grey), the calm fill moves toward the loud one until one does.
+///
+/// When no lightness clears a floor (a palette whose tiers straddle
 /// mid-grey), the walk ends on pure black or white — whichever
 /// [`legible_text_on`] picks for `bg0_hard`, which is at least 4.58:1 there.
 pub(super) fn fit_accent(seed: AccentSeed, palette: &ResolvedTheme) -> FittedAccent {
@@ -135,45 +228,64 @@ pub(super) fn fit_accent(seed: AccentSeed, palette: &ResolvedTheme) -> FittedAcc
     } else {
         -1.0
     };
-    let walk = |from: f32| -> (f32, Color) {
-        let mut l = from.clamp(0.0, 1.0);
-        loop {
-            let color = seed_color_at(seed, l);
-            if clears_accent_floors(color, palette) {
-                return (l, color);
-            }
-            let next = l + away * LIGHTNESS_STEP;
-            if !(0.0..=1.0).contains(&next) {
-                let end = if away > 0.0 { 1.0 } else { 0.0 };
-                return (end, seed_color_at(seed, end));
-            }
-            l = next;
-        }
-    };
-
     let start = if away > 0.0 {
         seed.lightness.min(BAND_LIGHTEST - BRIGHT_STEP)
     } else {
         seed.lightness.max(BAND_DARKEST + BRIGHT_STEP)
     };
-    let (accent_l, accent) = walk(start);
-    let (_, accent_bright) = walk(accent_l + away * BRIGHT_STEP);
+
+    let text = |c: Color| clears_accent_floors(c, palette);
+    let (accent_l, accent) = walk(seed, away, start, text);
+    let (_, accent_bright) = walk(seed, away, accent_l + away * BRIGHT_STEP, text);
+
+    let fill = |c: Color| clears_fill_floor(c, palette);
+    let (cover_l, _) = walk(seed, away, start, fill);
+    let (mut calm_l, mut calm) = walk(seed, away, cover_l - away * BRIGHT_STEP, fill);
+    let loud_from = if away > 0.0 {
+        cover_l.max(calm_l + BRIGHT_STEP)
+    } else {
+        cover_l.min(calm_l - BRIGHT_STEP)
+    };
+    let (loud_l, loud) = walk(seed, away, loud_from, fill);
+    let mut ink = fill_ink(palette, &[calm, loud]);
+    while min_contrast(ink, &[calm, loud]) < LEGIBLE_TEXT_CONTRAST && calm_l != loud_l {
+        calm_l = if away > 0.0 {
+            (calm_l + LIGHTNESS_STEP).min(loud_l)
+        } else {
+            (calm_l - LIGHTNESS_STEP).max(loud_l)
+        };
+        calm = seed_color_at(seed, calm_l);
+        ink = fill_ink(palette, &[calm, loud]);
+    }
 
     FittedAccent {
         accent,
         accent_bright,
         accent_border_light: accent_bright,
+        accent_fill: loud,
+        accent_fill_calm: calm,
+        on_accent_fill: ink,
     }
 }
 
 /// Replace the accent tokens of both modes with `seed`, each fitted to its own
-/// backgrounds, so a light/dark toggle needs no refit.
+/// backgrounds, so a light/dark toggle needs no refit. Stars and hearts take
+/// the text shade, so they match the accent on the chrome rows instead of
+/// clashing with it (on the loud-fill rows they take the row's ink; see
+/// `slot_list`).
 pub(super) fn apply(seed: AccentSeed, theme: &mut ResolvedDualTheme) {
     for palette in [&mut theme.dark, &mut theme.light] {
         let fitted = fit_accent(seed, palette);
         palette.accent = fitted.accent;
         palette.accent_bright = fitted.accent_bright;
         palette.accent_border_light = fitted.accent_border_light;
+        palette.roles = Some(AccentRoles {
+            accent_fill: fitted.accent_fill,
+            accent_fill_calm: fitted.accent_fill_calm,
+            on_accent_fill: fitted.on_accent_fill,
+            rating: fitted.accent_bright,
+            love: fitted.accent_bright,
+        });
     }
 }
 
@@ -408,21 +520,128 @@ mod tests {
         }
     }
 
-    /// The now-playing and expanded-parent fills derive from the fitted pair
-    /// and must stay tellable apart, as the static themes' are.
+    /// The now-playing and expanded-parent fills derive from the fitted FILL
+    /// pair and must stay tellable apart, as the static themes' are.
     #[test]
     fn fitted_highlight_fills_stay_distinct() {
         for (name, mode, palette) in all_builtin_palettes() {
             for seed in seed_sweep() {
                 let fitted = fit_accent(seed, &palette);
-                let (play, sel) =
-                    resolve_highlight_fills(fitted.accent, fitted.accent_bright, palette.bg0_hard);
+                let (play, sel) = resolve_highlight_fills(
+                    fitted.accent_fill_calm,
+                    fitted.accent_fill,
+                    palette.bg0_hard,
+                );
                 let cr = contrast_ratio(play, sel);
                 assert!(
                     cr >= crate::theme::FILL_DISTINCT_CONTRAST - 1e-3,
                     "{name}/{mode} fills only {cr:.2}:1 apart for {seed:?}"
                 );
             }
+        }
+    }
+
+    /// Both fill shades stand out from every tier a filled control sits on,
+    /// on every shipped theme, whatever the cover.
+    #[test]
+    fn fills_clear_the_fill_floor_on_every_theme() {
+        for (name, mode, palette) in all_builtin_palettes() {
+            let mut seeds = seed_sweep();
+            seeds.push(AccentSeed::from_color(palette.bg0_hard));
+            for seed in seeds {
+                let fitted = fit_accent(seed, &palette);
+                for (token, fill) in [
+                    ("accent_fill", fitted.accent_fill),
+                    ("accent_fill_calm", fitted.accent_fill_calm),
+                ] {
+                    assert!(
+                        clears_fill_floor(fill, &palette),
+                        "{name}/{mode} {token} {fill:?} from {seed:?} blends into the chrome \
+                         (bg0_hard {:.2}:1, bg2 {:.2}:1)",
+                        contrast_ratio(fill, palette.bg0_hard),
+                        contrast_ratio(fill, palette.bg2),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The point of the split: text and icons on an accent fill (tab labels,
+    /// toggle glyphs, pill labels, the progress time) read on BOTH fills.
+    #[test]
+    fn fill_ink_reads_on_both_fills_on_every_theme() {
+        for (name, mode, palette) in all_builtin_palettes() {
+            let mut seeds = seed_sweep();
+            seeds.push(AccentSeed::from_color(palette.bg0_hard));
+            for seed in seeds {
+                let f = fit_accent(seed, &palette);
+                for (token, fill) in [
+                    ("accent_fill", f.accent_fill),
+                    ("accent_fill_calm", f.accent_fill_calm),
+                ] {
+                    let cr = contrast_ratio(f.on_accent_fill, fill);
+                    assert!(
+                        cr >= LEGIBLE_TEXT_CONTRAST,
+                        "{name}/{mode} ink {:?} on {token} {fill:?} only {cr:.2}:1 for {seed:?}",
+                        f.on_accent_fill
+                    );
+                }
+            }
+        }
+    }
+
+    /// The fill shade is the better match: it never moves further from the
+    /// cover's own lightness than the text shade does (beyond the one step
+    /// the calm fill may push it), and it keeps the cover's hue.
+    #[test]
+    fn the_fill_shade_stays_closer_to_the_cover() {
+        for (name, mode, palette) in all_builtin_palettes() {
+            let dark_bg = legible_text_on(palette.bg0_hard) == Color::WHITE;
+            for seed in seed_sweep() {
+                let f = fit_accent(seed, &palette);
+                let (fill, text) = (f.accent_fill.into_oklch(), f.accent.into_oklch());
+                // The lightness both fits aim at: the cover's own, pulled
+                // into the band where a hue still reads.
+                let aim = if dark_bg {
+                    seed.lightness.min(BAND_LIGHTEST - BRIGHT_STEP)
+                } else {
+                    seed.lightness.max(BAND_DARKEST + BRIGHT_STEP)
+                };
+                assert!(
+                    (fill.l - aim).abs() <= (text.l - aim).abs() + BRIGHT_STEP + 0.01,
+                    "{name}/{mode} fill drifted further than text for {seed:?}"
+                );
+                if fill.c > 0.05 && seed.chroma > 0.05 {
+                    let d = (fill.h - seed.hue).rem_euclid(std::f32::consts::TAU);
+                    let drift = d.min(std::f32::consts::TAU - d);
+                    assert!(drift < 0.15, "{name}/{mode} fill hue drifted {drift:.3}");
+                }
+            }
+        }
+    }
+
+    /// The case the owner flagged: a red cover's accent went salmon on dark
+    /// themes because it had to read as text. As a fill it stays red.
+    #[test]
+    fn a_red_cover_fills_red_on_dark_themes() {
+        let red = AccentSeed::from_color(rgb(0xd0, 0x28, 0x30));
+        for (name, mode, palette) in all_builtin_palettes() {
+            if legible_text_on(palette.bg0_hard) != Color::WHITE {
+                continue;
+            }
+            let f = fit_accent(red, &palette);
+            let (fill, text) = (f.accent_fill.into_oklch(), f.accent.into_oklch());
+            // Salmon is red lifted toward white: the fill must stay below
+            // the text shade's lightness, nearer the cover's own. How far
+            // below depends on the palette's lightest tier; on the default
+            // theme it is a clear step.
+            let gap = if name == "svalbard" { 0.05 } else { 0.01 };
+            assert!(
+                fill.l + gap <= text.l,
+                "{name}/{mode}: fill lightness {:.3} is as pale as text {:.3}",
+                fill.l,
+                text.l
+            );
         }
     }
 
@@ -448,6 +667,13 @@ mod tests {
                     assert!(
                         cr >= LEGIBLE_TEXT_CONTRAST,
                         "grey {grey} accent {color:?} only {cr:.2}:1"
+                    );
+                }
+                for fill in [fitted.accent_fill, fitted.accent_fill_calm] {
+                    let cr = contrast_ratio(fitted.on_accent_fill, fill);
+                    assert!(
+                        cr >= LEGIBLE_TEXT_CONTRAST,
+                        "grey {grey} fill ink only {cr:.2}:1 on {fill:?}"
                     );
                 }
             }
@@ -508,6 +734,10 @@ mod tests {
         for (before, after) in [(&base.dark, &themed.dark), (&base.light, &themed.light)] {
             assert_ne!(before.accent, after.accent);
             assert_ne!(before.accent_bright, after.accent_bright);
+            assert_eq!(before.roles, None, "a static theme derives its roles");
+            let roles = after.roles.expect("the overlay sets the roles");
+            assert_eq!(roles.rating, after.accent_bright, "stars follow the accent");
+            assert_eq!(roles.love, after.accent_bright, "hearts follow the accent");
             assert_eq!(before.bg0_hard, after.bg0_hard);
             assert_eq!(before.fg0, after.fg0);
             assert_eq!(before.danger, after.danger);
