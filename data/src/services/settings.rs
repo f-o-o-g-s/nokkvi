@@ -297,8 +297,15 @@ impl SettingsManager {
         }
         // [visualizer] is config.toml-only: a deleted/absent section resets
         // the in-memory config to defaults (matching the legacy
-        // load_visualizer_config hot-reload behavior).
-        self.visualizer = sections.visualizer.unwrap_or_default();
+        // load_visualizer_config hot-reload behavior). A section that is
+        // present but malformed keeps the current config, like the other
+        // three sections above.
+        if !sections
+            .malformed
+            .contains(&crate::services::toml_settings_io::TomlSection::Visualizer)
+        {
+            self.visualizer = sections.visualizer.unwrap_or_default();
+        }
         tracing::debug!(" [SETTINGS] Manager state hot-reloaded from config.toml");
     }
 
@@ -3318,6 +3325,24 @@ mod reload_tests {
             "a failed reload must not reset the visualizer"
         );
         assert_eq!(mgr.settings.player.seek_step_secs, 17);
+    }
+
+    /// A `[visualizer]` section that parses as TOML but not as a
+    /// `VisualizerConfig` (e.g. `opacity = "loud"`) also leaves the live
+    /// visualizer alone; it used to read as an absent section and reset it.
+    #[test]
+    fn reload_with_a_malformed_visualizer_section_keeps_the_visualizer() {
+        let (mut mgr, _tmp) = manager();
+        mgr.with_visualizer(|v| v.opacity = 0.4)
+            .expect("with_visualizer");
+        let visualizer_before = mgr.visualizer().clone();
+
+        mgr.apply_reloaded_sections(Ok(TomlSections {
+            malformed: vec![crate::services::toml_settings_io::TomlSection::Visualizer],
+            ..TomlSections::default()
+        }));
+
+        assert_eq!(*mgr.visualizer(), visualizer_before);
     }
 
     /// The counterpart that stays: a file that parses but has no

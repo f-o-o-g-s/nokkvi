@@ -79,6 +79,33 @@ pub fn read_toml_visualizer() -> Result<Option<VisualizerConfig>> {
 /// The per-section readers above each re-read and re-parse the whole file —
 /// fine for a single-section consumer, wasteful when the caller wants
 /// everything (SettingsManager startup phase 1 and `reload_from_toml`).
+/// The top-level config.toml sections `SettingsManager` loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TomlSection {
+    Settings,
+    Hotkeys,
+    Views,
+    Visualizer,
+}
+
+impl TomlSection {
+    /// The table name as it appears in config.toml.
+    pub fn table_name(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::Hotkeys => "hotkeys",
+            Self::Views => "views",
+            Self::Visualizer => "visualizer",
+        }
+    }
+}
+
+impl std::fmt::Display for TomlSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]", self.table_name())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct TomlSections {
     pub settings: Option<TomlSettings>,
@@ -92,6 +119,10 @@ pub struct TomlSections {
     pub views: Option<TomlViewPreferences>,
     /// Validated (range-clamped), same contract as [`read_toml_visualizer`].
     pub visualizer: Option<VisualizerConfig>,
+    /// Sections that are present but failed to deserialize (each already
+    /// warn-logged with its error). Their field above is `None`, which on its
+    /// own would read the same as an absent section.
+    pub malformed: Vec<TomlSection>,
 }
 
 /// Read config.toml once and extract all four sections. Returns all-`None`
@@ -112,29 +143,44 @@ pub fn read_all_toml_sections() -> Result<TomlSections> {
 /// SECTION degrades to `None` with a warn (matching how the manager treated
 /// a failed per-section reader) without poisoning its siblings.
 fn sections_from_value(doc: &toml::Value) -> TomlSections {
-    fn extract<T: serde::de::DeserializeOwned>(doc: &toml::Value, section: &str) -> Option<T> {
-        let value = doc.get(section)?;
+    fn extract<T: serde::de::DeserializeOwned>(
+        doc: &toml::Value,
+        section: TomlSection,
+        malformed: &mut Vec<TomlSection>,
+    ) -> Option<T> {
+        let value = doc.get(section.table_name())?;
         match value.clone().try_into() {
             Ok(v) => Some(v),
             Err(e) => {
-                tracing::warn!("Error deserializing [{section}] from config.toml: {e}");
+                tracing::warn!("Error deserializing {section} from config.toml: {e}");
+                malformed.push(section);
                 None
             }
         }
     }
 
-    let hotkeys = extract::<std::collections::BTreeMap<String, String>>(doc, "hotkeys")
-        .map(|map| HotkeyConfig::from_toml_map_reporting(&map));
+    let mut malformed = Vec::new();
+    let settings = extract::<TomlSettings>(doc, TomlSection::Settings, &mut malformed);
+    let hotkeys = extract::<std::collections::BTreeMap<String, String>>(
+        doc,
+        TomlSection::Hotkeys,
+        &mut malformed,
+    )
+    .map(|map| HotkeyConfig::from_toml_map_reporting(&map));
     let hotkeys_normalized = hotkeys.as_ref().is_some_and(|(_, changed)| *changed);
-    TomlSections {
-        settings: extract::<TomlSettings>(doc, "settings"),
-        hotkeys: hotkeys.map(|(config, _)| config),
-        hotkeys_normalized,
-        views: extract::<TomlViewPreferences>(doc, "views"),
-        visualizer: extract::<VisualizerConfig>(doc, "visualizer").map(|mut v| {
+    let views = extract::<TomlViewPreferences>(doc, TomlSection::Views, &mut malformed);
+    let visualizer =
+        extract::<VisualizerConfig>(doc, TomlSection::Visualizer, &mut malformed).map(|mut v| {
             v.validate();
             v
-        }),
+        });
+    TomlSections {
+        settings,
+        hotkeys: hotkeys.map(|(config, _)| config),
+        hotkeys_normalized,
+        views,
+        visualizer,
+        malformed,
     }
 }
 
@@ -407,6 +453,26 @@ mod tests {
             "malformed [settings] degrades to None"
         );
         assert_eq!(sections.visualizer.expect("visualizer").opacity, 0.5);
+        assert_eq!(sections.malformed, vec![super::TomlSection::Settings]);
+    }
+
+    /// A present-but-malformed section is reported, so the hot-reload can tell
+    /// it apart from an absent one (both leave the field `None`).
+    #[test]
+    fn sections_from_value_reports_malformed_sections_only() {
+        let absent: toml::Value = toml::from_str("[settings]\nstart_view = \"Queue\"\n").unwrap();
+        assert!(super::sections_from_value(&absent).malformed.is_empty());
+
+        let broken: toml::Value = toml::from_str(
+            "[visualizer]\nopacity = \"loud\"\n\n[views]\nalbums_ascending = \"yes\"\n",
+        )
+        .unwrap();
+        let sections = super::sections_from_value(&broken);
+        assert!(sections.visualizer.is_none());
+        assert_eq!(
+            sections.malformed,
+            vec![super::TomlSection::Views, super::TomlSection::Visualizer]
+        );
     }
 
     #[test]
