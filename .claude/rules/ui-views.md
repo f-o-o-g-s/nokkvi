@@ -154,7 +154,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Cross-cutt
 
 **`update/components/`** (directory module — `ls` it rather than trusting a list here) — shared action helpers:
 - `guard_play_action` — pre-play hook that transitions radio playback back to queue mode (never blocks)
-- `play_batch_task` / `play_batch_in_place_task` — queue-replacing batch plays (the second stays on the current view, for Similar); both run `guard_play_action` + `enter_new_playback_context` themselves
+- `play_batch_task` / `play_batch_in_place_task` — queue-replacing batch plays (the second stays on the current view, for Similar). They and `play_entity_task` go through `queue_play_task`, which runs `guard_play_action` + `enter_new_playback_context` and hands radio mode back when the play fails while the station still streams
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
 - `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)

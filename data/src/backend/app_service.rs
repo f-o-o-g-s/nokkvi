@@ -870,6 +870,13 @@ impl AppService {
         Ok(ids.len())
     }
 
+    /// Whether the engine's source is still `url`. A queue play that failed
+    /// before reaching the engine leaves a radio station streaming; the UI
+    /// checks this to hand radio mode back.
+    pub async fn engine_source_is(&self, url: &str) -> bool {
+        self.playback.engine_source_snapshot().await.0 == url
+    }
+
     /// PULL — fetch the server's saved queue, clamp the playhead against the
     /// actually-returned entries (the server silently drops library-missing
     /// ids), replace the local queue model, and cue the engine ("cue, don't

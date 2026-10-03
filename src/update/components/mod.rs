@@ -155,11 +155,18 @@ impl Nokkvi {
     /// the playback pointer within the existing queue (`PlaySong` inside the
     /// queue view) must NOT — doing so clears the loaded-playlist header.
     pub(crate) fn guard_play_action(&mut self) {
+        // Every call is a new play attempt: a failure of an older one must
+        // not hand radio mode back over it.
+        self.playback.play_attempt = self.playback.play_attempt.wrapping_add(1);
         // Never blocks: blocking would prevent ever resuming queue playback
         // while a radio stream is active. The engine stop is handled by the
-        // play action that follows.
-        if self.active_playback.is_radio() {
-            self.active_playback = crate::state::ActivePlayback::Queue;
+        // play action that follows, which is why the station is remembered:
+        // a play that fails before reaching the engine leaves it streaming
+        // (see `queue_play_task`).
+        if let crate::state::ActivePlayback::Radio(station) =
+            std::mem::take(&mut self.active_playback)
+        {
+            self.playback.station_left_for_play = Some(station);
         }
     }
 
@@ -252,9 +259,9 @@ impl Nokkvi {
     /// Play an entity by parsing an index string, looking up the item, and calling a shell method.
     /// Used by albums and artists (parse index → get ID → shell → SwitchView).
     ///
-    /// The play replaces the queue, so this runs the play prologue itself
-    /// ([`Self::guard_play_action`] + [`Self::enter_new_playback_context`]).
-    /// `items` reads the list after the prologue's `&mut self` borrow ends.
+    /// The play replaces the queue, so it goes through [`Self::queue_play_task`]
+    /// (play prologue + radio hand-back on failure). `items` borrows the list
+    /// only for the lookup, before that `&mut self` call.
     pub(crate) fn play_entity_task<T, F, Fut>(
         &mut self,
         items: impl FnOnce(&Self) -> &[T],
@@ -267,33 +274,65 @@ impl Nokkvi {
         F: FnOnce(nokkvi_data::backend::app_service::AppService, String) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
     {
+        let Some(id) = index_str
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| items(self).get(index))
+            .map(get_id)
+        else {
+            return Task::none();
+        };
+        debug!(" Playing {}: {}", entity_name, id);
+        self.queue_play_task(
+            move |shell| async move { play_fn(shell, id).await },
+            || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+            format!("Failed to play {entity_name}"),
+        )
+    }
+
+    /// A queue-replacing play: the play prologue
+    /// ([`Self::guard_play_action`] + [`Self::enter_new_playback_context`]),
+    /// the backend call, then `on_ok` or the `failure` toast. A play that
+    /// fails before reaching the engine leaves the station the guard switched
+    /// away from still streaming; the task checks the engine and, when that
+    /// station is still its source, hands radio mode back
+    /// ([`Self::queue_play_failure_message`]).
+    pub(crate) fn queue_play_task<F, Fut>(
+        &mut self,
+        play: F,
+        on_ok: impl FnOnce() -> Message + Send + 'static,
+        failure: String,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
+    {
         self.guard_play_action();
         self.enter_new_playback_context();
-        if let Ok(index) = index_str.parse::<usize>()
-            && let Some(item) = items(self).get(index)
-        {
-            let id = get_id(item);
-            debug!(" Playing {}: index {}", entity_name, index);
-            return self.shell_task(
-                move |shell| async move { play_fn(shell, id).await },
-                move |result| match result {
-                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    Err(e) => {
-                        if let Some(msg) = session_expired_message(&e) {
-                            return msg;
-                        }
-                        error!(" Failed to play {}: {}", entity_name, e);
-                        Message::Toast(crate::app_message::ToastMessage::Push(
-                            nokkvi_data::types::toast::Toast::new(
-                                format!("Failed to play {entity_name}: {e}"),
-                                nokkvi_data::types::toast::ToastLevel::Error,
-                            ),
-                        ))
-                    }
-                },
-            );
-        }
-        Task::none()
+        let attempt = self.playback.play_attempt;
+        let left_station_url = self
+            .playback
+            .station_left_for_play
+            .as_ref()
+            .map(|radio| radio.station.stream_url.clone());
+        self.shell_task(
+            move |shell| async move {
+                let result = play(shell.clone()).await;
+                let station_still_on = match (&result, left_station_url) {
+                    (Err(_), Some(url)) => shell.engine_source_is(&url).await,
+                    _ => false,
+                };
+                (result, station_still_on)
+            },
+            move |(result, station_still_on)| match result {
+                Ok(()) => on_ok(),
+                Err(e) => Self::queue_play_failure_message(
+                    &e,
+                    &failure,
+                    station_still_on.then_some(attempt),
+                ),
+            },
+        )
     }
 
     /// Add an entity to queue by parsing an index string, looking up the item, and calling a shell method.
@@ -1112,33 +1151,16 @@ impl Nokkvi {
         payload: nokkvi_data::types::batch::BatchPayload,
         force: bool,
     ) -> Task<Message> {
-        self.guard_play_action();
-        self.enter_new_playback_context();
         // Multi-select / context-menu batches are always unanchored (no clicked
         // track to pin), so resolve the one-shot directive centrally here — all
         // five library views then share a single force→shuffle contract.
         let shuffle = self.activate_shuffle_directive(force, false);
         let len = payload.items.len();
         debug!(" Playing batch of {} items (shuffle={:?})", len, shuffle);
-        self.shell_task(
+        self.queue_play_task(
             move |shell| async move { shell.play_batch(payload, shuffle).await },
-            move |result| match result {
-                Ok(()) => Message::Navigation(crate::app_message::NavigationMessage::SwitchView(
-                    crate::View::Queue,
-                )),
-                Err(e) => {
-                    if let Some(msg) = session_expired_message(&e) {
-                        return msg;
-                    }
-                    error!(" Failed to play batch: {}", e);
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to play batch: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
-                }
-            },
+            || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+            "Failed to play batch".to_string(),
         )
     }
 
@@ -1150,15 +1172,51 @@ impl Nokkvi {
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
     ) -> Task<Message> {
-        self.guard_play_action();
-        self.enter_new_playback_context();
         let len = payload.items.len();
         debug!(" Playing batch of {} items in place", len);
-        self.shell_fire_and_forget_task(
+        self.queue_play_task(
             move |shell| async move { shell.play_batch(payload, OneShotShuffle::None).await },
-            format!("Playing batch of {len} items"),
-            "play batch",
+            move || {
+                let label = format!("Playing batch of {len} items");
+                info!(" {}", label);
+                Message::Toast(crate::app_message::ToastMessage::PushThen(
+                    nokkvi_data::types::toast::Toast::new(
+                        label,
+                        nokkvi_data::types::toast::ToastLevel::Success,
+                    ),
+                    Box::new(Message::LoadQueue),
+                ))
+            },
+            "Failed to play batch".to_string(),
         )
+    }
+
+    /// Map a failed queue play to its error toast. `station_still_on`
+    /// carries the play's attempt when the station it switched away from is
+    /// still the engine's source; the toast is then followed by
+    /// `QueuePlayFailedOnStation`, which hands radio mode back.
+    pub(crate) fn queue_play_failure_message(
+        e: &anyhow::Error,
+        failure: &str,
+        station_still_on: Option<u64>,
+    ) -> Message {
+        if let Some(msg) = session_expired_message(e) {
+            return msg;
+        }
+        error!(" {failure}: {e}");
+        let toast = nokkvi_data::types::toast::Toast::new(
+            format!("{failure}: {e}"),
+            nokkvi_data::types::toast::ToastLevel::Error,
+        );
+        match station_still_on {
+            Some(attempt) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                toast,
+                Box::new(Message::Playback(
+                    crate::app_message::PlaybackMessage::QueuePlayFailedOnStation { attempt },
+                )),
+            )),
+            None => Message::Toast(crate::app_message::ToastMessage::Push(toast)),
+        }
     }
 
     /// Fold context-menu seeds into the Trawl crate, deduped by identity.

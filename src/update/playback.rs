@@ -2135,6 +2135,19 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// A queue play failed before it reached the engine, so the station it
+    /// switched away from is still streaming: hand radio mode back, unless a
+    /// newer play has started (it decides) or a station is already on.
+    pub(crate) fn handle_queue_play_failed_on_station(&mut self, attempt: u64) -> Task<Message> {
+        if attempt == self.playback.play_attempt
+            && self.active_playback.is_queue()
+            && let Some(station) = self.playback.station_left_for_play.take()
+        {
+            self.active_playback = crate::state::ActivePlayback::Radio(station);
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_prepare_next_for_gapless(&mut self) -> Task<Message> {
         if self.engine.gapless_preparing {
             return Task::none();
@@ -2752,6 +2765,9 @@ impl Nokkvi {
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
             PlaybackMessage::VolumeCommitted(val) => self.handle_volume_committed(val),
             PlaybackMessage::VolumeSaved(result) => self.handle_volume_saved(result),
+            PlaybackMessage::QueuePlayFailedOnStation { attempt } => {
+                self.handle_queue_play_failed_on_station(attempt)
+            }
             PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),
             PlaybackMessage::PlayerSettingsLoaded(settings) => {
                 self.handle_player_settings_loaded(*settings)

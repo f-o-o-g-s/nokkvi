@@ -138,6 +138,13 @@ pub struct PlaybackState {
     /// run warns (each later one would cover the "Volume: N%" readout); a
     /// successful save clears it.
     pub volume_save_failing: bool,
+    /// Bumped by every `guard_play_action`. A failed play hands radio mode
+    /// back only while it is still the latest attempt.
+    pub play_attempt: u64,
+    /// The station `guard_play_action` last switched away from, so a queue
+    /// play that fails while that station is still the engine's source can
+    /// hand radio mode back.
+    pub station_left_for_play: Option<RadioPlaybackState>,
     /// The last title successfully sent to PipeWire via IPC, to prevent redundant cross-thread FFI calls
     pub pw_last_title: Option<String>,
     /// Shared EQ state — gains and enabled flag. Read by audio thread, written by UI.
@@ -179,6 +186,8 @@ impl Default for PlaybackState {
             bitrate: 0,
             volume_persist_throttle: None,
             volume_save_failing: false,
+            play_attempt: 0,
+            station_left_for_play: None,
             pw_last_title: None,
             eq_state: nokkvi_data::audio::EqState::default(),
             bpm: None,

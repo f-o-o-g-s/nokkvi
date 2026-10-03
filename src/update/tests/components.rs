@@ -288,6 +288,111 @@ fn similar_replace_queue_with_all_found_leaves_radio() {
 }
 
 // ============================================================================
+// A failed queue play hands radio mode back while the station still streams
+// ============================================================================
+
+fn station_failure(app: &mut crate::Nokkvi, attempt: u64) {
+    let _ = app.update(crate::app_message::Message::Playback(
+        crate::app_message::PlaybackMessage::QueuePlayFailedOnStation { attempt },
+    ));
+}
+
+#[test]
+fn guard_remembers_the_station_it_leaves() {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    let before = app.playback.play_attempt;
+
+    app.guard_play_action();
+
+    assert_eq!(app.playback.play_attempt, before + 1);
+    assert_eq!(
+        app.playback
+            .station_left_for_play
+            .as_ref()
+            .map(|r| r.station.id.as_str()),
+        Some("r1")
+    );
+}
+
+#[test]
+fn failed_batch_play_on_a_live_station_restores_radio() {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
+    assert!(
+        app.active_playback.is_queue(),
+        "setup: the play left radio mode"
+    );
+
+    let attempt = app.playback.play_attempt;
+    station_failure(&mut app, attempt);
+
+    assert!(
+        app.active_playback.is_radio(),
+        "the play failed and the station never stopped, so radio mode comes back"
+    );
+}
+
+#[test]
+fn failed_play_restores_nothing_after_a_newer_play() {
+    // A newer play is in flight; its outcome, not the stale failure, decides.
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
+    let failed_attempt = app.playback.play_attempt;
+    app.guard_play_action();
+
+    station_failure(&mut app, failed_attempt);
+
+    assert!(app.active_playback.is_queue());
+}
+
+#[test]
+fn failed_play_keeps_a_station_started_since() {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
+    let attempt = app.playback.play_attempt;
+    let mut other = app
+        .playback
+        .station_left_for_play
+        .clone()
+        .expect("setup: the guard remembered the station");
+    other.station.id = "r2".into();
+    app.active_playback = crate::state::ActivePlayback::Radio(other);
+
+    station_failure(&mut app, attempt);
+
+    assert_eq!(
+        app.active_playback.radio_station().map(|s| s.id.as_str()),
+        Some("r2"),
+        "the station the user switched to stays"
+    );
+}
+
+#[test]
+fn queue_play_failure_hands_radio_back_only_when_the_station_is_still_on() {
+    use crate::app_message::{Message, PlaybackMessage, ToastMessage};
+
+    let e = anyhow::anyhow!("nothing to play");
+    match crate::Nokkvi::queue_play_failure_message(&e, "Failed to play batch", Some(7)) {
+        Message::Toast(ToastMessage::PushThen(toast, next)) => {
+            assert_eq!(toast.message, "Failed to play batch: nothing to play");
+            assert!(matches!(
+                *next,
+                Message::Playback(PlaybackMessage::QueuePlayFailedOnStation { attempt: 7 })
+            ));
+        }
+        other => panic!("expected the error toast, then the radio hand-back: {other:?}"),
+    }
+    assert!(matches!(
+        crate::Nokkvi::queue_play_failure_message(&e, "Failed to play batch", None),
+        Message::Toast(ToastMessage::Push(_))
+    ));
+}
+
+// ============================================================================
 // Queue replacements stop a running Songs progressive load
 // ============================================================================
 

@@ -234,6 +234,11 @@ pub enum PlaybackMessage {
     VolumeCommitted(f32),
     /// Result of persisting the volume from `VolumeChanged` / `VolumeCommitted`.
     VolumeSaved(Result<(), String>),
+    /// A queue play (play attempt `attempt`) failed while the station it
+    /// switched away from was still the engine's source.
+    QueuePlayFailedOnStation {
+        attempt: u64,
+    },
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb
