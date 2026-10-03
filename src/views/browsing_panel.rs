@@ -71,7 +71,7 @@ impl BrowsingPanel {
     /// the panel is closed via the Discard/Save flow instead.
     pub fn tab_bar(
         &self,
-        similar_label: Option<&str>,
+        similar_source: Option<&crate::state::SimilarSource>,
         is_editing: bool,
     ) -> Element<'_, BrowsingPanelMessage> {
         let tabs = BrowsingView::ALL
@@ -84,7 +84,10 @@ impl BrowsingPanel {
             .map(|&view| {
                 let mut label_str = view.label();
                 if view == BrowsingView::Similar
-                    && similar_label.is_some_and(|lbl| lbl.starts_with("Top Songs"))
+                    && matches!(
+                        similar_source,
+                        Some(crate::state::SimilarSource::TopSongs(_))
+                    )
                 {
                     label_str = "Top Songs";
                 }

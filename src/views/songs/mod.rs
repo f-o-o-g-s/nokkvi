@@ -153,8 +153,8 @@ pub enum SongsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowInFolder(String),  // relative path - open containing folder
     RefreshArtwork(String), // album_id - refresh artwork from server
-    FindSimilar(String, String), // (id, label) - Find similar to this song
-    TopSongs(String, String), // (artist, label) - Find top songs by artist
+    FindSimilar(String, String), // (id, title) - Find similar to this song
+    TopSongs(String),      // artist - Find top songs by artist
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album

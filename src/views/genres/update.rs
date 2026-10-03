@@ -306,10 +306,7 @@ impl GenresPage {
                                     let aid = album.artist.clone();
                                     (
                                         Task::none(),
-                                        GenresAction::FindSimilar(
-                                            aid,
-                                            format!("Similar to: {}", album.name),
-                                        ),
+                                        GenresAction::FindSimilar(aid, album.name.clone()),
                                     )
                                 }
                                 _ => (Task::none(), GenresAction::None),

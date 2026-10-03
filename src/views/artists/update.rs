@@ -322,16 +322,12 @@ impl ArtistsPage {
                                     Task::none(),
                                     ArtistsAction::FindSimilar(
                                         artist.id.clone(),
-                                        format!("Similar to: {}", artist.name),
-                                    ),
-                                ),
-                                LibraryContextEntry::TopSongs => (
-                                    Task::none(),
-                                    ArtistsAction::TopSongs(
                                         artist.name.clone(),
-                                        format!("Top Songs: {}", artist.name),
                                     ),
                                 ),
+                                LibraryContextEntry::TopSongs => {
+                                    (Task::none(), ArtistsAction::TopSongs(artist.name.clone()))
+                                }
                                 _ => (Task::none(), ArtistsAction::None),
                             },
                             Some(SlotListEntry::Child(album, _)) => match entry {
@@ -351,10 +347,7 @@ impl ArtistsPage {
                                     let aid = album.artist.clone();
                                     (
                                         Task::none(),
-                                        ArtistsAction::FindSimilar(
-                                            aid,
-                                            format!("Similar to: {}", album.name),
-                                        ),
+                                        ArtistsAction::FindSimilar(aid, album.name.clone()),
                                     )
                                 }
                                 _ => (Task::none(), ArtistsAction::None),

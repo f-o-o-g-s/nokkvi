@@ -524,11 +524,11 @@ impl Nokkvi {
             ArtistsAction::ShowSongInFolder(path) => {
                 return self.handle_show_in_folder(path);
             }
-            ArtistsAction::FindSimilar(id, label) => {
-                return Task::done(Message::Find(FindMessage::Similar { id, label }));
+            ArtistsAction::FindSimilar(id, seed_name) => {
+                return Task::done(Message::Find(FindMessage::Similar { id, seed_name }));
             }
-            ArtistsAction::TopSongs(artist_name, label) => {
-                return Task::done(Message::Find(FindMessage::TopSongs { artist_name, label }));
+            ArtistsAction::TopSongs(artist_name) => {
+                return Task::done(Message::Find(FindMessage::TopSongs { artist_name }));
             }
             ArtistsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

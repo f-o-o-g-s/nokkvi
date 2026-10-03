@@ -51,8 +51,8 @@ pub struct SimilarViewData<'a> {
     pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
-    /// Provenance label: "Similar to: Paranoid Android" or "Top Songs: Radiohead"
-    pub label: &'a str,
+    /// What the results were fetched for; `None` before any Find Similar.
+    pub source: Option<&'a crate::state::SimilarSource>,
     /// Whether an API call is in flight
     pub loading: bool,
     /// Whether artwork-elevation is in effect for this frame. Forwarded into
@@ -104,9 +104,10 @@ pub enum SimilarAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>),
     ShowInFolder(String),
     /// Recursive discovery: FindSimilar from within the similar results
+    /// (song id, song title)
     FindSimilar(String, String),
-    /// Top Songs for an artist, triggered from within similar results
-    FindTopSongs(String, String),
+    /// Top Songs for an artist (artist name), triggered from within similar results
+    FindTopSongs(String),
     /// User toggled a similar column's visibility — persist to config.toml.
     ColumnVisibilityChanged(SimilarColumn, bool),
     None,
@@ -258,10 +259,7 @@ impl SimilarPage {
                         ),
                         LibraryContextEntry::TopSongs => (
                             Task::none(),
-                            SimilarAction::FindTopSongs(
-                                song.artist.clone(),
-                                format!("Top Songs: {}", song.artist),
-                            ),
+                            SimilarAction::FindTopSongs(song.artist.clone()),
                         ),
                         LibraryContextEntry::AddToMix => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
@@ -295,12 +293,11 @@ impl SimilarPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: SimilarViewData<'a>) -> Element<'a, SimilarMessage> {
         // Replace custom header with standard view_header
-        let header_prefix = if data.label.is_empty() {
-            "similar to selected".to_string()
-        } else {
-            // "Similar to: Song Name"
-            data.label.to_lowercase()
-        };
+        let header_prefix = data.source.map_or_else(
+            || "similar to selected".to_string(),
+            // "similar to: song name"
+            |source| source.label().to_lowercase(),
+        );
 
         // We don't have sort mode options for Similar, we can pass an empty slice
         // to hide the sort dropdown entirely, and pass the header_prefix as the view title.
@@ -372,10 +369,9 @@ impl SimilarPage {
 
         // Loading state
         if data.loading && data.songs.is_empty() {
-            let loading_text = if data.label.starts_with("Top Songs") {
-                "Loading top songs…"
-            } else {
-                "Loading similar songs…"
+            let loading_text = match data.source {
+                Some(crate::state::SimilarSource::TopSongs(_)) => "Loading top songs…",
+                Some(crate::state::SimilarSource::SimilarTo(_)) | None => "Loading similar songs…",
             };
 
             return widgets::base_slot_list_empty_state(header, loading_text, &layout_config);
@@ -759,9 +755,8 @@ mod tests {
             &songs,
         );
         match action {
-            SimilarAction::FindTopSongs(artist, label) => {
+            SimilarAction::FindTopSongs(artist) => {
                 assert_eq!(artist, "Radiohead");
-                assert!(label.contains("Radiohead"));
             }
             other => panic!("expected FindTopSongs, got {other:?}"),
         }

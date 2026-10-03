@@ -188,7 +188,7 @@ fn get_info_similar_browser_tab_still_opens() {
     open_browser_pane(&mut app, BrowsingView::Similar);
     app.similar_songs = Some(crate::state::SimilarSongsState {
         songs: vec![similar_song("s1", "Similar One")],
-        label: "Similar to: Test".to_string(),
+        source: crate::state::SimilarSource::SimilarTo("Test".into()),
         loading: false,
     });
 

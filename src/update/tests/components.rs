@@ -276,7 +276,7 @@ fn similar_replace_queue_with_all_found_leaves_radio() {
     let mut app = radio_app_with_stale_context();
     app.similar_songs = Some(crate::state::SimilarSongsState {
         songs: vec![make_song("s1", "Song 1", "Artist").into()],
-        label: "Similar to: Song 0".into(),
+        source: crate::state::SimilarSource::SimilarTo("Song 0".into()),
         loading: false,
     });
 

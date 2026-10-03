@@ -175,8 +175,8 @@ pub enum ArtistsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),  // song path - open containing folder directly
-    FindSimilar(String, String), // (entity_id, label) - open similar tab
-    TopSongs(String, String),  // (artist_name, label) - open similar tab for top songs
+    FindSimilar(String, String), // (entity_id, seed_name) - open similar tab
+    TopSongs(String),          // artist_name - open similar tab for top songs
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     ColumnVisibilityChanged(ArtistsColumn, bool),

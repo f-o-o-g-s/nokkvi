@@ -67,7 +67,7 @@ fn play_count_increment_propagates_to_similar_songs() {
     song.play_count = Some(2);
     app.similar_songs = Some(crate::state::SimilarSongsState {
         songs: vec![song],
-        label: "Similar".to_string(),
+        source: crate::state::SimilarSource::SimilarTo("Song A".into()),
         loading: false,
     });
 

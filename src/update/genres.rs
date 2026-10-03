@@ -425,8 +425,8 @@ impl Nokkvi {
             GenresAction::PlayNextBatch(payload) => {
                 return self.play_next_batch_task(payload);
             }
-            GenresAction::FindSimilar(id, label) => {
-                return Task::done(Message::Find(FindMessage::Similar { id, label }));
+            GenresAction::FindSimilar(id, seed_name) => {
+                return Task::done(Message::Find(FindMessage::Similar { id, seed_name }));
             }
             GenresAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

@@ -156,7 +156,7 @@ pub enum GenresAction {
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     /// Add the resolved selection to the Trawl crate as labeled seeds.
     AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
-    FindSimilar(String, String), // (entity_id, label) - open similar tab
+    FindSimilar(String, String), // (entity_id, seed_name) - open similar tab
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String),   // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),    // song path - open containing folder directly

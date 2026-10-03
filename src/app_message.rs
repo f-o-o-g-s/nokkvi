@@ -643,15 +643,16 @@ pub enum NavigationMessage {
 /// the API response that populates the Similar tab.
 #[derive(Debug, Clone)]
 pub enum FindMessage {
-    /// Trigger "Find Similar" from any view — opens browsing panel, fires getSimilarSongs2.
-    Similar { id: String, label: String },
-    /// Trigger "Top Songs" from artists view — opens browsing panel, fires getTopSongs.
-    TopSongs { artist_name: String, label: String },
-    /// API response for similar/top songs (generation counter, result, label).
+    /// Trigger "Find Similar" from any view — opens browsing panel, fires
+    /// getSimilarSongs2. `seed_name` is the song/album/artist's display name.
+    Similar { id: String, seed_name: String },
+    /// Trigger "Top Songs" for an artist — opens browsing panel, fires getTopSongs.
+    TopSongs { artist_name: String },
+    /// API response for similar/top songs (generation counter, result, source).
     Loaded(
         u64,
         Result<Vec<nokkvi_data::types::song::Song>, String>,
-        String,
+        crate::state::SimilarSource,
     ),
 }
 
@@ -1638,12 +1639,12 @@ mod tests {
         // Similar trigger
         let msg = Message::Find(FindMessage::Similar {
             id: "song-42".into(),
-            label: "Similar to: Lorem".into(),
+            seed_name: "Lorem".into(),
         });
         match msg {
-            Message::Find(FindMessage::Similar { id, label }) => {
+            Message::Find(FindMessage::Similar { id, seed_name }) => {
                 assert_eq!(id, "song-42");
-                assert_eq!(label, "Similar to: Lorem");
+                assert_eq!(seed_name, "Lorem");
             }
             _ => panic!("expected Message::Find(FindMessage::Similar)"),
         }
@@ -1651,23 +1652,22 @@ mod tests {
         // TopSongs trigger
         let msg = Message::Find(FindMessage::TopSongs {
             artist_name: "Artist X".into(),
-            label: "Top Songs: Artist X".into(),
         });
         match msg {
-            Message::Find(FindMessage::TopSongs { artist_name, label }) => {
+            Message::Find(FindMessage::TopSongs { artist_name }) => {
                 assert_eq!(artist_name, "Artist X");
-                assert_eq!(label, "Top Songs: Artist X");
             }
             _ => panic!("expected Message::Find(FindMessage::TopSongs)"),
         }
 
         // Loaded API response (success path)
-        let msg = Message::Find(FindMessage::Loaded(7, Ok(Vec::new()), "label".into()));
+        let source = crate::state::SimilarSource::SimilarTo("Lorem".into());
+        let msg = Message::Find(FindMessage::Loaded(7, Ok(Vec::new()), source.clone()));
         match msg {
-            Message::Find(FindMessage::Loaded(generation, result, label)) => {
+            Message::Find(FindMessage::Loaded(generation, result, loaded_source)) => {
                 assert_eq!(generation, 7);
                 assert!(result.is_ok());
-                assert_eq!(label, "label");
+                assert_eq!(loaded_source, source);
             }
             _ => panic!("expected Message::Find(FindMessage::Loaded)"),
         }
@@ -1675,20 +1675,17 @@ mod tests {
 
     /// `FindMessage::Loaded` carries the error string through the sub-enum
     /// boundary unmodified — the renamed shape preserves the previous
-    /// `(generation, Result<_, String>, label)` payload of the old flat
+    /// `(generation, Result<_, String>, source)` payload of the old flat
     /// `Message::SimilarSongsLoaded` variant.
     #[test]
     fn find_message_loaded_carries_error_string() {
-        let msg = Message::Find(FindMessage::Loaded(
-            42,
-            Err("boom".into()),
-            "test-label".into(),
-        ));
+        let source = crate::state::SimilarSource::TopSongs("Artist X".into());
+        let msg = Message::Find(FindMessage::Loaded(42, Err("boom".into()), source.clone()));
         match msg {
-            Message::Find(FindMessage::Loaded(generation, Err(err), label)) => {
+            Message::Find(FindMessage::Loaded(generation, Err(err), loaded_source)) => {
                 assert_eq!(generation, 42);
                 assert_eq!(err, "boom");
-                assert_eq!(label, "test-label");
+                assert_eq!(loaded_source, source);
             }
             _ => panic!("expected Message::Find(FindMessage::Loaded(_, Err(_), _))"),
         }

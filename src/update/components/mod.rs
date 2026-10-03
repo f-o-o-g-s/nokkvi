@@ -1434,10 +1434,9 @@ impl Nokkvi {
             self.toast_warn("No track is currently playing");
             return Task::none();
         };
-        let title = self.playback.title.clone();
         Task::done(Message::Find(FindMessage::Similar {
             id: song_id,
-            label: format!("Similar to: {title}"),
+            seed_name: self.playback.title.clone(),
         }))
     }
 
@@ -1449,8 +1448,7 @@ impl Nokkvi {
             return Task::none();
         }
         Task::done(Message::Find(FindMessage::TopSongs {
-            artist_name: artist.clone(),
-            label: format!("Top Songs: {artist}"),
+            artist_name: artist,
         }))
     }
 

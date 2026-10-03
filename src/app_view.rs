@@ -2286,10 +2286,10 @@ impl Nokkvi {
 
             let browser_content: Element<'_, Message> = if let Some(ref panel) = self.browsing_panel
             {
-                let similar_label = self.similar_songs.as_ref().map(|s| s.label.as_str());
+                let similar_source = self.similar_songs.as_ref().map(|s| &s.source);
                 let is_editing = self.playlist_editor.is_some();
                 let tab_bar = panel
-                    .tab_bar(similar_label, is_editing)
+                    .tab_bar(similar_source, is_editing)
                     .map(Message::BrowsingPanel);
 
                 // Delegate to the active view's existing page. Each page's
@@ -2317,9 +2317,9 @@ impl Nokkvi {
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
                     views::BrowsingView::Similar => {
-                        let (songs, label, loading) = match self.similar_songs.as_ref() {
-                            Some(s) => (s.songs.as_slice(), s.label.as_str(), s.loading),
-                            None => (&[][..], "", false),
+                        let (songs, source, loading) = match self.similar_songs.as_ref() {
+                            Some(s) => (s.songs.as_slice(), Some(&s.source), s.loading),
+                            None => (&[][..], None, false),
                         };
                         let (column_dropdown_open, column_dropdown_trigger_bounds) =
                             similar_column_dropdown_state(&self.open_menu);
@@ -2333,7 +2333,7 @@ impl Nokkvi {
                             chrome,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
-                            label,
+                            source,
                             loading,
                             elevated: false,
                             overlay: views::OverlayMenuViewData {

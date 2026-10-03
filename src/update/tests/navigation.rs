@@ -1506,3 +1506,49 @@ fn albums_hotkey_get_info_ignores_another_albums_expanded_tracks() {
         "Shift+I on Album A must not point Show in Folder at expanded Album B's track"
     );
 }
+
+// ============================================================================
+// Similar tab header — every Find Similar names its seed the same way
+// ============================================================================
+
+#[test]
+fn songs_find_similar_header_names_the_song() {
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(1));
+
+    let _ = app.update(crate::app_message::Message::Songs(
+        crate::views::SongsMessage::ContextMenuAction(
+            0,
+            crate::widgets::context_menu::LibraryContextEntry::FindSimilar,
+        ),
+    ));
+
+    let state = app
+        .similar_songs
+        .as_ref()
+        .expect("Find Similar fills the Similar tab");
+    assert_eq!(state.source.label(), "Similar to: Song 0");
+}
+
+#[test]
+fn songs_top_songs_header_names_the_artist() {
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(1));
+
+    let _ = app.update(crate::app_message::Message::Songs(
+        crate::views::SongsMessage::ContextMenuAction(
+            0,
+            crate::widgets::context_menu::LibraryContextEntry::TopSongs,
+        ),
+    ));
+
+    let state = app
+        .similar_songs
+        .as_ref()
+        .expect("Top Songs fills the Similar tab");
+    assert_eq!(
+        state.source,
+        crate::state::SimilarSource::TopSongs("Artist".into())
+    );
+    assert_eq!(state.source.label(), "Top Songs: Artist");
+}

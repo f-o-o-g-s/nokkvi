@@ -384,7 +384,7 @@ impl AlbumsPage {
                                     Task::none(),
                                     AlbumsAction::FindSimilar(
                                         album.artist.clone(),
-                                        format!("Similar to: {}", album.name),
+                                        album.name.clone(),
                                     ),
                                 ),
                                 LibraryContextEntry::Separator => {
@@ -404,10 +404,7 @@ impl AlbumsPage {
                                 ),
                                 LibraryContextEntry::FindSimilar => (
                                     Task::none(),
-                                    AlbumsAction::FindSimilar(
-                                        song.id.clone(),
-                                        format!("Similar to: {}", song.title),
-                                    ),
+                                    AlbumsAction::FindSimilar(song.id.clone(), song.title.clone()),
                                 ),
                                 LibraryContextEntry::Separator => {
                                     (Task::none(), AlbumsAction::None)

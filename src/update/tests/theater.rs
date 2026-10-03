@@ -799,11 +799,11 @@ mod r1 {
         panel.active_view = crate::views::BrowsingView::Similar;
         app.browsing_panel = Some(panel);
         let _ = app.enter_theater();
-        let _ = app.handle_find_similar("id".into(), "label".into());
+        let _ = app.handle_find_similar("id".into(), "Seed".into());
         assert!(!app.theater.active, "the Similar results are shown");
 
         let _ = app.enter_theater();
-        let _ = app.handle_find_top_songs("artist".into(), "label".into());
+        let _ = app.handle_find_top_songs("artist".into());
         assert!(!app.theater.active);
     }
 

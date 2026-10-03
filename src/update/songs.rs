@@ -455,11 +455,11 @@ impl Nokkvi {
                     album_id,
                 )));
             }
-            SongsAction::FindSimilar(song_id, label) => {
-                return self.handle_find_similar(song_id, label);
+            SongsAction::FindSimilar(song_id, title) => {
+                return self.handle_find_similar(song_id, title);
             }
-            SongsAction::TopSongs(artist_name, label) => {
-                return self.handle_find_top_songs(artist_name, label);
+            SongsAction::TopSongs(artist_name) => {
+                return self.handle_find_top_songs(artist_name);
             }
             SongsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

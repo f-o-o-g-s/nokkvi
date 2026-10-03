@@ -697,8 +697,8 @@ impl Nokkvi {
                     album_id,
                 )));
             }
-            AlbumsAction::FindSimilar(id, label) => {
-                return Task::done(Message::Find(FindMessage::Similar { id, label }));
+            AlbumsAction::FindSimilar(id, seed_name) => {
+                return Task::done(Message::Find(FindMessage::Similar { id, seed_name }));
             }
             AlbumsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

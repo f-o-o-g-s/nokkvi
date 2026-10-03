@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 use crate::{
     Nokkvi,
     app_message::{FindMessage, Message},
-    state::SimilarSongsState,
+    state::{SimilarSongsState, SimilarSource},
     views::{BrowsingPanel, BrowsingView, SimilarAction, SimilarMessage},
 };
 
@@ -83,16 +83,13 @@ impl Nokkvi {
                 Task::none()
             }
             SimilarAction::ShowInFolder(path) => self.handle_show_in_folder(path),
-            SimilarAction::FindSimilar(id, title) => {
+            SimilarAction::FindSimilar(id, seed_name) => {
                 // Recursive discovery — find similar from within similar results
-                Task::done(Message::Find(FindMessage::Similar {
-                    id,
-                    label: format!("Similar to: {title}"),
-                }))
+                Task::done(Message::Find(FindMessage::Similar { id, seed_name }))
             }
-            SimilarAction::FindTopSongs(artist_name, label) => {
+            SimilarAction::FindTopSongs(artist_name) => {
                 // Top songs for artist — from within similar results
-                Task::done(Message::Find(FindMessage::TopSongs { artist_name, label }))
+                Task::done(Message::Find(FindMessage::TopSongs { artist_name }))
             }
             SimilarAction::ColumnVisibilityChanged(col, value) => {
                 self.persist_column_visibility(col, value)
@@ -110,19 +107,46 @@ impl Nokkvi {
     /// per-view interaction messages.
     pub(crate) fn handle_find_message(&mut self, msg: FindMessage) -> Task<Message> {
         match msg {
-            FindMessage::Similar { id, label } => self.handle_find_similar(id, label),
-            FindMessage::TopSongs { artist_name, label } => {
-                self.handle_find_top_songs(artist_name, label)
-            }
-            FindMessage::Loaded(generation, result, label) => {
-                self.handle_similar_songs_loaded(generation, result, label)
+            FindMessage::Similar { id, seed_name } => self.handle_find_similar(id, seed_name),
+            FindMessage::TopSongs { artist_name } => self.handle_find_top_songs(artist_name),
+            FindMessage::Loaded(generation, result, source) => {
+                self.handle_similar_songs_loaded(generation, result, source)
             }
         }
     }
 
     /// Handle "Find Similar" — opens browsing panel on Similar tab and fires API.
-    pub(crate) fn handle_find_similar(&mut self, id: String, label: String) -> Task<Message> {
+    /// `seed_name` is the song/album/artist's display name for the header.
+    pub(crate) fn handle_find_similar(&mut self, id: String, seed_name: String) -> Task<Message> {
         info!("🎵 Finding similar songs for id={}", id);
+        self.open_similar_results(
+            SimilarSource::SimilarTo(seed_name),
+            move |shell| async move {
+                let api = shell.similar_api().await?;
+                api.get_similar_songs(&id, 500).await
+            },
+        )
+    }
+
+    /// Handle "Top Songs" — opens browsing panel on Similar tab and fires API.
+    pub(crate) fn handle_find_top_songs(&mut self, artist_name: String) -> Task<Message> {
+        info!("🎵 Finding top songs for artist='{}'", artist_name);
+        let source = SimilarSource::TopSongs(artist_name.clone());
+        self.open_similar_results(source, move |shell| async move {
+            let api = shell.similar_api().await?;
+            api.get_top_songs(&artist_name, 500).await
+        })
+    }
+
+    /// Shared front half of Find Similar / Top Songs: show the Similar tab in
+    /// its loading state for `source`, then run `fetch` under a fresh
+    /// stale-drop generation.
+    fn open_similar_results<F, Fut>(&mut self, source: SimilarSource, fetch: F) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<Vec<nokkvi_data::types::song::Song>>>
+            + Send,
+    {
         // Results land in the split view, so Theater Mode leaves first (the
         // route backstop cannot see a re-run on an already-open Similar tab).
         let exit_theater = self.exit_theater();
@@ -135,66 +159,20 @@ impl Nokkvi {
         let generation = self.similar_songs_generation;
         self.similar_songs = Some(SimilarSongsState {
             songs: Vec::new(),
-            label: label.clone(),
+            source: source.clone(),
             loading: true,
         });
 
         // Reset slot list to top
         self.similar_page.common.slot_list.set_offset(0, 0);
 
-        let fetch = self.shell_task(
-            move |shell| async move {
-                let api = shell.similar_api().await?;
-                api.get_similar_songs(&id, 500).await
-            },
-            move |result| {
-                Message::Find(FindMessage::Loaded(
-                    generation,
-                    result.map_err(|e| e.to_string()),
-                    label,
-                ))
-            },
-        );
-        Task::batch([exit_theater, fetch])
-    }
-
-    /// Handle "Top Songs" — opens browsing panel on Similar tab and fires API.
-    pub(crate) fn handle_find_top_songs(
-        &mut self,
-        artist_name: String,
-        label: String,
-    ) -> Task<Message> {
-        info!("🎵 Finding top songs for artist='{}'", artist_name);
-        let exit_theater = self.exit_theater();
-
-        // Ensure browsing panel is open and on Similar tab
-        self.ensure_browsing_panel_on_similar();
-
-        // Bump generation + set loading
-        self.similar_songs_generation += 1;
-        let generation = self.similar_songs_generation;
-        self.similar_songs = Some(SimilarSongsState {
-            songs: Vec::new(),
-            label: label.clone(),
-            loading: true,
+        let fetch = self.shell_task(fetch, move |result| {
+            Message::Find(FindMessage::Loaded(
+                generation,
+                result.map_err(|e| e.to_string()),
+                source,
+            ))
         });
-
-        // Reset slot list to top
-        self.similar_page.common.slot_list.set_offset(0, 0);
-
-        let fetch = self.shell_task(
-            move |shell| async move {
-                let api = shell.similar_api().await?;
-                api.get_top_songs(&artist_name, 500).await
-            },
-            move |result| {
-                Message::Find(FindMessage::Loaded(
-                    generation,
-                    result.map_err(|e| e.to_string()),
-                    label,
-                ))
-            },
-        );
         Task::batch([exit_theater, fetch])
     }
 
@@ -203,7 +181,7 @@ impl Nokkvi {
         &mut self,
         generation: u64,
         result: Result<Vec<nokkvi_data::types::song::Song>, String>,
-        label: String,
+        source: SimilarSource,
     ) -> Task<Message> {
         // Reject stale responses
         if generation != self.similar_songs_generation {
@@ -222,7 +200,7 @@ impl Nokkvi {
                     self.toast_info("No similar songs found");
                     self.similar_songs = Some(SimilarSongsState {
                         songs: Vec::new(),
-                        label,
+                        source,
                         loading: false,
                     });
                     return Task::none();
@@ -233,7 +211,7 @@ impl Nokkvi {
                 // Update state FIRST so that scrolling offset operates on valid data
                 self.similar_songs = Some(SimilarSongsState {
                     songs,
-                    label,
+                    source,
                     loading: false,
                 });
 
@@ -294,7 +272,7 @@ impl Nokkvi {
                 self.toast_error(format!("Failed to load similar songs: {e}"));
                 self.similar_songs = Some(SimilarSongsState {
                     songs: Vec::new(),
-                    label,
+                    source,
                     loading: false,
                 });
                 Task::none()

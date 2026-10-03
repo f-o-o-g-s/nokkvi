@@ -744,11 +744,9 @@ impl Nokkvi {
                     .as_deref()
                     .unwrap_or(&self.library.queue_songs);
                 if let Some(song) = rows.get(index) {
-                    let id = song.id.clone();
-                    let title = song.title.clone();
                     return Task::done(Message::Find(FindMessage::Similar {
-                        id,
-                        label: format!("Similar to: {title}"),
+                        id: song.id.clone(),
+                        seed_name: song.title.clone(),
                     }));
                 }
             }
@@ -756,14 +754,12 @@ impl Nokkvi {
                 let rows = filtered_owned
                     .as_deref()
                     .unwrap_or(&self.library.queue_songs);
-                if let Some(song) = rows.get(index) {
-                    let artist = song.artist.clone();
-                    if !artist.is_empty() {
-                        return Task::done(Message::Find(FindMessage::TopSongs {
-                            artist_name: artist.clone(),
-                            label: format!("Top Songs: {artist}"),
-                        }));
-                    }
+                if let Some(song) = rows.get(index)
+                    && !song.artist.is_empty()
+                {
+                    return Task::done(Message::Find(FindMessage::TopSongs {
+                        artist_name: song.artist.clone(),
+                    }));
                 }
             }
             QueueAction::EnterTheater => {

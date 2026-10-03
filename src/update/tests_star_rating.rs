@@ -41,7 +41,7 @@ fn star_propagates_to_similar_songs() {
     let song = make_song("s1", "Song A", "Artist").into();
     app.similar_songs = Some(crate::state::SimilarSongsState {
         songs: vec![song],
-        label: "Similar".to_string(),
+        source: crate::state::SimilarSource::SimilarTo("Song A".into()),
         loading: false,
     });
 
@@ -132,7 +132,7 @@ fn rating_propagates_to_similar_songs() {
     let song = make_song("s1", "Song A", "Artist").into();
     app.similar_songs = Some(crate::state::SimilarSongsState {
         songs: vec![song],
-        label: "Similar".to_string(),
+        source: crate::state::SimilarSource::SimilarTo("Song A".into()),
         loading: false,
     });
 
