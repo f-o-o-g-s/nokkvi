@@ -380,6 +380,7 @@ pub(crate) fn make_settings_view_data() -> crate::views::SettingsViewData {
         rounded_mode: nokkvi_data::types::player_settings::RoundedMode::Off,
         opacity_gradient: true,
         dynamic_accent: false,
+        dynamic_visualizer: false,
     }
 }
 

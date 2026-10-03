@@ -14,7 +14,7 @@ use crate::{
     app_message::{ArtworkMessage, Message, PlaybackMessage},
     state::ACCENT_HOLD_TICKS,
     test_helpers::*,
-    theme::{self, AccentSeed, THEME_MODE_LOCK},
+    theme::{self, AccentSeed, CoverPalette, THEME_MODE_LOCK},
 };
 
 fn png_of(rgb: [u8; 3]) -> Vec<u8> {
@@ -46,7 +46,7 @@ fn extracted(
     let _ = app.update(Message::Artwork(ArtworkMessage::AccentExtracted {
         owner: owner.to_string(),
         source,
-        seed,
+        palette: seed.map(CoverPalette::single),
     }));
 }
 
@@ -336,4 +336,56 @@ fn logout_clears_the_accent_and_its_cache() {
     assert_eq!(app.dynamic_accent.shown, None);
     assert!(app.dynamic_accent.seeds.is_empty());
     assert_eq!(theme::dynamic_accent_seed(), None);
+}
+
+/// "Visualizer From Album Art" alone: the cover is read and the visualizer
+/// colors follow it, while the accent stays the theme's.
+#[test]
+fn the_visualizer_can_follow_the_cover_without_the_accent() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let (mut app, id) = accent_app();
+    app.settings.dynamic_accent = false;
+    app.settings.dynamic_visualizer = true;
+    tick(&mut app);
+    assert_eq!(
+        app.dynamic_accent.pending,
+        Some(("album_s1".to_string(), id)),
+        "the cover is read for the visualizer alone"
+    );
+    extracted(&mut app, "album_s1", id, Some(seed()));
+    tick(&mut app);
+    assert!(app.dynamic_accent.applied);
+    assert!(
+        !theme::dynamic_accent_active(),
+        "the accent stays the theme's"
+    );
+    assert!(theme::cover_milkdrop().is_some(), "the visualizer follows");
+
+    theme::set_dynamic_accent(None);
+}
+
+/// Flipping either switch while a track plays re-applies what is on screen
+/// at once, without reading the cover again; both off returns to the theme.
+#[test]
+fn flipping_a_switch_reapplies_without_a_new_read() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let (mut app, _id) = shown_app();
+    assert!(theme::cover_milkdrop().is_none(), "fixture: accent only");
+
+    app.settings.dynamic_visualizer = true;
+    tick(&mut app);
+    assert_eq!(app.dynamic_accent.pending, None, "no second read");
+    assert!(theme::dynamic_accent_active());
+    assert!(theme::cover_milkdrop().is_some());
+
+    app.settings.dynamic_accent = false;
+    tick(&mut app);
+    assert!(!theme::dynamic_accent_active());
+    assert!(theme::cover_milkdrop().is_some());
+    assert!(app.dynamic_accent.applied);
+
+    app.settings.dynamic_visualizer = false;
+    tick(&mut app);
+    assert!(!app.dynamic_accent.applied);
+    assert!(theme::cover_milkdrop().is_none());
 }

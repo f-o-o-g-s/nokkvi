@@ -524,6 +524,7 @@ pub(crate) struct SettingsViewData {
     pub rounded_mode: nokkvi_data::types::player_settings::RoundedMode,
     pub opacity_gradient: bool,
     pub dynamic_accent: bool,
+    pub dynamic_visualizer: bool,
 }
 
 // ============================================================================

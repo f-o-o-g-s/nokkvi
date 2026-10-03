@@ -108,6 +108,9 @@ pub struct TomlSettings {
     /// Whether the accent color follows the playing cover (default false).
     #[serde(default)]
     pub dynamic_accent: bool,
+    /// Whether the visualizer gradients follow the playing cover (default false).
+    #[serde(default)]
+    pub dynamic_visualizer: bool,
     /// How the slot-list scrollbar is shown (default `Always` — a permanent
     /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
     /// the bar entirely. Missing keys fill from the container `#[serde(default)]`
@@ -353,6 +356,7 @@ impl Default for TomlSettings {
             opacity_gradient: false,
             slot_text_links: false,
             dynamic_accent: false,
+            dynamic_visualizer: false,
             scrollbar_visibility: ScrollbarVisibility::default(),
             icon_set: IconSet::default(),
             horizontal_volume: false,

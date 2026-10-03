@@ -1,10 +1,12 @@
-//! Dynamic accent: keep the theme's accent in step with the playing cover.
+//! Cover colors: keep the theme's accent and/or the visualizer colors in step
+//! with the playing cover ("Accent From Album Art", "Visualizer From Album
+//! Art").
 //!
 //! The 100 ms playback tick level-sets everything, so no event has to be
 //! caught: a track change, a cover arriving late, a stop, the setting, radio
 //! and logout all resolve on the next tick. The tick finds the playing item's
-//! artwork, has its color read off-thread once, and hands the seed to the
-//! theme, which fits it to the active palette (`theme::set_dynamic_accent`).
+//! artwork, has its palette read off-thread once, and hands it to the theme,
+//! which fits it to the active palette (`theme::set_cover_colors`).
 
 use iced::{Task, advanced::image::Id, widget::image::Handle};
 
@@ -12,7 +14,7 @@ use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, Message},
     state::ACCENT_HOLD_TICKS,
-    theme::{self, AccentSeed},
+    theme::{self, CoverFollow, CoverPalette},
     update::components::cover_job::{CoverJob, cover_job},
 };
 
@@ -20,10 +22,10 @@ use crate::{
 enum Step {
     /// The accent on screen already belongs to what is playing.
     Keep,
-    /// A remembered seed for this item: show it.
-    Show(Id, Option<AccentSeed>),
+    /// A remembered palette for this item: show it.
+    Show(Id, Option<CoverPalette>),
     /// Read this handle off-thread; `None` when it holds nothing to decode.
-    Extract(Id, Option<CoverJob<AccentSeed>>),
+    Extract(Id, Option<CoverJob<CoverPalette>>),
     /// A newly playing item with no artwork cached (yet).
     Artless,
 }
@@ -38,7 +40,8 @@ impl Nokkvi {
     /// held for [`ACCENT_HOLD_TICKS`] first, since a skip can pass through a
     /// stopped state between two tracks.
     pub(crate) fn dynamic_accent_tick(&mut self) -> Task<Message> {
-        if !self.settings.dynamic_accent {
+        let follow = self.cover_follow();
+        if !follow.any() {
             self.dynamic_accent_release();
             return Task::none();
         }
@@ -73,10 +76,10 @@ impl Nokkvi {
                     && cached(source)
                 {
                     Step::Keep
-                } else if let Some((source, seed)) = state.seeds.peek(&cover.owner)
+                } else if let Some((source, palette)) = state.seeds.peek(&cover.owner)
                     && cached(source)
                 {
-                    Step::Show(*source, *seed)
+                    Step::Show(*source, palette.clone())
                 } else if let Some((owner, source)) = &state.pending
                     && same_owner(owner)
                     && cached(source)
@@ -85,7 +88,11 @@ impl Nokkvi {
                 } else {
                     Step::Extract(
                         handle.id(),
-                        cover_job(handle, theme::seed_from_encoded, theme::seed_from_rgba),
+                        cover_job(
+                            handle,
+                            theme::palette_from_encoded,
+                            theme::palette_from_rgba,
+                        ),
                     )
                 }
             }
@@ -99,13 +106,23 @@ impl Nokkvi {
         match step {
             Step::Keep => {
                 state.waiting = None;
+                // A setting flipped (accent and/or visualizer) while the item
+                // stayed: re-apply what is shown under the new switches.
+                if state.applied && state.applied_follow != follow {
+                    let palette = state
+                        .shown
+                        .as_ref()
+                        .and_then(|(o, _)| state.seeds.peek(o))
+                        .and_then(|(_, p)| p.clone());
+                    self.dynamic_accent_show(palette);
+                }
                 Task::none()
             }
-            Step::Show(source, seed) => {
+            Step::Show(source, palette) => {
                 state.waiting = None;
                 state.seeds.promote(&owner);
                 state.shown = Some((owner, Some(source)));
-                self.dynamic_accent_show(seed);
+                self.dynamic_accent_show(palette);
                 Task::none()
             }
             Step::Extract(source, Some(job)) => {
@@ -115,11 +132,11 @@ impl Nokkvi {
                 state.pending = Some((owner.clone(), source));
                 Task::perform(
                     async move { tokio::task::spawn_blocking(job).await.ok().flatten() },
-                    move |seed| {
+                    move |palette| {
                         Message::Artwork(ArtworkMessage::AccentExtracted {
                             owner: owner.clone(),
                             source,
-                            seed,
+                            palette,
                         })
                     },
                 )
@@ -150,14 +167,14 @@ impl Nokkvi {
     }
 
     /// Record a finished extraction. The next tick shows it — or does not, if
-    /// playback has moved on; the seed is kept for when its item plays again.
-    /// A seed is only ever shown against the handle it was read from, so a
-    /// late result can be remembered without a staleness check.
+    /// playback has moved on; the palette is kept for when its item plays
+    /// again. A palette is only ever shown against the handle it was read
+    /// from, so a late result can be remembered without a staleness check.
     pub(crate) fn handle_accent_extracted(
         &mut self,
         owner: String,
         source: Id,
-        seed: Option<AccentSeed>,
+        palette: Option<CoverPalette>,
     ) -> Task<Message> {
         let state = &mut self.dynamic_accent;
         if state
@@ -167,23 +184,33 @@ impl Nokkvi {
         {
             state.pending = None;
         }
-        state.seeds.put(owner, (source, seed));
+        state.seeds.put(owner, (source, palette));
         Task::none()
     }
 
-    /// Put `seed` on screen, or the theme's own accent for `None`. The theme
-    /// state is process-global, so it is only written back to `None` by the
-    /// app that set it.
-    fn dynamic_accent_show(&mut self, seed: Option<AccentSeed>) {
-        if seed.is_none() && !self.dynamic_accent.applied {
-            return;
+    /// What the cover recolors, from the two settings.
+    fn cover_follow(&self) -> CoverFollow {
+        CoverFollow {
+            accent: self.settings.dynamic_accent,
+            visualizer: self.settings.dynamic_visualizer,
         }
-        self.dynamic_accent.applied = seed.is_some();
-        theme::set_dynamic_accent(seed);
     }
 
-    /// Back to the theme's own accent: the setting is off or nothing is
-    /// playing. Remembered seeds are kept for the next play.
+    /// Put `palette` on screen under the current switches, or the theme's own
+    /// colors for `None`. The theme state is process-global, so it is only
+    /// written back to `None` by the app that set it.
+    fn dynamic_accent_show(&mut self, palette: Option<CoverPalette>) {
+        if palette.is_none() && !self.dynamic_accent.applied {
+            return;
+        }
+        let follow = self.cover_follow();
+        self.dynamic_accent.applied = palette.is_some();
+        self.dynamic_accent.applied_follow = follow;
+        theme::set_cover_colors(palette, follow);
+    }
+
+    /// Back to the theme's own colors: both settings are off or nothing is
+    /// playing. Remembered palettes are kept for the next play.
     fn dynamic_accent_release(&mut self) {
         let state = &mut self.dynamic_accent;
         state.shown = None;
@@ -193,7 +220,7 @@ impl Nokkvi {
         self.dynamic_accent_show(None);
     }
 
-    /// Forget the accent and its cache (logout).
+    /// Forget the cover colors and their cache (logout).
     pub(crate) fn dynamic_accent_reset(&mut self) {
         self.dynamic_accent_release();
         self.dynamic_accent.seeds.clear();

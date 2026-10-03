@@ -208,6 +208,7 @@ impl SettingsService {
     delegate_setter!(set_slot_row_height, SlotRowHeight);
     delegate_setter!(set_opacity_gradient, bool);
     delegate_setter!(set_dynamic_accent, bool);
+    delegate_setter!(set_dynamic_visualizer, bool);
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
     delegate_setter!(set_lyrics_enabled, bool);

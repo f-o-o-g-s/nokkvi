@@ -397,6 +397,10 @@ keyword_table! {
         "general.dynamic_accent" => &[
             "dynamic", "album", "cover", "artwork", "color", "colour", "adaptive", "material",
         ],
+        "general.dynamic_visualizer" => &[
+            "dynamic", "album", "cover", "artwork", "color", "colour", "gradient", "bars",
+            "milkdrop",
+        ],
         // Theme COLORS moved out of the GUI into the theme TOML files, so the
         // picker is now the only row a colour search can land on. It inherits
         // the vocabulary the deleted `accent.primary` / `border` rows carried.

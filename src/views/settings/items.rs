@@ -497,6 +497,7 @@ mod tests {
             true,
             false,
             false,
+            false,
         );
 
         // The inline per-color editors were stripped (theme colors are edited
@@ -516,6 +517,7 @@ mod tests {
                 "general.rounded_mode",
                 "general.opacity_gradient",
                 "general.dynamic_accent",
+                "general.dynamic_visualizer",
             ],
         );
 
@@ -1176,6 +1178,7 @@ mod tests {
             &theme,
             nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
+            false,
             false,
             false,
         ));

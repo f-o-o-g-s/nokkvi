@@ -66,8 +66,8 @@ impl Nokkvi {
             ArtworkMessage::AccentExtracted {
                 owner,
                 source,
-                seed,
-            } => self.handle_accent_extracted(owner, source, seed),
+                palette,
+            } => self.handle_accent_extracted(owner, source, palette),
             ArtworkMessage::LargeLoaded(id, handle) => self.handle_large_artwork_loaded(id, handle),
             ArtworkMessage::LargeArtistLoaded(id, handle) => {
                 // Mirror `handle_large_artwork_loaded`'s id-gated clear:

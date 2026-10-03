@@ -18,6 +18,7 @@ pub(crate) fn build_theme_items(
     rounded_mode: RoundedMode,
     opacity_gradient: bool,
     dynamic_accent: bool,
+    dynamic_visualizer: bool,
     is_light_mode: bool,
 ) -> Vec<SettingsEntry> {
     const MODE_ICON: &str = "assets/icons/monitor.svg";
@@ -69,6 +70,19 @@ pub(crate) fn build_theme_items(
                  cover, adjusted to stay readable · Off: the theme's own accent",
             ),
         dynamic_accent,
+        false,
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new(
+            "general.dynamic_visualizer",
+            "Visualizer From Album Art",
+            "Display",
+        )
+        .with_subtitle(
+            "On: the bars, lines, scope and nokkvi's MilkDrop presets take their gradient from \
+             the playing cover's colors · Off: the theme's visualizer gradient",
+        ),
+        dynamic_visualizer,
         false,
     ));
 

@@ -22,6 +22,7 @@
   "slot_row_height": "spacious",
   "opacity_gradient": false,
   "dynamic_accent": true,
+  "dynamic_visualizer": true,
   "slot_text_links": true,
   "scrollbar_visibility": "hidden",
   "icon_set": "lucide",

@@ -4,7 +4,7 @@
 //! `general.normalization_level`, `general.replay_gain_*`,
 //! `general.scrobbl*`, the playlist scalars, the queue column-visibility
 //! booleans, and the `general.opacity_gradient` / `general.dynamic_accent` /
-//! `general.rounded_mode` Theme-tab top scalars. The macro emits dispatch + apply in lockstep;
+//! `general.dynamic_visualizer` / `general.rounded_mode` Theme-tab top scalars. The macro emits dispatch + apply in lockstep;
 //! audio-engine pushes still happen via `PlayerSettingsLoaded` after the
 //! refreshed `LivePlayerSettings` round-trips back to the UI.
 //!
@@ -831,6 +831,14 @@ define_settings! {
             read: |src, out| out.dynamic_accent = src.dynamic_accent,
             write: |ps, ts| ts.dynamic_accent = ps.dynamic_accent,
         },
+        DynamicVisualizer {
+            key: "general.dynamic_visualizer",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_dynamic_visualizer(v),
+            toml_apply: |ts, p| p.dynamic_visualizer = ts.dynamic_visualizer,
+            read: |src, out| out.dynamic_visualizer = src.dynamic_visualizer,
+            write: |ps, ts| ts.dynamic_visualizer = ps.dynamic_visualizer,
+        },
         RoundedModeSetting {
             key: "general.rounded_mode",
             value_type: Enum,
@@ -982,8 +990,8 @@ mod tests {
     /// love-change-notification, trigger, percentage), and 2 Playlists.
     /// The 5 conditional AGC/RG knobs and the `default_playlist_name` dialog
     /// row stay hand-written; the lifecycle-only entries (queue column
-    /// visibility, opacity_gradient, dynamic_accent, rounded_mode) emit nothing
-    /// here. The
+    /// visibility, opacity_gradient, dynamic_accent, dynamic_visualizer,
+    /// rounded_mode) emit nothing here. The
     /// Rating Reminder trigger/percentage rows are emitted here
     /// unconditionally but the UI builder (`items_playback.rs`) only splices
     /// them in when the feature is enabled.

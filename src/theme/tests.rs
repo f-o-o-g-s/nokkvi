@@ -100,6 +100,21 @@ fn rgb(r: u8, g: u8, b: u8) -> Color {
 /// Every shipped palette as `(name, mode, ResolvedTheme)` — for theme-wide
 /// contrast guards. Reads embedded built-in TOML; no disk, no global theme
 /// state, so these sweeps are deterministic and lock-free.
+/// A shipped theme's own visualizer colors for one mode (`"dark"` /
+/// `"light"`), from the embedded built-in TOML.
+pub(super) fn builtin_visualizer(
+    stem: &str,
+    mode: &str,
+) -> nokkvi_data::types::theme_file::VisualizerColors {
+    let tf = nokkvi_data::services::theme_loader::load_builtin_theme(stem)
+        .unwrap_or_else(|| panic!("built-in theme {stem} must parse"));
+    if mode == "light" {
+        tf.light.visualizer
+    } else {
+        tf.dark.visualizer
+    }
+}
+
 pub(super) fn all_builtin_palettes() -> Vec<(String, &'static str, ResolvedTheme)> {
     let mut out = Vec::new();
     for stem in nokkvi_data::services::theme_loader::builtin_theme_stems() {

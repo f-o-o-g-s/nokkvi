@@ -47,7 +47,7 @@ Things that shaped this project:
 - **Smart playlists** authored in-app: a rules editor with nested All/Any groups, live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
 - **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
 - Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
-- **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, an optional accent color taken from the playing album cover, and two icon sets (Phosphor, Lucide).
+- **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, optional accent and visualizer colors taken from the playing album cover, and two icon sets (Phosphor, Lucide).
 - Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** that fits a whole number of rows to the window (up to 29) and scales their contents to match.
 - Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search and one-press random plays; persistent queue, multi-select, drag-and-drop, star ratings; lyrics, synced or plain; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
 

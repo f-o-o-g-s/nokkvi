@@ -21,7 +21,7 @@ use crate::theme_config::{AccentRoles, ResolvedDualTheme, ResolvedTheme};
 /// it had in the artwork (the fit starts there and moves only as far as the
 /// palette demands).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AccentSeed {
+pub(crate) struct AccentSeed {
     /// Oklch lightness in the artwork, 0..=1.
     pub lightness: f32,
     /// Oklch chroma.
@@ -124,7 +124,7 @@ fn in_gamut(l: f32, c: f32, h: f32) -> bool {
 
 /// The most chroma sRGB holds for hue `h` at lightness `l` (none at pure
 /// black or white).
-fn max_chroma(l: f32, h: f32) -> f32 {
+pub(super) fn max_chroma(l: f32, h: f32) -> f32 {
     let (mut lo, mut hi) = (0.0_f32, 0.5_f32);
     for _ in 0..14 {
         let mid = f32::midpoint(lo, hi);
@@ -145,7 +145,7 @@ fn max_chroma(l: f32, h: f32) -> f32 {
 /// to a lightness that reads on a dark theme it should stay as saturated as a
 /// red can be there, where sRGB holds far more chroma. Keeping the absolute
 /// chroma instead turned it a washed-out coral.
-fn saturation(seed: AccentSeed) -> f32 {
+pub(super) fn saturation(seed: AccentSeed) -> f32 {
     let room = max_chroma(seed.lightness.clamp(0.0, 1.0), seed.hue);
     if room <= f32::EPSILON {
         1.0
@@ -173,7 +173,7 @@ fn seed_color_at(seed: AccentSeed, saturation: f32, l: f32) -> Color {
 /// at every accent change and theme reload. Contrast against the background
 /// grows along the walk, so the boundary is found in a few probes; the result
 /// always satisfies `clears` (the bisection only ever keeps a passing end).
-fn walk(
+pub(super) fn walk(
     color_at: impl Fn(f32) -> Color,
     away: f32,
     from: f32,
@@ -339,6 +339,46 @@ const MIN_HUE_SHARE: f32 = 0.015;
 /// Lowest chroma a seed carries: a muted cover still yields an accent that
 /// reads as a color.
 const MIN_SEED_CHROMA: f32 = 0.09;
+/// Most hues taken from one cover (the visualizer gradient's anchors).
+const MAX_COVER_HUES: usize = 4;
+/// Closest two picked hues may sit, in bins (40°): nearer than that they are
+/// one color, and the second would only muddy the gradient.
+const MIN_HUE_SEPARATION_BINS: usize = 4;
+/// Score a secondary hue needs relative to the primary, so a few stray pixels
+/// of a third color do not become a gradient stop.
+const MIN_SECONDARY_SCORE: f32 = 0.12;
+
+/// The colors a cover contributes: its prominent vivid hues, the most
+/// prominent first. Never empty. The accent takes the first; the visualizer
+/// gradient runs through all of them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverPalette {
+    colors: Vec<AccentSeed>,
+}
+
+impl CoverPalette {
+    /// A palette of one color.
+    #[cfg(test)]
+    pub(crate) fn single(seed: AccentSeed) -> Self {
+        Self { colors: vec![seed] }
+    }
+
+    /// A palette from `colors`, most prominent first; `None` when empty.
+    #[cfg(test)]
+    pub(crate) fn from_colors(colors: Vec<AccentSeed>) -> Option<Self> {
+        (!colors.is_empty()).then_some(Self { colors })
+    }
+
+    /// The most prominent hue: the accent's seed.
+    pub(crate) fn primary(&self) -> AccentSeed {
+        self.colors[0]
+    }
+
+    /// Every hue, most prominent first.
+    pub(crate) fn colors(&self) -> &[AccentSeed] {
+        &self.colors
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 struct HueBin {
@@ -351,14 +391,15 @@ struct HueBin {
     lightness: f32,
 }
 
-/// Pick the accent seed of an RGBA8 image: its most prominent vivid hue.
-/// `None` for an empty, transparent or black-and-white image.
-pub(crate) fn seed_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<AccentSeed> {
+/// Pick the palette of an RGBA8 image: up to [`MAX_COVER_HUES`] prominent
+/// vivid hues, the strongest first. `None` for an empty, transparent or
+/// black-and-white image.
+pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CoverPalette> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return None;
     }
-    let stride = (((width * height) as f32 / MAX_SAMPLES as f32).sqrt().ceil() as usize).max(1);
+    let stride = (((w * h) as f32 / MAX_SAMPLES as f32).sqrt().ceil() as usize).max(1);
 
     let mut bins = [HueBin::default(); HUE_BINS];
     let mut sampled = 0u32;
@@ -402,45 +443,68 @@ pub(crate) fn seed_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<Acc
             bins[(i + 1) % HUE_BINS],
         ]
     };
+    let score = |i: usize| {
+        let [prev, mid, next] = around(i);
+        0.5 * prev.score + mid.score + 0.5 * next.score
+    };
     let min_count = sampled as f32 * MIN_HUE_SHARE;
-    let winner = (0..HUE_BINS)
+    let mut ranked: Vec<usize> = (0..HUE_BINS)
         .filter(|&i| around(i).iter().map(|b| b.count).sum::<u32>() as f32 >= min_count)
-        .max_by(|&a, &b| {
-            let score = |i: usize| {
-                let [prev, mid, next] = around(i);
-                0.5 * prev.score + mid.score + 0.5 * next.score
-            };
-            score(a).total_cmp(&score(b))
-        })?;
+        .collect();
+    ranked.sort_by(|&a, &b| score(b).total_cmp(&score(a)));
 
-    let (mut score, mut sin, mut cos, mut chroma, mut lightness) = (0.0, 0.0, 0.0, 0.0, 0.0);
-    for bin in around(winner) {
-        score += bin.score;
-        sin += bin.sin;
-        cos += bin.cos;
-        chroma += bin.chroma;
-        lightness += bin.lightness;
+    let bin_distance = |a: usize, b: usize| {
+        let d = a.abs_diff(b);
+        d.min(HUE_BINS - d)
+    };
+    let mut picked: Vec<usize> = Vec::with_capacity(MAX_COVER_HUES);
+    for i in ranked {
+        if picked.len() == MAX_COVER_HUES {
+            break;
+        }
+        let strong_enough = picked
+            .first()
+            .is_none_or(|&first| score(i) >= score(first) * MIN_SECONDARY_SCORE);
+        let distinct = picked
+            .iter()
+            .all(|&p| bin_distance(i, p) >= MIN_HUE_SEPARATION_BINS);
+        if strong_enough && distinct {
+            picked.push(i);
+        }
     }
-    if score <= 0.0 {
-        return None;
-    }
-    Some(AccentSeed {
-        lightness: lightness / score,
-        chroma: (chroma / score).max(MIN_SEED_CHROMA),
-        hue: sin.atan2(cos),
-    })
+
+    let colors: Vec<AccentSeed> = picked
+        .into_iter()
+        .filter_map(|i| {
+            let (mut score, mut sin, mut cos, mut chroma, mut lightness) =
+                (0.0, 0.0, 0.0, 0.0, 0.0);
+            for bin in around(i) {
+                score += bin.score;
+                sin += bin.sin;
+                cos += bin.cos;
+                chroma += bin.chroma;
+                lightness += bin.lightness;
+            }
+            (score > 0.0).then(|| AccentSeed {
+                lightness: lightness / score,
+                chroma: (chroma / score).max(MIN_SEED_CHROMA),
+                hue: sin.atan2(cos),
+            })
+        })
+        .collect();
+    (!colors.is_empty()).then_some(CoverPalette { colors })
 }
 
-/// [`seed_from_rgba`] for an encoded cover (PNG / JPEG / …). Blocking; run it
-/// off the UI thread.
-pub(crate) fn seed_from_encoded(bytes: &[u8]) -> Option<AccentSeed> {
-    /// Decode target: a cover's prominent hue survives any downscale.
+/// [`palette_from_rgba`] for an encoded cover (PNG / JPEG / …). Blocking; run
+/// it off the UI thread.
+pub(crate) fn palette_from_encoded(bytes: &[u8]) -> Option<CoverPalette> {
+    /// Decode target: a cover's prominent hues survive any downscale.
     const THUMB_SIDE: u32 = 64;
     let thumb = image::load_from_memory(bytes)
         .ok()?
         .thumbnail(THUMB_SIDE, THUMB_SIDE)
         .to_rgba8();
-    seed_from_rgba(thumb.width(), thumb.height(), thumb.as_raw())
+    palette_from_rgba(thumb.width(), thumb.height(), thumb.as_raw())
 }
 
 #[cfg(test)]
@@ -450,6 +514,15 @@ mod tests {
 
     fn rgb(r: u8, g: u8, b: u8) -> Color {
         Color::from_rgb8(r, g, b)
+    }
+
+    /// The primary hue of an image, as the accent sees it.
+    fn seed_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<AccentSeed> {
+        palette_from_rgba(width, height, rgba).map(|p| p.primary())
+    }
+
+    fn seed_from_encoded(bytes: &[u8]) -> Option<AccentSeed> {
+        palette_from_encoded(bytes).map(|p| p.primary())
     }
 
     /// Seeds that cover the hue wheel at several chromas and lightnesses, plus
@@ -938,6 +1011,51 @@ mod tests {
         }
         let seed = seed_from_rgba(side as u32, side as u32, &px).expect("has a hue");
         assert!(hue_distance(seed.hue, hue_of(0xd0, 0x80, 0x10)) < 0.02);
+    }
+
+    /// A two-color cover yields both hues, the stronger first.
+    #[test]
+    fn a_two_color_cover_yields_both_hues() {
+        let (w, h, px) = image_of(&[([0xe0, 0x20, 0x30], 600), ([0x20, 0x70, 0xd0], 424)]);
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        let hues: Vec<f32> = palette.colors().iter().map(|c| c.hue).collect();
+        assert_eq!(hues.len(), 2, "{hues:?}");
+        assert!(hue_distance(hues[0], hue_of(0xe0, 0x20, 0x30)) < 0.1);
+        assert!(hue_distance(hues[1], hue_of(0x20, 0x70, 0xd0)) < 0.1);
+    }
+
+    /// Two shades of one color are one hue, not a two-stop gradient.
+    #[test]
+    fn neighbouring_hues_merge() {
+        let (w, h, px) = image_of(&[([0xe0, 0x20, 0x30], 512), ([0xe0, 0x40, 0x20], 512)]);
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
+    }
+
+    /// At most four hues, however many the cover has.
+    #[test]
+    fn a_rainbow_cover_caps_at_four_hues() {
+        let stripes = [
+            [0xe0, 0x20, 0x30],
+            [0xe8, 0x90, 0x10],
+            [0xd0, 0xd0, 0x20],
+            [0x30, 0xb0, 0x40],
+            [0x20, 0x90, 0xd0],
+            [0x70, 0x30, 0xd0],
+            [0xd0, 0x30, 0xb0],
+            [0x20, 0xc0, 0xb0],
+        ];
+        let (w, h, px) = image_of(&stripes.map(|c| (c, 128)));
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        assert_eq!(palette.colors().len(), MAX_COVER_HUES);
+    }
+
+    /// A faint second color (a few percent of a vivid first) is not a stop.
+    #[test]
+    fn a_faint_second_hue_is_dropped() {
+        let (w, h, px) = image_of(&[([0xe0, 0x20, 0x30], 1000), ([0x6b, 0x70, 0x90], 24)]);
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
     }
 
     #[test]

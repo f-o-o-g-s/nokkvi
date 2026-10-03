@@ -174,6 +174,7 @@ impl Nokkvi {
             rounded_mode: crate::theme::rounded_mode(),
             opacity_gradient: crate::theme::is_opacity_gradient(),
             dynamic_accent: self.settings.dynamic_accent,
+            dynamic_visualizer: self.settings.dynamic_visualizer,
         }
     }
 

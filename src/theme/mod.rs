@@ -6,6 +6,7 @@
 //! All color accessors are functions (not statics) so they react to hot-reload via `reload_theme()`.
 
 mod colors;
+mod cover_visualizer;
 mod dynamic_accent;
 mod font;
 mod radius;
@@ -14,7 +15,9 @@ mod style;
 mod ui_mode;
 
 pub(crate) use colors::*;
-pub(crate) use dynamic_accent::{AccentSeed, seed_from_encoded, seed_from_rgba};
+#[cfg(test)]
+pub(crate) use dynamic_accent::AccentSeed;
+pub(crate) use dynamic_accent::{CoverPalette, palette_from_encoded, palette_from_rgba};
 pub(crate) use font::*;
 pub(crate) use radius::*;
 pub(crate) use state::*;

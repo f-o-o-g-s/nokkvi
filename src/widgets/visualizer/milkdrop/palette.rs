@@ -57,11 +57,21 @@ impl PresetPalette {
     /// light on a dark canvas (additive glows, trails fading to black), which a
     /// light palette would wash out, so light mode shows them as a dark panel
     /// in the theme's own dark colours. `light` still tells a preset the mode.
+    ///
+    /// While the visualizer follows the playing cover ("Visualizer From Album
+    /// Art"), the accent, highlight and ramp come from the cover instead, so a
+    /// themed preset recolours (crossfading) on a track change; the
+    /// backgrounds, text and warm roles stay the theme's.
     pub(crate) fn from_theme() -> Self {
         use crate::theme::{self, read_dark_color};
-        let bars: crate::visualizer_config::ThemeBarColors =
-            theme::get_visualizer_colors_dark().into();
-        let accent = rgb(read_dark_color(|t| t.accent));
+        let cover = theme::cover_milkdrop();
+        let bars: crate::visualizer_config::ThemeBarColors = cover
+            .as_ref()
+            .map_or_else(theme::get_visualizer_colors_dark, |c| c.bars.clone())
+            .into();
+        let accent = rgb(cover
+            .as_ref()
+            .map_or_else(|| read_dark_color(|t| t.accent), |c| c.accent));
         let ramp_src: Vec<Rgb> = bars
             .bar_gradient_colors
             .iter()
@@ -74,7 +84,9 @@ impl PresetPalette {
             surface: rgb(read_dark_color(|t| t.bg1)),
             text: rgb(read_dark_color(|t| t.fg0)),
             accent,
-            highlight: rgb(read_dark_color(|t| t.accent_bright)),
+            highlight: rgb(cover
+                .as_ref()
+                .map_or_else(|| read_dark_color(|t| t.accent_bright), |c| c.highlight)),
             warm: rgb(read_dark_color(|t| t.warning)),
             ramp,
             light: theme::is_light_mode(),
@@ -174,6 +186,54 @@ pub(crate) fn uses_light(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Visualizer From Album Art" recolours themed presets from the cover
+    /// (accent, highlight, ramp) and leaves the theme's backgrounds, text and
+    /// warm roles; "Accent From Album Art" alone must not recolour them, or
+    /// every track change would rebuild the preset for nothing.
+    #[test]
+    fn themed_presets_follow_the_cover_only_with_the_visualizer() {
+        use crate::theme::{self, AccentSeed, CoverFollow, CoverPalette};
+        let _guard = theme::THEME_MODE_LOCK.lock();
+        theme::set_dynamic_accent(None);
+        let base = PresetPalette::from_theme();
+        let cover = CoverPalette::single(AccentSeed {
+            lightness: 0.55,
+            chroma: 0.2,
+            hue: 0.5,
+        });
+
+        theme::set_cover_colors(
+            Some(cover.clone()),
+            CoverFollow {
+                accent: true,
+                visualizer: false,
+            },
+        );
+        assert!(
+            !base.recolours(&PresetPalette::from_theme(), true),
+            "the accent alone leaves presets as they are"
+        );
+
+        theme::set_cover_colors(
+            Some(cover),
+            CoverFollow {
+                accent: false,
+                visualizer: true,
+            },
+        );
+        let now = PresetPalette::from_theme();
+        assert_ne!(now.accent, base.accent);
+        assert_ne!(now.highlight, base.highlight);
+        assert_ne!(now.ramp, base.ramp);
+        assert_eq!(
+            (now.bg, now.surface, now.text, now.warm),
+            (base.bg, base.surface, base.text, base.warm)
+        );
+        assert!(base.recolours(&now, false));
+
+        theme::set_dynamic_accent(None);
+    }
 
     fn palette() -> PresetPalette {
         PresetPalette {

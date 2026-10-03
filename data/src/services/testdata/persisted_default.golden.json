@@ -22,6 +22,7 @@
   "slot_row_height": "compact",
   "opacity_gradient": false,
   "dynamic_accent": false,
+  "dynamic_visualizer": false,
   "slot_text_links": false,
   "scrollbar_visibility": "always",
   "icon_set": "phosphor",

@@ -5,7 +5,6 @@
 
 use iced::Color;
 use nokkvi_data::types::theme_file::{ThemeFile, ThemePalette};
-use tracing::debug;
 
 // ============================================================================
 // Color Parsing
@@ -211,16 +210,6 @@ impl ResolvedDualTheme {
 pub(crate) fn load_active_theme_file() -> ThemeFile {
     let name = nokkvi_data::services::theme_loader::read_theme_name_from_config();
     nokkvi_data::services::theme_loader::load_theme(&name)
-}
-
-/// Load and resolve dual themes from theme file.
-pub(crate) fn load_resolved_dual_theme() -> ResolvedDualTheme {
-    let theme = load_active_theme_file();
-    let resolved = ResolvedDualTheme::from_theme_file(&theme);
-
-    debug!(" Loaded theme '{}'", theme.name);
-
-    resolved
 }
 
 /// Load light_mode from [settings] in config.toml (for hot-reload).

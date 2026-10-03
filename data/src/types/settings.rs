@@ -105,6 +105,10 @@ crate::player_settings_schema! {
     /// memory; the theme file is never written.
     #[serde(default)]
     same dynamic_accent: bool = false,
+    /// Whether the visualizer gradients (Bars, Lines, Scope, themed MilkDrop
+    /// presets) follow the playing cover (default: false). In memory only.
+    #[serde(default)]
+    same dynamic_visualizer: bool = false,
     /// Whether clickable text links in slot list items are enabled (default: false)
     #[serde(default)]
     same slot_text_links: bool = false,

@@ -456,13 +456,13 @@ pub enum ArtworkMessage {
         Option<image::Handle>,
     ),
 
-    /// Result of the dynamic-accent job for the playing `owner` (album id, or
-    /// `radio:<station id>`): the seed read from artwork handle `source`, or
-    /// `None` for a cover with no usable color.
+    /// Result of the cover-color job for the playing `owner` (album id, or
+    /// `radio:<station id>`): the palette read from artwork handle `source`,
+    /// or `None` for a cover with no usable color.
     AccentExtracted {
         owner: String,
         source: iced::advanced::image::Id,
-        seed: Option<crate::theme::AccentSeed>,
+        palette: Option<crate::theme::CoverPalette>,
     },
 
     // --- Collage Artwork (Genre / Playlist) ---

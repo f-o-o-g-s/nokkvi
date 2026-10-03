@@ -13,34 +13,117 @@ use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 use parking_lot::RwLock;
 use tracing::debug;
 
-use super::{UI_MODE, dynamic_accent, dynamic_accent::AccentSeed};
-use crate::theme_config::{
-    ResolvedDualTheme, ResolvedTheme, load_active_theme_file, load_resolved_dual_theme,
+#[cfg(test)]
+use super::dynamic_accent::AccentSeed;
+use super::{
+    UI_MODE, cover_visualizer, cover_visualizer::CoverMilkdrop, dynamic_accent,
+    dynamic_accent::CoverPalette,
 };
+use crate::theme_config::{ResolvedDualTheme, ResolvedTheme, load_active_theme_file};
 
 // ============================================================================
 // Global theme state (with hot-reload support via lock-free ArcSwap)
 // ============================================================================
 
-/// The theme file's own palette, the palette on screen, and the cover seed
-/// that tells them apart. `shown` is `base` with the accent tokens refitted
-/// from `seed` (see [`set_dynamic_accent`]); without a seed they are equal.
-/// One value behind one `ArcSwap`, so a theme reload and an accent change
-/// can never store a mix of the two.
+/// What the cover recolors, one switch per setting ("Accent From Album Art",
+/// "Visualizer From Album Art").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CoverFollow {
+    /// The accent tokens and the roles derived from them.
+    pub accent: bool,
+    /// The visualizer gradients (Bars, Lines, Scope) and the colors themed
+    /// MilkDrop presets are compiled with.
+    pub visualizer: bool,
+}
+
+impl CoverFollow {
+    pub(crate) fn any(self) -> bool {
+        self.accent || self.visualizer
+    }
+}
+
+/// The theme file's visualizer colors for both modes.
+#[derive(Debug, Clone)]
+struct DualVisualizer {
+    dark: VisualizerColors,
+    light: VisualizerColors,
+}
+
+impl DualVisualizer {
+    fn of(file: &ThemeFile) -> Self {
+        Self {
+            dark: file.dark.visualizer.clone(),
+            light: file.light.visualizer.clone(),
+        }
+    }
+}
+
+/// The visualizer colors taken from the cover, for both modes, plus the
+/// colors themed MilkDrop presets compile with.
+#[derive(Debug, Clone)]
+struct CoverVisualizer {
+    shown: DualVisualizer,
+    milkdrop: CoverMilkdrop,
+}
+
+/// The theme file's own palette, the palette on screen, and the cover colors
+/// that tell them apart. `shown` is `base` with the accent tokens refitted
+/// from the cover (when `follow.accent`); `visualizer` holds the cover's
+/// gradients (when `follow.visualizer`). One value behind one `ArcSwap`, so a
+/// theme reload and a cover change can never store a mix of the two.
 #[derive(Debug, Clone)]
 struct ActiveTheme {
     base: ResolvedDualTheme,
+    base_visualizer: DualVisualizer,
     shown: ResolvedDualTheme,
-    seed: Option<AccentSeed>,
+    visualizer: Option<CoverVisualizer>,
+    cover: Option<CoverPalette>,
+    follow: CoverFollow,
 }
 
 impl ActiveTheme {
-    fn compose(base: ResolvedDualTheme, seed: Option<AccentSeed>) -> Self {
+    fn compose(
+        base: ResolvedDualTheme,
+        base_visualizer: DualVisualizer,
+        cover: Option<CoverPalette>,
+        follow: CoverFollow,
+    ) -> Self {
         let mut shown = base.clone();
-        if let Some(seed) = seed {
-            dynamic_accent::apply(seed, &mut shown);
+        let mut visualizer = None;
+        if let Some(palette) = &cover {
+            if follow.accent {
+                dynamic_accent::apply(palette.primary(), &mut shown);
+            }
+            if follow.visualizer {
+                visualizer = Some(CoverVisualizer {
+                    shown: DualVisualizer {
+                        dark: cover_visualizer::visualizer_colors(
+                            palette,
+                            &base.dark,
+                            &base_visualizer.dark,
+                        ),
+                        light: cover_visualizer::visualizer_colors(
+                            palette,
+                            &base.light,
+                            &base_visualizer.light,
+                        ),
+                    },
+                    milkdrop: cover_visualizer::milkdrop_colors(
+                        palette,
+                        &base.dark,
+                        &base_visualizer.dark,
+                    ),
+                });
+            }
         }
-        Self { base, shown, seed }
+        Self {
+            base,
+            base_visualizer,
+            shown,
+            visualizer,
+            cover,
+            follow,
+        }
     }
 }
 
@@ -54,9 +137,13 @@ static DUAL_THEME: LazyLock<ArcSwap<ActiveTheme>> = LazyLock::new(|| {
     if let Err(e) = nokkvi_data::services::theme_loader::seed_builtin_themes() {
         tracing::warn!("Failed to seed built-in themes: {e}");
     }
+    let file = load_active_theme_file();
+    debug!(" Loaded theme '{}'", file.name);
     ArcSwap::from(Arc::new(ActiveTheme::compose(
-        load_resolved_dual_theme(),
+        ResolvedDualTheme::from_theme_file(&file),
+        DualVisualizer::of(&file),
         None,
+        CoverFollow::default(),
     )))
 });
 
@@ -92,12 +179,20 @@ pub(crate) fn bump_theme_generation() {
 
 /// Reload theme from theme file (hot-reload support).
 /// Call this when the theme file or `theme` key in config.toml changes.
-/// An active dynamic accent is refitted to the new palette.
+/// Active cover colors are refitted to the new palette.
 pub(crate) fn reload_theme() {
     let new_file = load_active_theme_file();
     let new_resolved = ResolvedDualTheme::from_theme_file(&new_file);
+    let new_visualizer = DualVisualizer::of(&new_file);
 
-    DUAL_THEME.rcu(|active| Arc::new(ActiveTheme::compose(new_resolved.clone(), active.seed)));
+    DUAL_THEME.rcu(|active| {
+        Arc::new(ActiveTheme::compose(
+            new_resolved.clone(),
+            new_visualizer.clone(),
+            active.cover.clone(),
+            active.follow,
+        ))
+    });
     {
         let mut file = THEME_FILE.write();
         *file = new_file;
@@ -107,41 +202,89 @@ pub(crate) fn reload_theme() {
     debug!(" Theme hot-reloaded from theme file");
 }
 
-/// Lay a cover-derived accent over the theme (`Some`), or return to the theme
-/// file's own accent (`None`). Only the accent tokens and the roles derived
-/// from them change (see `theme_config::AccentRoles`), in both modes, each
-/// fitted to its own backgrounds; nothing is written to disk. A no-op when
-/// `seed` is already the active one, so callers may level-set it.
-pub(crate) fn set_dynamic_accent(seed: Option<AccentSeed>) {
+/// Lay the cover's colors over the theme (`Some`), or return to the theme
+/// file's own (`None`), recoloring what `follow` names: the accent tokens and
+/// the roles derived from them (see `theme_config::AccentRoles`), and/or the
+/// visualizer gradients. Both modes, each fitted to its own backgrounds;
+/// nothing is written to disk. A no-op when nothing changed, so callers may
+/// level-set it.
+pub(crate) fn set_cover_colors(cover: Option<CoverPalette>, follow: CoverFollow) {
+    let cover = cover.filter(|_| follow.any());
+    let follow = if cover.is_some() {
+        follow
+    } else {
+        CoverFollow::default()
+    };
     let previous = DUAL_THEME.rcu(|active| {
-        if active.seed == seed {
+        if active.cover == cover && active.follow == follow {
             Arc::clone(active)
         } else {
-            Arc::new(ActiveTheme::compose(active.base.clone(), seed))
+            Arc::new(ActiveTheme::compose(
+                active.base.clone(),
+                active.base_visualizer.clone(),
+                cover.clone(),
+                follow,
+            ))
         }
     });
-    if previous.seed != seed {
+    if previous.cover != cover || previous.follow != follow {
         THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
-        debug!(" Dynamic accent changed: {seed:?}");
+        debug!(" Cover colors changed: {follow:?} {cover:?}");
     }
+}
+
+/// Test shorthand: a one-hue cover on the accent only (`None` clears).
+#[cfg(test)]
+pub(crate) fn set_dynamic_accent(seed: Option<AccentSeed>) {
+    set_cover_colors(
+        seed.map(CoverPalette::single),
+        CoverFollow {
+            accent: true,
+            visualizer: false,
+        },
+    );
 }
 
 /// Whether the accent currently follows the playing cover.
 #[inline]
 pub(crate) fn dynamic_accent_active() -> bool {
-    DUAL_THEME.load().seed.is_some()
+    let active = DUAL_THEME.load();
+    active.follow.accent && active.cover.is_some()
 }
 
-/// The cover-derived accent laid over the theme, if any.
+/// The colors themed MilkDrop presets take from the cover while the
+/// visualizer follows it; `None` otherwise (they keep the theme's).
+pub(crate) fn cover_milkdrop() -> Option<CoverMilkdrop> {
+    DUAL_THEME
+        .load()
+        .visualizer
+        .as_ref()
+        .map(|v| v.milkdrop.clone())
+}
+
+/// The cover-derived accent seed laid over the theme, if any.
 #[cfg(test)]
 pub(crate) fn dynamic_accent_seed() -> Option<AccentSeed> {
-    DUAL_THEME.load().seed
+    let active = DUAL_THEME.load();
+    active
+        .cover
+        .as_ref()
+        .filter(|_| active.follow.accent)
+        .map(CoverPalette::primary)
 }
 
-/// Get the active mode's visualizer colors (hex strings).
-/// Returns a clone — safe to call from the render loop.
+/// Get the active mode's visualizer colors (hex strings): the cover's while
+/// the visualizer follows it, else the theme file's. Returns a clone — safe
+/// to call from the render loop.
 #[inline]
 pub(crate) fn get_visualizer_colors() -> VisualizerColors {
+    if let Some(cover) = &DUAL_THEME.load().visualizer {
+        return if is_light_mode() {
+            cover.shown.light.clone()
+        } else {
+            cover.shown.dark.clone()
+        };
+    }
     let guard = THEME_FILE.read();
     if is_light_mode() {
         guard.light.visualizer.clone()

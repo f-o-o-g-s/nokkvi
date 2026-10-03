@@ -1,14 +1,16 @@
-//! Dynamic accent bookkeeping: which cover the accent on screen came from.
-//! The color itself lives in the theme (`theme::set_dynamic_accent`).
+//! Cover-color bookkeeping: which cover the accent and visualizer colors on
+//! screen came from. The colors themselves live in the theme
+//! (`theme::set_cover_colors`).
 
 use std::num::NonZeroUsize;
 
 use iced::advanced::image::Id;
 use lru::LruCache;
 
-use crate::theme::AccentSeed;
+use crate::theme::{CoverFollow, CoverPalette};
 
-/// Seeds remembered per album / station, so a replay recolors without a decode.
+/// Palettes remembered per album / station, so a replay recolors without a
+/// decode.
 const SEED_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).expect("capacity must be > 0");
 
 /// Ticks (100 ms each) the accent is held through a gap before it returns to
@@ -17,8 +19,8 @@ const SEED_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).expect("capacit
 /// rather than twice.
 pub(crate) const ACCENT_HOLD_TICKS: u8 = 15;
 
-/// State of the accent that follows the playing cover (see
-/// `update/dynamic_accent.rs`).
+/// State of the colors that follow the playing cover — the accent and/or the
+/// visualizer (see `update/dynamic_accent.rs`).
 #[derive(Debug)]
 pub struct DynamicAccentState {
     /// The playing item (album id, or `radio:<station id>`) the accent on
@@ -26,17 +28,19 @@ pub struct DynamicAccentState {
     /// The handle is `None` when the item had no artwork and the accent went
     /// back to the theme's own.
     pub shown: Option<(String, Option<Id>)>,
-    /// Whether this app has a cover accent laid over the theme right now.
+    /// Whether this app has cover colors laid over the theme right now.
     pub applied: bool,
+    /// What those colors recolor (the two settings when they were applied).
+    pub applied_follow: CoverFollow,
     /// Extraction in flight, as `(item, artwork handle)`.
     pub pending: Option<(String, Id)>,
     /// A newly playing item still without artwork, and for how many ticks.
     pub waiting: Option<(String, u8)>,
     /// Consecutive ticks with nothing playing or paused.
     pub idle_ticks: u8,
-    /// Extracted seeds by item, each with the handle it was read from. A
-    /// `None` seed is a cover without a usable color.
-    pub seeds: LruCache<String, (Id, Option<AccentSeed>)>,
+    /// Extracted palettes by item, each with the handle it was read from. A
+    /// `None` palette is a cover without a usable color.
+    pub seeds: LruCache<String, (Id, Option<CoverPalette>)>,
 }
 
 impl Default for DynamicAccentState {
@@ -44,6 +48,7 @@ impl Default for DynamicAccentState {
         Self {
             shown: None,
             applied: false,
+            applied_follow: CoverFollow::default(),
             pending: None,
             waiting: None,
             idle_ticks: 0,

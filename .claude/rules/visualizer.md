@@ -83,6 +83,7 @@ Plays MilkDrop presets (Butterchurn's pre-converted JSON) through `particle-milk
 
 - Behavior under `[visualizer]`, `[visualizer.bars]`, `[visualizer.lines]`, `[visualizer.scope]`, `[visualizer.milkdrop]` in `config.toml`
 - Colors under `[dark.visualizer]` / `[light.visualizer]` in active theme file: `bar_gradient_colors`, `peak_gradient_colors`, `border_color`, `border_opacity`, `led_border_opacity`
+- **Visualizer From Album Art** (`general.dynamic_visualizer`) swaps the bar and peak gradients for ones built from the playing cover (`theme/cover_visualizer.rs`) while it is on; read them through `theme::get_visualizer_colors()`, never `THEME_FILE` directly. Themed MilkDrop presets take the cover's accent, highlight and ramp through `theme::cover_milkdrop()` in `PresetPalette::from_theme`, so they recolour (the normal palette-change reload) on a track change only while that switch is on.
 
 ## Configuration pipeline (M3 unified)
 
