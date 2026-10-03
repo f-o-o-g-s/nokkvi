@@ -35,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Find Similar from the Songs view now titles the results "Similar to: …" like every other view.
 - The Playlists create menu now closes when the window loses focus, like the other header menus.
 - `nokkvi --help` now lists `harbour` among the `switch-view` targets.
+- When the volume can't be saved, a warning now says so instead of the change silently not surviving a restart.
 
 ### Removed
 

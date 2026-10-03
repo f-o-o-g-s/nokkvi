@@ -450,6 +450,37 @@ fn volume_committed_sets_state_and_pushes_toast() {
 }
 
 #[test]
+fn volume_save_failure_warns_with_the_error() {
+    // The committed volume must reach disk (see handle_volume_committed), so a
+    // failed save has to say so instead of vanishing.
+    let mut app = test_app();
+
+    let msg = crate::Nokkvi::volume_saved_message(Err(anyhow::anyhow!("database is locked")));
+    let _ = app.update(msg);
+
+    let last = app
+        .toast
+        .toasts
+        .back()
+        .expect("a failed volume save should push a toast");
+    assert_eq!(last.level, nokkvi_data::types::toast::ToastLevel::Warning);
+    assert!(
+        last.message.contains("volume") && last.message.contains("database is locked"),
+        "the warning names the volume and the error: {:?}",
+        last.message
+    );
+}
+
+#[test]
+fn volume_save_success_is_silent() {
+    let mut app = test_app();
+
+    let _ = app.update(crate::Nokkvi::volume_saved_message(Ok(())));
+
+    assert!(app.toast.toasts.is_empty(), "a saved volume needs no toast");
+}
+
+#[test]
 fn volume_committed_advances_throttle_inside_blocked_window() {
     // Pin the bug fix: VolumeCommitted must always advance the persist throttle
     // (and dispatch the persist task) even when VolumeChanged would be throttled.
