@@ -116,6 +116,13 @@ impl ActiveStream {
             return;
         }
         if writer.switches.try_push((writer.written, gain)).is_ok() {
+            debug!(
+                "🔊 [RODIO] Gain switch at ring sample {}: {:.3}× → {:.3}× ({:+.2} dB)",
+                writer.written,
+                writer.write_gain,
+                gain,
+                20.0 * gain.max(f32::MIN_POSITIVE).log10()
+            );
             writer.write_gain = gain;
         } else {
             warn!(
