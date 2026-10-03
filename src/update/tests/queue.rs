@@ -1211,7 +1211,7 @@ fn build_queue_view_data_matches_settings_and_counts() {
     // can both be false, which would let a field swap pass silently.
     app.settings.stable_viewport = true;
     app.settings.queue_show_default_playlist = false;
-    app.library.queue_loading_target = Some(7);
+    app.library.start_progressive_queue_load(7);
 
     let vd = app.build_queue_view_data(false);
     assert!(
@@ -1224,7 +1224,7 @@ fn build_queue_view_data_matches_settings_and_counts() {
     );
     assert_eq!(
         vd.total_queue_count, 7,
-        "total_queue_count must use queue_loading_target"
+        "total_queue_count must use the progressive loading total"
     );
 }
 

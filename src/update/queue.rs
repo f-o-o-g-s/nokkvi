@@ -369,7 +369,7 @@ impl Nokkvi {
                     // Only flash for active user actions (track change, MPRIS).
                     // Suppress for passive callers (view switch, queue reload)
                     // and during progressive queue loading.
-                    if flash && self.library.queue_loading_target.is_none() {
+                    if flash && self.library.queue_loading_total().is_none() {
                         self.queue_page.common.slot_list.flash_center();
                     }
                 } else {
@@ -1084,11 +1084,19 @@ impl Nokkvi {
     /// rows + entry_ids; an empty/absent server queue is an info toast with
     /// no local change.
     pub(crate) fn pull_queue_task(&mut self) -> Task<Message> {
-        // The pulled queue replaces the local one, so a running Songs
-        // progressive load must stop appending to it.
-        self.cancel_progressive_queue_load();
+        // A pulled queue replaces the local one, so a running Songs
+        // progressive load must stop appending to it, but only once the
+        // server has entries to replace it with. The bump hides the chain's
+        // "X of Y" count too (`LibraryData::queue_loading_total`).
+        let progressive_queue_generation = self.library.progressive_queue_generation.clone();
         self.shell_task(
-            |shell| async move { shell.pull_queue().await },
+            move |shell| async move {
+                shell
+                    .pull_queue(move || {
+                        progressive_queue_generation.bump();
+                    })
+                    .await
+            },
             |result| match result {
                 Ok(s) if s.restored == 0 => Message::Toast(crate::app_message::ToastMessage::Push(
                     nokkvi_data::types::toast::Toast::new(

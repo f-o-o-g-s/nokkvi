@@ -97,7 +97,7 @@ fn enter_new_playback_context_clears_active_playlist_info() {
     // playlist context.
     let mut app = test_app();
     app.active_playlist_info = Some(make_playlist_ctx());
-    app.library.queue_loading_target = Some(5);
+    app.library.start_progressive_queue_load(5);
 
     app.enter_new_playback_context();
 
@@ -106,7 +106,7 @@ fn enter_new_playback_context_clears_active_playlist_info() {
         "new-context entry must clear the playlist header"
     );
     assert!(
-        app.library.queue_loading_target.is_none(),
+        app.library.queue_loading_total().is_none(),
         "new-context entry must cancel the in-progress queue load target"
     );
 }
@@ -155,7 +155,7 @@ fn radio_app_with_stale_context() -> crate::Nokkvi {
     let mut app = test_app();
     seed_radio_playback(&mut app);
     app.active_playlist_info = Some(make_playlist_ctx());
-    app.library.queue_loading_target = Some(5);
+    app.library.start_progressive_queue_load(5);
     app
 }
 
@@ -169,7 +169,7 @@ fn assert_batch_play_entered_new_context(app: &crate::Nokkvi, path: &str) {
         "{path}: a batch play replaces the queue, so the playlist header must go"
     );
     assert!(
-        app.library.queue_loading_target.is_none(),
+        app.library.queue_loading_total().is_none(),
         "{path}: a batch play must clear the stale progressive-load count"
     );
 }
@@ -294,8 +294,7 @@ fn similar_replace_queue_with_all_found_leaves_radio() {
 /// A Songs "play all" whose remaining pages are still being appended.
 fn app_with_running_songs_load() -> (crate::Nokkvi, u64) {
     let mut app = test_app();
-    let chain = app.library.progressive_queue_generation.bump();
-    app.library.queue_loading_target = Some(500);
+    let chain = app.library.start_progressive_queue_load(500);
     (app, chain)
 }
 
@@ -323,17 +322,31 @@ fn clear_queue_stops_a_running_songs_load() {
     let _ = app.clear_queue_action();
 
     assert!(!app.library.progressive_queue_generation.is_current(chain));
-    assert!(app.library.queue_loading_target.is_none());
+    assert!(app.library.queue_loading_total().is_none());
 }
 
 #[test]
-fn queue_pull_stops_a_running_songs_load() {
+fn starting_a_queue_pull_keeps_the_songs_load_running() {
+    // A pull with no saved queue, or a failed one, replaces nothing; the
+    // pull stops the load inside AppService::pull_queue, right before it
+    // replaces the queue, and only then.
     let (mut app, chain) = app_with_running_songs_load();
 
     let _ = app.pull_queue_task();
 
-    assert!(!app.library.progressive_queue_generation.is_current(chain));
-    assert!(app.library.queue_loading_target.is_none());
+    assert!(app.library.progressive_queue_generation.is_current(chain));
+    assert_eq!(app.library.queue_loading_total(), Some(500));
+}
+
+#[test]
+fn a_stopped_chains_count_leaves_the_header() {
+    // A pull stops the chain from its async task with a bare bump: nothing
+    // clears the target, so the header must stop showing it on its own.
+    let (app, _chain) = app_with_running_songs_load();
+
+    let _ = app.library.progressive_queue_generation.bump();
+
+    assert_eq!(app.library.queue_loading_total(), None);
 }
 
 #[test]
@@ -344,7 +357,7 @@ fn genre_roulette_stops_a_running_songs_load() {
     let _ = app.roulette_settle_play(View::Genres, 0, 1);
 
     assert!(!app.library.progressive_queue_generation.is_current(chain));
-    assert!(app.library.queue_loading_target.is_none());
+    assert!(app.library.queue_loading_total().is_none());
 }
 
 #[test]
@@ -371,21 +384,20 @@ fn in_queue_play_keeps_the_songs_load_running() {
     )));
 
     assert!(app.library.progressive_queue_generation.is_current(chain));
-    assert_eq!(app.library.queue_loading_target, Some(500));
+    assert_eq!(app.library.queue_loading_total(), Some(500));
 }
 
 #[test]
 fn stale_chain_done_leaves_the_newer_loads_count() {
     let (mut app, stale_chain) = app_with_running_songs_load();
-    let _newer_chain = app.library.progressive_queue_generation.bump();
-    app.library.queue_loading_target = Some(50);
+    let _newer_chain = app.library.start_progressive_queue_load(50);
 
     let _ = app.update(crate::app_message::Message::ProgressiveQueueDone {
         generation: stale_chain,
     });
 
     assert_eq!(
-        app.library.queue_loading_target,
+        app.library.queue_loading_total(),
         Some(50),
         "a superseded chain finishing must not clear the running chain's count"
     );
@@ -853,12 +865,12 @@ fn play_playlist_from_track_transitions_radio_to_queue() {
 fn play_playlist_from_track_clears_stale_queue_loading_target() {
     let mut app = test_app();
     seed_expanded_playlist_centered_on_child(&mut app);
-    app.library.queue_loading_target = Some(5);
+    app.library.start_progressive_queue_load(5);
 
     activate_center_on_playlists(&mut app);
 
     assert!(
-        app.library.queue_loading_target.is_none(),
+        app.library.queue_loading_total().is_none(),
         "playing a playlist from a track must clear the stale queue_loading_target \
          (enter_new_playback_context prologue)"
     );

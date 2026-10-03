@@ -1498,7 +1498,7 @@ pub enum Message {
         generation: u64,
     },
     /// All pages of a progressive queue chain have been loaded (or a page
-    /// failed). Clears `queue_loading_target` so the header shows the actual
+    /// failed). Clears the loading target so the header shows the actual
     /// count.
     ProgressiveQueueDone {
         generation: u64,

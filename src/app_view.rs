@@ -1955,7 +1955,7 @@ impl Nokkvi {
                 .is_some_and(|name| self.milkdrop.library.is_favorite(name)),
             total_queue_count: self
                 .library
-                .queue_loading_target
+                .queue_loading_total()
                 .unwrap_or(self.library.queue_songs.len()),
             stable_viewport: self.settings.stable_viewport,
             elevated,

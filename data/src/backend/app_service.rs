@@ -874,7 +874,11 @@ impl AppService {
     /// actually-returned entries (the server silently drops library-missing
     /// ids), replace the local queue model, and cue the engine ("cue, don't
     /// play" — play/pause state is preserved).
-    pub async fn pull_queue(&self) -> Result<PullSummary> {
+    ///
+    /// `before_replace` runs right before the local queue is replaced, and
+    /// only when the server returned entries: an empty or failed pull leaves
+    /// the local queue, and anything still filling it, alone.
+    pub async fn pull_queue(&self, before_replace: impl FnOnce()) -> Result<PullSummary> {
         use crate::services::api::play_queue::clamp_pulled_index;
 
         let pq = self
@@ -907,6 +911,7 @@ impl AppService {
 
         // 1. Replace the queue MODEL + reactive playhead; discharge the
         //    gapless-prep reset obligation against the engine.
+        before_replace();
         let effect = self.queue_service.set_queue(pq.entry, clamped).await?;
         let engine_arc = self.audio_engine();
         effect.apply_to(&engine_arc).await;

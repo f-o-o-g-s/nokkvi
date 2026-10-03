@@ -27,6 +27,14 @@ impl ProgressiveQueueGeneration {
     }
 }
 
+/// The Songs progressive load's final queue length, tagged with the chain
+/// that set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueLoadingTarget {
+    pub total: usize,
+    pub generation: u64,
+}
+
 /// All loaded library data vectors + counts
 ///
 /// Groups the 6 data vectors and their associated counts that were
@@ -53,9 +61,9 @@ pub struct LibraryData {
     >,
     pub queue_songs: Vec<nokkvi_data::backend::queue::QueueSongUIViewData>,
     pub radio_stations: Vec<nokkvi_data::types::radio_station::RadioStation>,
-    /// Target count during progressive queue loading (e.g., 12036 while loading).
-    /// When `Some`, the queue header shows "X of Y songs" as pages are appended.
-    pub queue_loading_target: Option<usize>,
+    /// Target count during progressive queue loading (e.g., 12036 while
+    /// loading). Read it through [`Self::queue_loading_total`].
+    pub queue_loading_target: Option<QueueLoadingTarget>,
     /// Generation counter for progressive queue loading. Bumped each time
     /// play-from-songs starts a new chain; stale chains self-cancel by comparing
     /// their generation against this value.
@@ -64,6 +72,30 @@ pub struct LibraryData {
 }
 
 /// Total counts for library items (used in headers)
+impl LibraryData {
+    /// Start a progressive load toward `total` rows: bumps the generation
+    /// (stopping any running chain) and tags the target with it. Returns the
+    /// chain's generation.
+    pub fn start_progressive_queue_load(&mut self, total: usize) -> u64 {
+        let generation = self.progressive_queue_generation.bump();
+        self.queue_loading_target = Some(QueueLoadingTarget { total, generation });
+        generation
+    }
+
+    /// The total for the queue header's "X of Y songs" while a progressive
+    /// load is running: `None` once its chain is no longer current, so a
+    /// chain stopped from an async path (a server pull) drops its count
+    /// without needing a message.
+    pub fn queue_loading_total(&self) -> Option<usize> {
+        self.queue_loading_target
+            .filter(|target| {
+                self.progressive_queue_generation
+                    .is_current(target.generation)
+            })
+            .map(|target| target.total)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LibraryCounts {
     pub albums: usize,
