@@ -57,7 +57,7 @@ fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  
 Key shared infrastructure:
 - `ViewPage` trait (`views/mod.rs`) — explicit `impl` per view, no macro. Has pane-aware `current_view_page{,_mut}()` (delegates to browsing panel in split-view) and direct `view_page{,_mut}(View)`.
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components/`.
-- `impl_expansion_update!` macro — deduplicates inline expansion handling.
+- `impl_expansion_update!` macro — owns the expansion views' shared `update()` arms (every `SlotList` message, sort/search, expand/collapse), with per-view closures.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
 - Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (pre-play hook: transition radio playback back to queue mode; never blocks), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
 

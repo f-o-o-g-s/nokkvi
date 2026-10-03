@@ -24,7 +24,7 @@ Adding a new slot-list **view**? Follow [new-view.md](new-view.md) (ordered wiri
 
 ## Cross-Cutting
 - [ ] **Cross-view sync**: star/rating/play-count changes propagate across views
-- [ ] **Context menu**: `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry`
+- [ ] **Context menu**: `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry`. An entry added to an expansion view's row menu (`*Page::parent_menu` / `child_menu`) needs a handler arm; `update/tests/row_menus.rs` fails on one that does nothing
 - [ ] **Toasts**: `toast_success()` / `toast_error()` / `toast_warn()` / `toast_info()`
 - [ ] **Hotkeys**: add a variant to the `define_hotkey_actions!` table in `data/src/types/hotkey_config/action.rs` (it emits the enum, `ALL` / `RESERVED` slices, default-binding, and TOML wire string from one declaration)
 - [ ] **MPRIS**: update `services/mpris.rs` for playback-related changes
