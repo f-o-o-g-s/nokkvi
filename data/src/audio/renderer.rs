@@ -498,6 +498,10 @@ pub struct AudioRenderer {
     /// exactly once, not once per 20 ms tick.
     #[cfg(test)]
     stall_signals_sent: u64,
+    /// Set by [`Self::install_detached_output_for_test`]: `output` is a
+    /// device-less mixer, so `ensure_music_output` must not open a real sink.
+    #[cfg(test)]
+    detached_output: bool,
 
     /// Shared visualizer callback slot. Owned by the renderer, shared with
     /// all `RodioOutput` instances and their `StreamingSource`s.
@@ -607,15 +611,18 @@ impl AudioRenderer {
         self.pending_crossfade_replay_gain = rg;
     }
 
-    /// Move the staged crossfade RG into the current slot. Called after a
-    /// successful gapless decoder-swap that reuses the same rodio stream.
+    /// Record `rg`, the swapped-in track's own tags (from the prepared slot),
+    /// as the playing stream's. Called after a successful inline gapless swap,
+    /// which keeps the same rodio stream; the staged crossfade copy of the
+    /// same tags is spent, so it is cleared.
     ///
     /// Unlike `finalize_crossfade`, this leaves `pending_replay_gain` alone:
     /// the decode loop calls it without re-checking its own generation, so a
     /// superseded loop could land here after `load_track_with_rg` stashed a
     /// newly loaded track's tags.
-    pub fn adopt_pending_crossfade_replay_gain(&mut self) {
-        self.current_replay_gain = self.pending_crossfade_replay_gain.take();
+    pub fn adopt_gapless_replay_gain(&mut self, rg: Option<ReplayGain>) {
+        self.current_replay_gain = rg;
+        self.pending_crossfade_replay_gain = None;
     }
 
     /// Take the staged crossfade RG out (leaving `None`). Used by the
@@ -650,21 +657,19 @@ impl AudioRenderer {
     /// baked in at stream creation. The decode-loop's gapless swap reuses
     /// the same primary stream, which would mis-level the next track.
     ///
-    /// Returns `false` only when mode is `ReplayGainTrack` *and* the
-    /// staged next track has a different `track_gain` than the live
-    /// stream — denying the swap forces the engine to take the natural
-    /// EOF → reload path, which calls `init()` and creates a fresh
-    /// stream with the correct gain.
+    /// Returns `false` only when mode is `ReplayGainTrack` *and* `incoming`
+    /// (the prepared track's own tags) has a different `track_gain` than the
+    /// live stream — denying the swap forces the engine to take the natural
+    /// EOF → reload path (`load_prepared_track`), which stages the incoming
+    /// tags and calls `init()`, building a fresh stream with the correct gain.
     ///
-    /// Album mode is unaffected (same album → same album_gain).
-    pub fn gapless_swap_allowed(&self) -> bool {
+    /// Album mode is not checked: tracks of one album share its album gain,
+    /// but a same-format join into a different album keeps the first one's.
+    pub fn gapless_swap_allowed(&self, incoming: Option<&ReplayGain>) -> bool {
         if self.volume_normalization_mode != VolumeNormalizationMode::ReplayGainTrack {
             return true;
         }
-        !rg_track_gains_differ(
-            self.current_replay_gain.as_ref(),
-            self.pending_crossfade_replay_gain.as_ref(),
-        )
+        !rg_track_gains_differ(self.current_replay_gain.as_ref(), incoming)
     }
 
     /// Resolve mode + settings + an optional `ReplayGain` into the final
@@ -732,6 +737,8 @@ impl AudioRenderer {
             transport_fade_completions: 0,
             #[cfg(test)]
             stall_signals_sent: 0,
+            #[cfg(test)]
+            detached_output: false,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
             viz_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             music_sink: None,
@@ -824,7 +831,8 @@ impl AudioRenderer {
         // RG-track mode also requires the per-track gain to be unchanged —
         // gapless reuse keeps the existing rodio chain (with the previous
         // track's `amplify` factor), which would mis-level the new track.
-        // Album mode is unaffected: same album → same album_gain by definition.
+        // Album mode is not checked: tracks of one album share its album gain,
+        // but a same-format join into a different album keeps the first one's.
         let rg_blocks_gapless = self.volume_normalization_mode
             == VolumeNormalizationMode::ReplayGainTrack
             && rg_track_gains_differ(
@@ -846,6 +854,9 @@ impl AudioRenderer {
             // Formats match — reuse existing stream for gapless playback.
             debug!("📡 Renderer::init() GAPLESS path — reusing stream");
             self.format = format.clone();
+            // The stream now plays the staged track, so its tags are the ones
+            // the next gapless-swap verdict compares against.
+            self.current_replay_gain = self.pending_replay_gain.clone();
             self.position_offset = 0;
             if let Some(ref stream) = self.primary_stream {
                 stream.reset_position();
@@ -1374,6 +1385,10 @@ impl AudioRenderer {
     /// so PipeWire switches the device clock. A no-op when the rate already
     /// matches (the common, same-rate case — gapless and normal playback).
     pub(crate) fn ensure_music_output(&mut self, format_rate: u32) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if self.detached_output {
+            return Ok(());
+        }
         // Build once at the default rate so we know the backend (native PipeWire
         // vs cpal).
         if self.music_sink.is_none() {
@@ -2741,6 +2756,33 @@ impl AudioRenderer {
         self.playing = true;
         self.paused = false;
         (source, handle)
+    }
+
+    /// Test-only: give the renderer a music output on a device-less rodio
+    /// mixer, so `init` builds real streams without opening a PipeWire node
+    /// or an audio device. Keep the returned mixer source alive for the test.
+    #[cfg(test)]
+    pub(crate) fn install_detached_output_for_test(&mut self) -> rodio::mixer::MixerSource {
+        use std::num::NonZero;
+        let (mixer, source) = rodio::mixer::mixer(
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("48000 is nonzero"),
+        );
+        self.output = Some(
+            RodioOutput::new(mixer, self.viz_callback.clone(), self.viz_enabled.clone())
+                .expect("a detached output builds"),
+        );
+        self.detached_output = true;
+        source
+    }
+
+    /// Test-only: the primary stream's control handle, so a test can tell a
+    /// reused stream from a rebuilt one.
+    #[cfg(test)]
+    pub(crate) fn primary_stream_handle_for_test(
+        &self,
+    ) -> Option<crate::audio::streaming_source::StreamHandle> {
+        self.primary_stream.as_ref().map(|s| s.handle.clone())
     }
 
     // =========================================================================

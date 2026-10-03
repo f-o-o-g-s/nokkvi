@@ -474,11 +474,20 @@ pub(crate) struct GaplessSlot {
     /// ReplayGain tags of the prepared track, carried WITH the slot so a
     /// prep landing while a blend is live never overwrites the renderer's
     /// `pending_crossfade_replay_gain` (still owned by the LIVE blend —
-    /// finalize promotes it into `current_replay_gain`). Re-staged into the
-    /// renderer by every consumer of the slot: `rearm_crossfade_if_prepared`
-    /// (finalize-time re-arm + seek re-arm) and engine `start_crossfade`
-    /// (EOF-fallback trigger). The ordinary store path stages the renderer
-    /// copy immediately AND records it here, so the two never disagree.
+    /// finalize promotes it into `current_replay_gain`). The ordinary store
+    /// path also stages the renderer copy immediately; the re-arm
+    /// (`rearm_crossfade_if_prepared`) re-stages it from here. The consumers
+    /// that take the track ([`Self::take_prepared`]) get these tags with the
+    /// decoder and apply them themselves, never the renderer's staged copy.
+    pub replay_gain: Option<crate::types::song::ReplayGain>,
+}
+
+/// A prepared next track taken out of the [`GaplessSlot`]: its decoder with
+/// the URL and ReplayGain tags it was prepared for. They travel together so
+/// no consumer can promote the decoder and miss its tags.
+pub(crate) struct PreparedTrack {
+    pub decoder: AudioDecoder,
+    pub source: String,
     pub replay_gain: Option<crate::types::song::ReplayGain>,
 }
 
@@ -494,6 +503,29 @@ impl GaplessSlot {
 
     pub(crate) fn is_prepared(&self) -> bool {
         self.prepared && self.decoder.is_some()
+    }
+
+    /// Take the staged track out (decoder, URL and ReplayGain together),
+    /// leaving the slot empty. `None` when no decoder is staged. This does not
+    /// check `prepared`; callers that need the gate check
+    /// [`Self::is_prepared`] first.
+    pub(crate) fn take_prepared(&mut self) -> Option<PreparedTrack> {
+        let decoder = self.decoder.take()?;
+        self.prepared = false;
+        Some(PreparedTrack {
+            decoder,
+            source: std::mem::take(&mut self.source),
+            replay_gain: self.replay_gain.take(),
+        })
+    }
+
+    /// Return a track taken from a PREPARED slot that went unused (the inline
+    /// swap standing down), restoring the slot as it was.
+    pub(crate) fn put_back(&mut self, track: PreparedTrack) {
+        self.decoder = Some(track.decoder);
+        self.source = track.source;
+        self.replay_gain = track.replay_gain;
+        self.prepared = true;
     }
 
     pub fn clear(&mut self) {
@@ -976,9 +1008,9 @@ fn should_attempt_gapless_swap(
     !renderer_crossfade_armed && !renderer_crossfade_active
 }
 
-/// Outcome of an inline EOF gapless-swap attempt (`try_gapless_swap`). The five
-/// variants are the five mutually-exclusive exit paths of the original inline
-/// block; the caller branches on them so each path's side effects stay explicit.
+/// Outcome of an inline EOF gapless-swap attempt (`try_gapless_swap`). Each
+/// variant is one of its mutually-exclusive exit paths; the caller branches on
+/// them so each path's side effects stay explicit.
 ///
 /// Only `Swapped` actually advanced to the next track. The caller MUST clear its
 /// loop-local `backpressure_active` latch on `Swapped` ONLY (the new track's
@@ -995,10 +1027,15 @@ enum GaplessSwapOutcome {
     Swapped,
     /// Nothing was staged (`!slot.is_prepared()`) — no swap possible.
     NotPrepared,
-    /// The staged decoder's format didn't match the live stream's (or the
-    /// RG-track gain differs): the decoder was put BACK in the slot for a later
-    /// retry / the renderer's crossfade trigger.
+    /// The staged decoder's format didn't match the live stream's: the
+    /// decoder was put BACK in the slot for a later retry / the renderer's
+    /// crossfade trigger.
     FormatMismatch,
+    /// ReplayGain Track mode, and the staged track needs a different gain than
+    /// the live stream, whose gain is fixed when the stream is built: the track
+    /// was put BACK so the end-of-track path (`load_prepared_track`) gives it
+    /// a stream of its own.
+    ReplayGainDiffers,
     /// A crossfade is armed or active, so the renderer's position-based trigger
     /// owns the transition: the staged decoder was put BACK so that trigger can
     /// take it.
@@ -1018,7 +1055,7 @@ enum GaplessSwapOutcome {
 /// Inline EOF gapless swap: when the primary decoder hits EOF on a finite
 /// stream, try to swap the prepared next-track decoder straight into the primary
 /// slot so the decode loop continues with NO gap. Extracted verbatim from the
-/// decode loop; see `GaplessSwapOutcome` for the five exit paths.
+/// decode loop; see `GaplessSwapOutcome` for its exit paths.
 ///
 /// Lock discipline (preserved exactly): the caller has ALREADY dropped the
 /// primary `decoder_guard` and passes `current_format` (snapshotted from it) by
@@ -1045,10 +1082,10 @@ async fn try_gapless_swap(
     if !slot.is_prepared() {
         drop(slot);
         GaplessSwapOutcome::NotPrepared
-    } else if let Some(next_dec) = slot.decoder.take() {
+    } else if let Some(next) = slot.take_prepared() {
         // Hold the slot lock through the format check + ownership
-        // transition so `prepared` and `decoder` flip atomically.
-        let next_fmt = next_dec.format().clone();
+        // transition so the take and any put-back are atomic.
+        let next_fmt = next.decoder.format().clone();
         let formats_match = current_format.is_valid()
             && next_fmt.is_valid()
             && current_format.sample_rate() == next_fmt.sample_rate()
@@ -1059,14 +1096,11 @@ async fn try_gapless_swap(
         let (rg_allows_swap, cf_armed, cf_active) = {
             let r = renderer.lock();
             (
-                r.gapless_swap_allowed(),
+                r.gapless_swap_allowed(next.replay_gain.as_ref()),
                 r.is_crossfade_armed(),
                 r.is_crossfade_active(),
             )
         };
-        if !rg_allows_swap {
-            tracing::debug!("🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap");
-        }
 
         // M7: a planned manual skip's build window is open (latch matches
         // the live generation) — the queue cursor ALREADY advanced for the
@@ -1079,7 +1113,7 @@ async fn try_gapless_swap(
             tracing::debug!(
                 "🔀 [DECODE LOOP] Skip-fade plan pending — standing down (the skip owns the transition)"
             );
-            slot.decoder = Some(next_dec);
+            slot.put_back(next);
             drop(slot);
             return GaplessSwapOutcome::SkipFadePlanPending;
         }
@@ -1093,11 +1127,14 @@ async fn try_gapless_swap(
         // cushion >= the crossfade duration re-strand a phantom
         // crossfade (the dead-air bug).
         if formats_match && rg_allows_swap && should_attempt_gapless_swap(cf_armed, cf_active) {
-            let next_duration = next_dec.duration();
-            let next_source_url = std::mem::take(&mut slot.source);
-            let next_codec = next_dec.live_codec();
-            slot.prepared = false;
             drop(slot); // release before locking decoder + renderer
+            let PreparedTrack {
+                decoder: next_dec,
+                source: next_source_url,
+                replay_gain: next_replay_gain,
+            } = next;
+            let next_duration = next_dec.duration();
+            let next_codec = next_dec.live_codec();
 
             // Swap into primary decoder
             *decoder.lock().await = next_dec;
@@ -1105,16 +1142,15 @@ async fn try_gapless_swap(
             // Increment source generation for stale callback detection
             source_generation.bump_for_gapless();
 
-            // Reset renderer position for the new track and
-            // promote the staged crossfade RG to "current"
-            // (since we're keeping the same stream, the
-            // amplify factor is already correct — we just
-            // need our bookkeeping to reflect the new track).
+            // Reset renderer position for the new track and record
+            // its own tags as "current" (since we're keeping the
+            // same stream, the amplify factor is already correct —
+            // we just need our bookkeeping to reflect the new track).
             {
                 let mut r = renderer.lock();
                 r.reset_position();
                 r.reset_finished_called();
-                r.adopt_pending_crossfade_replay_gain();
+                r.adopt_gapless_replay_gain(next_replay_gain);
             }
 
             // Store transition info for the engine to pick up
@@ -1137,27 +1173,30 @@ async fn try_gapless_swap(
             tracing::info!("🎵 [DECODE LOOP] Gapless transition — continuing decode loop");
             GaplessSwapOutcome::Swapped
         } else {
-            let crossfade_owns = !should_attempt_gapless_swap(cf_armed, cf_active);
-            if crossfade_owns {
+            let outcome = if !should_attempt_gapless_swap(cf_armed, cf_active) {
                 tracing::debug!(
                     "🔀 [DECODE LOOP] Crossfade armed/active — deferring transition to the renderer trigger (skipping inline gapless)"
                 );
-            } else {
+                GaplessSwapOutcome::CrossfadeActive
+            } else if !formats_match {
                 tracing::debug!(
                     "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
                     current_format,
                     next_fmt
                 );
-            }
-            // Put the decoder back so a future swap can retry,
-            // or so the renderer's crossfade trigger can take it.
-            slot.decoder = Some(next_dec);
-            drop(slot);
-            if crossfade_owns {
-                GaplessSwapOutcome::CrossfadeActive
-            } else {
                 GaplessSwapOutcome::FormatMismatch
-            }
+            } else {
+                tracing::debug!(
+                    "🔄 [DECODE LOOP] ReplayGain Track gain differs — no inline gapless swap; the next track gets its own stream"
+                );
+                GaplessSwapOutcome::ReplayGainDiffers
+            };
+            // Put the track back so a future swap can retry, the
+            // renderer's crossfade trigger can take it, or the
+            // end-of-track load can.
+            slot.put_back(next);
+            drop(slot);
+            outcome
         }
     } else {
         // Slot said prepared but decoder was missing — clear.
@@ -2706,16 +2745,39 @@ impl CustomAudioEngine {
                 info.duration,
                 info.format
             );
-            self.source = info.source;
-            self.duration = info.duration;
-            self.position = 0;
-            self.current_format = info.format;
-            self.live_codec_name.set(info.codec);
-            self.next_source.clear();
-            self.gapless.lock().await.source.clear();
-            self.live_sample_rate
-                .store(self.current_format.sample_rate(), Ordering::Relaxed);
+            self.promote_to_now_playing(info.source, info.format, info.duration, info.codec);
         }
+    }
+
+    /// Record a track as now playing in the engine's own fields. This is the
+    /// one copy of that bookkeeping for every transition that promotes an
+    /// already-built decoder: the inline gapless swap (via
+    /// [`Self::consume_gapless_transition`]), the crossfade finalize and
+    /// [`Self::load_prepared_track`]. The caller installs the decoder and
+    /// handles the renderer side, which differs per path.
+    ///
+    /// `next_format` described the track being promoted, so it is cleared (a
+    /// prep stored mid-blend gets it back from `rearm_crossfade_if_prepared`).
+    /// `next_source` is cleared only while it still names the promoted track:
+    /// a prep stored mid-blend names the track after it.
+    fn promote_to_now_playing(
+        &mut self,
+        source: String,
+        format: AudioFormat,
+        duration_ms: u64,
+        codec: Option<String>,
+    ) {
+        if self.next_source == source {
+            self.next_source.clear();
+        }
+        self.source = source;
+        self.live_sample_rate
+            .store(format.sample_rate(), Ordering::Relaxed);
+        self.current_format = format;
+        self.duration = duration_ms;
+        self.position = 0;
+        self.live_codec_name.set(codec);
+        self.next_format = AudioFormat::invalid();
     }
 
     // =========================================================================
@@ -3035,21 +3097,22 @@ impl CustomAudioEngine {
             return false;
         }
 
-        // Take the prepared decoder for crossfade use, ungating the slot
-        // and decoder ownership atomically. The slot's ReplayGain rides
-        // along so it can be re-staged below.
-        let (next_decoder, slot_replay_gain) = {
+        // Take the prepared track for crossfade use, ungating the slot and
+        // decoder ownership atomically. Its ReplayGain rides along so it
+        // can be re-staged below.
+        let PreparedTrack {
+            decoder: next_decoder,
+            source: incoming_source,
+            replay_gain: slot_replay_gain,
+        } = {
             let mut slot = self.gapless.lock().await;
             if !slot.is_prepared() {
                 drop(slot);
                 debug!("🔀 [CROSSFADE] No prepared decoder, cannot start");
                 return false;
             }
-            let dec = slot.decoder.take();
-            slot.prepared = false;
-            let rg = slot.replay_gain.clone();
-            match dec {
-                Some(d) => (d, rg),
+            match slot.take_prepared() {
+                Some(track) => track,
                 None => {
                     debug!("🔀 [CROSSFADE] Prepared flag set but no decoder, skipping");
                     return false;
@@ -3061,7 +3124,6 @@ impl CustomAudioEngine {
         // Effective = per-transition bar-snap override when staged (M8): the
         // EOF-fallback fire must blend at the same length the arm would have.
         let duration_ms = self.crossfade.effective_duration_ms();
-        let incoming_source = self.next_source.clone();
         self.next_source.clear();
 
         debug!(
@@ -3536,19 +3598,12 @@ impl CustomAudioEngine {
         // Take the crossfade decoder and make it the primary
         let crossfade_dec = decoder_arc.lock().await.take();
         if let Some(decoder) = crossfade_dec {
+            let format = decoder.format().clone();
+            let duration = decoder.duration();
+            let codec = decoder.live_codec();
             // Swap decoders
             *self.decoder.lock().await = decoder;
-            let dec = self.decoder.lock().await;
-
-            // Update engine state to reflect the incoming track
-            self.source = incoming_source;
-            self.current_format = dec.format().clone();
-            self.live_sample_rate
-                .store(self.current_format.sample_rate(), Ordering::Relaxed);
-            self.duration = dec.duration();
-            self.position = 0;
-            self.next_format = AudioFormat::invalid();
-            drop(dec);
+            self.promote_to_now_playing(incoming_source, format, duration, codec);
 
             // Read the stored crossfade elapsed time and apply state resets.
             // The renderer already finalized (from render_buffers), so we just
@@ -3714,19 +3769,20 @@ impl CustomAudioEngine {
         });
     }
 
-    /// Load prepared track (for gapless transition)
+    /// Load the prepared track at end of track, when the inline gapless swap
+    /// didn't take it (a format change, a ReplayGain Track gain change, or a
+    /// crossfade that didn't fire). Reuses the stream when the format and gain
+    /// allow, else builds a fresh one at the track's own ReplayGain.
     pub async fn load_prepared_track(&mut self) -> Result<()> {
-        // Drain the slot atomically: take ownership of the decoder, clear
-        // prepared + source so the slot can't be reused mid-swap.
-        let next_decoder = {
-            let mut slot = self.gapless.lock().await;
-            let dec = match slot.decoder.take() {
-                Some(d) => d,
-                None => anyhow::bail!("No prepared track to load"),
-            };
-            slot.prepared = false;
-            slot.source.clear();
-            dec
+        // Drain the slot atomically (decoder, URL and ReplayGain together)
+        // so the slot can't be reused mid-swap.
+        let Some(PreparedTrack {
+            decoder: next_decoder,
+            source: next_source,
+            replay_gain: next_replay_gain,
+        }) = self.gapless.lock().await.take_prepared()
+        else {
+            anyhow::bail!("No prepared track to load");
         };
 
         // Stop current decoding loop before swapping decoders
@@ -3735,22 +3791,12 @@ impl CustomAudioEngine {
         // Store previous format for gapless detection
         let prev_format = self.current_format.clone();
 
+        let format = next_decoder.format().clone();
+        let duration = next_decoder.duration();
+        let codec = next_decoder.live_codec();
         // Switch decoders
         *self.decoder.lock().await = next_decoder;
-        let decoder = self.decoder.lock().await;
-
-        // Update source and format
-        self.source = self.next_source.clone();
-        self.next_source.clear();
-        self.current_format = decoder.format().clone();
-        self.live_sample_rate
-            .store(self.current_format.sample_rate(), Ordering::Relaxed);
-        self.next_format = AudioFormat::invalid();
-
-        // Update duration
-        self.duration = decoder.duration();
-        self.position = 0;
-        drop(decoder);
+        self.promote_to_now_playing(next_source, format, duration, codec);
 
         // Check if formats match for gapless playback
         let formats_match = prev_format.is_valid()
@@ -3770,6 +3816,10 @@ impl CustomAudioEngine {
         // Initialize renderer with format-aware gapless logic
         let should_start = {
             let mut renderer = self.renderer.lock();
+            // Stage the incoming track's own tags first: `init` builds a
+            // fresh stream from them, and in ReplayGain Track mode a changed
+            // gain is what makes it build one instead of reusing the stream.
+            renderer.set_pending_replay_gain(next_replay_gain);
             renderer.init(&self.current_format, force_reload, Some(&prev_format))?;
 
             // Apply current volume to renderer
@@ -7210,7 +7260,7 @@ mod tests {
         let mut engine = CustomAudioEngine::new();
         let cb_count = install_callback_counter(&mut engine);
 
-        // A fresh renderer reports `gapless_swap_allowed() == true` and no
+        // A fresh renderer (not in Track mode) allows the swap and has no
         // crossfade armed/active, so the matching-format slot swaps cleanly.
         let current_format = matching_format();
 
@@ -7467,20 +7517,22 @@ mod tests {
         );
     }
 
-    /// Characterization (S2): `consume_gapless_transition` performs EIGHT
-    /// writes when the in-memory gapless slot holds an `Some(info)`. This pins
-    /// every one so a decomposition that drops a write — especially the two
-    /// most-droppable, `gapless.lock().source.clear()` and the
-    /// `live_sample_rate` store — fails loudly instead of silently regressing
-    /// gapless metadata pickup.
+    /// Characterization (S2): `consume_gapless_transition` performs every
+    /// now-playing write (`promote_to_now_playing`) when the in-memory gapless
+    /// slot holds an `Some(info)`. This pins each one so a decomposition that
+    /// drops a write — especially the most-droppable `live_sample_rate`
+    /// store — fails loudly instead of silently regressing gapless metadata
+    /// pickup. It also pins the one thing it leaves alone: the prepared slot,
+    /// whose URL the swap already took out with its decoder.
     ///
     /// Each field is pre-seeded to a DISTINCT non-default sentinel that differs
     /// from the value the consume writes, so every assertion can genuinely fail.
+    /// `next_source` starts as the incoming URL, as the prep left it.
     /// `playing` stays false (fresh-engine default) so the cleared `position`
     /// is read straight from the private field rather than the renderer-gated
     /// `position()` branch.
     #[tokio::test]
-    async fn consume_gapless_transition_applies_all_eight_writes() {
+    async fn consume_gapless_transition_applies_every_now_playing_write() {
         let mut engine = CustomAudioEngine::new();
 
         // The info the decode loop staged, with identifiable values.
@@ -7493,14 +7545,15 @@ mod tests {
         });
 
         // Pre-seed every destination to a DIFFERENT sentinel so each of the
-        // eight writes is observable (not masked by an already-equal value).
+        // writes is observable (not masked by an already-equal value).
         engine.source = "http://example.test/STALE-current".to_string();
         engine.duration = 111_111;
         engine.position = 77_777; // must be cleared to 0
         engine.current_format = AudioFormat::new(crate::audio::SampleFormat::S16, 44_100, 2);
         engine.live_codec_name.set(Some("mp3-stale".to_string()));
-        engine.next_source = "http://example.test/STALE-next".to_string();
-        engine.gapless.lock().await.source = "http://example.test/STALE-slot".to_string();
+        engine.next_source = "http://example.test/incoming-gapless".to_string();
+        engine.next_format = staged_format.clone();
+        engine.gapless.lock().await.source = "http://example.test/later-prep".to_string();
         engine.live_sample_rate.store(44_100, Ordering::Relaxed);
         // Keep playing=false so `position` is read from the private field.
         engine.playing = false;
@@ -7533,28 +7586,34 @@ mod tests {
             Some("flac-incoming".to_string()),
             "live codec must be replaced with the staged codec",
         );
-        // 6. next_source cleared
+        // 6. next_source cleared (it named the promoted track)
         assert!(
             engine.next_source.is_empty(),
             "next_source must be cleared on gapless pickup",
         );
-        // 7. gapless slot source cleared (most-droppable write A)
+        // 7. next_format invalidated (it described the promoted track)
         assert!(
-            engine.gapless.lock().await.source.is_empty(),
-            "gapless slot source must be cleared on gapless pickup",
+            !engine.next_format.is_valid(),
+            "next_format must be cleared on gapless pickup",
         );
-        // 8. live_sample_rate <- current_format.sample_rate() (most-droppable B)
+        // 8. live_sample_rate <- current_format.sample_rate() (most-droppable)
         assert_eq!(
             engine.live_sample_rate.load(Ordering::Relaxed),
             96_000,
             "live_sample_rate must be stored from the new current_format",
+        );
+        // The slot is not consume's to touch.
+        assert_eq!(
+            engine.gapless.lock().await.source,
+            "http://example.test/later-prep",
+            "consume must leave the prepared slot alone",
         );
     }
 
     /// Characterization (S2): the `None` path. With an EMPTY
     /// `gapless_transition_info` slot, `consume_gapless_transition` is a no-op —
     /// every engine field it would otherwise overwrite is left untouched. This
-    /// pins that the `if let Some(info)` guard genuinely gates all eight writes.
+    /// pins that the `if let Some(info)` guard genuinely gates every write.
     #[tokio::test]
     async fn consume_gapless_transition_none_path_is_noop() {
         let mut engine = CustomAudioEngine::new();
@@ -7596,6 +7655,219 @@ mod tests {
             "gapless slot source must be untouched on the None path",
         );
         assert_eq!(engine.live_sample_rate.load(Ordering::Relaxed), 88_200);
+    }
+
+    // -----------------------------------------------------------------------
+    // A prepared track plays at its own ReplayGain
+    //
+    // The prepared slot carries the track's ReplayGain beside its decoder.
+    // Every path that promotes the prepared track has to apply THOSE tags;
+    // the renderer's `pending_replay_gain` still holds the last track loaded
+    // by hand.
+    // -----------------------------------------------------------------------
+
+    const PREPARED_URL: &str = "http://example.test/prepared";
+
+    /// An engine playing a 44.1 kHz track whose stream was built at
+    /// `outgoing_rg`, in ReplayGain Track mode, on a device-less output so
+    /// `load_prepared_track` can build real streams. Keep the returned mixer
+    /// source alive for the test.
+    fn engine_playing_at(
+        outgoing_rg: crate::types::song::ReplayGain,
+    ) -> (CustomAudioEngine, rodio::mixer::MixerSource) {
+        let mut engine = CustomAudioEngine::new();
+        let mixer = {
+            let mut renderer = engine.renderer.lock();
+            let mixer = renderer.install_detached_output_for_test();
+            renderer.set_volume_normalization(
+                crate::types::player_settings::VolumeNormalizationMode::ReplayGainTrack,
+                1.0,
+                0.0,
+                0.0,
+                false,
+                false,
+            );
+            renderer.set_pending_replay_gain(Some(outgoing_rg));
+            renderer
+                .init(&matching_format(), false, None)
+                .expect("the outgoing stream builds");
+            mixer
+        };
+        engine.current_format = matching_format();
+        engine.source = "http://example.test/outgoing".to_string();
+        (engine, mixer)
+    }
+
+    /// Stage the next track the way the controller's gapless prep does.
+    async fn prepare_next(
+        engine: &mut CustomAudioEngine,
+        format: AudioFormat,
+        replay_gain: crate::types::song::ReplayGain,
+    ) {
+        engine
+            .store_prepared_decoder(
+                staged_decoder(format, 200_000, "flac"),
+                PREPARED_URL.to_string(),
+                Some(replay_gain),
+                PreparedTransitionDirectives::default(),
+            )
+            .await;
+    }
+
+    /// A 44.1 kHz → 48 kHz auto-advance can't reuse the stream, so
+    /// `load_prepared_track` builds a new one. It must build it from the
+    /// incoming track's tags, not the last hand-loaded track's.
+    #[tokio::test]
+    async fn load_prepared_track_builds_a_cross_rate_track_at_its_own_replay_gain() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        prepare_next(
+            &mut engine,
+            AudioFormat::new(crate::audio::SampleFormat::F32, 48_000, 2),
+            rg(-9.0),
+        )
+        .await;
+
+        engine
+            .load_prepared_track()
+            .await
+            .expect("the prepared track loads");
+
+        let renderer = engine.renderer.lock();
+        assert_eq!(
+            renderer.current_replay_gain_for_test(),
+            Some(rg(-9.0)),
+            "the 48 kHz stream must be built at the incoming track's ReplayGain"
+        );
+        assert_eq!(
+            renderer.pending_replay_gain_for_test(),
+            Some(rg(-9.0)),
+            "a seek or Stop-then-Play must rebuild it at the same tags"
+        );
+    }
+
+    /// Track mode refuses the inline gapless swap when the next track's gain
+    /// differs, because the live stream's gain is fixed when it is built.
+    /// `load_prepared_track` must then give the track a stream of its own;
+    /// reusing the outgoing's would play it at the outgoing's gain.
+    #[tokio::test]
+    async fn load_prepared_track_gives_a_track_mode_gain_change_its_own_stream() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        let outgoing = engine
+            .renderer
+            .lock()
+            .primary_stream_handle_for_test()
+            .expect("precondition: the outgoing stream exists");
+        prepare_next(&mut engine, matching_format(), rg(-9.0)).await;
+
+        engine
+            .load_prepared_track()
+            .await
+            .expect("the prepared track loads");
+
+        assert!(
+            outgoing.stopped.load(Ordering::Acquire),
+            "a different Track-mode gain must get a new stream, not the outgoing's"
+        );
+        assert_eq!(
+            engine.renderer.lock().current_replay_gain_for_test(),
+            Some(rg(-9.0)),
+            "the new stream must be built at the incoming track's ReplayGain"
+        );
+    }
+
+    /// Same format and same Track-mode gain: the prepared track keeps the
+    /// outgoing's stream (a gapless join) and takes over the bookkeeping, so
+    /// the next swap verdict and a later seek read the playing track's tags.
+    #[tokio::test]
+    async fn load_prepared_track_keeps_the_stream_when_the_gain_matches() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        let outgoing = engine
+            .renderer
+            .lock()
+            .primary_stream_handle_for_test()
+            .expect("precondition: the outgoing stream exists");
+        let incoming = crate::types::song::ReplayGain {
+            album_gain: Some(-5.0),
+            ..rg(-3.0)
+        };
+        prepare_next(&mut engine, matching_format(), incoming.clone()).await;
+
+        engine
+            .load_prepared_track()
+            .await
+            .expect("the prepared track loads");
+
+        assert!(
+            !outgoing.stopped.load(Ordering::Acquire),
+            "an equal Track-mode gain must keep the gapless stream"
+        );
+        assert_eq!(
+            engine.renderer.lock().current_replay_gain_for_test(),
+            Some(incoming),
+            "the reused stream's bookkeeping must name the incoming track's tags"
+        );
+    }
+
+    /// The inline swap's Track-mode refusal reports what happened: the formats
+    /// match, so it is a gain refusal, not a format mismatch. The track goes
+    /// back in the slot for `load_prepared_track`.
+    #[tokio::test]
+    async fn try_gapless_swap_reports_a_track_mode_gain_refusal() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        prepare_next(&mut engine, matching_format(), rg(-9.0)).await;
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::ReplayGainDiffers);
+        let slot = engine.gapless.lock().await;
+        assert!(
+            slot.is_prepared(),
+            "the refused track goes back in the slot"
+        );
+        assert_eq!(slot.source, PREPARED_URL);
+        assert_eq!(slot.replay_gain, Some(rg(-9.0)));
+    }
+
+    /// The inline swap takes the swapped-in track's tags from the slot, where
+    /// they ride with its decoder. The renderer's staged copy can be gone (a
+    /// mid-fade cancel drops it while the slot keeps the prep).
+    #[tokio::test]
+    async fn try_gapless_swap_adopts_the_slot_replay_gain() {
+        let mut engine = CustomAudioEngine::new();
+        prepare_next(&mut engine, matching_format(), rg(-9.0)).await;
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(None);
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped);
+        assert_eq!(
+            engine.renderer.lock().current_replay_gain_for_test(),
+            Some(rg(-9.0)),
+            "the swapped-in track's bookkeeping must carry its own tags"
+        );
     }
 
     // -----------------------------------------------------------------------

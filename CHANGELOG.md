@@ -44,6 +44,8 @@ All notable changes to this project will be documented in this file.
 - Enter in a full library view now plays instead of only adding to the queue when the split view was left open on the Queue.
 - With the split view left open behind another view, Enter and the list keys now act on the view on screen, not a hidden tab.
 - A radio station that drops the connection now reconnects instead of staying silent.
+- Auto-advancing into a track with a different sample rate now plays it at its own ReplayGain level instead of the previous track's.
+- In ReplayGain Track mode, a gapless auto-advance into a track with a different gain now plays it at its own level.
 
 ### Removed
 
