@@ -1,8 +1,8 @@
 //! Graphic Equalizer Slider Widget
 //!
 //! A custom vertical slider for the 10-band EQ. Similar to VolumeSlider but
-//! specifically designed for a symmetric [-15.0, +15.0] dB range, with a center
-//! detent line at 0 dB.
+//! specifically designed for the engine's symmetric gain range
+//! (`EQ_GAIN_DB_MIN..=EQ_GAIN_DB_MAX`), with a center detent line at 0 dB.
 
 use iced::{
     Element, Event, Length, Rectangle, Size, Theme,
@@ -20,8 +20,8 @@ use crate::widgets::slider_drag::{self, Axis, SliderDragState};
 const SLIDER_WIDTH: f32 = 20.0;
 const SLIDER_HEIGHT: f32 = 180.0;
 const HANDLE_SIZE: f32 = 14.0;
-const MAX_DB: f32 = 15.0;
-const MIN_DB: f32 = -15.0;
+const MAX_DB: f32 = nokkvi_data::audio::eq::EQ_GAIN_DB_MAX;
+const MIN_DB: f32 = nokkvi_data::audio::eq::EQ_GAIN_DB_MIN;
 const RANGE_DB: f32 = MAX_DB - MIN_DB;
 
 /// State for eq slider interaction
@@ -264,4 +264,20 @@ pub(crate) fn eq_slider<'a, Message: Clone + 'a>(
     on_change: impl Fn(f32) -> Message + 'a,
 ) -> EqSlider<'a, Message> {
     EqSlider::new(gain, on_change)
+}
+
+#[cfg(test)]
+mod tests {
+    use nokkvi_data::audio::eq::{EQ_GAIN_DB_MAX, EQ_GAIN_DB_MIN};
+
+    use super::EqSlider;
+
+    /// The slider's travel is the engine's gain range. A wider slider left a
+    /// dead zone at each end: the handle pinned at the engine's clamp while
+    /// the cursor kept going.
+    #[test]
+    fn slider_range_matches_the_engine_gain_range() {
+        assert_eq!(EqSlider::new(99.0, |g| g).gain, EQ_GAIN_DB_MAX);
+        assert_eq!(EqSlider::new(-99.0, |g| g).gain, EQ_GAIN_DB_MIN);
+    }
 }

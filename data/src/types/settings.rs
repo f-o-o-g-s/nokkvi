@@ -521,6 +521,10 @@ impl PersistedPlayerSettings {
             ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
             ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
         );
+
+        for gain in &mut self.eq_gains {
+            *gain = crate::audio::eq::clamp_gain(*gain);
+        }
     }
 }
 

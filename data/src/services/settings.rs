@@ -3257,6 +3257,33 @@ mod load_clamp_tests {
             escaped.join("\n")
         );
     }
+
+    /// `eq_gains` is the one numeric array in `[settings]`, so the scalar
+    /// sweep above skips it.
+    #[test]
+    fn eq_gains_are_clamped_on_load() {
+        use crate::audio::eq::{EQ_GAIN_DB_MAX, EQ_GAIN_DB_MIN};
+
+        let mut table = default_settings_table();
+        let probe: Vec<toml::Value> = [99.0, -99.0, f64::NAN, 3.5]
+            .into_iter()
+            .chain(std::iter::repeat(0.0))
+            .take(crate::audio::eq::EQ_BAND_COUNT)
+            .map(toml::Value::Float)
+            .collect();
+        table
+            .as_table_mut()
+            .expect("table")
+            .insert("eq_gains".to_string(), toml::Value::Array(probe));
+        let ts: TomlSettings = table.try_into().expect("eq_gains probe deserializes");
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts, &mut p);
+
+        assert_eq!(p.eq_gains[0], EQ_GAIN_DB_MAX);
+        assert_eq!(p.eq_gains[1], EQ_GAIN_DB_MIN);
+        assert!(p.eq_gains[2].is_finite(), "NaN must not survive the load");
+        assert_eq!(p.eq_gains[3], 3.5, "in-range gains are left alone");
+    }
 }
 
 #[cfg(test)]

@@ -5,11 +5,24 @@ use std::sync::{
 
 use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type as FilterType};
 
+/// Per-band gain bounds, in dB. Single source shared by the engine clamps
+/// (`set_band_gain` / `set_all_gains`), the EQ modal sliders' travel, and the
+/// load-time `PersistedPlayerSettings::validate`.
+pub const EQ_GAIN_DB_MIN: f32 = -12.0;
+pub const EQ_GAIN_DB_MAX: f32 = 12.0;
+
+/// Hold a band gain to `EQ_GAIN_DB_MIN..=EQ_GAIN_DB_MAX`; NaN snaps to the
+/// low bound so it never reaches the filter bank.
+pub(crate) fn clamp_gain(gain_db: f32) -> f32 {
+    crate::utils::clamp::finite_clamp32(gain_db, EQ_GAIN_DB_MIN, EQ_GAIN_DB_MAX)
+}
+
 /// Shared EQ state for lock-free gain transport between UI and audio threads.
 /// Cloned into each StreamingSource instance.
 #[derive(Clone, Debug)]
 pub struct EqState {
-    /// Per-band gain in dB, encoded via f32::to_bits(). Range: -12.0 to +12.0.
+    /// Per-band gain in dB, encoded via f32::to_bits(). Range:
+    /// `EQ_GAIN_DB_MIN..=EQ_GAIN_DB_MAX`.
     pub gains: Arc<[AtomicU32; EQ_BAND_COUNT]>,
     /// Master bypass toggle.
     pub enabled: Arc<AtomicBool>,
@@ -32,14 +45,14 @@ impl EqState {
     /// Set a single band's gain (called from UI thread).
     pub fn set_band_gain(&self, band: usize, gain_db: f32) {
         if band < EQ_BAND_COUNT {
-            self.gains[band].store(gain_db.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+            self.gains[band].store(clamp_gain(gain_db).to_bits(), Ordering::Relaxed);
         }
     }
 
     /// Set all 10 bands at once (for presets).
     pub fn set_all_gains(&self, gains: &[f32; EQ_BAND_COUNT]) {
         for (i, &g) in gains.iter().enumerate() {
-            self.gains[i].store(g.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+            self.gains[i].store(clamp_gain(g).to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -284,6 +297,26 @@ impl EqProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gains are held to the shared bounds, and a NaN never reaches the
+    /// filter bank (it would turn every sample of the band into NaN).
+    #[test]
+    fn band_gains_are_clamped_and_never_nan() {
+        let state = EqState::new();
+        state.set_band_gain(0, 15.0);
+        state.set_band_gain(1, -15.0);
+        state.set_band_gain(2, f32::NAN);
+        assert_eq!(state.get_band_gain(0), EQ_GAIN_DB_MAX);
+        assert_eq!(state.get_band_gain(1), EQ_GAIN_DB_MIN);
+        assert!(state.get_band_gain(2).is_finite());
+
+        let mut gains = [0.0; EQ_BAND_COUNT];
+        gains[3] = 99.0;
+        gains[4] = f32::NAN;
+        state.set_all_gains(&gains);
+        assert_eq!(state.get_band_gain(3), EQ_GAIN_DB_MAX);
+        assert!(state.get_band_gain(4).is_finite());
+    }
 
     #[test]
     fn test_coefficient_generation_succeeds() {
