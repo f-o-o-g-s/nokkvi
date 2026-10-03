@@ -495,52 +495,57 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
         .collect();
     ranked.sort_by(|&a, &b| score(b).total_cmp(&score(a)));
 
+    // Each candidate hue's mean color over its support. A barely tinted
+    // candidate (paper, a sepia wash) is not a color at all: it is dropped
+    // BEFORE the primary is chosen, so it can neither become a grey gradient
+    // stop nor out-score a vivid hue that clears the population floor.
+    let seed_of = |i: usize| {
+        let (mut score, mut sin, mut cos, mut chroma, mut lightness) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for bin in around(i) {
+            score += bin.score;
+            sin += bin.sin;
+            cos += bin.cos;
+            chroma += bin.chroma;
+            lightness += bin.lightness;
+        }
+        (score > 0.0).then(|| AccentSeed {
+            lightness: lightness / score,
+            chroma: chroma / score,
+            hue: sin.atan2(cos),
+        })
+    };
+    let colorful: Vec<(usize, AccentSeed)> = ranked
+        .into_iter()
+        .filter_map(|i| seed_of(i).map(|seed| (i, seed)))
+        .filter(|(_, seed)| seed.chroma >= ACHROMATIC_CHROMA)
+        .collect();
+
     let bin_distance = |a: usize, b: usize| {
         let d = a.abs_diff(b);
         d.min(HUE_BINS - d)
     };
-    let mut picked: Vec<usize> = Vec::with_capacity(MAX_COVER_HUES);
-    for i in ranked {
+    let mut picked: Vec<(usize, AccentSeed)> = Vec::with_capacity(MAX_COVER_HUES);
+    for (i, seed) in colorful {
         if picked.len() == MAX_COVER_HUES {
             break;
         }
         let strong_enough = picked
             .first()
-            .is_none_or(|&first| score(i) >= score(first) * MIN_SECONDARY_SCORE);
+            .is_none_or(|&(first, _)| score(i) >= score(first) * MIN_SECONDARY_SCORE);
         let distinct = picked
             .iter()
-            .all(|&p| bin_distance(i, p) >= MIN_HUE_SEPARATION_BINS);
+            .all(|&(p, _)| bin_distance(i, p) >= MIN_HUE_SEPARATION_BINS);
         if strong_enough && distinct {
-            picked.push(i);
+            picked.push((i, seed));
         }
     }
-
-    let colors: Vec<AccentSeed> = picked
-        .into_iter()
-        .filter_map(|i| {
-            let (mut score, mut sin, mut cos, mut chroma, mut lightness) =
-                (0.0, 0.0, 0.0, 0.0, 0.0);
-            for bin in around(i) {
-                score += bin.score;
-                sin += bin.sin;
-                cos += bin.cos;
-                chroma += bin.chroma;
-                lightness += bin.lightness;
-            }
-            (score > 0.0).then(|| AccentSeed {
-                lightness: lightness / score,
-                chroma: chroma / score,
-                hue: sin.atan2(cos),
-            })
-        })
-        .collect();
-    match colors.first() {
-        Some(primary) if primary.chroma >= ACHROMATIC_CHROMA => Some(CoverPalette {
-            colors,
-            backdrop_lightness: lightness_sum / sampled as f32,
-        }),
-        _ => Some(neutral()),
+    if picked.is_empty() {
+        return Some(neutral());
     }
+    Some(CoverPalette {
+        colors: picked.into_iter().map(|(_, seed)| seed).collect(),
+        backdrop_lightness: lightness_sum / sampled as f32,
+    })
 }
 
 /// [`palette_from_rgba`] for an encoded cover (PNG / JPEG / …). Blocking; run
@@ -1148,6 +1153,26 @@ mod tests {
         let (w, h, px) = image_of(&[([0xe0, 0x20, 0x30], 1000), ([0x6b, 0x70, 0x90], 24)]);
         let palette = palette_from_rgba(w, h, &px).expect("has color");
         assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
+    }
+
+    /// A vivid red logo on beige paper: the paper is a tint, not a second
+    /// hue, so it never becomes a grey gradient stop.
+    #[test]
+    fn a_tinted_paper_is_not_a_second_hue() {
+        let (w, h, px) = image_of(&[([0xc8, 0xb8, 0x9a], 820), ([0xe0, 0x20, 0x30], 204)]);
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
+        assert!(hue_distance(palette.primary().hue, hue_of(0xe0, 0x20, 0x30)) < 0.1);
+    }
+
+    /// Sepia paper over most of the cover plus a small vivid red block: the
+    /// red is the color a person would name, so it wins over the tint.
+    #[test]
+    fn a_vivid_block_on_a_sepia_cover_is_its_color() {
+        let (w, h, px) = image_of(&[([0x8a, 0x78, 0x5c], 1000), ([0xe0, 0x20, 0x30], 24)]);
+        let palette = palette_from_rgba(w, h, &px).expect("has color");
+        assert!(palette.primary().chroma > 0.1, "{:?}", palette.primary());
+        assert!(hue_distance(palette.primary().hue, hue_of(0xe0, 0x20, 0x30)) < 0.1);
     }
 
     #[test]

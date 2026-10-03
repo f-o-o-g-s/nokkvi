@@ -32,6 +32,9 @@ pub struct DynamicAccentState {
     pub applied: bool,
     /// What those colors recolor (the two settings when they were applied).
     pub applied_follow: CoverFollow,
+    /// The palette on screen, kept so a settings flip re-applies it without
+    /// depending on the `seeds` cache still holding it.
+    pub shown_palette: Option<CoverPalette>,
     /// Extraction in flight, as `(item, artwork handle)`.
     pub pending: Option<(String, Id)>,
     /// A newly playing item still without artwork, and for how many ticks.
@@ -49,6 +52,7 @@ impl Default for DynamicAccentState {
             shown: None,
             applied: false,
             applied_follow: CoverFollow::default(),
+            shown_palette: None,
             pending: None,
             waiting: None,
             idle_ticks: 0,

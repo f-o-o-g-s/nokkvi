@@ -109,11 +109,7 @@ impl Nokkvi {
                 // A setting flipped (accent and/or visualizer) while the item
                 // stayed: re-apply what is shown under the new switches.
                 if state.applied && state.applied_follow != follow {
-                    let palette = state
-                        .shown
-                        .as_ref()
-                        .and_then(|(o, _)| state.seeds.peek(o))
-                        .and_then(|(_, p)| p.clone());
+                    let palette = state.shown_palette.clone();
                     self.dynamic_accent_show(palette);
                 }
                 Task::none()
@@ -204,8 +200,10 @@ impl Nokkvi {
             return;
         }
         let follow = self.cover_follow();
-        self.dynamic_accent.applied = palette.is_some();
-        self.dynamic_accent.applied_follow = follow;
+        let state = &mut self.dynamic_accent;
+        state.applied = palette.is_some();
+        state.applied_follow = follow;
+        state.shown_palette.clone_from(&palette);
         theme::set_cover_colors(palette, follow);
     }
 
@@ -218,6 +216,7 @@ impl Nokkvi {
         state.waiting = None;
         state.idle_ticks = 0;
         self.dynamic_accent_show(None);
+        self.dynamic_accent.shown_palette = None;
     }
 
     /// Forget the cover colors and their cache (logout).

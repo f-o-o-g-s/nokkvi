@@ -65,19 +65,21 @@ impl PresetPalette {
     pub(crate) fn from_theme() -> Self {
         use crate::theme::{self, read_dark_color};
         let cover = theme::cover_milkdrop();
-        let bars: crate::visualizer_config::ThemeBarColors = cover
-            .as_ref()
-            .map_or_else(theme::get_visualizer_colors_dark, |c| c.bars.clone())
-            .into();
         let accent = rgb(cover
             .as_ref()
             .map_or_else(|| read_dark_color(|t| t.accent), |c| c.accent));
-        let ramp_src: Vec<Rgb> = bars
-            .bar_gradient_colors
-            .iter()
-            .filter_map(|hex| crate::theme_config::parse_hex_color(hex))
-            .map(rgb)
-            .collect();
+        let ramp_src: Vec<Rgb> = match &cover {
+            Some(cover) => cover.ramp.iter().copied().map(rgb).collect(),
+            None => {
+                let bars: crate::visualizer_config::ThemeBarColors =
+                    theme::get_visualizer_colors_dark().into();
+                bars.bar_gradient_colors
+                    .iter()
+                    .filter_map(|hex| crate::theme_config::parse_hex_color(hex))
+                    .map(rgb)
+                    .collect()
+            }
+        };
         let ramp = stretch_ramp(&ramp_src, accent);
         Self {
             bg: rgb(read_dark_color(|t| t.bg0_hard)),

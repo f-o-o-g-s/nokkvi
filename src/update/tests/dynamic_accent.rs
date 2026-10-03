@@ -389,3 +389,22 @@ fn flipping_a_switch_reapplies_without_a_new_read() {
     assert!(!app.dynamic_accent.applied);
     assert!(theme::cover_milkdrop().is_none());
 }
+
+/// The review's case: the shown album's palette fell out of the seed cache,
+/// then a setting flipped. The colors on screen must survive the flip.
+#[test]
+fn a_settings_flip_survives_an_evicted_cache_entry() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let (mut app, _id) = shown_app();
+    app.dynamic_accent.seeds.clear();
+    app.settings.dynamic_visualizer = true;
+    tick(&mut app);
+    assert!(app.dynamic_accent.applied, "still on screen");
+    assert!(theme::dynamic_accent_active());
+    assert!(
+        theme::cover_milkdrop().is_some(),
+        "and now the visualizer too"
+    );
+
+    theme::set_dynamic_accent(None);
+}

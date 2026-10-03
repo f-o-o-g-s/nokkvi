@@ -10,7 +10,6 @@ use std::sync::{
 use arc_swap::ArcSwap;
 use iced::Color;
 use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
-use parking_lot::RwLock;
 use tracing::debug;
 
 #[cfg(test)]
@@ -42,7 +41,8 @@ impl CoverFollow {
     }
 }
 
-/// The theme file's visualizer colors for both modes.
+/// The theme file's visualizer colors for both modes: the one copy every
+/// visualizer reader goes through (`get_visualizer_colors*`).
 #[derive(Debug, Clone)]
 struct DualVisualizer {
     dark: VisualizerColors,
@@ -108,11 +108,7 @@ impl ActiveTheme {
                             &base_visualizer.light,
                         ),
                     },
-                    milkdrop: cover_visualizer::milkdrop_colors(
-                        palette,
-                        &base.dark,
-                        &base_visualizer.dark,
-                    ),
+                    milkdrop: cover_visualizer::milkdrop_colors(palette, &base.dark),
                 });
             }
         }
@@ -147,15 +143,11 @@ static DUAL_THEME: LazyLock<ArcSwap<ActiveTheme>> = LazyLock::new(|| {
     )))
 });
 
-/// Global raw theme file — hex strings for visualizer colors and UI that
-/// needs the original color values (not parsed `iced::Color`).
-static THEME_FILE: LazyLock<RwLock<ThemeFile>> =
-    LazyLock::new(|| RwLock::new(load_active_theme_file()));
-
 /// Monotonic counter bumped every time the active palette changes — by
 /// `reload_theme()` (theme file edit, preset switch, color picker),
-/// `set_light_mode()` (light/dark toggle) or `set_dynamic_accent()` (a new
-/// cover accent, about once per track). Widgets that cache theme-derived
+/// `set_light_mode()` (light/dark toggle) or `set_cover_colors()` (new cover
+/// colors, about once per track; the MilkDrop palette check rides on it even
+/// when only the visualizer follows the cover). Widgets that cache theme-derived
 /// content (e.g. the boat's substituted SVG handle) snapshot this on build
 /// and rebuild when it advances. Without this counter, every new code path
 /// that mutates the active theme is a fresh chance to leave a stale cache.
@@ -193,10 +185,6 @@ pub(crate) fn reload_theme() {
             active.follow,
         ))
     });
-    {
-        let mut file = THEME_FILE.write();
-        *file = new_file;
-    }
     THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
 
     debug!(" Theme hot-reloaded from theme file");
@@ -285,11 +273,11 @@ pub(crate) fn get_visualizer_colors() -> VisualizerColors {
             cover.shown.dark.clone()
         };
     }
-    let guard = THEME_FILE.read();
+    let active = DUAL_THEME.load();
     if is_light_mode() {
-        guard.light.visualizer.clone()
+        active.base_visualizer.light.clone()
     } else {
-        guard.dark.visualizer.clone()
+        active.base_visualizer.dark.clone()
     }
 }
 
@@ -303,7 +291,7 @@ pub(crate) fn get_visualizer_colors() -> VisualizerColors {
 /// honors the light-mode styling.
 #[inline]
 pub(crate) fn get_visualizer_colors_dark() -> VisualizerColors {
-    THEME_FILE.read().dark.visualizer.clone()
+    DUAL_THEME.load().base_visualizer.dark.clone()
 }
 
 /// Read a single color field from the active mode's theme without cloning the
