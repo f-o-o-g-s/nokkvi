@@ -668,6 +668,45 @@ impl InfoModalItem {
             representative_path,
         }
     }
+
+    /// Construct an `Artist` info modal item from an `ArtistUIViewData`.
+    /// Shared by the Artists view's context menu and the Get-Info hotkey.
+    pub fn from_artist_view_data(artist: &crate::backend::artists::ArtistUIViewData) -> Self {
+        Self::Artist {
+            name: artist.name.clone(),
+            song_count: Some(artist.song_count),
+            album_count: Some(artist.album_count),
+            is_starred: artist.is_starred,
+            rating: artist.rating,
+            play_count: artist.play_count,
+            play_date: artist.play_date.clone(),
+            size: artist.size,
+            mbz_artist_id: artist.mbz_artist_id.clone(),
+            biography: artist.biography.clone(),
+            external_url: artist.external_url.clone(),
+            id: artist.id.clone(),
+        }
+    }
+
+    /// Construct a `Playlist` info modal item from a `PlaylistUIViewData`.
+    /// Shared by the Playlists view's context menu and the Get-Info hotkey.
+    /// The projection carries no size or creation date, so those stay empty.
+    pub fn from_playlist_view_data(
+        playlist: &crate::backend::playlists::PlaylistUIViewData,
+    ) -> Self {
+        Self::Playlist {
+            name: playlist.name.clone(),
+            comment: playlist.comment.clone(),
+            duration: playlist.duration,
+            song_count: playlist.song_count,
+            size: 0,
+            owner_name: playlist.owner_name.clone(),
+            public: playlist.public,
+            created_at: String::new(),
+            updated_at: playlist.updated_at.clone(),
+            id: playlist.id.clone(),
+        }
+    }
 }
 
 /// Flatten HashMap tags into sorted (key, joined_values) pairs for display.

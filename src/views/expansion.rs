@@ -260,6 +260,16 @@ impl<C: Clone> ExpansionState<C> {
         self.expanded_id.as_deref() == Some(id)
     }
 
+    /// The loaded children of `parent_id`: empty unless that parent is the
+    /// expanded one, so a row never borrows another row's children.
+    pub fn children_of(&self, parent_id: &str) -> &[C] {
+        if self.is_expanded_parent(parent_id) {
+            &self.children
+        } else {
+            &[]
+        }
+    }
+
     // ── Shared update() helpers ─────────────────────────────────────────
     //
     // These methods extract identical match-arm logic that was previously
@@ -902,6 +912,21 @@ mod tests {
         assert!(state.is_expanded_parent("b"));
         assert!(!state.is_expanded_parent("a"));
         assert!(!state.is_expanded_parent("c"));
+    }
+
+    #[test]
+    fn children_of_answers_only_for_the_expanded_parent() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        assert!(state.children_of("b").is_empty(), "nothing expanded yet");
+
+        state.set_children("b".into(), children(), &p, &mut common);
+        assert_eq!(state.children_of("b").len(), children().len());
+        assert!(
+            state.children_of("a").is_empty(),
+            "a collapsed row must not see the expanded row's children"
+        );
     }
 
     #[test]

@@ -501,18 +501,7 @@ impl PlaylistsPage {
                             ),
                             PlaylistContextEntry::Library(LibraryContextEntry::GetInfo) => {
                                 use nokkvi_data::types::info_modal::InfoModalItem;
-                                let item = InfoModalItem::Playlist {
-                                    name: playlist.name.clone(),
-                                    comment: playlist.comment.clone(),
-                                    duration: playlist.duration,
-                                    song_count: playlist.song_count,
-                                    size: 0, // Not available on PlaylistUIViewData
-                                    owner_name: playlist.owner_name.clone(),
-                                    public: playlist.public,
-                                    created_at: String::new(), // Not available on PlaylistUIViewData
-                                    updated_at: playlist.updated_at.clone(),
-                                    id: playlist.id.clone(),
-                                };
+                                let item = InfoModalItem::from_playlist_view_data(playlist);
                                 (Task::none(), PlaylistsAction::ShowInfo(Box::new(item)))
                             }
                             _ => (Task::none(), PlaylistsAction::None),

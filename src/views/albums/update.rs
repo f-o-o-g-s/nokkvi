@@ -373,14 +373,10 @@ impl AlbumsPage {
                         // Non-batched actions (apply only to the clicked item)
                         _ => match self.expansion.get_entry_at(clicked_idx, albums, |a| &a.id) {
                             Some(SlotListEntry::Parent(album)) => match entry {
-                                LibraryContextEntry::GetInfo => {
-                                    use nokkvi_data::types::info_modal::InfoModalItem;
-                                    let item = InfoModalItem::from_album_view_data(
-                                        album,
-                                        self.expansion.children.first().map(|s| s.path.clone()),
-                                    );
-                                    (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
-                                }
+                                LibraryContextEntry::GetInfo => (
+                                    Task::none(),
+                                    AlbumsAction::ShowInfo(Box::new(self.album_info_item(album))),
+                                ),
                                 LibraryContextEntry::ShowInFolder => {
                                     (Task::none(), AlbumsAction::ShowInFolder(album.id.clone()))
                                 }

@@ -311,20 +311,7 @@ impl ArtistsPage {
                             Some(SlotListEntry::Parent(artist)) => match entry {
                                 LibraryContextEntry::GetInfo => {
                                     use nokkvi_data::types::info_modal::InfoModalItem;
-                                    let item = InfoModalItem::Artist {
-                                        name: artist.name.clone(),
-                                        song_count: Some(artist.song_count),
-                                        album_count: Some(artist.album_count),
-                                        is_starred: artist.is_starred,
-                                        rating: artist.rating,
-                                        play_count: artist.play_count,
-                                        play_date: artist.play_date.clone(),
-                                        size: artist.size,
-                                        mbz_artist_id: artist.mbz_artist_id.clone(),
-                                        biography: artist.biography.clone(),
-                                        external_url: artist.external_url.clone(),
-                                        id: artist.id.clone(),
-                                    };
+                                    let item = InfoModalItem::from_artist_view_data(artist);
                                     (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                                 }
                                 LibraryContextEntry::ShowInFolder

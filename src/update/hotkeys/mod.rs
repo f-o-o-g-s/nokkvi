@@ -197,14 +197,7 @@ impl Nokkvi {
                 }) {
                     let item = match entry {
                         SlotListEntry::Child(song, _) => InfoModalItem::from_song_view_data(song),
-                        SlotListEntry::Parent(album) => InfoModalItem::from_album_view_data(
-                            album,
-                            self.albums_page
-                                .expansion
-                                .children
-                                .first()
-                                .map(|s| s.path.clone()),
-                        ),
+                        SlotListEntry::Parent(album) => self.albums_page.album_info_item(album),
                     };
                     return self.update(Message::InfoModal(
                         crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
@@ -221,20 +214,9 @@ impl Nokkvi {
                         SlotListEntry::Child(album, _) => {
                             InfoModalItem::from_album_view_data(album, None)
                         }
-                        SlotListEntry::Parent(artist) => InfoModalItem::Artist {
-                            name: artist.name.clone(),
-                            song_count: Some(artist.song_count),
-                            album_count: Some(artist.album_count),
-                            is_starred: artist.is_starred,
-                            rating: artist.rating,
-                            play_count: artist.play_count,
-                            play_date: artist.play_date.clone(),
-                            size: artist.size,
-                            mbz_artist_id: artist.mbz_artist_id.clone(),
-                            biography: artist.biography.clone(),
-                            external_url: artist.external_url.clone(),
-                            id: artist.id.clone(),
-                        },
+                        SlotListEntry::Parent(artist) => {
+                            InfoModalItem::from_artist_view_data(artist)
+                        }
                     };
                     return self.update(Message::InfoModal(
                         crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
@@ -258,18 +240,9 @@ impl Nokkvi {
                 }) {
                     let item = match entry {
                         SlotListEntry::Child(song, _) => InfoModalItem::from_song_view_data(song),
-                        SlotListEntry::Parent(playlist) => InfoModalItem::Playlist {
-                            name: playlist.name.clone(),
-                            comment: playlist.comment.clone(),
-                            duration: playlist.duration,
-                            song_count: playlist.song_count,
-                            size: 0,
-                            owner_name: playlist.owner_name.clone(),
-                            public: playlist.public,
-                            created_at: String::new(),
-                            updated_at: playlist.updated_at.clone(),
-                            id: playlist.id.clone(),
-                        },
+                        SlotListEntry::Parent(playlist) => {
+                            InfoModalItem::from_playlist_view_data(playlist)
+                        }
                     };
                     return self.update(Message::InfoModal(
                         crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),

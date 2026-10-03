@@ -211,6 +211,22 @@ impl AlbumsPage {
         Self::default()
     }
 
+    /// Get Info for an album row (context menu and Shift+I). The album's
+    /// first loaded track locates its folder for Show in Folder, so the
+    /// button only lights up while this album is the expanded one.
+    pub(crate) fn album_info_item(
+        &self,
+        album: &AlbumUIViewData,
+    ) -> nokkvi_data::types::info_modal::InfoModalItem {
+        nokkvi_data::types::info_modal::InfoModalItem::from_album_view_data(
+            album,
+            self.expansion
+                .children_of(&album.id)
+                .first()
+                .map(|song| song.path.clone()),
+        )
+    }
+
     /// Convert sort mode to API string for server requests.
     /// Thin shim — the unified mapping lives in `views/sort_api.rs`.
     pub fn sort_mode_to_api_string(

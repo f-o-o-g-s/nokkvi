@@ -1425,3 +1425,84 @@ fn a_seek_key_press_asks_for_the_step_in_the_direction_pressed() {
     assert_eq!(seek_step_delta(60, true), 60.0);
     assert_eq!(seek_step_delta(1, false), -1.0);
 }
+
+// ============================================================================
+// Albums Get Info — "Show in Folder" path comes from THIS album's tracks
+// ============================================================================
+
+/// The `representative_path` the info modal opened with, if it is an album.
+fn opened_album_representative_path(app: &crate::Nokkvi) -> Option<Option<String>> {
+    match app.info_modal.item.as_ref()? {
+        nokkvi_data::types::info_modal::InfoModalItem::Album {
+            representative_path,
+            ..
+        } => Some(representative_path.clone()),
+        _ => None,
+    }
+}
+
+/// Albums A and B, with B expanded on its one track.
+fn albums_with_second_expanded(app: &mut crate::Nokkvi) {
+    seed_albums(
+        app,
+        vec![
+            make_album("a1", "Album A", "Artist"),
+            make_album("a2", "Album B", "Artist"),
+        ],
+    );
+    expand_albums_with(app, "a2", vec![make_song("b-track", "B Track", "Artist")]);
+}
+
+#[test]
+fn albums_context_get_info_ignores_another_albums_expanded_tracks() {
+    let mut app = test_app();
+    albums_with_second_expanded(&mut app);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        crate::views::AlbumsMessage::ContextMenuAction(
+            0, // Album A — collapsed
+            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+        ),
+    ));
+
+    assert_eq!(
+        opened_album_representative_path(&app),
+        Some(None),
+        "Album A's info must not point Show in Folder at expanded Album B's track"
+    );
+}
+
+#[test]
+fn albums_context_get_info_uses_its_own_expanded_tracks() {
+    let mut app = test_app();
+    albums_with_second_expanded(&mut app);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        crate::views::AlbumsMessage::ContextMenuAction(
+            1, // Album B — the expanded one
+            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+        ),
+    ));
+
+    assert_eq!(
+        opened_album_representative_path(&app),
+        Some(Some("/music/b-track.flac".to_string())),
+        "the expanded album's own track locates its folder"
+    );
+}
+
+#[test]
+fn albums_hotkey_get_info_ignores_another_albums_expanded_tracks() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    albums_with_second_expanded(&mut app);
+    // viewport_offset 0 + center slot resolves the center to Album A.
+
+    let _ = app.handle_get_info();
+
+    assert_eq!(
+        opened_album_representative_path(&app),
+        Some(None),
+        "Shift+I on Album A must not point Show in Folder at expanded Album B's track"
+    );
+}

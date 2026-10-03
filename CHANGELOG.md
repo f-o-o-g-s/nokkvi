@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - When a section of config.toml holds an invalid value, a warning now names the section that kept its previous values.
 - Playing several selected items, or choosing Shuffle Play, while a radio station plays now hands the player back to the queue.
 - Replacing the queue from Similar or Top Songs results now clears the previous playlist's header.
+- Show in Folder in an album's Get Info no longer opens a different, expanded album's folder.
 
 ### Removed
 
