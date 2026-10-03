@@ -14,10 +14,23 @@ use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
 use super::{super::expansion::SlotListEntry, GenresMessage, GenresPage, GenresViewData};
 use crate::widgets::{
     self,
+    context_menu::LibraryContextEntry,
     view_header::{HeaderButton, ViewHeaderConfig},
 };
 
 impl GenresPage {
+    /// Right-click entries for a genre row. The row renderer and the
+    /// menu-coverage tests (`update/tests/row_menus.rs`) both read this, so
+    /// an entry offered without a handler fails a test.
+    pub(crate) fn parent_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::genre_entries()
+    }
+
+    /// Right-click entries for an expanded album row (see [`Self::parent_menu`]).
+    pub(crate) fn child_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::library_entries_with_folder()
+    }
+
     /// Build the view
     pub fn view<'a>(&'a self, data: GenresViewData<'a>) -> Element<'a, GenresMessage> {
         let column_dropdown: Element<'a, GenresMessage> =
@@ -375,12 +388,12 @@ impl GenresPage {
             GenresMessage::SlotList,
         );
 
-        use crate::widgets::context_menu::{library_entries, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Genres,
             ctx.item_index,
             slot_button,
-            library_entries(),
+            Self::parent_menu(),
             open_menu,
             GenresMessage::ContextMenuAction,
             GenresMessage::SetOpenMenu,
@@ -416,12 +429,12 @@ impl GenresPage {
             1, // depth 1: child albums under genre
         );
 
-        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Genres,
             ctx.item_index,
             album_el,
-            library_entries_with_folder(),
+            Self::child_menu(),
             open_menu,
             GenresMessage::ContextMenuAction,
             GenresMessage::SetOpenMenu,

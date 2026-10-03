@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// A library-list playlist entry with controllable smartness/ownership.
-fn playlist_row(
+pub(super) fn playlist_row(
     id: &str,
     name: &str,
     smart: bool,

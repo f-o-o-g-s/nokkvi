@@ -16,10 +16,23 @@ use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 use super::{super::expansion::SlotListEntry, ArtistsMessage, ArtistsPage, ArtistsViewData};
 use crate::widgets::{
     self,
+    context_menu::LibraryContextEntry,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
 };
 
 impl ArtistsPage {
+    /// Right-click entries for an artist row. The row renderer and the
+    /// menu-coverage tests (`update/tests/row_menus.rs`) both read this, so
+    /// an entry offered without a handler fails a test.
+    pub(crate) fn parent_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::artist_entries()
+    }
+
+    /// Right-click entries for an expanded album row (see [`Self::parent_menu`]).
+    pub(crate) fn child_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::library_entries_with_folder()
+    }
+
     /// Build the view
     pub fn view<'a>(&'a self, data: ArtistsViewData<'a>) -> Element<'a, ArtistsMessage> {
         // Build the columns-visibility dropdown for the artists view header.
@@ -577,12 +590,12 @@ impl ArtistsPage {
             ArtistsMessage::SlotList,
         );
 
-        use crate::widgets::context_menu::{artist_entries_with_folder, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Artists,
             ctx.item_index,
             slot_button,
-            artist_entries_with_folder(),
+            Self::parent_menu(),
             open_menu,
             ArtistsMessage::ContextMenuAction,
             ArtistsMessage::SetOpenMenu,
@@ -616,12 +629,12 @@ impl ArtistsPage {
             1,    // depth 1: child albums under artist
         );
 
-        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Artists,
             ctx.item_index,
             album_el,
-            library_entries_with_folder(),
+            Self::child_menu(),
             open_menu,
             ArtistsMessage::ContextMenuAction,
             ArtistsMessage::SetOpenMenu,

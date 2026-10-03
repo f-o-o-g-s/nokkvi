@@ -4,14 +4,210 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::{playlists::PlaylistUIViewData, songs::SongUIViewData},
+    types::{ItemKind, batch::BatchItem, info_modal::InfoModalItem, trawl::TrawlSeed},
+};
 
 use super::{
     super::expansion::SlotListEntry, PlaylistContextEntry, PlaylistsAction, PlaylistsMessage,
     PlaylistsPage,
 };
+use crate::widgets::context_menu::LibraryContextEntry;
+
+type PlaylistsRow<'a> = SlotListEntry<&'a PlaylistUIViewData, &'a SongUIViewData>;
 
 impl PlaylistsPage {
+    /// What a row stands for in a play / queue / playlist batch.
+    fn batch_item(row: PlaylistsRow<'_>) -> BatchItem {
+        match row {
+            SlotListEntry::Parent(playlist) => BatchItem::Playlist(playlist.id.clone()),
+            SlotListEntry::Child(song, _) => BatchItem::Song(Box::new(song.clone().into())),
+        }
+    }
+
+    /// The Trawl seed a row adds to the crate.
+    fn trawl_seed(row: PlaylistsRow<'_>) -> TrawlSeed {
+        match row {
+            SlotListEntry::Parent(playlist) => TrawlSeed::from_playlist(
+                playlist.id.clone(),
+                playlist.name.clone(),
+                playlist.song_count,
+            ),
+            SlotListEntry::Child(song, _) => TrawlSeed::from_song(song.clone().into()),
+        }
+    }
+
+    /// The rows a batch menu entry acts on: the selection when the clicked
+    /// row is part of it, else the clicked row alone (clears the selection).
+    fn menu_targets<'a>(
+        &'a mut self,
+        clicked_idx: usize,
+        playlists: &'a [PlaylistUIViewData],
+    ) -> impl Iterator<Item = PlaylistsRow<'a>> + 'a {
+        let targets = self.common.get_batch_target_indices(clicked_idx);
+        self.expansion.rows_at(targets, playlists, |p| &p.id)
+    }
+
+    /// Resolve a click in an expanded track row's menu (the shared library
+    /// entries). Batch entries act on the selection when the clicked row is
+    /// part of it; the rest act on the clicked row alone.
+    fn track_menu_action(
+        &mut self,
+        clicked_idx: usize,
+        entry: LibraryContextEntry,
+        playlists: &[PlaylistUIViewData],
+    ) -> PlaylistsAction {
+        use LibraryContextEntry as Entry;
+        let row = self
+            .expansion
+            .get_entry_at(clicked_idx, playlists, |p| &p.id);
+        match (entry, row) {
+            (Entry::ShufflePlay, _) => PlaylistsAction::PlayBatch(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::batch_item)
+                    .collect(),
+                true,
+            ),
+            (Entry::AddToQueue, _) => PlaylistsAction::AddBatchToQueue(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::batch_item)
+                    .collect(),
+            ),
+            (Entry::AddToPlaylist, _) => PlaylistsAction::AddBatchToPlaylist(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::batch_item)
+                    .collect(),
+            ),
+            (Entry::AddToMix, _) => PlaylistsAction::AddBatchToMix(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::trawl_seed)
+                    .collect(),
+            ),
+            (Entry::GetInfo, Some(SlotListEntry::Child(song, _))) => {
+                PlaylistsAction::ShowInfo(Box::new(InfoModalItem::from_song_view_data(song)))
+            }
+            // Single-row and ordinal-addressed (never id-addressed: a
+            // playlist can hold the same song twice). Position is 1-based on
+            // the wire. Smart parents never offer the entry.
+            (Entry::RemoveFromPlaylist, Some(SlotListEntry::Child(song, playlist_id))) => {
+                match self
+                    .expansion
+                    .child_ordinal_at(clicked_idx, playlists, |p| &p.id)
+                {
+                    Some(ordinal) => PlaylistsAction::RemoveTrackFromPlaylist {
+                        playlist_id,
+                        song_id: song.id.clone(),
+                        position: ordinal as u32 + 1,
+                    },
+                    None => PlaylistsAction::None,
+                }
+            }
+            // Playlist rows use `playlist_menu_action`; track rows here offer
+            // neither a folder nor Find Similar / Top Songs, and the rest are
+            // other views' entries.
+            (Entry::GetInfo | Entry::RemoveFromPlaylist, Some(SlotListEntry::Parent(_)) | None)
+            | (
+                Entry::ShowInFolder
+                | Entry::FindSimilar
+                | Entry::TopSongs
+                | Entry::Separator
+                | Entry::ReplaceQueueWithAllFound
+                | Entry::AddAllFoundToQueue
+                | Entry::AddAllFoundToPlaylist,
+                _,
+            ) => PlaylistsAction::None,
+        }
+    }
+
+    /// Resolve a click in a playlist row's menu. Add to Queue / Add to Mix
+    /// act on the selection when the clicked row is part of it; the rest act
+    /// on the clicked playlist alone.
+    fn playlist_menu_action(
+        &mut self,
+        clicked_idx: usize,
+        entry: PlaylistContextEntry,
+        playlists: &[PlaylistUIViewData],
+    ) -> PlaylistsAction {
+        use LibraryContextEntry as Entry;
+        use PlaylistContextEntry as Pl;
+        let row = self
+            .expansion
+            .get_entry_at(clicked_idx, playlists, |p| &p.id);
+        match (entry, row) {
+            (Pl::Library(Entry::AddToQueue), _) => PlaylistsAction::AddBatchToQueue(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::batch_item)
+                    .collect(),
+            ),
+            (Pl::Library(Entry::AddToMix), _) => PlaylistsAction::AddBatchToMix(
+                self.menu_targets(clicked_idx, playlists)
+                    .map(Self::trawl_seed)
+                    .collect(),
+            ),
+            (Pl::Library(Entry::GetInfo), Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::ShowInfo(Box::new(InfoModalItem::from_playlist_view_data(
+                    playlist,
+                )))
+            }
+            (Pl::Delete, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::DeletePlaylist(playlist.id.clone())
+            }
+            (Pl::Rename, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::RenamePlaylist(playlist.id.clone())
+            }
+            (Pl::EditPlaylist, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::EditPlaylist(
+                    playlist.id.clone(),
+                    playlist.name.clone(),
+                    playlist.comment.clone(),
+                    playlist.public,
+                )
+            }
+            (Pl::EditRules, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::EditRules(playlist.id.clone())
+            }
+            (Pl::SetAsDefault, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::SetAsDefaultPlaylist(playlist.id.clone(), playlist.name.clone())
+            }
+            (Pl::SetCustomArtwork, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::SetCustomArtwork(playlist.id.clone(), playlist.name.clone())
+            }
+            (Pl::ResetArtwork, Some(SlotListEntry::Parent(playlist))) => {
+                PlaylistsAction::ResetCustomArtwork(playlist.id.clone(), playlist.name.clone())
+            }
+            // Only playlist rows carry this menu, and it offers no other
+            // library entries.
+            (
+                Pl::Library(Entry::GetInfo)
+                | Pl::Delete
+                | Pl::Rename
+                | Pl::EditPlaylist
+                | Pl::EditRules
+                | Pl::SetAsDefault
+                | Pl::SetCustomArtwork
+                | Pl::ResetArtwork,
+                Some(SlotListEntry::Child(..)) | None,
+            )
+            | (
+                Pl::Library(
+                    Entry::ShufflePlay
+                    | Entry::AddToPlaylist
+                    | Entry::Separator
+                    | Entry::ShowInFolder
+                    | Entry::FindSimilar
+                    | Entry::TopSongs
+                    | Entry::RemoveFromPlaylist
+                    | Entry::ReplaceQueueWithAllFound
+                    | Entry::AddAllFoundToQueue
+                    | Entry::AddAllFoundToPlaylist,
+                )
+                | Pl::Separator,
+                _,
+            ) => PlaylistsAction::None,
+        }
+    }
+
     /// Update internal state and return actions for root
     pub fn update(
         &mut self,
@@ -269,234 +465,14 @@ impl PlaylistsPage {
                 }
                 PlaylistsMessage::ImportNsp => (Task::none(), PlaylistsAction::ImportNsp),
                 PlaylistsMessage::RetryCapsFetch => (Task::none(), PlaylistsAction::RetryCapsFetch),
-                PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
-                    // Context menu for child tracks (uses shared LibraryContextEntry)
-                    use nokkvi_data::types::batch::BatchItem;
-
-                    use crate::widgets::context_menu::LibraryContextEntry;
-
-                    if matches!(entry, LibraryContextEntry::AddToMix) {
-                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                        let seeds =
-                            super::super::expansion::build_trawl_seeds(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_playlist(
-                                            playlist.id.clone(),
-                                            playlist.name.clone(),
-                                            playlist.song_count,
-                                        ))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_song(
-                                            song.clone().into(),
-                                        ))
-                                    }
-                                    None => None,
-                                }
-                            });
-                        return (Task::none(), PlaylistsAction::AddBatchToMix(seeds));
-                    }
-
-                    if matches!(entry, LibraryContextEntry::RemoveFromPlaylist) {
-                        // Single-row, ordinal-addressed (never id-addressed —
-                        // duplicate songs make ids ambiguous). Position is
-                        // 1-based on the wire. Smart parents never emit the
-                        // entry, so this resolve is regular-parent-only.
-                        if let (Some(SlotListEntry::Child(song, parent_id)), Some(ordinal)) = (
-                            self.expansion
-                                .get_entry_at(clicked_idx, playlists, |p| &p.id),
-                            self.expansion
-                                .child_ordinal_at(clicked_idx, playlists, |p| &p.id),
-                        ) {
-                            return (
-                                Task::none(),
-                                PlaylistsAction::RemoveTrackFromPlaylist {
-                                    playlist_id: parent_id,
-                                    song_id: song.id.clone(),
-                                    position: ordinal as u32 + 1,
-                                },
-                            );
-                        }
-                        return (Task::none(), PlaylistsAction::None);
-                    }
-
-                    if matches!(
-                        entry,
-                        LibraryContextEntry::ShufflePlay
-                            | LibraryContextEntry::AddToQueue
-                            | LibraryContextEntry::AddToPlaylist
-                    ) {
-                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                        let payload =
-                            super::super::expansion::build_batch_payload(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(BatchItem::Playlist(playlist.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(BatchItem::Song(Box::new(item)))
-                                    }
-                                    None => None,
-                                }
-                            });
-
-                        match entry {
-                            LibraryContextEntry::ShufflePlay => {
-                                return (Task::none(), PlaylistsAction::PlayBatch(payload, true));
-                            }
-                            LibraryContextEntry::AddToQueue => {
-                                return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
-                            }
-                            LibraryContextEntry::AddToPlaylist => {
-                                return (
-                                    Task::none(),
-                                    PlaylistsAction::AddBatchToPlaylist(payload),
-                                );
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-
-                    match self
-                        .expansion
-                        .get_entry_at(clicked_idx, playlists, |p| &p.id)
-                    {
-                        Some(SlotListEntry::Child(song, _)) => match entry {
-                            LibraryContextEntry::GetInfo => {
-                                use nokkvi_data::types::info_modal::InfoModalItem;
-                                let item = InfoModalItem::from_song_view_data(song);
-                                (Task::none(), PlaylistsAction::ShowInfo(Box::new(item)))
-                            }
-                            _ => (Task::none(), PlaylistsAction::None),
-                        },
-                        _ => (Task::none(), PlaylistsAction::None),
-                    }
-                }
-                PlaylistsMessage::PlaylistContextAction(clicked_idx, entry) => {
-                    // Context menu for parent playlists (extended entries)
-                    use nokkvi_data::types::batch::BatchItem;
-
-                    use crate::widgets::context_menu::LibraryContextEntry;
-
-                    if matches!(
-                        entry,
-                        PlaylistContextEntry::Library(LibraryContextEntry::AddToMix)
-                    ) {
-                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                        let seeds =
-                            super::super::expansion::build_trawl_seeds(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_playlist(
-                                            playlist.id.clone(),
-                                            playlist.name.clone(),
-                                            playlist.song_count,
-                                        ))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_song(
-                                            song.clone().into(),
-                                        ))
-                                    }
-                                    None => None,
-                                }
-                            });
-                        return (Task::none(), PlaylistsAction::AddBatchToMix(seeds));
-                    }
-
-                    if matches!(
-                        entry,
-                        PlaylistContextEntry::Library(
-                            LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist
-                        )
-                    ) {
-                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                        let payload =
-                            super::super::expansion::build_batch_payload(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(BatchItem::Playlist(playlist.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(BatchItem::Song(Box::new(item)))
-                                    }
-                                    None => None,
-                                }
-                            });
-
-                        match entry {
-                            PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue) => {
-                                return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
-                            }
-                            PlaylistContextEntry::Library(LibraryContextEntry::AddToPlaylist) => {
-                                return (Task::none(), PlaylistsAction::None);
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-
-                    match self
-                        .expansion
-                        .get_entry_at(clicked_idx, playlists, |p| &p.id)
-                    {
-                        Some(SlotListEntry::Parent(playlist)) => match entry {
-                            PlaylistContextEntry::Delete => (
-                                Task::none(),
-                                PlaylistsAction::DeletePlaylist(playlist.id.clone()),
-                            ),
-                            PlaylistContextEntry::Rename => (
-                                Task::none(),
-                                PlaylistsAction::RenamePlaylist(playlist.id.clone()),
-                            ),
-                            PlaylistContextEntry::EditPlaylist => (
-                                Task::none(),
-                                PlaylistsAction::EditPlaylist(
-                                    playlist.id.clone(),
-                                    playlist.name.clone(),
-                                    playlist.comment.clone(),
-                                    playlist.public,
-                                ),
-                            ),
-                            PlaylistContextEntry::EditRules => (
-                                Task::none(),
-                                PlaylistsAction::EditRules(playlist.id.clone()),
-                            ),
-                            PlaylistContextEntry::SetAsDefault => (
-                                Task::none(),
-                                PlaylistsAction::SetAsDefaultPlaylist(
-                                    playlist.id.clone(),
-                                    playlist.name.clone(),
-                                ),
-                            ),
-                            PlaylistContextEntry::SetCustomArtwork => (
-                                Task::none(),
-                                PlaylistsAction::SetCustomArtwork(
-                                    playlist.id.clone(),
-                                    playlist.name.clone(),
-                                ),
-                            ),
-                            PlaylistContextEntry::ResetArtwork => (
-                                Task::none(),
-                                PlaylistsAction::ResetCustomArtwork(
-                                    playlist.id.clone(),
-                                    playlist.name.clone(),
-                                ),
-                            ),
-                            PlaylistContextEntry::Library(LibraryContextEntry::GetInfo) => {
-                                use nokkvi_data::types::info_modal::InfoModalItem;
-                                let item = InfoModalItem::from_playlist_view_data(playlist);
-                                (Task::none(), PlaylistsAction::ShowInfo(Box::new(item)))
-                            }
-                            _ => (Task::none(), PlaylistsAction::None),
-                        },
-                        _ => (Task::none(), PlaylistsAction::None),
-                    }
-                }
+                PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => (
+                    Task::none(),
+                    self.track_menu_action(clicked_idx, entry, playlists),
+                ),
+                PlaylistsMessage::PlaylistContextAction(clicked_idx, entry) => (
+                    Task::none(),
+                    self.playlist_menu_action(clicked_idx, entry, playlists),
+                ),
                 // Common arms already handled by macro above
                 _ => (Task::none(), PlaylistsAction::None),
             },

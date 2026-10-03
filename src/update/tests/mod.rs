@@ -52,6 +52,7 @@ mod queue;
 mod radio_artwork;
 mod redesign_chrome;
 mod roulette;
+mod row_menus;
 mod rules_editor;
 mod scrobble;
 mod session;

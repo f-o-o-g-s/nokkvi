@@ -66,19 +66,19 @@ pub enum LibraryContextEntry {
     AddAllFoundToPlaylist,
 }
 
-/// Standard library context menu entries list.
-pub(crate) fn library_entries() -> Vec<LibraryContextEntry> {
+/// Context entries for a genre row: the batch entries only (a genre has no
+/// info modal and no folder).
+pub(crate) fn genre_entries() -> Vec<LibraryContextEntry> {
     vec![
         LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
         LibraryContextEntry::AddToPlaylist,
         LibraryContextEntry::AddToMix,
-        LibraryContextEntry::Separator,
-        LibraryContextEntry::GetInfo,
     ]
 }
 
-/// Library context menu entries with "Show in File Manager" (Songs, Albums, Artists views).
+/// Context entries for an album row (Albums view, and the album rows
+/// expanded under an artist or a genre).
 pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
         LibraryContextEntry::ShufflePlay,
@@ -111,7 +111,8 @@ pub(crate) fn playlist_child_entries(parent_is_smart: bool) -> Vec<LibraryContex
     entries
 }
 
-/// Library context menu entries for Songs view (includes FindSimilar/TopSongs).
+/// Context entries for a song row (Songs view, and the track rows expanded
+/// under an album). Includes Find Similar + Top Songs.
 pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
         LibraryContextEntry::ShufflePlay,
@@ -126,8 +127,9 @@ pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
     ]
 }
 
-/// Library context menu entries for Artists view (includes TopSongs + FindSimilar).
-pub(crate) fn artist_entries_with_folder() -> Vec<LibraryContextEntry> {
+/// Context entries for an artist row (includes Find Similar + Top Songs;
+/// no Show in File Manager, since an artist has no folder of its own).
+pub(crate) fn artist_entries() -> Vec<LibraryContextEntry> {
     vec![
         LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
@@ -135,7 +137,6 @@ pub(crate) fn artist_entries_with_folder() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::AddToMix,
         LibraryContextEntry::Separator,
         LibraryContextEntry::GetInfo,
-        LibraryContextEntry::ShowInFolder,
         LibraryContextEntry::FindSimilar,
         LibraryContextEntry::TopSongs,
     ]

@@ -4,12 +4,115 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
+    types::{ItemKind, batch::BatchItem, info_modal::InfoModalItem, trawl::TrawlSeed},
+};
 
 use super::{super::expansion::SlotListEntry, ArtistsAction, ArtistsMessage, ArtistsPage};
-use crate::widgets::SlotListPageMessage;
+use crate::widgets::{SlotListPageMessage, context_menu::LibraryContextEntry};
+
+type ArtistsRow<'a> = SlotListEntry<&'a ArtistUIViewData, &'a AlbumUIViewData>;
 
 impl ArtistsPage {
+    /// What a row stands for in a play / queue / playlist batch.
+    fn batch_item(row: ArtistsRow<'_>) -> BatchItem {
+        match row {
+            SlotListEntry::Parent(artist) => BatchItem::Artist(artist.id.clone()),
+            SlotListEntry::Child(album, _) => BatchItem::Album(album.id.clone()),
+        }
+    }
+
+    /// The Trawl seed a row adds to the crate.
+    fn trawl_seed(row: ArtistsRow<'_>) -> TrawlSeed {
+        match row {
+            SlotListEntry::Parent(artist) => {
+                TrawlSeed::from_artist(artist.id.clone(), artist.name.clone())
+            }
+            SlotListEntry::Child(album, _) => {
+                TrawlSeed::from_album(album.id.clone(), album.name.clone(), album.artist.clone())
+            }
+        }
+    }
+
+    /// The rows a batch menu entry acts on: the selection when the clicked
+    /// row is part of it, else the clicked row alone (clears the selection).
+    fn menu_targets<'a>(
+        &'a mut self,
+        clicked_idx: usize,
+        artists: &'a [ArtistUIViewData],
+    ) -> impl Iterator<Item = ArtistsRow<'a>> + 'a {
+        let targets = self.common.get_batch_target_indices(clicked_idx);
+        self.expansion.rows_at(targets, artists, |a| &a.id)
+    }
+
+    /// Resolve a row-menu click on flattened row `clicked_idx`. Batch entries
+    /// act on the selection when the clicked row is part of it; the rest act
+    /// on the clicked row alone.
+    fn context_menu_action(
+        &mut self,
+        clicked_idx: usize,
+        entry: LibraryContextEntry,
+        artists: &[ArtistUIViewData],
+    ) -> ArtistsAction {
+        use LibraryContextEntry as Entry;
+        let row = self.expansion.get_entry_at(clicked_idx, artists, |a| &a.id);
+        match (entry, row) {
+            (Entry::ShufflePlay, _) => ArtistsAction::PlayBatch(
+                self.menu_targets(clicked_idx, artists)
+                    .map(Self::batch_item)
+                    .collect(),
+                true,
+            ),
+            (Entry::AddToQueue, _) => ArtistsAction::AddBatchToQueue(
+                self.menu_targets(clicked_idx, artists)
+                    .map(Self::batch_item)
+                    .collect(),
+            ),
+            (Entry::AddToPlaylist, _) => ArtistsAction::AddBatchToPlaylist(
+                self.menu_targets(clicked_idx, artists)
+                    .map(Self::batch_item)
+                    .collect(),
+            ),
+            (Entry::AddToMix, _) => ArtistsAction::AddBatchToMix(
+                self.menu_targets(clicked_idx, artists)
+                    .map(Self::trawl_seed)
+                    .collect(),
+            ),
+            (Entry::GetInfo, Some(SlotListEntry::Parent(artist))) => {
+                ArtistsAction::ShowInfo(Box::new(InfoModalItem::from_artist_view_data(artist)))
+            }
+            (Entry::GetInfo, Some(SlotListEntry::Child(album, _))) => {
+                ArtistsAction::ShowInfo(Box::new(InfoModalItem::from_album_view_data(album, None)))
+            }
+            (Entry::ShowInFolder, Some(SlotListEntry::Child(album, _))) => {
+                ArtistsAction::ShowAlbumInFolder(album.id.clone())
+            }
+            (Entry::FindSimilar, Some(SlotListEntry::Parent(artist))) => {
+                ArtistsAction::FindSimilar(artist.id.clone(), artist.name.clone())
+            }
+            (Entry::FindSimilar, Some(SlotListEntry::Child(album, _))) => {
+                ArtistsAction::FindSimilar(album.id.clone(), album.name.clone())
+            }
+            (Entry::TopSongs, Some(SlotListEntry::Parent(artist))) => {
+                ArtistsAction::TopSongs(artist.name.clone())
+            }
+            // An artist has no folder of its own, and album rows don't offer
+            // Top Songs; the rest are other views' entries.
+            (Entry::ShowInFolder, Some(SlotListEntry::Parent(_)))
+            | (Entry::TopSongs, Some(SlotListEntry::Child(..)))
+            | (Entry::GetInfo | Entry::ShowInFolder | Entry::FindSimilar | Entry::TopSongs, None)
+            | (
+                Entry::Separator
+                | Entry::RemoveFromPlaylist
+                | Entry::ReplaceQueueWithAllFound
+                | Entry::AddAllFoundToQueue
+                | Entry::AddAllFoundToPlaylist,
+                _,
+            ) => ArtistsAction::None,
+        }
+    }
+
     /// Update internal state and return actions for root
     pub fn update(
         &mut self,
@@ -246,115 +349,10 @@ impl ArtistsPage {
                         None => (Task::none(), ArtistsAction::None),
                     }
                 }
-                ArtistsMessage::ContextMenuAction(clicked_idx, entry) => {
-                    use nokkvi_data::types::batch::BatchItem;
-
-                    use crate::widgets::context_menu::LibraryContextEntry;
-
-                    match entry {
-                        LibraryContextEntry::AddToMix => {
-                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                            let seeds =
-                                super::super::expansion::build_trawl_seeds(target_indices, |i| {
-                                    match self.expansion.get_entry_at(i, artists, |a| &a.id) {
-                                        Some(SlotListEntry::Parent(artist)) => {
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_artist(
-                                                artist.id.clone(),
-                                                artist.name.clone(),
-                                            ))
-                                        }
-                                        Some(SlotListEntry::Child(album, _)) => {
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_album(
-                                                album.id.clone(),
-                                                album.name.clone(),
-                                                album.artist.clone(),
-                                            ))
-                                        }
-                                        None => None,
-                                    }
-                                });
-                            (Task::none(), ArtistsAction::AddBatchToMix(seeds))
-                        }
-                        LibraryContextEntry::ShufflePlay
-                        | LibraryContextEntry::AddToQueue
-                        | LibraryContextEntry::AddToPlaylist => {
-                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                            let payload =
-                                super::super::expansion::build_batch_payload(target_indices, |i| {
-                                    match self.expansion.get_entry_at(i, artists, |a| &a.id) {
-                                        Some(SlotListEntry::Parent(artist)) => {
-                                            Some(BatchItem::Artist(artist.id.clone()))
-                                        }
-                                        Some(SlotListEntry::Child(album, _)) => {
-                                            Some(BatchItem::Album(album.id.clone()))
-                                        }
-                                        None => None,
-                                    }
-                                });
-
-                            match entry {
-                                LibraryContextEntry::ShufflePlay => {
-                                    (Task::none(), ArtistsAction::PlayBatch(payload, true))
-                                }
-                                LibraryContextEntry::AddToQueue => {
-                                    (Task::none(), ArtistsAction::AddBatchToQueue(payload))
-                                }
-                                LibraryContextEntry::AddToPlaylist => {
-                                    (Task::none(), ArtistsAction::AddBatchToPlaylist(payload))
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                        // Non-batched actions (apply only to the clicked item)
-                        _ => match self.expansion.get_entry_at(clicked_idx, artists, |a| &a.id) {
-                            Some(SlotListEntry::Parent(artist)) => match entry {
-                                LibraryContextEntry::GetInfo => {
-                                    use nokkvi_data::types::info_modal::InfoModalItem;
-                                    let item = InfoModalItem::from_artist_view_data(artist);
-                                    (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
-                                }
-                                LibraryContextEntry::ShowInFolder
-                                | LibraryContextEntry::Separator => {
-                                    (Task::none(), ArtistsAction::None)
-                                }
-                                LibraryContextEntry::FindSimilar => (
-                                    Task::none(),
-                                    ArtistsAction::FindSimilar(
-                                        artist.id.clone(),
-                                        artist.name.clone(),
-                                    ),
-                                ),
-                                LibraryContextEntry::TopSongs => {
-                                    (Task::none(), ArtistsAction::TopSongs(artist.name.clone()))
-                                }
-                                _ => (Task::none(), ArtistsAction::None),
-                            },
-                            Some(SlotListEntry::Child(album, _)) => match entry {
-                                LibraryContextEntry::GetInfo => {
-                                    use nokkvi_data::types::info_modal::InfoModalItem;
-                                    let item = InfoModalItem::from_album_view_data(album, None);
-                                    (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
-                                }
-                                LibraryContextEntry::ShowInFolder => (
-                                    Task::none(),
-                                    ArtistsAction::ShowAlbumInFolder(album.id.clone()),
-                                ),
-                                LibraryContextEntry::Separator => {
-                                    (Task::none(), ArtistsAction::None)
-                                }
-                                LibraryContextEntry::FindSimilar => {
-                                    let aid = album.artist.clone();
-                                    (
-                                        Task::none(),
-                                        ArtistsAction::FindSimilar(aid, album.name.clone()),
-                                    )
-                                }
-                                _ => (Task::none(), ArtistsAction::None),
-                            },
-                            None => (Task::none(), ArtistsAction::None),
-                        },
-                    }
-                }
+                ArtistsMessage::ContextMenuAction(clicked_idx, entry) => (
+                    Task::none(),
+                    self.context_menu_action(clicked_idx, entry, artists),
+                ),
                 // Common arms already handled by macro above
                 _ => (Task::none(), ArtistsAction::None),
             },

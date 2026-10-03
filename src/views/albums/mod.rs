@@ -181,6 +181,7 @@ pub enum AlbumsAction {
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, seed_name) - open similar tab
+    TopSongs(String),     // artist_name - open similar tab for top songs
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     NavigateAndExpandGenre(String),  // genre_id - navigate to Genres and auto-expand

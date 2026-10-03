@@ -200,6 +200,19 @@ impl<C: Clone> ExpansionState<C> {
         None
     }
 
+    /// The rows at flattened `indices`, in the order given; an index past the
+    /// end drops out. Batch actions map these to their payload items.
+    pub fn rows_at<'a, P>(
+        &'a self,
+        indices: impl IntoIterator<Item = usize> + 'a,
+        parents: &'a [P],
+        id_fn: impl Fn(&P) -> &str + 'a,
+    ) -> impl Iterator<Item = SlotListEntry<&'a P, &'a C>> + 'a {
+        indices
+            .into_iter()
+            .filter_map(move |i| self.get_entry_at(i, parents, &id_fn))
+    }
+
     /// The 0-based ordinal of the CHILD at flattened `idx` within the
     /// expanded parent's children, or `None` when `idx` is a parent row or
     /// out of range. The playlist remove-by-position path depends on the
@@ -879,6 +892,23 @@ mod tests {
             matches!(state.get_entry_at(4, &p, id_fn), Some(SlotListEntry::Parent(p)) if p.id == "c")
         );
         assert!(state.get_entry_at(5, &p, id_fn).is_none());
+    }
+
+    #[test]
+    fn rows_at_keeps_the_given_order_and_drops_out_of_range_indices() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        state.set_children("a".into(), children(), &p, &mut common);
+        // Flattened: [Parent(a), Child(c1), Child(c2), Parent(b), Parent(c)]
+        let ids: Vec<&str> = state
+            .rows_at([3, 9, 2, 0], &p, id_fn)
+            .map(|row| match row {
+                SlotListEntry::Parent(parent) => parent.id.as_str(),
+                SlotListEntry::Child(child, _) => child.id.as_str(),
+            })
+            .collect();
+        assert_eq!(ids, ["b", "c2", "a"]);
     }
 
     #[test]

@@ -33,6 +33,14 @@ impl BatchPayload {
     }
 }
 
+impl FromIterator<BatchItem> for BatchPayload {
+    fn from_iter<I: IntoIterator<Item = BatchItem>>(items: I) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

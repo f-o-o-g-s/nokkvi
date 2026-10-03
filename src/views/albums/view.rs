@@ -20,10 +20,23 @@ use nokkvi_data::{
 use super::{super::expansion::SlotListEntry, AlbumsMessage, AlbumsPage, AlbumsViewData};
 use crate::widgets::{
     self,
+    context_menu::LibraryContextEntry,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
 };
 
 impl AlbumsPage {
+    /// Right-click entries for an album row. The row renderer and the
+    /// menu-coverage tests (`update/tests/row_menus.rs`) both read this, so
+    /// an entry offered without a handler fails a test.
+    pub(crate) fn parent_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::library_entries_with_folder()
+    }
+
+    /// Right-click entries for an expanded track row (see [`Self::parent_menu`]).
+    pub(crate) fn child_menu() -> Vec<LibraryContextEntry> {
+        crate::widgets::context_menu::song_entries_with_folder()
+    }
+
     /// Build the view
     pub fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage> {
         let column_dropdown: Element<'a, AlbumsMessage> =
@@ -558,12 +571,12 @@ impl AlbumsPage {
             AlbumsMessage::SlotList,
         );
 
-        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Albums,
             ctx.item_index,
             slot_button,
-            library_entries_with_folder(),
+            Self::parent_menu(),
             open_menu,
             AlbumsMessage::ContextMenuAction,
             AlbumsMessage::SetOpenMenu,
@@ -592,12 +605,12 @@ impl AlbumsPage {
             1, // depth 1: child tracks under album
         );
 
-        use crate::widgets::context_menu::{song_entries_with_folder, wrap_library_row};
+        use crate::widgets::context_menu::wrap_library_row;
         wrap_library_row(
             crate::View::Albums,
             ctx.item_index,
             track_el,
-            song_entries_with_folder(),
+            Self::child_menu(),
             open_menu,
             AlbumsMessage::ContextMenuAction,
             AlbumsMessage::SetOpenMenu,
