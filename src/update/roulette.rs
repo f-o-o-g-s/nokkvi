@@ -97,13 +97,12 @@ impl Nokkvi {
             page.common_mut().set_toolbar_dropdown_open(false);
         }
 
-        // Leave radio mode the same way every other play handler does.
-        // Skip `enter_new_playback_context()` here — the
-        // per-view settle dispatch (`roulette_settle_play`) routes through
-        // each view's own play handler, which calls the helper when the play
-        // replaces the queue. Calling it up-front would clear the loaded
-        // playlist header for Queue-view roulette, which is an in-queue play.
-        self.guard_play_action();
+        // No play prologue here: a spin can be cancelled, and the station
+        // keeps streaming until something plays. The settle
+        // (`roulette_settle_play`) runs it: the Genres / Artists arms
+        // directly, every other view through its own play handler. Running
+        // it up-front would also clear the loaded playlist header for
+        // Queue-view roulette, which is an in-queue play.
 
         // Collapse any active inline expansion so the wheel spins through
         // a uniform parents-only list, never a mixed flattened set.
@@ -386,6 +385,7 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let name = genre.name.clone();
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 self.shell_action_task(
                     move |shell| async move { shell.play_genre_random(&name).await },
@@ -398,6 +398,7 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let id = artist.id.clone();
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 self.shell_action_task(
                     move |shell| async move { shell.play_artist_random(&id).await },

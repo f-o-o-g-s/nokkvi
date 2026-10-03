@@ -373,3 +373,58 @@ fn click_navigate_and_expand_album_keeps_center_only_off_for_top_pin_layout() {
          otherwise the click would get the Shift+C layout"
     );
 }
+
+// ============================================================================
+// Radio mode: only the settled play leaves it, never the spin
+// ============================================================================
+
+fn four_albums(app: &mut crate::Nokkvi) {
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "One", "X"),
+        make_album("a2", "Two", "X"),
+        make_album("a3", "Three", "X"),
+        make_album("a4", "Four", "X"),
+    ]);
+}
+
+#[test]
+fn roulette_cancel_keeps_radio_playing_mode() {
+    // Escape mid-spin plays nothing, so the station that is still streaming
+    // must keep the app in radio mode.
+    let mut app = test_app();
+    four_albums(&mut app);
+    seed_radio_playback(&mut app);
+
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Cancel);
+
+    assert!(
+        app.active_playback.is_radio(),
+        "a cancelled spin must not leave radio mode"
+    );
+}
+
+#[test]
+fn genre_roulette_settle_leaves_radio() {
+    let mut app = test_app();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    seed_radio_playback(&mut app);
+
+    let _ = app.roulette_settle_play(View::Genres, 0, 1);
+
+    assert!(
+        app.active_playback.is_queue(),
+        "the genre settle plays the queue, so it must leave radio mode"
+    );
+}
+
+#[test]
+fn artist_roulette_settle_leaves_radio() {
+    let mut app = test_app();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+    seed_radio_playback(&mut app);
+
+    let _ = app.roulette_settle_play(View::Artists, 0, 1);
+
+    assert!(app.active_playback.is_queue());
+}
