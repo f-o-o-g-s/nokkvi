@@ -1042,8 +1042,9 @@ enum GaplessSwapOutcome {
     /// decoder was put BACK in the slot for a later retry / the renderer's
     /// crossfade trigger.
     FormatMismatch,
-    /// ReplayGain Track mode, and the staged track needs a different gain than
-    /// the live stream, whose gain is fixed when the stream is built: the track
+    /// The staged track resolves to a different ReplayGain normalization than
+    /// the live stream, whose gain is fixed when the stream is built (Album
+    /// mode: another album; Track mode: another gain or peak clamp): the track
     /// was put BACK so the end-of-track path (`load_prepared_track`) gives it
     /// a stream of its own.
     ReplayGainDiffers,
@@ -1198,7 +1199,7 @@ async fn try_gapless_swap(
                 GaplessSwapOutcome::FormatMismatch
             } else {
                 tracing::debug!(
-                    "🔄 [DECODE LOOP] ReplayGain Track gain differs — no inline gapless swap; the next track gets its own stream"
+                    "🔄 [DECODE LOOP] ReplayGain normalization differs — no inline gapless swap; the next track gets its own stream"
                 );
                 GaplessSwapOutcome::ReplayGainDiffers
             };
@@ -7799,6 +7800,46 @@ mod tests {
             engine.renderer.lock().current_replay_gain_for_test(),
             Some(rg(-9.0)),
             "the new stream must be built at the incoming track's ReplayGain"
+        );
+    }
+
+    /// Album mode: a same-format track from another album (another album
+    /// gain) gets a stream of its own. Album mode used to reuse the stream,
+    /// so the new album played at the previous album's gain.
+    #[tokio::test]
+    async fn load_prepared_track_gives_another_album_its_own_stream_in_album_mode() {
+        let album = |gain: f64| crate::types::song::ReplayGain {
+            album_gain: Some(gain),
+            ..rg(-3.0)
+        };
+        let (mut engine, _mixer) = engine_playing_at(album(-6.0));
+        engine.renderer.lock().set_volume_normalization(
+            crate::types::player_settings::VolumeNormalizationMode::ReplayGainAlbum,
+            1.0,
+            0.0,
+            0.0,
+            false,
+            false,
+        );
+        let outgoing = engine
+            .renderer
+            .lock()
+            .primary_stream_handle_for_test()
+            .expect("precondition: the outgoing stream exists");
+        prepare_next(&mut engine, matching_format(), album(-11.0)).await;
+
+        engine
+            .load_prepared_track()
+            .await
+            .expect("the prepared track loads");
+
+        assert!(
+            outgoing.stopped.load(Ordering::Acquire),
+            "another album's gain must get a new stream, not the outgoing's"
+        );
+        assert_eq!(
+            engine.renderer.lock().current_replay_gain_for_test(),
+            Some(album(-11.0))
         );
     }
 

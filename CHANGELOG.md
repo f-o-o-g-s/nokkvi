@@ -48,6 +48,8 @@ All notable changes to this project will be documented in this file.
 - In ReplayGain Track mode, auto-advancing into a track with a different gain now plays it at its own level instead of the previous track's.
 - On the non-PipeWire audio fallback, where bit-perfect Strict has no effect, clicking a track now crossfades with Fade on Skip like Next does.
 - ReplayGain normalization now applies to songs played from albums, artists, genres and the Songs view.
+- In ReplayGain Album mode, auto-advancing into another album now plays it at that album's level instead of the previous album's.
+- In ReplayGain Track mode, auto-advancing now also honors clipping prevention and album-gain fallback for the next track.
 
 ### Removed
 

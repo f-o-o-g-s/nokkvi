@@ -683,23 +683,28 @@ impl AudioRenderer {
         self.pending_crossfade_replay_gain.clone()
     }
 
-    /// In ReplayGain-track mode, the rodio chain's `amplify` factor is
-    /// baked in at stream creation. The decode-loop's gapless swap reuses
-    /// the same primary stream, which would mis-level the next track.
+    /// The rodio chain's normalization (`amplify` factor or AGC) is baked in
+    /// at stream creation, and the decode loop's inline gapless swap reuses
+    /// the primary stream, which would mis-level a next track that needs a
+    /// different gain.
     ///
-    /// Returns `false` only when mode is `ReplayGainTrack` *and* `incoming`
-    /// (the prepared track's own tags) has a different `track_gain` than the
-    /// live stream — denying the swap forces the engine to take the natural
+    /// Returns `false` when `incoming` (the prepared track's own tags)
+    /// resolves to a different normalization than the playing track, in any
+    /// mode: in Album mode that is an album change, in Track mode a gain or
+    /// peak-clamp change. Denying the swap sends the engine down the natural
     /// EOF → reload path (`load_prepared_track`), which stages the incoming
-    /// tags and calls `init()`, building a fresh stream with the correct gain.
-    ///
-    /// Album mode is not checked: tracks of one album share its album gain,
-    /// but a same-format join into a different album keeps the first one's.
+    /// tags and calls `init()`, building a fresh stream with the right gain.
     pub fn gapless_swap_allowed(&self, incoming: Option<&ReplayGain>) -> bool {
-        if self.volume_normalization_mode != VolumeNormalizationMode::ReplayGainTrack {
-            return true;
-        }
-        !rg_track_gains_differ(self.current_replay_gain.as_ref(), incoming)
+        !self.needs_own_stream_for(incoming)
+    }
+
+    /// Whether a track tagged `incoming` needs a stream of its own: the
+    /// normalization it resolves to (mode + settings + tags, exactly what a
+    /// new stream would bake in) differs from the playing track's. Both
+    /// gapless paths that keep the live stream, the inline swap and
+    /// [`Self::init`]'s reuse branch, ask this one question.
+    fn needs_own_stream_for(&self, incoming: Option<&ReplayGain>) -> bool {
+        self.resolve_norm_for(self.current_replay_gain.as_ref()) != self.resolve_norm_for(incoming)
     }
 
     /// Resolve mode + settings + an optional `ReplayGain` into the final
@@ -855,17 +860,10 @@ impl AudioRenderer {
         self.prev_format = prev_format.cloned().unwrap_or_else(|| old_format.clone());
 
         // Check if gapless is possible (formats match and gapless enabled).
-        // RG-track mode also requires the per-track gain to be unchanged —
+        // The staged track must also resolve to the same normalization:
         // gapless reuse keeps the existing rodio chain (with the previous
         // track's `amplify` factor), which would mis-level the new track.
-        // Album mode is not checked: tracks of one album share its album gain,
-        // but a same-format join into a different album keeps the first one's.
-        let rg_blocks_gapless = self.volume_normalization_mode
-            == VolumeNormalizationMode::ReplayGainTrack
-            && rg_track_gains_differ(
-                self.current_replay_gain.as_ref(),
-                self.pending_replay_gain.as_ref(),
-            );
+        let rg_blocks_gapless = self.needs_own_stream_for(self.pending_replay_gain.as_ref());
         let is_gapless = !force_reload
             && self.gapless_enabled
             && self.prev_format.is_valid()
@@ -874,7 +872,7 @@ impl AudioRenderer {
             && !rg_blocks_gapless;
 
         if rg_blocks_gapless {
-            debug!("📡 Renderer::init() RG-track gain differs — forcing fresh stream");
+            debug!("📡 Renderer::init() ReplayGain normalization differs — forcing fresh stream");
         }
 
         if is_gapless {
@@ -3130,18 +3128,6 @@ impl Default for AudioRenderer {
     }
 }
 
-/// Compare track_gain values across two optional `ReplayGain` snapshots.
-/// Returns `true` when the new track would need a different `amplify`
-/// factor than the live stream is currently applying.
-fn rg_track_gains_differ(current: Option<&ReplayGain>, pending: Option<&ReplayGain>) -> bool {
-    match (current, pending) {
-        (None, None) => false,
-        (None, Some(p)) => p.track_gain.is_some(),
-        (Some(c), None) => c.track_gain.is_some(),
-        (Some(c), Some(p)) => c.track_gain != p.track_gain,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::num::NonZero;
@@ -4251,6 +4237,64 @@ mod tests {
         renderer.disarm_crossfade();
 
         assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
+    }
+
+    /// The gapless gates compare the gain each track would actually get, in
+    /// every mode. Album mode used to never refuse, so a same-format join
+    /// into another album kept the first album's gain; Track mode compared
+    /// only `track_gain`, missing peak clamping and the album-gain fallback.
+    #[tokio::test]
+    async fn gapless_swap_compares_the_resolved_gain_in_every_mode() {
+        let tags = |track: Option<f64>, album: Option<f64>, peak: Option<f64>| ReplayGain {
+            album_gain: album,
+            track_gain: track,
+            album_peak: None,
+            track_peak: peak,
+        };
+        let mut r = AudioRenderer::new();
+
+        r.set_volume_normalization(
+            VolumeNormalizationMode::ReplayGainAlbum,
+            1.0,
+            0.0,
+            0.0,
+            false,
+            false,
+        );
+        r.adopt_gapless_replay_gain(Some(tags(Some(-3.0), Some(-6.0), None)));
+        assert!(
+            r.gapless_swap_allowed(Some(&tags(Some(-9.0), Some(-6.0), None))),
+            "Album mode: the same album gain keeps the stream, whatever the track gain"
+        );
+        assert!(
+            !r.gapless_swap_allowed(Some(&tags(Some(-3.0), Some(-11.0), None))),
+            "Album mode: another album's gain needs its own stream"
+        );
+
+        r.set_volume_normalization(
+            VolumeNormalizationMode::ReplayGainTrack,
+            1.0,
+            0.0,
+            0.0,
+            false,
+            true,
+        );
+        r.adopt_gapless_replay_gain(Some(tags(Some(-3.0), None, Some(0.5))));
+        assert!(
+            !r.gapless_swap_allowed(Some(&tags(Some(-3.0), None, Some(1.6)))),
+            "Track mode: an equal track gain that clipping prevention clamps differently"
+        );
+        r.adopt_gapless_replay_gain(Some(tags(None, Some(-3.0), None)));
+        assert!(
+            !r.gapless_swap_allowed(Some(&tags(None, Some(-9.0), None))),
+            "Track mode: untagged tracks fall back to album gains that differ"
+        );
+
+        r.set_volume_normalization(VolumeNormalizationMode::Off, 1.0, 0.0, 0.0, false, false);
+        assert!(
+            r.gapless_swap_allowed(Some(&tags(Some(-20.0), Some(-20.0), None))),
+            "Off: tags change nothing"
+        );
     }
 
     /// The length rules both blend starts share (`arm_crossfade` and the
