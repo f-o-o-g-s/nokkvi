@@ -100,7 +100,10 @@ mod window;
 
 pub(crate) use chrome::dispatch_view_chrome;
 use iced::Task;
-pub(crate) use ipc::{CLI_ARGS as IPC_CLI_ARGS, KNOWN_COMMANDS as IPC_KNOWN_COMMANDS};
+pub(crate) use ipc::{
+    CLI_ARGS as IPC_CLI_ARGS, KNOWN_COMMANDS as IPC_KNOWN_COMMANDS,
+    switchable_view_names as ipc_switchable_view_names,
+};
 pub(crate) use loader_target::{
     AlbumsTarget, ArtistsTarget, GenresTarget, PlaylistsTarget, SongsTarget,
 };

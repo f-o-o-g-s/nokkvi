@@ -1441,6 +1441,28 @@ pub fn main() -> iced::Result {
         .run()
 }
 
+/// The `switch-view` row of `--help`, built from the same name list the
+/// verb's parser accepts and wrapped under the description column.
+fn switch_view_help() -> String {
+    const WIDTH: usize = 80;
+    const INDENT: &str = "                   ";
+    let mut out = String::from("  switch-view <v>  Switch the top pane to <v> (");
+    let mut line_len = out.len();
+    let mut names = crate::update::ipc_switchable_view_names().peekable();
+    while let Some(name) = names.next() {
+        let sep = if names.peek().is_some() { "/" } else { ")" };
+        if line_len + name.len() + sep.len() > WIDTH {
+            out.push('\n');
+            out.push_str(INDENT);
+            line_len = INDENT.len();
+        }
+        out.push_str(name);
+        out.push_str(sep);
+        line_len += name.len() + sep.len();
+    }
+    out
+}
+
 /// Print `--help` to stdout. Format follows GNU conventions: usage line,
 /// option table, environment vars, file paths, then a docs URL.
 #[allow(clippy::print_stdout)]
@@ -1474,8 +1496,7 @@ fn print_cli_help() {
     println!("  queue-pull       Replace the local queue with the server's");
     println!("  add-to-queue     Add the focused list item to the queue");
     println!("  remove-from-queue  Remove the centered song from the queue (queue view only)");
-    println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
-    println!("                   artists/genres/playlists/radios/settings)");
+    println!("{}", switch_view_help());
     println!("  nav-up           Move the focused list selection up (Backspace)");
     println!("  nav-down         Move the focused list selection down (Tab)");
     println!("  enter            Activate the centered item (play/expand/edit)");
@@ -1760,6 +1781,29 @@ pub(crate) fn main_window_settings() -> iced::window::Settings {
         // close + reopen the window instead of exiting the runtime.
         exit_on_close_request: false,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod cli_help_tests {
+    use super::switch_view_help;
+
+    #[test]
+    fn switch_view_help_lists_every_switchable_view() {
+        let help = switch_view_help();
+        for name in crate::update::ipc_switchable_view_names() {
+            assert!(
+                help.contains(name),
+                "`--help` must list switch-view target `{name}`:\n{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn switch_view_help_fits_the_help_column_width() {
+        for line in switch_view_help().lines() {
+            assert!(line.len() <= 80, "help line over 80 columns: {line:?}");
+        }
     }
 }
 

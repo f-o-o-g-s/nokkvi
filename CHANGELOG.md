@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Show in Folder in an album's Get Info no longer opens a different, expanded album's folder.
 - Find Similar from the Songs view now titles the results "Similar to: …" like every other view.
 - The Playlists create menu now closes when the window loses focus, like the other header menus.
+- `nokkvi --help` now lists `harbour` among the `switch-view` targets.
 
 ### Removed
 

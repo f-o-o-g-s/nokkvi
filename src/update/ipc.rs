@@ -121,9 +121,9 @@
 //! | `remove-from-queue` | act | `{"removed":name\|null}`; remove the centered    |
 //! |               |           | queue song (Ctrl+D); `not_in_queue_view` error |
 //! |               |           | outside the queue view.                        |
-//! | `switch-view` | act_str   | `{"view":name}`; arg `view` (one of `albums`/  |
-//! |               |           | `queue`/`songs`/`artists`/`genres`/`playlists`/|
-//! |               |           | `radios`/`settings`). Invalid → `invalid_args`.|
+//! | `switch-view` | act_str   | `{"view":name}`; arg `view`, any name that     |
+//! |               |           | `switchable_view_names()` yields (`--help`     |
+//! |               |           | lists them). Invalid → `invalid_args`.         |
 //! | `nav-up`      | dispatch  | `{"ok":true}`; move focused list up (async).   |
 //! | `nav-down`    | dispatch  | `{"ok":true}`; move focused list down (async). |
 //! | `enter`       | dispatch  | `{"ok":true}`; activate centered item.         |
@@ -314,12 +314,22 @@ fn arg_as_text(value: &serde_json::Value) -> Option<std::borrow::Cow<'_, str>> {
 pub(crate) fn parse_view_name(name: &str) -> Result<View, String> {
     let switchable = || View::ALL.iter().copied().filter(|v| ipc_switchable(*v));
     switchable().find(|v| view_name(*v) == name).ok_or_else(|| {
-        let supported: Vec<&'static str> = switchable().map(view_name).collect();
+        let supported: Vec<&'static str> = switchable_view_names().collect();
         format!(
             "unknown view `{name}` (expected one of: {})",
             supported.join(", ")
         )
     })
+}
+
+/// The `switch-view` names in [`View::ALL`] order: the source for the
+/// parser's error listing and the `--help` text, so neither can miss a view.
+pub(crate) fn switchable_view_names() -> impl Iterator<Item = &'static str> {
+    View::ALL
+        .iter()
+        .copied()
+        .filter(|v| ipc_switchable(*v))
+        .map(view_name)
 }
 
 /// Whether a [`View`] is a valid `switch-view` target. Exhaustive on
