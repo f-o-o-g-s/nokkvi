@@ -1084,6 +1084,9 @@ impl Nokkvi {
     /// rows + entry_ids; an empty/absent server queue is an info toast with
     /// no local change.
     pub(crate) fn pull_queue_task(&mut self) -> Task<Message> {
+        // The pulled queue replaces the local one, so a running Songs
+        // progressive load must stop appending to it.
+        self.cancel_progressive_queue_load();
         self.shell_task(
             |shell| async move { shell.pull_queue().await },
             |result| match result {

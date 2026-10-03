@@ -170,10 +170,19 @@ impl Nokkvi {
     /// path only moves the current-track pointer and must preserve the loaded
     /// playlist header.
     pub(crate) fn enter_new_playback_context(&mut self) {
-        // Cancel any in-progress progressive queue loading target so the header
-        // doesn't show a stale "X of Y" count from a superseded play action.
-        self.library.queue_loading_target = None;
+        self.cancel_progressive_queue_load();
         self.clear_active_playlist();
+    }
+
+    /// Stop a running Songs progressive load: its remaining pages belong to
+    /// the queue being replaced. Bumping the shared generation stops the
+    /// chain's next page AND drops a page already in flight before it is
+    /// appended; clearing the target drops the header's "X of Y" count.
+    /// Every queue replacement runs this (via
+    /// [`Self::enter_new_playback_context`], clear queue, server pull).
+    pub(crate) fn cancel_progressive_queue_load(&mut self) {
+        self.library.queue_loading_target = None;
+        self.library.progressive_queue_generation.bump();
     }
 
     /// Clear the active playlist context and persist the change.
@@ -1652,7 +1661,15 @@ impl Nokkvi {
         self.login_page.login_in_progress = false;
 
         // Server-specific data pointing at gone IDs
-        self.library = crate::state::LibraryData::default();
+        // ...except the progressive-load counter, carried forward and bumped:
+        // a pre-logout chain's in-flight page task holds a clone of it, and a
+        // fresh counter would leave that clone current.
+        let progressive_queue_generation = self.library.progressive_queue_generation.clone();
+        progressive_queue_generation.bump();
+        self.library = crate::state::LibraryData {
+            progressive_queue_generation,
+            ..Default::default()
+        };
         // Artwork caches are session-bound: server-A's cover bytes must not be
         // served for server-B's album IDs if the IDs happen to overlap after
         // re-login. Default rebuilds the LRUs at their declared capacities.

@@ -288,6 +288,130 @@ fn similar_replace_queue_with_all_found_leaves_radio() {
 }
 
 // ============================================================================
+// Queue replacements stop a running Songs progressive load
+// ============================================================================
+
+/// A Songs "play all" whose remaining pages are still being appended.
+fn app_with_running_songs_load() -> (crate::Nokkvi, u64) {
+    let mut app = test_app();
+    let chain = app.library.progressive_queue_generation.bump();
+    app.library.queue_loading_target = Some(500);
+    (app, chain)
+}
+
+#[test]
+fn batch_play_stops_a_running_songs_load() {
+    use crate::{views::AlbumsMessage, widgets::context_menu::LibraryContextEntry};
+
+    let (mut app, chain) = app_with_running_songs_load();
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        AlbumsMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert!(
+        !app.library.progressive_queue_generation.is_current(chain),
+        "the album replaced the queue, so the Songs pages must stop appending"
+    );
+}
+
+#[test]
+fn clear_queue_stops_a_running_songs_load() {
+    let (mut app, chain) = app_with_running_songs_load();
+
+    let _ = app.clear_queue_action();
+
+    assert!(!app.library.progressive_queue_generation.is_current(chain));
+    assert!(app.library.queue_loading_target.is_none());
+}
+
+#[test]
+fn queue_pull_stops_a_running_songs_load() {
+    let (mut app, chain) = app_with_running_songs_load();
+
+    let _ = app.pull_queue_task();
+
+    assert!(!app.library.progressive_queue_generation.is_current(chain));
+    assert!(app.library.queue_loading_target.is_none());
+}
+
+#[test]
+fn genre_roulette_stops_a_running_songs_load() {
+    let (mut app, chain) = app_with_running_songs_load();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+
+    let _ = app.roulette_settle_play(View::Genres, 0, 1);
+
+    assert!(!app.library.progressive_queue_generation.is_current(chain));
+    assert!(app.library.queue_loading_target.is_none());
+}
+
+#[test]
+fn artist_roulette_stops_a_running_songs_load() {
+    let (mut app, chain) = app_with_running_songs_load();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+
+    let _ = app.roulette_settle_play(View::Artists, 0, 1);
+
+    assert!(!app.library.progressive_queue_generation.is_current(chain));
+}
+
+#[test]
+fn in_queue_play_keeps_the_songs_load_running() {
+    // Playing a row of the queue only moves the cursor: the chain is still
+    // filling this same queue and must keep going.
+    use crate::{views::QueueMessage, widgets::SlotListPageMessage};
+
+    let (mut app, chain) = app_with_running_songs_load();
+    app.library.queue_songs = vec![make_queue_song("s1", "One", "Artist", "Album")];
+
+    let _ = app.update(crate::app_message::Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::ActivateCenter(false),
+    )));
+
+    assert!(app.library.progressive_queue_generation.is_current(chain));
+    assert_eq!(app.library.queue_loading_target, Some(500));
+}
+
+#[test]
+fn stale_chain_done_leaves_the_newer_loads_count() {
+    let (mut app, stale_chain) = app_with_running_songs_load();
+    let _newer_chain = app.library.progressive_queue_generation.bump();
+    app.library.queue_loading_target = Some(50);
+
+    let _ = app.update(crate::app_message::Message::ProgressiveQueueDone {
+        generation: stale_chain,
+    });
+
+    assert_eq!(
+        app.library.queue_loading_target,
+        Some(50),
+        "a superseded chain finishing must not clear the running chain's count"
+    );
+}
+
+#[test]
+fn logout_stops_a_running_songs_load() {
+    // The chain's in-flight task holds a clone of the counter; a fresh
+    // counter would leave that clone current and let the page append.
+    let _sse = super::SSE_SLOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut app, chain) = app_with_running_songs_load();
+    let task_copy = app.library.progressive_queue_generation.clone();
+
+    let _ = app.reset_session_state();
+
+    assert!(!task_copy.is_current(chain));
+    let next_chain = app.library.progressive_queue_generation.bump();
+    assert!(
+        task_copy.is_current(next_chain) && next_chain > chain,
+        "the new session keeps counting on the same counter, never reusing a generation"
+    );
+}
+
+// ============================================================================
 // redirect_play_to_queue_in_browsing_panel (components.rs)
 // ============================================================================
 

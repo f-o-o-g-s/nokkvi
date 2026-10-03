@@ -261,7 +261,16 @@ impl Nokkvi {
                 total_count,
                 generation,
             ),
-            Message::ProgressiveQueueDone => {
+            Message::ProgressiveQueueDone { generation } => {
+                // A superseded chain's last page must not clear the count a
+                // newer chain (or nothing) now owns.
+                if !self
+                    .library
+                    .progressive_queue_generation
+                    .is_current(generation)
+                {
+                    return Task::none();
+                }
                 self.library.queue_loading_target = None;
                 self.handle_load_queue()
             }

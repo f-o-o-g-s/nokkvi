@@ -374,7 +374,7 @@ impl Nokkvi {
     /// and Artists the user wants "load all songs, play a random one" —
     /// calls dedicated AppService methods. Other views just route through
     /// the page's normal `SlotListActivateCenter` play path.
-    fn roulette_settle_play(
+    pub(crate) fn roulette_settle_play(
         &mut self,
         view: View,
         target_idx: usize,
@@ -386,7 +386,7 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let name = genre.name.clone();
-                self.clear_active_playlist();
+                self.enter_new_playback_context();
                 self.shell_action_task(
                     move |shell| async move { shell.play_genre_random(&name).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
@@ -398,7 +398,7 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let id = artist.id.clone();
-                self.clear_active_playlist();
+                self.enter_new_playback_context();
                 self.shell_action_task(
                     move |shell| async move { shell.play_artist_random(&id).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

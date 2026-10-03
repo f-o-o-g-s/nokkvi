@@ -361,9 +361,8 @@ impl Nokkvi {
                             if needs_more && !shuffle.shuffles() {
                                 // Set loading target so queue header shows "X of Y songs"
                                 self.library.queue_loading_target = Some(total_count);
-                                // Increment generation so any stale chain from a previous play self-cancels
-                                self.library.progressive_queue_generation += 1;
-                                let generation = self.library.progressive_queue_generation;
+                                // Bump the generation so any stale chain from a previous play self-cancels
+                                let generation = self.library.progressive_queue_generation.bump();
 
                                 debug!(
                                     "📄 Progressive queue: will fetch {} remaining songs in background (generation={})",

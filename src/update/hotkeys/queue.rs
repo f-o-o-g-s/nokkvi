@@ -100,8 +100,10 @@ impl Nokkvi {
             viz.reset();
         }
 
-        // Clear playlist context bar: the playlist's queue is gone
+        // Clear playlist context bar: the playlist's queue is gone, and so is
+        // whatever a running Songs progressive load was filling.
         self.clear_active_playlist();
+        self.cancel_progressive_queue_load();
 
         self.toast_success("Queue cleared");
         self.shell_task(

@@ -27,10 +27,15 @@ impl Nokkvi {
     ) -> Task<Message> {
         // Stale generation check: if a newer play-from-songs has started,
         // this chain is obsolete — stop silently.
-        if generation != self.library.progressive_queue_generation {
+        if !self
+            .library
+            .progressive_queue_generation
+            .is_current(generation)
+        {
             debug!(
                 "📄 Progressive queue: stale chain (gen {} vs current {}), cancelling",
-                generation, self.library.progressive_queue_generation
+                generation,
+                self.library.progressive_queue_generation.current()
             );
             return Task::none();
         }
@@ -40,6 +45,7 @@ impl Nokkvi {
         let sort_o = sort_order.clone();
         let filter_c = filter.clone();
         let page_size = self.settings.library_page_size.to_usize();
+        let chain_generation = self.library.progressive_queue_generation.clone();
         let fetch_task = self.shell_task(
             move |shell| async move {
                 let library_ids = shell.active_library_ids_vec();
@@ -55,6 +61,11 @@ impl Nokkvi {
                         page_size,
                     )
                     .await?;
+                // A queue replacement during the fetch bumped the shared
+                // generation: this page belongs to the replaced queue.
+                if !chain_generation.is_current(generation) {
+                    return Ok(None);
+                }
                 let count = songs.len();
                 // Appending in shuffle mode invalidates the engine's
                 // pre-buffered next-track decoder — discharge against
@@ -62,10 +73,14 @@ impl Nokkvi {
                 // picks the right song from the freshly-extended order.
                 let effect = shell.queue().add_songs(songs).await?;
                 effect.apply_to(&shell.audio_engine()).await;
-                Ok(count)
+                Ok(Some(count))
             },
-            move |result: Result<usize, anyhow::Error>| match result {
-                Ok(count) => {
+            move |result: Result<Option<usize>, anyhow::Error>| match result {
+                Ok(None) => {
+                    debug!("📄 Progressive queue: dropped a page fetched for a replaced queue");
+                    Message::NoOp
+                }
+                Ok(Some(count)) => {
                     let new_offset = offset + count;
                     debug!(
                         "📄 Progressive queue: appended {} songs ({}→{} of {})",
@@ -73,7 +88,7 @@ impl Nokkvi {
                     );
                     if count == 0 || new_offset >= total_count {
                         // Done — clear progressive loading target, then refresh queue UI
-                        Message::ProgressiveQueueDone
+                        Message::ProgressiveQueueDone { generation }
                     } else {
                         // Chain next page fetch (LoadQueue fires first via batch)
                         Message::ProgressiveQueueAppendPage {
@@ -89,7 +104,8 @@ impl Nokkvi {
                 }
                 Err(e) => {
                     tracing::error!(" Progressive queue failed: {}", e);
-                    Message::ProgressiveQueueDone // Clear target and refresh what we have
+                    // Clear target and refresh what we have
+                    Message::ProgressiveQueueDone { generation }
                 }
             },
         );

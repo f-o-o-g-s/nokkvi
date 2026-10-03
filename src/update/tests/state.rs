@@ -43,16 +43,27 @@ fn scrobble_state_reset_with_nonzero_position() {
 #[test]
 fn progressive_queue_generation_starts_at_zero() {
     let app = test_app();
-    assert_eq!(app.library.progressive_queue_generation, 0);
+    assert_eq!(app.library.progressive_queue_generation.current(), 0);
 }
 
 #[test]
-fn progressive_queue_generation_increments() {
-    let mut app = test_app();
-    app.library.progressive_queue_generation += 1;
-    assert_eq!(app.library.progressive_queue_generation, 1);
-    app.library.progressive_queue_generation += 1;
-    assert_eq!(app.library.progressive_queue_generation, 2);
+fn progressive_queue_generation_bump_returns_the_new_value() {
+    let app = test_app();
+    assert_eq!(app.library.progressive_queue_generation.bump(), 1);
+    assert_eq!(app.library.progressive_queue_generation.bump(), 2);
+    assert!(app.library.progressive_queue_generation.is_current(2));
+    assert!(!app.library.progressive_queue_generation.is_current(1));
+}
+
+#[test]
+fn progressive_queue_generation_clones_share_the_counter() {
+    // The chain's page task holds a clone; a bump on the app's copy must
+    // reach it so an in-flight page sees it is stale.
+    let app = test_app();
+    let task_copy = app.library.progressive_queue_generation.clone();
+    let chain = task_copy.current();
+    let _ = app.library.progressive_queue_generation.bump();
+    assert!(!task_copy.is_current(chain));
 }
 
 // ============================================================================

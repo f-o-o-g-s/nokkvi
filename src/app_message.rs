@@ -1497,9 +1497,12 @@ pub enum Message {
         total_count: usize,
         generation: u64,
     },
-    /// All pages of a progressive queue chain have been loaded.
-    /// Clears `queue_loading_target` so the header shows the actual count.
-    ProgressiveQueueDone,
+    /// All pages of a progressive queue chain have been loaded (or a page
+    /// failed). Clears `queue_loading_target` so the header shows the actual
+    /// count.
+    ProgressiveQueueDone {
+        generation: u64,
+    },
 
     // --- Loader Results (per-domain *LoaderMessage) ---
     // Backend data-load responses are routed via `dispatch_<domain>_loader`
