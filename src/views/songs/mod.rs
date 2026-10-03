@@ -145,10 +145,13 @@ pub enum SongsAction {
     SortOrderChanged(bool),                                 // trigger reload
     RefreshViewData,                                        // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // Batch payload
-    /// Replace the queue with the selection/clicked item and play. `true` shuffles
-    /// the batch once (Ctrl+Enter / context-menu Shuffle Play); `false` honors the
-    /// `enter_shuffle` setting.
+    /// Context-menu Shuffle Play: replace the queue with the clicked row, or
+    /// the selection it belongs to, and play it shuffled once (`true`).
     PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
+    /// Enter / Ctrl+Enter on a multi-selection: play it (`true` shuffles once,
+    /// `false` honors `enter_shuffle`), or add it to the queue from the split
+    /// view's library pane, like Enter on one row there.
+    PlaySelection(nokkvi_data::types::batch::BatchPayload, bool),
     AddToPlaylist(String), // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowInFolder(String),  // relative path - open containing folder

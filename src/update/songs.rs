@@ -450,6 +450,13 @@ impl Nokkvi {
                     .clear_selection_indices_only();
                 return self.play_batch_task(payload, force);
             }
+            SongsAction::PlaySelection(payload, force) => {
+                self.songs_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_selection_task(payload, force);
+            }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(
                     crate::widgets::info_modal::InfoModalMessage::Open(item),

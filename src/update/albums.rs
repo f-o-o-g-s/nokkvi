@@ -547,6 +547,13 @@ impl Nokkvi {
                     .clear_selection_indices_only();
                 return self.play_batch_task(payload, force);
             }
+            AlbumsAction::PlaySelection(payload, force) => {
+                self.albums_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_selection_task(payload, force);
+            }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
                 if let Ok(index) = album_id_str.parse::<usize>() {
                     // Resolve the actual album ID using the expansion state and

@@ -174,27 +174,91 @@ fn assert_batch_play_entered_new_context(app: &crate::Nokkvi, path: &str) {
     );
 }
 
+/// Enter on a multi-selection plays it from every full library view and adds
+/// it from the split view's library pane, the same rule as Enter on one row.
+const MULTI_SELECT_VIEWS: [View; 5] = [
+    View::Albums,
+    View::Artists,
+    View::Genres,
+    View::Playlists,
+    View::Songs,
+];
+
+/// Seed two rows in `view`, select both, and return the view's Enter message.
+fn select_two_rows(app: &mut crate::Nokkvi, view: View) -> crate::app_message::Message {
+    use crate::{
+        app_message::Message,
+        views::{AlbumsMessage, ArtistsMessage, GenresMessage, PlaylistsMessage, SongsMessage},
+        widgets::SlotListPageMessage,
+    };
+    let enter = SlotListPageMessage::ActivateCenter(false);
+    let (common, message) = match view {
+        View::Albums => {
+            seed_albums(app, albums_indexed(2));
+            (
+                &mut app.albums_page.common,
+                Message::Albums(AlbumsMessage::SlotList(enter)),
+            )
+        }
+        View::Artists => {
+            seed_artists(app, artists_indexed(2));
+            (
+                &mut app.artists_page.common,
+                Message::Artists(ArtistsMessage::SlotList(enter)),
+            )
+        }
+        View::Genres => {
+            seed_genres(app, genres_indexed(2));
+            (
+                &mut app.genres_page.common,
+                Message::Genres(GenresMessage::SlotList(enter)),
+            )
+        }
+        View::Playlists => {
+            app.library.playlists.set_from_vec(vec![
+                make_test_playlist("p1", "Playlist 1"),
+                make_test_playlist("p2", "Playlist 2"),
+            ]);
+            (
+                &mut app.playlists_page.common,
+                Message::Playlists(PlaylistsMessage::SlotList(enter)),
+            )
+        }
+        View::Songs => {
+            seed_songs(app, songs_indexed(2));
+            (
+                &mut app.songs_page.common,
+                Message::Songs(SongsMessage::SlotList(enter)),
+            )
+        }
+        other => panic!("{other:?} is not a multi-select library view"),
+    };
+    common.slot_list.selected_indices = [0usize, 1].into_iter().collect();
+    message
+}
+
 #[test]
-fn albums_multi_select_enter_batch_play_leaves_radio() {
-    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+fn multi_select_enter_plays_from_every_full_library_view() {
+    for view in MULTI_SELECT_VIEWS {
+        let mut app = radio_app_with_stale_context();
+        let enter = select_two_rows(&mut app, view);
 
-    let mut app = radio_app_with_stale_context();
-    seed_albums(
-        &mut app,
-        vec![
-            make_album("a1", "Album 1", "Artist"),
-            make_album("a2", "Album 2", "Artist"),
-        ],
-    );
-    let selection = &mut app.albums_page.common.slot_list.selected_indices;
-    selection.insert(0);
-    selection.insert(1);
+        let _ = app.update(enter);
 
-    let _ = app.update(crate::app_message::Message::Albums(
-        AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
-    ));
+        assert_batch_play_entered_new_context(&app, &format!("{view:?} Enter on a selection"));
+    }
+}
 
-    assert_batch_play_entered_new_context(&app, "Albums Enter on a multi-selection");
+#[test]
+fn multi_select_enter_adds_from_the_split_view_library_pane() {
+    for view in MULTI_SELECT_VIEWS {
+        let mut app = radio_app_with_browsing_panel();
+        let enter = select_two_rows(&mut app, view);
+
+        let _ = app.update(enter);
+
+        assert_add_left_playback_alone(&app, &format!("{view:?} Enter on a selection"));
+    }
 }
 
 #[test]

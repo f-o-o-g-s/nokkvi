@@ -47,7 +47,7 @@ impl SongsPage {
                                     })
                                 })
                                 .fold(BatchPayload::new(), |p, i| p.with_item(i));
-                            (Task::none(), SongsAction::PlayBatch(payload, force))
+                            (Task::none(), SongsAction::PlaySelection(payload, force))
                         } else if let Some(center_idx) =
                             self.common.get_center_item_index(total_items)
                         {

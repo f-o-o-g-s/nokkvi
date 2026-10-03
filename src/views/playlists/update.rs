@@ -225,161 +225,30 @@ impl PlaylistsPage {
             toggle_sort: PlaylistsMessage::ToggleSortOrder => PlaylistsAction::SortOrderChanged,
             search_changed: PlaylistsMessage::SearchQueryChanged => PlaylistsAction::SearchChanged,
             search_focused: PlaylistsMessage::SearchFocused,
-            slot_list_wrap: PlaylistsMessage::SlotList,
-            action_none: PlaylistsAction::None,
-        ) {
-            Ok(result) => result,
-            Err(msg) => match msg {
-                PlaylistsMessage::SlotList(msg) => {
-                    use crate::widgets::SlotListPageMessage;
-                    match msg {
-                        SlotListPageMessage::NavigateUp => {
-                            let center = self
-                                .expansion
-                                .handle_navigate_up(playlists, &mut self.common);
-                            match center {
-                                Some(idx) => {
-                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
-                                }
-                                None => (Task::none(), PlaylistsAction::None),
-                            }
-                        }
-                        SlotListPageMessage::NavigateDown => {
-                            let center = self
-                                .expansion
-                                .handle_navigate_down(playlists, &mut self.common);
-                            match center {
-                                Some(idx) => {
-                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
-                                }
-                                None => (Task::none(), PlaylistsAction::None),
-                            }
-                        }
-                        SlotListPageMessage::SetOffset(offset, modifiers) => {
-                            let center = self.expansion.handle_select_offset(
-                                offset,
-                                modifiers,
-                                playlists,
-                                &mut self.common,
-                            );
-                            match center {
-                                Some(idx) => {
-                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
-                                }
-                                None => (Task::none(), PlaylistsAction::None),
-                            }
-                        }
-                        SlotListPageMessage::ScrollSeek(offset) => {
-                            self.expansion
-                                .handle_set_offset(offset, playlists, &mut self.common);
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        SlotListPageMessage::ClickPlay(offset) => {
-                            self.expansion
-                                .handle_set_offset(offset, playlists, &mut self.common);
-                            self.update(
-                                PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter(
-                                    false,
-                                )),
-                                total_items,
-                                playlists,
-                            )
-                        }
-                        SlotListPageMessage::SelectionToggle(offset) => {
-                            // Flattened (parents + expansion children) index space —
-                            // `total_items` from the dispatcher is the base count.
-                            let flattened = self.expansion.flattened_len(playlists);
-                            self.common.handle_selection_toggle(offset, flattened);
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        SlotListPageMessage::SelectAllToggle => {
-                            let flattened = self.expansion.flattened_len(playlists);
-                            self.common.handle_select_all_toggle(flattened);
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        SlotListPageMessage::ActivateCenter(force) => {
-                            let total = self.expansion.flattened_len(playlists);
-                            if let Some(center_idx) = self.common.get_center_item_index(total) {
-                                self.common.slot_list.flash_center();
-                                match self
-                                    .expansion
-                                    .get_entry_at(center_idx, playlists, |p| &p.id)
-                                {
-                                    Some(SlotListEntry::Child(_song, parent_playlist_id)) => {
-                                        // Play playlist starting from this track
-                                        let track_idx = self.expansion.count_children_before(
-                                            center_idx,
-                                            playlists,
-                                            |p| &p.id,
-                                        );
-                                        (
-                                            Task::none(),
-                                            PlaylistsAction::PlayPlaylistFromTrack(
-                                                parent_playlist_id,
-                                                track_idx,
-                                                force,
-                                            ),
-                                        )
-                                    }
-                                    Some(SlotListEntry::Parent(playlist)) => (
-                                        Task::none(),
-                                        PlaylistsAction::PlayPlaylist(playlist.id.clone(), force),
-                                    ),
-                                    None => (Task::none(), PlaylistsAction::None),
-                                }
-                            } else {
-                                (Task::none(), PlaylistsAction::None)
-                            }
-                        }
-                        SlotListPageMessage::AddCenterToQueue => {
-                            use nokkvi_data::types::batch::BatchItem;
-                            let total = self.expansion.flattened_len(playlists);
-
-                            let target_indices = self.common.get_queue_target_indices(total);
-
-                            if target_indices.is_empty() {
-                                return (Task::none(), PlaylistsAction::None);
-                            }
-
-                            let payload =
-                                super::super::expansion::build_batch_payload(target_indices, |i| {
-                                    match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                        Some(SlotListEntry::Parent(playlist)) => {
-                                            Some(BatchItem::Playlist(playlist.id.clone()))
-                                        }
-                                        Some(SlotListEntry::Child(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song =
-                                                song.clone().into();
-                                            Some(BatchItem::Song(Box::new(item)))
-                                        }
-                                        None => None,
-                                    }
-                                });
-
-                            (Task::none(), PlaylistsAction::AddBatchToQueue(payload))
-                        }
-                        SlotListPageMessage::RefreshViewData => {
-                            (Task::none(), PlaylistsAction::RefreshViewData)
-                        }
-                        // Playlists does not emit CenterOnPlaying; exhaustiveness arm only.
-                        SlotListPageMessage::CenterOnPlaying => {
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        // Sort/search/hover exhaustiveness arms — all handled by
-                        // impl_expansion_update! above.
-                        SlotListPageMessage::SearchQueryChanged(_)
-                        | SlotListPageMessage::SearchFocused(_)
-                        | SlotListPageMessage::SortModeSelected(_)
-                        | SlotListPageMessage::ToggleSortOrder
-                        | SlotListPageMessage::HoverEnterSlot(_)
-                        | SlotListPageMessage::HoverExitSlot(_)
-                        | SlotListPageMessage::ToolbarHoverEnter
-                        | SlotListPageMessage::ToolbarHoverExit
-                        | SlotListPageMessage::ToolbarDropdownToggled(_) => {
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                    }
+            slot_list: PlaylistsMessage::SlotList,
+            on_center: |center| center.map_or(PlaylistsAction::None, |idx| {
+                PlaylistsAction::LoadArtwork(idx.to_string())
+            }),
+            activate: |row, row_idx, force| match row {
+                SlotListEntry::Parent(playlist) => {
+                    PlaylistsAction::PlayPlaylist(playlist.id.clone(), force)
                 }
+                SlotListEntry::Child(_, playlist_id) => PlaylistsAction::PlayPlaylistFromTrack(
+                    playlist_id,
+                    self.expansion.count_children_before(row_idx, playlists, |p| &p.id),
+                    force,
+                ),
+            },
+            batch_item: Self::batch_item,
+            play_selection: PlaylistsAction::PlaySelection,
+            add_to_queue: PlaylistsAction::AddBatchToQueue,
+            refresh: PlaylistsAction::RefreshViewData,
+            // Playlists has no playing row to center on.
+            center_on_playing: PlaylistsAction::None,
+            none: PlaylistsAction::None,
+        ) {
+            Ok(handled) => handled,
+            Err(message) => match message {
                 PlaylistsMessage::FocusAndExpand(idx) => {
                     self.common.slot_list.clear_selection_indices_only();
                     let (t1, _) = self.update(
@@ -473,8 +342,20 @@ impl PlaylistsPage {
                     Task::none(),
                     self.playlist_menu_action(clicked_idx, entry, playlists),
                 ),
-                // Common arms already handled by macro above
-                _ => (Task::none(), PlaylistsAction::None),
+                // Routed up to root in `handle_playlists` before this match runs.
+                PlaylistsMessage::ArtworkColumnDrag(_)
+                | PlaylistsMessage::ArtworkColumnVerticalDrag(_) => {
+                    (Task::none(), PlaylistsAction::None)
+                }
+                // Handled by `impl_expansion_update!` above.
+                PlaylistsMessage::SlotList(_)
+                | PlaylistsMessage::ExpandCenter
+                | PlaylistsMessage::CollapseExpansion
+                | PlaylistsMessage::TracksLoaded(..)
+                | PlaylistsMessage::SortModeSelected(_)
+                | PlaylistsMessage::ToggleSortOrder
+                | PlaylistsMessage::SearchQueryChanged(_)
+                | PlaylistsMessage::SearchFocused(_) => (Task::none(), PlaylistsAction::None),
             },
         }
     }

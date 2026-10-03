@@ -210,9 +210,13 @@ pub enum PlaylistsMessage {
 #[derive(Debug, Clone)]
 pub enum PlaylistsAction {
     PlayPlaylist(String, bool), // (playlist_id, force_shuffle) - replace queue and play
-    /// Replace the queue with the selection/clicked item and play. `true` shuffles
-    /// the batch once (context-menu Shuffle Play); `false` honors `enter_shuffle`.
+    /// Context-menu Shuffle Play: replace the queue with the clicked row, or
+    /// the selection it belongs to, and play it shuffled once (`true`).
     PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
+    /// Enter / Ctrl+Enter on a multi-selection: play it (`true` shuffles once,
+    /// `false` honors `enter_shuffle`), or add it to the queue from the split
+    /// view's library pane, like Enter on one row there.
+    PlaySelection(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     /// Add the resolved selection to the Trawl crate as labeled seeds.
     AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),

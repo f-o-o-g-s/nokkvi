@@ -416,6 +416,13 @@ impl Nokkvi {
                     .clear_selection_indices_only();
                 return self.play_batch_task(payload, force);
             }
+            ArtistsAction::PlaySelection(payload, force) => {
+                self.artists_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_selection_task(payload, force);
+            }
             ArtistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }

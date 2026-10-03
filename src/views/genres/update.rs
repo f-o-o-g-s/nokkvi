@@ -11,7 +11,7 @@ use nokkvi_data::{
 };
 
 use super::{super::expansion::SlotListEntry, GenresAction, GenresMessage, GenresPage};
-use crate::widgets::{SlotListPageMessage, context_menu::LibraryContextEntry};
+use crate::widgets::context_menu::LibraryContextEntry;
 
 type GenresRow<'a> = SlotListEntry<&'a GenreUIViewData, &'a AlbumUIViewData>;
 
@@ -161,11 +161,21 @@ impl GenresPage {
             toggle_sort: GenresMessage::ToggleSortOrder => GenresAction::SortOrderChanged,
             search_changed: GenresMessage::SearchQueryChanged => GenresAction::SearchChanged,
             search_focused: GenresMessage::SearchFocused,
-            slot_list_wrap: GenresMessage::SlotList,
-            action_none: GenresAction::None,
+            slot_list: GenresMessage::SlotList,
+            on_center: |_center| self.resolve_artwork_action(genres),
+            activate: |row, _row_idx, force| match row {
+                SlotListEntry::Parent(genre) => GenresAction::PlayGenre(genre.name.clone(), force),
+                SlotListEntry::Child(album, _) => GenresAction::PlayAlbum(album.id.clone(), force),
+            },
+            batch_item: Self::batch_item,
+            play_selection: GenresAction::PlaySelection,
+            add_to_queue: GenresAction::AddBatchToQueue,
+            refresh: GenresAction::RefreshViewData,
+            center_on_playing: GenresAction::CenterOnPlaying,
+            none: GenresAction::None,
         ) {
-            Ok(result) => result,
-            Err(msg) => match msg {
+            Ok(handled) => handled,
+            Err(message) => match message {
                 GenresMessage::FocusAndExpand(offset) => {
                     let len = self.expansion.flattened_len(genres);
                     self.common
@@ -182,108 +192,6 @@ impl GenresPage {
                 GenresMessage::NavigateAndExpandAlbum(album_id) => {
                     (Task::none(), GenresAction::NavigateAndExpandAlbum(album_id))
                 }
-                GenresMessage::SlotList(msg) => match msg {
-                    SlotListPageMessage::NavigateUp => {
-                        self.expansion.handle_navigate_up(genres, &mut self.common);
-                        let action = self.resolve_artwork_action(genres);
-                        (Task::none(), action)
-                    }
-                    SlotListPageMessage::NavigateDown => {
-                        self.expansion
-                            .handle_navigate_down(genres, &mut self.common);
-                        let action = self.resolve_artwork_action(genres);
-                        (Task::none(), action)
-                    }
-                    SlotListPageMessage::SetOffset(offset, modifiers) => {
-                        self.expansion.handle_select_offset(
-                            offset,
-                            modifiers,
-                            genres,
-                            &mut self.common,
-                        );
-                        let action = self.resolve_artwork_action(genres);
-                        (Task::none(), action)
-                    }
-                    SlotListPageMessage::ScrollSeek(offset) => {
-                        self.expansion
-                            .handle_set_offset(offset, genres, &mut self.common);
-                        (Task::none(), GenresAction::None)
-                    }
-                    SlotListPageMessage::ClickPlay(offset) => {
-                        self.expansion
-                            .handle_set_offset(offset, genres, &mut self.common);
-                        self.update(
-                            GenresMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
-                            total_items,
-                            genres,
-                        )
-                    }
-                    SlotListPageMessage::SelectionToggle(offset) => {
-                        let flattened = self.expansion.flattened_len(genres);
-                        self.common.handle_selection_toggle(offset, flattened);
-                        (Task::none(), GenresAction::None)
-                    }
-                    SlotListPageMessage::SelectAllToggle => {
-                        let flattened = self.expansion.flattened_len(genres);
-                        self.common.handle_select_all_toggle(flattened);
-                        (Task::none(), GenresAction::None)
-                    }
-                    SlotListPageMessage::ActivateCenter(force) => {
-                        let total = self.expansion.flattened_len(genres);
-                        if let Some(center_idx) = self.common.get_center_item_index(total) {
-                            self.common.slot_list.flash_center();
-                            match self.expansion.get_entry_at(center_idx, genres, |g| &g.id) {
-                                Some(SlotListEntry::Child(album, _)) => (
-                                    Task::none(),
-                                    GenresAction::PlayAlbum(album.id.clone(), force),
-                                ),
-                                Some(SlotListEntry::Parent(genre)) => (
-                                    Task::none(),
-                                    GenresAction::PlayGenre(genre.name.clone(), force),
-                                ),
-                                None => (Task::none(), GenresAction::None),
-                            }
-                        } else {
-                            (Task::none(), GenresAction::None)
-                        }
-                    }
-                    SlotListPageMessage::AddCenterToQueue => {
-                        use nokkvi_data::types::batch::BatchItem;
-                        let total = self.expansion.flattened_len(genres);
-
-                        let target_indices = self.common.get_queue_target_indices(total);
-
-                        if target_indices.is_empty() {
-                            return (Task::none(), GenresAction::None);
-                        }
-
-                        let payload =
-                            super::super::expansion::build_batch_payload(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, genres, |g| &g.id) {
-                                    Some(SlotListEntry::Parent(genre)) => {
-                                        Some(BatchItem::Genre(genre.name.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(album, _)) => {
-                                        Some(BatchItem::Album(album.id.clone()))
-                                    }
-                                    None => None,
-                                }
-                            });
-
-                        (Task::none(), GenresAction::AddBatchToQueue(payload))
-                    }
-                    SlotListPageMessage::RefreshViewData => {
-                        (Task::none(), GenresAction::RefreshViewData)
-                    }
-                    SlotListPageMessage::CenterOnPlaying => {
-                        (Task::none(), GenresAction::CenterOnPlaying)
-                    }
-                    // Exhaustiveness: variants handled by macro above come through
-                    // the Ok arm; these are forwarded by view-level emit sites that
-                    // wrap common messages — treat as no-op here.
-                    #[allow(unreachable_patterns)]
-                    _ => (Task::none(), GenresAction::None),
-                },
                 GenresMessage::ClickToggleStar(item_index) => {
                     match self.expansion.get_entry_at(item_index, genres, |g| &g.id) {
                         Some(SlotListEntry::Child(album, _)) => (
@@ -323,8 +231,18 @@ impl GenresPage {
                     Task::none(),
                     self.context_menu_action(clicked_idx, entry, genres),
                 ),
-                // Common arms already handled by macro above
-                _ => (Task::none(), GenresAction::None),
+                // Routed up to root in `handle_genres` before this match runs.
+                GenresMessage::ArtworkColumnDrag(_)
+                | GenresMessage::ArtworkColumnVerticalDrag(_) => (Task::none(), GenresAction::None),
+                // Handled by `impl_expansion_update!` above.
+                GenresMessage::SlotList(_)
+                | GenresMessage::ExpandCenter
+                | GenresMessage::CollapseExpansion
+                | GenresMessage::AlbumsLoaded(..)
+                | GenresMessage::SortModeSelected(_)
+                | GenresMessage::ToggleSortOrder
+                | GenresMessage::SearchQueryChanged(_)
+                | GenresMessage::SearchFocused(_) => (Task::none(), GenresAction::None),
             },
         }
     }

@@ -811,44 +811,107 @@ fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
     }
 }
 
-/// The headline F2 seam: a multi-select **plain** Enter (`ActivateCenter(false)`)
-/// must emit `PlayBatch(payload, false)` carrying the whole selection — the
-/// `false` is what lets the root handler honor the `enter_shuffle` setting via
-/// `activate_shuffle_directive`. The force=true path is covered by the genres
-/// ctrl-enter / context-menu tests and the resolver itself by
-/// `activate_shuffle_directive_resolves_from_setting_and_force`; this pins the
-/// otherwise-untested `false` producer arm against a silent regression.
-#[test]
-fn albums_multiselect_plain_enter_emits_unforced_play_batch() {
-    use crate::widgets::SlotListPageMessage;
+/// Enter (`ActivateCenter(false)`) and Ctrl+Enter (`ActivateCenter(true)`)
+/// with a multi-selection play the selection, in display order, in every
+/// expandable view: never the row under the cursor. The fixture puts the
+/// cursor on the first parent and selects the expanded child below it plus
+/// the second parent, so a view that plays the cursor row, drops the child,
+/// or reorders the batch fails. The flag must ride through unchanged: plain
+/// Enter's `false` is what lets the root honor `enter_shuffle` (see
+/// `activate_shuffle_directive_resolves_from_setting_and_force`).
+macro_rules! enter_with_selection_plays_it {
+    (
+        $name:ident,
+        page: $page:ty,
+        message: $msg:path,
+        action: $action:path,
+        parents: $parents:expr,
+        expanded: $expanded:expr,
+        children: $children:expr,
+        expected: $expected:expr $(,)?
+    ) => {
+        #[test]
+        fn $name() {
+            use nokkvi_data::types::trawl::{TrawlSeedKind, batch_item_key};
 
-    let mut app = test_app();
-    let albums = vec![
-        make_album("a1", "One", "Artist"),
-        make_album("a2", "Two", "Artist"),
-        make_album("a3", "Three", "Artist"),
-    ];
-    app.library.albums.set_from_vec(albums.clone());
-    // Multi-select two albums, then plain Enter.
-    app.albums_page.common.slot_list.selected_indices = [0usize, 2].into_iter().collect();
+            use crate::widgets::SlotListPageMessage;
 
-    let (_, action) = app.albums_page.update(
-        crate::views::AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
-        albums.len(),
-        &albums,
-    );
-    match action {
-        crate::views::AlbumsAction::PlayBatch(payload, force) => {
-            assert_eq!(
-                payload.items.len(),
-                2,
-                "both selected albums ride the batch"
-            );
-            assert!(!force, "plain Enter must NOT force shuffle (force = false)");
+            let parents = $parents;
+            let expected: Vec<(TrawlSeedKind, &str)> = $expected;
+            for force in [false, true] {
+                let mut page = <$page>::new();
+                page.expansion.expanded_id = Some($expanded.into());
+                page.expansion.children = $children;
+                // Flattened: [parent 0, its child, parent 1].
+                page.common.slot_list.selected_offset = Some(0);
+                page.common.slot_list.selected_indices = [1usize, 2].into_iter().collect();
+
+                let (_, action) = page.update(
+                    $msg(SlotListPageMessage::ActivateCenter(force)),
+                    parents.len(),
+                    &parents,
+                );
+                let $action(payload, forced) = action else {
+                    panic!("force={force}: expected PlaySelection, got {action:?}");
+                };
+                assert_eq!(forced, force, "the batch keeps Enter's shuffle flag");
+                let keys: Vec<_> = payload.items.iter().map(batch_item_key).collect();
+                assert_eq!(
+                    keys, expected,
+                    "force={force}: the selection, in display order"
+                );
+            }
         }
-        other => panic!("Expected PlayBatch(_, false) action, got {other:?}"),
-    }
+    };
 }
+
+enter_with_selection_plays_it!(
+    albums_enter_with_selection_plays_the_selection,
+    page: crate::views::AlbumsPage,
+    message: crate::views::AlbumsMessage::SlotList,
+    action: crate::views::AlbumsAction::PlaySelection,
+    parents: vec![make_album("a1", "One", "Band"), make_album("a2", "Two", "Band")],
+    expanded: "a1",
+    children: vec![make_song("s1", "Track", "Band")],
+    expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Album, "a2")],
+);
+
+enter_with_selection_plays_it!(
+    artists_enter_with_selection_plays_the_selection,
+    page: crate::views::ArtistsPage,
+    message: crate::views::ArtistsMessage::SlotList,
+    action: crate::views::ArtistsAction::PlaySelection,
+    parents: vec![make_artist("ar1", "One"), make_artist("ar2", "Two")],
+    expanded: "ar1",
+    children: vec![make_album("a1", "Record", "One")],
+    expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Artist, "ar2")],
+);
+
+enter_with_selection_plays_it!(
+    genres_enter_with_selection_plays_the_selection,
+    page: crate::views::GenresPage,
+    message: crate::views::GenresMessage::SlotList,
+    action: crate::views::GenresAction::PlaySelection,
+    parents: vec![make_genre("g1", "Rock"), make_genre("g2", "Jazz")],
+    expanded: "g1",
+    children: vec![make_album("a1", "Record", "Band")],
+    // Genres batch by name, like the rest of the batch pipeline.
+    expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Genre, "Jazz")],
+);
+
+enter_with_selection_plays_it!(
+    playlists_enter_with_selection_plays_the_selection,
+    page: crate::views::PlaylistsPage,
+    message: crate::views::PlaylistsMessage::SlotList,
+    action: crate::views::PlaylistsAction::PlaySelection,
+    parents: vec![
+        super::playlists::playlist_row("p1", "One", false),
+        super::playlists::playlist_row("p2", "Two", false),
+    ],
+    expanded: "p1",
+    children: vec![make_song("s1", "Track", "Band")],
+    expected: vec![(TrawlSeedKind::Song, "s1"), (TrawlSeedKind::Playlist, "p2")],
+);
 
 // ============================================================================
 // Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)

@@ -10,7 +10,7 @@ use nokkvi_data::{
 };
 
 use super::{super::expansion::SlotListEntry, ArtistsAction, ArtistsMessage, ArtistsPage};
-use crate::widgets::{SlotListPageMessage, context_menu::LibraryContextEntry};
+use crate::widgets::context_menu::LibraryContextEntry;
 
 type ArtistsRow<'a> = SlotListEntry<&'a ArtistUIViewData, &'a AlbumUIViewData>;
 
@@ -151,11 +151,21 @@ impl ArtistsPage {
             toggle_sort: ArtistsMessage::ToggleSortOrder => ArtistsAction::SortOrderChanged,
             search_changed: ArtistsMessage::SearchQueryChanged => ArtistsAction::SearchChanged,
             search_focused: ArtistsMessage::SearchFocused,
-            slot_list_wrap: ArtistsMessage::SlotList,
-            action_none: ArtistsAction::None,
+            slot_list: ArtistsMessage::SlotList,
+            on_center: |_center| ArtistsAction::LoadLargeArtwork,
+            activate: |row, row_idx, force| match row {
+                SlotListEntry::Parent(_) => ArtistsAction::PlayArtist(row_idx.to_string(), force),
+                SlotListEntry::Child(album, _) => ArtistsAction::PlayAlbum(album.id.clone(), force),
+            },
+            batch_item: Self::batch_item,
+            play_selection: ArtistsAction::PlaySelection,
+            add_to_queue: ArtistsAction::AddBatchToQueue,
+            refresh: ArtistsAction::RefreshViewData,
+            center_on_playing: ArtistsAction::CenterOnPlaying,
+            none: ArtistsAction::None,
         ) {
-            Ok(result) => result,
-            Err(msg) => match msg {
+            Ok(handled) => handled,
+            Err(message) => match message {
                 ArtistsMessage::FocusAndExpand(offset) => {
                     let len = self.expansion.flattened_len(artists);
                     self.common
@@ -173,116 +183,6 @@ impl ArtistsPage {
                     Task::none(),
                     ArtistsAction::NavigateAndExpandAlbum(album_id),
                 ),
-                ArtistsMessage::SlotList(msg) => match msg {
-                    SlotListPageMessage::NavigateUp => {
-                        self.expansion.handle_navigate_up(artists, &mut self.common);
-                        (Task::none(), ArtistsAction::LoadLargeArtwork)
-                    }
-                    SlotListPageMessage::NavigateDown => {
-                        self.expansion
-                            .handle_navigate_down(artists, &mut self.common);
-                        (Task::none(), ArtistsAction::LoadLargeArtwork)
-                    }
-                    SlotListPageMessage::SetOffset(offset, modifiers) => {
-                        self.expansion.handle_select_offset(
-                            offset,
-                            modifiers,
-                            artists,
-                            &mut self.common,
-                        );
-                        (Task::none(), ArtistsAction::LoadLargeArtwork)
-                    }
-                    SlotListPageMessage::ScrollSeek(offset) => {
-                        self.expansion
-                            .handle_set_offset(offset, artists, &mut self.common);
-                        // Mid-drag: update viewport offset only. Artwork +
-                        // page-fetch deferred to the SeekSettled debounce, which
-                        // synthesises a SetOffset message that emits LoadLargeArtwork.
-                        (Task::none(), ArtistsAction::None)
-                    }
-                    SlotListPageMessage::ClickPlay(offset) => {
-                        let len = self.expansion.flattened_len(artists);
-                        self.common.handle_set_offset(offset, len);
-                        self.update(
-                            ArtistsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
-                            total_items,
-                            artists,
-                        )
-                    }
-                    SlotListPageMessage::SelectionToggle(offset) => {
-                        let flattened = self.expansion.flattened_len(artists);
-                        self.common.handle_selection_toggle(offset, flattened);
-                        (Task::none(), ArtistsAction::None)
-                    }
-                    SlotListPageMessage::SelectAllToggle => {
-                        let flattened = self.expansion.flattened_len(artists);
-                        self.common.handle_select_all_toggle(flattened);
-                        (Task::none(), ArtistsAction::None)
-                    }
-                    SlotListPageMessage::ActivateCenter(force) => {
-                        let total = self.expansion.flattened_len(artists);
-                        if let Some(center_idx) = self.common.get_center_item_index(total) {
-                            self.common.slot_list.flash_center();
-                            match self.expansion.get_entry_at(center_idx, artists, |a| &a.id) {
-                                Some(SlotListEntry::Child(album, _)) => (
-                                    Task::none(),
-                                    ArtistsAction::PlayAlbum(album.id.clone(), force),
-                                ),
-                                Some(SlotListEntry::Parent(_)) => (
-                                    Task::none(),
-                                    ArtistsAction::PlayArtist(center_idx.to_string(), force),
-                                ),
-                                None => (Task::none(), ArtistsAction::None),
-                            }
-                        } else {
-                            (Task::none(), ArtistsAction::None)
-                        }
-                    }
-                    SlotListPageMessage::AddCenterToQueue => {
-                        use nokkvi_data::types::batch::BatchItem;
-                        let total = self.expansion.flattened_len(artists);
-
-                        let target_indices = self.common.get_queue_target_indices(total);
-
-                        if target_indices.is_empty() {
-                            return (Task::none(), ArtistsAction::None);
-                        }
-
-                        let payload =
-                            super::super::expansion::build_batch_payload(target_indices, |i| {
-                                match self.expansion.get_entry_at(i, artists, |a| &a.id) {
-                                    Some(SlotListEntry::Parent(artist)) => {
-                                        Some(BatchItem::Artist(artist.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(album, _)) => {
-                                        Some(BatchItem::Album(album.id.clone()))
-                                    }
-                                    None => None,
-                                }
-                            });
-
-                        (Task::none(), ArtistsAction::AddBatchToQueue(payload))
-                    }
-                    SlotListPageMessage::RefreshViewData => {
-                        (Task::none(), ArtistsAction::RefreshViewData)
-                    }
-                    SlotListPageMessage::CenterOnPlaying => {
-                        (Task::none(), ArtistsAction::CenterOnPlaying)
-                    }
-                    // Sort/search/hover are handled by impl_expansion_update! above;
-                    // these arms exist only for pattern-exhaustiveness.
-                    SlotListPageMessage::SearchQueryChanged(_)
-                    | SlotListPageMessage::SearchFocused(_)
-                    | SlotListPageMessage::SortModeSelected(_)
-                    | SlotListPageMessage::ToggleSortOrder
-                    | SlotListPageMessage::HoverEnterSlot(_)
-                    | SlotListPageMessage::HoverExitSlot(_)
-                    | SlotListPageMessage::ToolbarHoverEnter
-                    | SlotListPageMessage::ToolbarHoverExit
-                    | SlotListPageMessage::ToolbarDropdownToggled(_) => {
-                        (Task::none(), ArtistsAction::None)
-                    }
-                },
 
                 // Routed up to root in `handle_artists` before this match runs;
                 // arm exists only for exhaustiveness.
@@ -353,8 +253,21 @@ impl ArtistsPage {
                     Task::none(),
                     self.context_menu_action(clicked_idx, entry, artists),
                 ),
-                // Common arms already handled by macro above
-                _ => (Task::none(), ArtistsAction::None),
+                // Routed up to root in `handle_artists` before this match runs.
+                ArtistsMessage::OpenExternalUrl(_)
+                | ArtistsMessage::ArtworkColumnDrag(_)
+                | ArtistsMessage::ArtworkColumnVerticalDrag(_) => {
+                    (Task::none(), ArtistsAction::None)
+                }
+                // Handled by `impl_expansion_update!` above.
+                ArtistsMessage::SlotList(_)
+                | ArtistsMessage::ExpandCenter
+                | ArtistsMessage::CollapseExpansion
+                | ArtistsMessage::AlbumsLoaded(..)
+                | ArtistsMessage::SortModeSelected(_)
+                | ArtistsMessage::ToggleSortOrder
+                | ArtistsMessage::SearchQueryChanged(_)
+                | ArtistsMessage::SearchFocused(_) => (Task::none(), ArtistsAction::None),
             },
         }
     }

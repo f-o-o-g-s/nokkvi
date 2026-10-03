@@ -1152,6 +1152,21 @@ impl Nokkvi {
         }
     }
 
+    /// Enter / Ctrl+Enter on a multi-selection in a library view. From the
+    /// split view's library pane it adds the selection to the queue, as Enter
+    /// on a single row there does; anywhere else it replaces the queue with
+    /// the selection and plays.
+    pub(crate) fn play_selection_task(
+        &mut self,
+        payload: nokkvi_data::types::batch::BatchPayload,
+        force: bool,
+    ) -> Task<Message> {
+        if self.library_play_adds_to_queue() {
+            return self.add_or_insert_batch_to_queue_task(payload);
+        }
+        self.play_batch_task(payload, force)
+    }
+
     /// Replace the queue with a batch and navigate to the Queue view.
     ///
     /// Sibling of [`Self::add_or_insert_batch_to_queue_task`] /

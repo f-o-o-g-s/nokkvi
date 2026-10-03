@@ -264,6 +264,13 @@ impl Nokkvi {
                     .clear_selection_indices_only();
                 return self.play_batch_task(payload, force);
             }
+            views::PlaylistsAction::PlaySelection(payload, force) => {
+                self.playlists_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_selection_task(payload, force);
+            }
             views::PlaylistsAction::AddBatchToMix(seeds) => {
                 return self.add_seeds_to_mix(seeds);
             }

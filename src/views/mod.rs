@@ -188,28 +188,42 @@ pub(crate) trait HasCommonAction {
 // (impl_view_page! macro removed — each view now has an explicit ViewPage impl)
 
 // ============================================================================
-// impl_expansion_update! macro — deduplicates common expansion view update arms
+// impl_expansion_update! macro — the arms every expansion view shares
 // ============================================================================
 
-/// Handle the 7 common match arms shared by all expansion-based view `update()` methods.
+/// The shared half of an expansion view's `update()` (Albums, Artists, Genres,
+/// Playlists): expand / collapse / children loaded, sort and search, and every
+/// `SlotList(SlotListPageMessage)` carrier message.
 ///
-/// Returns `Ok((Task, Action))` if the message was handled by a common arm,
-/// or `Err(message)` if the caller should handle it as a view-specific message.
+/// Evaluates to `Ok((Task, Action))` when the message was one of those, or
+/// `Err(message)` handing every other message back for the view's own arms.
 ///
-/// Common arms handled:
-/// - ExpandCenter → delegates to `expansion.handle_expand_center()`
-/// - CollapseExpansion → delegates to `expansion.collapse()`
-/// - ChildrenLoaded(id, children) → delegates to `expansion.set_children()`
-/// - SortModeSelected(mode) → delegates to `expansion.handle_sort_mode_selected()`
-/// - ToggleSortOrder → delegates to `expansion.handle_toggle_sort_order()`
-/// - SearchQueryChanged(query) → delegates to `expansion.handle_search_query_changed()`
-/// - SearchFocused(focused) → delegates to `common.handle_search_focused()`
-/// - `SlotList(SlotListPageMessage::HoverEnterSlot)` / `HoverExitSlot` →
-///   writes / idempotently clears `common.slot_list.hovered_slot`
+/// Per-view differences come in as closure-shaped arguments: the macro binds
+/// the parameters and inlines the body (`|center| body` becomes
+/// `{ let center = …; body }`), so a body may read `self` and the parameter
+/// types come from the macro, not from inference.
+///
+/// - `on_center: |center| …` — the action after NavigateUp / NavigateDown /
+///   SetOffset; `center` is the new center row's flattened index, if any.
+/// - `activate: |row, row_idx, force| …` — Enter (and a legacy ClickPlay) on
+///   the centered row when nothing is multi-selected; `row` is its
+///   `SlotListEntry`, `row_idx` its flattened index, `force` Ctrl+Enter's
+///   one-shot shuffle.
+/// - `batch_item` — maps a row to its `BatchItem` for the batch actions.
+///
+/// Rules this macro owns, so the four views can't drift apart again:
+/// - Enter / Ctrl+Enter with a multi-selection plays the selection, in
+///   display order, as one `play_selection` batch (as the Songs view does);
+///   without one, it activates the centered row.
+/// - Add to Queue targets the selection, else the centered row.
+/// - Selection toggles and select-all count the flattened rows (parents plus
+///   the expanded children), not the parent buffer `total_items` counts.
+/// - The `SlotList` sort / search carriers do exactly what the view's own
+///   sort / search messages do.
 ///
 /// # Usage
 /// ```ignore
-/// let (cmd, action) = match super::impl_expansion_update!(
+/// match super::super::impl_expansion_update!(
 ///     self, message, albums, total_items,
 ///     id_fn: |a| &a.id,
 ///     expand_center: AlbumsMessage::ExpandCenter => AlbumsAction::ExpandAlbum,
@@ -219,15 +233,23 @@ pub(crate) trait HasCommonAction {
 ///     toggle_sort: AlbumsMessage::ToggleSortOrder => AlbumsAction::SortOrderChanged,
 ///     search_changed: AlbumsMessage::SearchQueryChanged => AlbumsAction::SearchChanged,
 ///     search_focused: AlbumsMessage::SearchFocused,
-///     slot_list_wrap: AlbumsMessage::SlotList,
-///     action_none: AlbumsAction::None,
+///     slot_list: AlbumsMessage::SlotList,
+///     on_center: |center| …,
+///     activate: |row, row_idx, force| …,
+///     batch_item: Self::batch_item,
+///     play_selection: AlbumsAction::PlaySelection,
+///     add_to_queue: AlbumsAction::AddBatchToQueue,
+///     refresh: AlbumsAction::RefreshViewData,
+///     center_on_playing: AlbumsAction::CenterOnPlaying,
+///     none: AlbumsAction::None,
 /// ) {
-///     Ok(result) => result,
-///     Err(msg) => match msg {
-///         // Handle view-specific arms here
-///         _ => (Task::none(), AlbumsAction::None),
+///     Ok(handled) => handled,
+///     Err(message) => match message {
+///         // The view's own arms, then one arm naming the variants the
+///         // macro handles (no `_ =>`, so a new message variant is a
+///         // compile error here).
 ///     },
-/// };
+/// }
 /// ```
 macro_rules! impl_expansion_update {
     (
@@ -240,13 +262,18 @@ macro_rules! impl_expansion_update {
         toggle_sort: $toggle_msg:path => $sort_order_action:expr,
         search_changed: $search_msg:path => $search_action:expr,
         search_focused: $focus_msg:path,
-        slot_list_wrap: $slot_list_wrap:path,
-        action_none: $action_none:expr $(,)?
+        slot_list: $slot_list:path,
+        on_center: |$center:ident| $on_center:expr,
+        activate: |$row:ident, $row_idx:ident, $force:ident| $activate:expr,
+        batch_item: $batch_item:expr,
+        play_selection: $play_selection:path,
+        add_to_queue: $add_to_queue:path,
+        refresh: $refresh_action:expr,
+        center_on_playing: $center_on_playing_action:expr,
+        none: $action_none:expr $(,)?
     ) => {{
-        // Try to match common expansion arms.
-        // Returns Ok((Task, Action)) if handled, Err(message) to pass back for view-specific handling.
-        #[allow(unreachable_patterns)]
         match $message {
+            // ── Expansion ──────────────────────────────────────────────
             $expand_msg => {
                 Ok(match $self.expansion.handle_expand_center($items, $id_fn, &mut $self.common) {
                     Some(id) => (Task::none(), $expand_action(id)),
@@ -261,51 +288,154 @@ macro_rules! impl_expansion_update {
                 $self.expansion.set_children(id, children, $items, &mut $self.common);
                 Ok((Task::none(), $action_none))
             }
-            $sort_msg(sort_mode) => {
+
+            // ── Sort / search (view messages and SlotList carriers alike) ──
+            $sort_msg(sort_mode)
+            | $slot_list(crate::widgets::SlotListPageMessage::SortModeSelected(sort_mode)) => {
                 Ok(match $self.expansion.handle_sort_mode_selected(sort_mode, &mut $self.common) {
                     Some(vt) => (Task::none(), $sort_action(vt)),
                     None => (Task::none(), $action_none),
                 })
             }
-            $toggle_msg => {
+            $toggle_msg | $slot_list(crate::widgets::SlotListPageMessage::ToggleSortOrder) => {
                 Ok(match $self.expansion.handle_toggle_sort_order(&mut $self.common) {
                     Some(ascending) => (Task::none(), $sort_order_action(ascending)),
                     None => (Task::none(), $action_none),
                 })
             }
-            $search_msg(query) => {
+            $search_msg(query)
+            | $slot_list(crate::widgets::SlotListPageMessage::SearchQueryChanged(query)) => {
                 Ok(match $self.expansion.handle_search_query_changed(query, $total_items, &mut $self.common) {
                     Some(q) => (Task::none(), $search_action(q)),
                     None => (Task::none(), $action_none),
                 })
             }
-            $focus_msg(focused) => {
+            $focus_msg(focused)
+            | $slot_list(crate::widgets::SlotListPageMessage::SearchFocused(focused)) => {
                 $self.common.handle_search_focused(focused);
                 Ok((Task::none(), $action_none))
             }
-            $slot_list_wrap(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)) => {
+
+            // ── Navigation ─────────────────────────────────────────────
+            $slot_list(crate::widgets::SlotListPageMessage::NavigateUp) => {
+                let $center = $self.expansion.handle_navigate_up($items, &mut $self.common);
+                Ok((Task::none(), $on_center))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::NavigateDown) => {
+                let $center = $self.expansion.handle_navigate_down($items, &mut $self.common);
+                Ok((Task::none(), $on_center))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::SetOffset(offset, modifiers)) => {
+                let $center = $self.expansion.handle_select_offset(
+                    offset,
+                    modifiers,
+                    $items,
+                    &mut $self.common,
+                );
+                Ok((Task::none(), $on_center))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::ScrollSeek(offset)) => {
+                // Mid-drag: move the viewport only. Artwork and page fetches
+                // wait for the SeekSettled debounce's synthesized SetOffset.
+                $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
+                Ok((Task::none(), $action_none))
+            }
+
+            // ── Selection ──────────────────────────────────────────────
+            $slot_list(crate::widgets::SlotListPageMessage::SelectionToggle(offset)) => {
+                let len = $self.expansion.flattened_len($items);
+                $self.common.handle_selection_toggle(offset, len);
+                Ok((Task::none(), $action_none))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::SelectAllToggle) => {
+                let len = $self.expansion.flattened_len($items);
+                $self.common.handle_select_all_toggle(len);
+                Ok((Task::none(), $action_none))
+            }
+
+            // ── Activation ─────────────────────────────────────────────
+            $slot_list(crate::widgets::SlotListPageMessage::ActivateCenter($force)) => {
+                Ok(if $self.common.slot_list.selected_indices.is_empty() {
+                    let len = $self.expansion.flattened_len($items);
+                    let center = $self.common.get_center_item_index(len);
+                    if center.is_some() {
+                        $self.common.slot_list.flash_center();
+                    }
+                    let centered = center.and_then(|idx| {
+                        $self.expansion.get_entry_at(idx, $items, $id_fn).map(|row| (idx, row))
+                    });
+                    match centered {
+                        Some(($row_idx, $row)) => (Task::none(), $activate),
+                        None => (Task::none(), $action_none),
+                    }
+                } else {
+                    // `selected_indices` is ordered, so the batch plays in
+                    // display order.
+                    let selected: Vec<usize> =
+                        $self.common.slot_list.selected_indices.iter().copied().collect();
+                    let payload = $self
+                        .expansion
+                        .rows_at(selected, $items, $id_fn)
+                        .map($batch_item)
+                        .collect();
+                    (Task::none(), $play_selection(payload, $force))
+                })
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::ClickPlay(offset)) => {
+                // Legacy click-to-play: center the clicked row, then Enter.
+                $self.expansion.handle_set_offset(offset, $items, &mut $self.common);
+                Ok($self.update(
+                    $slot_list(crate::widgets::SlotListPageMessage::ActivateCenter(false)),
+                    $total_items,
+                    $items,
+                ))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::AddCenterToQueue) => {
+                let len = $self.expansion.flattened_len($items);
+                let targets = $self.common.get_queue_target_indices(len);
+                Ok(if targets.is_empty() {
+                    (Task::none(), $action_none)
+                } else {
+                    let payload = $self
+                        .expansion
+                        .rows_at(targets, $items, $id_fn)
+                        .map($batch_item)
+                        .collect();
+                    (Task::none(), $add_to_queue(payload))
+                })
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::RefreshViewData) => {
+                Ok((Task::none(), $refresh_action))
+            }
+            $slot_list(crate::widgets::SlotListPageMessage::CenterOnPlaying) => {
+                Ok((Task::none(), $center_on_playing_action))
+            }
+
+            // ── Hover / toolbar reveal ─────────────────────────────────
+            $slot_list(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)) => {
                 $self.common.slot_list.hovered_slot = Some(h);
                 Ok((Task::none(), $action_none))
             }
-            $slot_list_wrap(crate::widgets::SlotListPageMessage::HoverExitSlot(h)) => {
+            $slot_list(crate::widgets::SlotListPageMessage::HoverExitSlot(h)) => {
                 if $self.common.slot_list.hovered_slot == Some(h) {
                     $self.common.slot_list.hovered_slot = None;
                 }
                 Ok((Task::none(), $action_none))
             }
-            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarHoverEnter) => {
+            $slot_list(crate::widgets::SlotListPageMessage::ToolbarHoverEnter) => {
                 $self.common.set_toolbar_hovered(true);
                 Ok((Task::none(), $action_none))
             }
-            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarHoverExit) => {
+            $slot_list(crate::widgets::SlotListPageMessage::ToolbarHoverExit) => {
                 $self.common.set_toolbar_hovered(false);
                 Ok((Task::none(), $action_none))
             }
-            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(open)) => {
+            $slot_list(crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(open)) => {
                 $self.common.set_toolbar_dropdown_open(open);
                 Ok((Task::none(), $action_none))
             }
-            other => Err(other)
+
+            other => Err(other),
         }
     }};
 }
