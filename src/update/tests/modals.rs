@@ -312,3 +312,35 @@ fn list_timers_reach_the_view_under_a_modal() {
         );
     }
 }
+
+// ----------------------------------------------------------------------------
+// Logout
+// ----------------------------------------------------------------------------
+
+#[test]
+fn logout_discards_every_modal_without_running_its_close() {
+    let _sse = super::SSE_SLOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut app = app_with_every_modal_open();
+    // The Trawl save dialog's Cancel reopens Trawl; logout must not.
+    app.text_input_dialog.open(
+        "Save Mix as Playlist",
+        "",
+        "Playlist name...",
+        crate::widgets::text_input_dialog::TextInputDialogAction::CreatePlaylistFromTrawl(vec![
+            "s1".to_string(),
+        ]),
+    );
+    let _ = app.handle_eq_modal(EqModalMessage::SavePreset);
+
+    let _ = app.reset_session_state();
+
+    for modal in ActiveModal::STACK {
+        assert!(!app.modal_is_open(modal), "{modal:?} closed at logout");
+    }
+    assert!(
+        !app.eq_modal.save_mode,
+        "no half-typed preset name greets the next login"
+    );
+}

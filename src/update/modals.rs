@@ -105,4 +105,29 @@ impl Nokkvi {
             ActiveModal::Trawl => self.handle_trawl_modal(TrawlModalMessage::Close),
         }
     }
+
+    /// Throw `modal` away without running its Close: logout and session
+    /// expiry. Close is wrong there: the MilkDrop picker's Close reloads the
+    /// preset it opened over into a renderer that is being released, and the
+    /// Trawl save dialog's Cancel reopens Trawl. The modal's whole state resets,
+    /// open or not, so nothing of the old session (EQ's half-typed preset
+    /// name, Info's item) greets the next login.
+    pub(crate) fn discard_modal(&mut self, modal: ActiveModal) {
+        match modal {
+            ActiveModal::TextInputDialog => {
+                self.text_input_dialog =
+                    crate::widgets::text_input_dialog::TextInputDialogState::default();
+            }
+            ActiveModal::Eq => self.eq_modal = crate::widgets::eq_modal::EqModalState::default(),
+            ActiveModal::About => {
+                self.about_modal = crate::widgets::about_modal::AboutModalState::default();
+            }
+            ActiveModal::Info => {
+                self.info_modal = crate::widgets::info_modal::InfoModalState::default();
+            }
+            ActiveModal::DefaultPlaylistPicker => self.default_playlist_picker = None,
+            ActiveModal::MilkdropPicker => self.milkdrop_picker_discard(),
+            ActiveModal::Trawl => self.trawl_modal = None,
+        }
+    }
 }

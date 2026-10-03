@@ -1604,10 +1604,10 @@ impl Nokkvi {
     ///   similar_songs(+generation), active_playlist_info, playlist_editor,
     ///   server_version, last_queue_current_index,
     ///   pending_expand (whole `PendingExpandState`), roulette,
-    ///   trawl_crate + trawl_modal (+trawl_search_generation carried forward
-    ///   bumped — seeds and search results reference the old server's ids;
-    ///   unlike the retained picker shell, the trawl modal holds server data).
-    /// - **Transient UI work tied to the prior session**: open_menu,
+    ///   trawl_crate (+trawl_search_generation carried forward bumped —
+    ///   seeds and search results reference the old server's ids).
+    /// - **Transient UI work tied to the prior session**: every root modal
+    ///   (`ActiveModal::STACK`, through `discard_modal`), open_menu,
     ///   browsing_panel, cross_pane_drag (whole `CrossPaneDragUi`),
     ///   start_view_applied, suppress_next_auto_center.
     ///
@@ -1625,10 +1625,8 @@ impl Nokkvi {
     /// - retained: sfx_engine, sfx, engine, window, player_bar_layout,
     ///   visualizer(+config), boat — local UI/audio infrastructure
     ///   independent of the server.
-    /// - retained: toast, text_input_dialog, info_modal, about_modal,
-    ///   eq_modal, default_playlist_picker — modal/overlay shells
-    ///   (toast queue intentionally survives so the session-expired
-    ///   message is visible after this returns).
+    /// - retained: toast — the queue intentionally survives so the
+    ///   session-expired message is visible after this returns.
     /// - retained: mpris_connection, tray_connection, tray_window_hidden,
     ///   main_window_id — system integrations bound to the app process,
     ///   not the session.
@@ -1769,8 +1767,8 @@ impl Nokkvi {
             ..Default::default()
         };
         // Trawl: seeds + search results are keyed on the prior server's ids.
-        // Same generation carry-forward rationale as Harbour above.
-        self.trawl_modal = None;
+        // Same generation carry-forward rationale as Harbour above. (The
+        // modal itself goes with the others below.)
         self.trawl_crate = nokkvi_data::types::trawl::TrawlCrate::default();
         self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
         self.active_playlist_info = None;
@@ -1791,14 +1789,12 @@ impl Nokkvi {
         // Transient UI work tied to the prior session — including any
         // modals the user might have had open at logout. Without this
         // reset, logging in to a different server briefly shows the
-        // prior server's About / Info / EQ / text-input / playlist-picker
-        // overlay before the user dismisses it (the visible field bytes
-        // are still wired to the previous session's data shapes).
-        self.about_modal = crate::widgets::about_modal::AboutModalState::default();
-        self.info_modal = crate::widgets::info_modal::InfoModalState::default();
-        self.eq_modal = crate::widgets::eq_modal::EqModalState::default();
-        self.text_input_dialog = crate::widgets::text_input_dialog::TextInputDialogState::default();
-        self.default_playlist_picker = None;
+        // prior server's overlay before the user dismisses it (the visible
+        // field bytes are still wired to the previous session's data
+        // shapes). Discarded, not closed: see `discard_modal`.
+        for modal in crate::update::modals::ActiveModal::STACK {
+            self.discard_modal(modal);
+        }
 
         self.open_menu = None;
         self.browsing_panel = None;
