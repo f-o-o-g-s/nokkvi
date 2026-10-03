@@ -449,14 +449,27 @@ fn volume_committed_sets_state_and_pushes_toast() {
     assert!(last.right_aligned, "volume toast is right-aligned");
 }
 
+fn volume_saved(app: &mut crate::Nokkvi, result: Result<(), &str>) {
+    let _ = app.update(crate::app_message::Message::Playback(
+        crate::app_message::PlaybackMessage::VolumeSaved(result.map_err(str::to_string)),
+    ));
+}
+
+fn volume_save_warnings(app: &crate::Nokkvi) -> usize {
+    app.toast
+        .toasts
+        .iter()
+        .filter(|t| t.level == nokkvi_data::types::toast::ToastLevel::Warning)
+        .count()
+}
+
 #[test]
 fn volume_save_failure_warns_with_the_error() {
     // The committed volume must reach disk (see handle_volume_committed), so a
     // failed save has to say so instead of vanishing.
     let mut app = test_app();
 
-    let msg = crate::Nokkvi::volume_saved_message(Err(anyhow::anyhow!("database is locked")));
-    let _ = app.update(msg);
+    volume_saved(&mut app, Err("database is locked"));
 
     let last = app
         .toast
@@ -472,10 +485,33 @@ fn volume_save_failure_warns_with_the_error() {
 }
 
 #[test]
+fn volume_save_failures_warn_once_per_run() {
+    // Every wheel notch saves, so a stuck database would otherwise cover each
+    // "Volume: N%" readout with the same warning.
+    let mut app = test_app();
+
+    volume_saved(&mut app, Err("database is locked"));
+    volume_saved(&mut app, Err("database is locked"));
+    assert_eq!(
+        volume_save_warnings(&app),
+        1,
+        "a run of failures warns once"
+    );
+
+    volume_saved(&mut app, Ok(()));
+    volume_saved(&mut app, Err("disk full"));
+    assert_eq!(
+        volume_save_warnings(&app),
+        2,
+        "a failure after a successful save starts a new run"
+    );
+}
+
+#[test]
 fn volume_save_success_is_silent() {
     let mut app = test_app();
 
-    let _ = app.update(crate::Nokkvi::volume_saved_message(Ok(())));
+    volume_saved(&mut app, Ok(()));
 
     assert!(app.toast.toasts.is_empty(), "a saved volume needs no toast");
 }

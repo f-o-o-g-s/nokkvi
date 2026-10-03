@@ -2076,10 +2076,7 @@ impl Nokkvi {
         };
 
         if should_persist {
-            self.shell_task(
-                move |shell| async move { shell.set_volume(val).await },
-                Self::volume_saved_message,
-            )
+            self.persist_volume_task(val)
         } else {
             // Still set engine volume even when not persisting
             self.shell_task(
@@ -2106,26 +2103,36 @@ impl Nokkvi {
         // Force-advance the throttle so subsequent rapid VolumeChanged events
         // observe the standard 500ms cooldown from this final value.
         self.playback.volume_persist_throttle = Some(Instant::now());
+        self.persist_volume_task(val)
+    }
+
+    /// Apply `val` to the engine and save it; the result comes back as
+    /// `VolumeSaved`. The one persist path for both volume handlers.
+    fn persist_volume_task(&self, val: f32) -> Task<Message> {
         self.shell_task(
             move |shell| async move { shell.set_volume(val).await },
-            Self::volume_saved_message,
+            |result| {
+                Message::Playback(PlaybackMessage::VolumeSaved(
+                    result.map_err(|e| format!("{e:#}")),
+                ))
+            },
         )
     }
 
-    /// Map the result of persisting the volume. This is the boundary that
-    /// handles a failed save, so it logs and warns here; a failure repeated
-    /// through a slider drag repeats the same one-line warning.
-    pub(crate) fn volume_saved_message(result: anyhow::Result<()>) -> Message {
+    /// The boundary that handles a failed volume save: log every failure,
+    /// warn on the first of a run (see `PlaybackState::volume_save_failing`).
+    pub(crate) fn handle_volume_saved(&mut self, result: Result<(), String>) -> Task<Message> {
         match result {
-            Ok(()) => Message::NoOp,
+            Ok(()) => self.playback.volume_save_failing = false,
             Err(e) => {
-                tracing::warn!(" Failed to save volume: {e:#}");
-                Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
-                    format!("Failed to save volume: {e}"),
-                    nokkvi_data::types::toast::ToastLevel::Warning,
-                )))
+                tracing::warn!(" Failed to save volume: {e}");
+                if !self.playback.volume_save_failing {
+                    self.playback.volume_save_failing = true;
+                    self.toast_warn(format!("Failed to save volume: {e}"));
+                }
             }
         }
+        Task::none()
     }
 
     pub(crate) fn handle_prepare_next_for_gapless(&mut self) -> Task<Message> {
@@ -2744,6 +2751,7 @@ impl Nokkvi {
             }
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
             PlaybackMessage::VolumeCommitted(val) => self.handle_volume_committed(val),
+            PlaybackMessage::VolumeSaved(result) => self.handle_volume_saved(result),
             PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),
             PlaybackMessage::PlayerSettingsLoaded(settings) => {
                 self.handle_player_settings_loaded(*settings)

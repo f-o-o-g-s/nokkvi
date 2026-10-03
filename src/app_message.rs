@@ -232,6 +232,8 @@ pub enum PlaybackMessage {
     /// commits that fit inside the 500ms window silently drop on next
     /// launch.
     VolumeCommitted(f32),
+    /// Result of persisting the volume from `VolumeChanged` / `VolumeCommitted`.
+    VolumeSaved(Result<(), String>),
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb

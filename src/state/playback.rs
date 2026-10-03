@@ -134,6 +134,10 @@ pub struct PlaybackState {
     pub bitrate: u32,
     /// Throttle timestamp for volume persistence to storage
     pub volume_persist_throttle: Option<std::time::Instant>,
+    /// Set while volume saves keep failing, so only the first failure of a
+    /// run warns (each later one would cover the "Volume: N%" readout); a
+    /// successful save clears it.
+    pub volume_save_failing: bool,
     /// The last title successfully sent to PipeWire via IPC, to prevent redundant cross-thread FFI calls
     pub pw_last_title: Option<String>,
     /// Shared EQ state — gains and enabled flag. Read by audio thread, written by UI.
@@ -174,6 +178,7 @@ impl Default for PlaybackState {
             bit_perfect_holder_reprobe_ticks: 0,
             bitrate: 0,
             volume_persist_throttle: None,
+            volume_save_failing: false,
             pw_last_title: None,
             eq_state: nokkvi_data::audio::EqState::default(),
             bpm: None,
