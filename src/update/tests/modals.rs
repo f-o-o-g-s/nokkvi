@@ -318,12 +318,24 @@ fn list_timers_reach_the_view_under_a_modal() {
 // ----------------------------------------------------------------------------
 
 #[test]
-fn logout_discards_every_modal_without_running_its_close() {
+fn logout_closes_every_modal() {
     let _sse = super::SSE_SLOT_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let mut app = app_with_every_modal_open();
-    // The Trawl save dialog's Cancel reopens Trawl; logout must not.
+
+    let _ = app.reset_session_state();
+
+    for modal in ActiveModal::STACK {
+        assert!(!app.modal_is_open(modal), "{modal:?} closed at logout");
+    }
+}
+
+#[test]
+fn discarding_the_trawl_save_dialog_leaves_trawl_closed() {
+    // The dialog's Cancel reopens Trawl (the user backed out of naming, not
+    // out of the mix); a logout discard must not.
+    let mut app = test_app();
     app.text_input_dialog.open(
         "Save Mix as Playlist",
         "",
@@ -332,15 +344,24 @@ fn logout_discards_every_modal_without_running_its_close() {
             "s1".to_string(),
         ]),
     );
+
+    app.discard_modal(ActiveModal::TextInputDialog);
+
+    assert!(!app.text_input_dialog.visible);
+    assert!(app.trawl_modal.is_none(), "no Trawl reopened at logout");
+}
+
+#[test]
+fn discarding_eq_drops_the_typed_preset_name() {
+    // Close only leaves save mode; a discard resets the whole state, so a
+    // half-typed name doesn't greet the next login.
+    let mut app = test_app();
+    let _ = app.handle_eq_modal(EqModalMessage::Open);
     let _ = app.handle_eq_modal(EqModalMessage::SavePreset);
+    let _ = app.handle_eq_modal(EqModalMessage::SavePresetNameChanged("Bass".into()));
 
-    let _ = app.reset_session_state();
+    app.discard_modal(ActiveModal::Eq);
 
-    for modal in ActiveModal::STACK {
-        assert!(!app.modal_is_open(modal), "{modal:?} closed at logout");
-    }
-    assert!(
-        !app.eq_modal.save_mode,
-        "no half-typed preset name greets the next login"
-    );
+    assert!(!app.eq_modal.open && !app.eq_modal.save_mode);
+    assert!(app.eq_modal.save_name.is_empty(), "the typed name is gone");
 }

@@ -1107,9 +1107,9 @@ fn tray_keys_do_not_cycle_queue_sort() {
 
 #[test]
 fn newly_admitted_keys_stay_swallowed_over_other_modals() {
-    // The CycleSortMode / SettingsCategoryMotion admissions live inside the
-    // trawl-gated is_trawl_nav arm — the EQ/Info/About modals must keep
-    // swallowing the same keys.
+    // The CycleSortMode / SettingsCategoryMotion admissions live in the key
+    // gate's `ActiveModal::Trawl` arm only — the EQ/Info/About modals must
+    // keep swallowing the same keys.
     let mut app = test_app();
     app.current_view = crate::View::Settings;
     app.screen = crate::Screen::Home;

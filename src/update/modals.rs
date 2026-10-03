@@ -48,9 +48,9 @@ impl ActiveModal {
     /// The smaller, more transient surface sits higher: the prompt above the
     /// panels, the panels above the pickers, the pickers above the Trawl
     /// workspace. So a dialog that a server reply opens late lands on top of
-    /// whatever the user opened meanwhile, and a small surface opened from a
-    /// big one (a prompt from a picker, Get Info from Trawl) is already above
-    /// it.
+    /// whatever the user opened meanwhile, and a future flow that opens a
+    /// small surface from a big one (say, Get Info from inside Trawl) needs
+    /// no reordering.
     pub(crate) const STACK: [Self; 7] = [
         Self::TextInputDialog,
         Self::Eq,

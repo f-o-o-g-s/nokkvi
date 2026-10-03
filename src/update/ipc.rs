@@ -533,8 +533,9 @@ define_commands! {
     // Slot-list navigation — the in-app Backspace/Tab/Enter hotkeys, exposed so
     // a WM keybind or script can drive the focused list without focusing the
     // window. Routed through Message::SlotList so the existing handler resolves
-    // the focused pane/view and applies all guards (roulette, picker, play
-    // gate). The move is async (a further per-page message), so the resulting
+    // the focused pane/view and applies all guards (the top modal, roulette,
+    // play gate): an open picker or Trawl takes the key, and under EQ, About,
+    // Info or a dialog it does nothing, like the keyboard. The move is async (a further per-page message), so the resulting
     // center can't be echoed here — query `selection` to read where it landed.
     "nav-up"      => dispatch (Message::SlotList(SlotListMessage::NavigateUp));
     "nav-down"    => dispatch (Message::SlotList(SlotListMessage::NavigateDown));

@@ -1235,10 +1235,19 @@ impl Nokkvi {
         // first. Every modal sits below the toasts, so a toast raised from
         // inside one (Trawl's "Added N songs to queue", a failed MilkDrop
         // preview) stays visible over it.
+        //
+        // Each modal keeps a fixed layer, a placeholder while it is closed:
+        // `Stack` diffs children by position, so a modal opening UNDER an
+        // open one (a server reply opening Info under a dialog) would
+        // otherwise shift the open one's layer and rebuild its widget state,
+        // dropping the text field's focus mid-typing. `Stack::push` drops
+        // only a child with a `Fixed(0.0)` side, so the default (`Shrink`)
+        // `Space::new()` is kept as the placeholder.
         for modal in ActiveModal::STACK.into_iter().rev() {
-            if let Some(overlay) = self.modal_overlay(modal) {
-                stack = stack.push(overlay);
-            }
+            stack = stack.push(
+                self.modal_overlay(modal)
+                    .unwrap_or_else(|| iced::widget::Space::new().into()),
+            );
         }
 
         // Add toast status bar overlay (if any active toast)

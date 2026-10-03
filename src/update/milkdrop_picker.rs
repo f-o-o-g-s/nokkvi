@@ -107,7 +107,9 @@ impl Nokkvi {
             self.toast_warn("MilkDrop: no presets found");
             return Task::none();
         }
-        // A spin would keep Enter and Escape (both route to the roulette first).
+        // End a spin rather than leave it cruising behind the picker (the
+        // other modals leave one running; Enter and Escape reach the modal
+        // first either way).
         self.cancel_roulette_restoring_offset();
         let state = MilkdropPickerState::new(
             &self.milkdrop.library,
