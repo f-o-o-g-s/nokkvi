@@ -117,24 +117,6 @@ fn harbour_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::Pl
     }
 }
 
-/// Seed a radio playback so a play handler's `guard_play_action` has something
-/// observable to transition.
-fn seed_radio_playback(app: &mut crate::Nokkvi) {
-    use crate::state::{ActivePlayback, RadioPlaybackState};
-    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
-        station: nokkvi_data::types::radio_station::RadioStation {
-            id: "r1".into(),
-            name: "Test".into(),
-            stream_url: "http://example.invalid/stream".into(),
-            home_page_url: None,
-            cover_art: None,
-        },
-        icy_artist: None,
-        icy_title: None,
-        icy_url: None,
-    });
-}
-
 #[test]
 fn switch_view_to_harbour_sets_current_view() {
     let mut app = test_app();

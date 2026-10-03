@@ -69,7 +69,7 @@ fn handle_common_view_action_navigate_and_search_returns_task() {
 //
 // Decomposed from a single helper after the 2026-05-12 regression where
 // `QueueAction::PlaySong` cleared the loaded-playlist header. The guard now
-// only handles universal checks (edit-mode block, radio→queue transition);
+// only handles the universal radio→queue transition;
 // `enter_new_playback_context` carries the cleanup that must NOT run for
 // in-queue plays.
 
@@ -81,9 +81,8 @@ fn guard_play_action_preserves_active_playlist_info() {
     let mut app = test_app();
     app.active_playlist_info = Some(make_playlist_ctx());
 
-    let blocked = app.guard_play_action();
+    app.guard_play_action();
 
-    assert!(blocked.is_none(), "guard should let the play proceed");
     assert!(
         app.active_playlist_info.is_some(),
         "guard alone must preserve the loaded-playlist header — \
@@ -134,58 +133,158 @@ fn clear_active_playlist_resets_strip_expansion() {
 }
 
 #[test]
-fn guard_play_action_does_not_block_during_playlist_edit() {
-    let mut app = test_app();
-    app.active_playlist_info = Some(make_playlist_ctx());
-    app.playlist_editor = Some(crate::state::PlaylistEditorState::new(
-        nokkvi_data::types::playlist_edit::PlaylistEditState::new(
-            "pl_42".into(),
-            "Sunday Set".into(),
-            String::new(),
-            false,
-            Vec::new(),
-        ),
-    ));
-
-    let blocked = app.guard_play_action();
-
-    // The editor owns a buffer decoupled from the live queue, so a play can no
-    // longer disturb an edit — the guard lets it proceed.
-    assert!(
-        blocked.is_none(),
-        "edit-mode plays are no longer blocked (decoupled editor buffer)"
-    );
-    assert!(
-        app.active_playlist_info.is_some(),
-        "the guard must not mutate playlist context"
-    );
-}
-
-#[test]
 fn guard_play_action_transitions_radio_to_queue() {
-    use crate::state::{ActivePlayback, RadioPlaybackState};
-
     let mut app = test_app();
-    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
-        station: nokkvi_data::types::radio_station::RadioStation {
-            id: "r1".into(),
-            name: "Test".into(),
-            stream_url: "http://example.invalid/stream".into(),
-            home_page_url: None,
-            cover_art: None,
-        },
-        icy_artist: None,
-        icy_title: None,
-        icy_url: None,
-    });
+    seed_radio_playback(&mut app);
 
-    let blocked = app.guard_play_action();
+    app.guard_play_action();
 
-    assert!(blocked.is_none(), "guard should let the play proceed");
     assert!(
         app.active_playback.is_queue(),
         "active radio must transition back to queue mode"
     );
+}
+
+// ============================================================================
+// Batch play owns the play prologue (play_batch_task + Similar)
+// ============================================================================
+
+/// Radio playing, a loaded-playlist header, and a stale progressive-load
+/// target: everything a queue-replacing play must reset.
+fn radio_app_with_stale_context() -> crate::Nokkvi {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    app.active_playlist_info = Some(make_playlist_ctx());
+    app.library.queue_loading_target = Some(5);
+    app
+}
+
+fn assert_batch_play_entered_new_context(app: &crate::Nokkvi, path: &str) {
+    assert!(
+        app.active_playback.is_queue(),
+        "{path}: a batch play must transition active radio back to queue mode"
+    );
+    assert!(
+        app.active_playlist_info.is_none(),
+        "{path}: a batch play replaces the queue, so the playlist header must go"
+    );
+    assert!(
+        app.library.queue_loading_target.is_none(),
+        "{path}: a batch play must cancel the stale progressive-load target"
+    );
+}
+
+#[test]
+fn albums_multi_select_enter_batch_play_leaves_radio() {
+    use crate::{views::AlbumsMessage, widgets::SlotListPageMessage};
+
+    let mut app = radio_app_with_stale_context();
+    seed_albums(
+        &mut app,
+        vec![
+            make_album("a1", "Album 1", "Artist"),
+            make_album("a2", "Album 2", "Artist"),
+        ],
+    );
+    let selection = &mut app.albums_page.common.slot_list.selected_indices;
+    selection.insert(0);
+    selection.insert(1);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Albums Enter on a multi-selection");
+}
+
+#[test]
+fn albums_shuffle_play_batch_leaves_radio() {
+    use crate::{views::AlbumsMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    seed_albums(&mut app, vec![make_album("a1", "Album 1", "Artist")]);
+
+    let _ = app.update(crate::app_message::Message::Albums(
+        AlbumsMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Albums Shuffle Play");
+}
+
+#[test]
+fn songs_shuffle_play_batch_leaves_radio() {
+    use crate::{views::SongsMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    seed_songs(&mut app, songs_indexed(2));
+
+    let _ = app.update(crate::app_message::Message::Songs(
+        SongsMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Songs Shuffle Play");
+}
+
+#[test]
+fn artists_shuffle_play_batch_leaves_radio() {
+    use crate::{views::ArtistsMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist 1")]);
+
+    let _ = app.update(crate::app_message::Message::Artists(
+        ArtistsMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Artists Shuffle Play");
+}
+
+#[test]
+fn genres_shuffle_play_batch_leaves_radio() {
+    use crate::{views::GenresMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+
+    let _ = app.update(crate::app_message::Message::Genres(
+        GenresMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Genres Shuffle Play");
+}
+
+#[test]
+fn playlists_shuffle_play_batch_leaves_radio() {
+    use crate::{views::PlaylistsMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    app.library
+        .playlists
+        .set_from_vec(vec![make_test_playlist("p1", "Playlist 1")]);
+
+    let _ = app.update(crate::app_message::Message::Playlists(
+        PlaylistsMessage::ContextMenuAction(0, LibraryContextEntry::ShufflePlay),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Playlists Shuffle Play");
+}
+
+#[test]
+fn similar_replace_queue_with_all_found_leaves_radio() {
+    use crate::{views::SimilarMessage, widgets::context_menu::LibraryContextEntry};
+
+    let mut app = radio_app_with_stale_context();
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![make_song("s1", "Song 1", "Artist").into()],
+        label: "Similar to: Song 0".into(),
+        loading: false,
+    });
+
+    let _ = app.update(crate::app_message::Message::Similar(
+        SimilarMessage::ContextMenuAction(0, LibraryContextEntry::ReplaceQueueWithAllFound),
+    ));
+
+    assert_batch_play_entered_new_context(&app, "Similar Replace Queue With All Found");
 }
 
 // ============================================================================
@@ -401,7 +500,7 @@ fn redirect_play_invokes_insert_and_consumes_position() {
 //
 // The from-track play arm must run the same prologue as its album sibling
 // (`AlbumsAction::PlayAlbumFromTrack`): `guard_play_action()` (radio→queue
-// transition + edit-mode block) then `enter_new_playback_context()` (clears a
+// transition) then `enter_new_playback_context()` (clears a
 // stale `queue_loading_target`), BEFORE it sets `active_playlist_info`.
 
 fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {

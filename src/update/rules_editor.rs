@@ -851,9 +851,7 @@ impl Nokkvi {
                 // The tweak-preview-HEAR loop: play the evaluated list from
                 // the centered row (SongSource::Preloaded — real songs with
                 // real ids after the mediaFileId remap).
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 let Some((songs, cursor)) = self.rules_session().and_then(|s| {
                     (!s.preview.songs.is_empty())
                         .then(|| (s.preview.songs.clone(), s.preview.cursor))

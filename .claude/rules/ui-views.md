@@ -153,12 +153,13 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Cross-cutt
 - `dispatch_view_chrome<M: HasViewChrome>(handler, msg, view)` — run at the top of every `handle_*` function. Returns `Some(task)` for `SetOpenMenu` / `Roulette` intercepts (caller returns immediately); returns `None` for normal page actions (after triggering the appropriate SFX).
 
 **`update/components/`** (directory module — `ls` it rather than trusting a list here) — shared action helpers:
-- `guard_play_action` — pre-play hook that transitions radio playback back to queue mode (returns `None` to let the play proceed; retains an `Option` return so a future block condition could short-circuit a play)
+- `guard_play_action` — pre-play hook that transitions radio playback back to queue mode (never blocks)
+- `play_batch_task` / `play_batch_in_place_task` — queue-replacing batch plays (the second stays on the current view, for Similar); both run `guard_play_action` + `enter_new_playback_context` themselves
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
 - `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
 - `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch; defined in `artwork_prefetch.rs`, re-exported so call sites keep using `components::<fn>`
-- `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders
+- `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders (`play_entity_task` also runs the play prologue)
 - `pick_and_upload` / `outcome_from_result` / `custom_artwork_error_toast` (`custom_artwork.rs`) — the shared Set/Reset Custom Artwork front half for playlists + radio stations. Failure origins stay typed apart: only the upload/DELETE call may yield `CustomArtworkOutcome::Failed` (substring-classified), while every local pick/read problem is `LocalFailed` and surfaces verbatim — its detail embeds the user-picked path, which must never reach the classifiers
 - `reset_session_state(&mut self) -> Task<Message>` — full session-teardown reset (audio engine, task manager, queue/library/state/scrobble caches, focus, modals). Single source for logout + session-expired auth flows; callers add only their tail-specific work (toast, dialog) afterward.
 - Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `get_batch_target_indices`) and `views/expansion.rs` (`build_batch_payload`)

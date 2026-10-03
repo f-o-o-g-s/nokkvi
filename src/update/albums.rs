@@ -475,9 +475,7 @@ impl Nokkvi {
 
         match action {
             AlbumsAction::PlayAlbum(album_id_str, force) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
                 // drag-drop position when one is pending, else append).
@@ -528,7 +526,7 @@ impl Nokkvi {
                 // PlayAll / PlaySingle: replace queue with album (PlaySingle = PlayAll for albums)
                 let shuffle = self.activate_shuffle_directive(force, false);
                 return self.play_entity_task(
-                    &self.library.albums,
+                    |app| &app.library.albums,
                     &album_id_str,
                     "album",
                     |a| a.id.clone(),
@@ -611,9 +609,7 @@ impl Nokkvi {
                 return Task::batch([artwork_task, tracks_task]);
             }
             AlbumsAction::PlayAlbumFromTrack(album_id, track_idx, force) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // Browsing panel: redirect play → add song to queue
                 if self.browsing_panel.is_some() {

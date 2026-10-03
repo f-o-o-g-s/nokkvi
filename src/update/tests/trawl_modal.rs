@@ -13,7 +13,7 @@ use nokkvi_data::types::{
 };
 
 use crate::{
-    test_helpers::test_app,
+    test_helpers::{seed_radio_playback, test_app},
     widgets::trawl_modal::{TrawlModalMessage, TrawlModalState, TrawlTrayControl},
 };
 
@@ -37,22 +37,6 @@ fn results_with_genre() -> Box<LibrarySearchResults> {
         }],
         ..Default::default()
     })
-}
-
-fn seed_radio_playback(app: &mut crate::Nokkvi) {
-    use crate::state::{ActivePlayback, RadioPlaybackState};
-    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
-        station: nokkvi_data::types::radio_station::RadioStation {
-            id: "r1".into(),
-            name: "Test".into(),
-            stream_url: "http://example.invalid/stream".into(),
-            home_page_url: None,
-            cover_art: None,
-        },
-        icy_artist: None,
-        icy_title: None,
-        icy_url: None,
-    });
 }
 
 fn send_raw_key(

@@ -168,12 +168,10 @@ impl Nokkvi {
                     self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
-                // Same pre-play ritual as play_batch_task's callers: radio →
-                // queue transition, then reset the previous playback context
+                // Same pre-play ritual as play_batch_task: radio → queue
+                // transition, then reset the previous playback context
                 // (loading target + active playlist).
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 let mix = self.trawl_crate.clone();
                 self.shell_task(

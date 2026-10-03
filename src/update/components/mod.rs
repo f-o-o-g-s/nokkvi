@@ -141,28 +141,26 @@ impl Nokkvi {
 
     /// Pre-play hook for every Play* handler: transition radio playback back to
     /// queue mode so the upcoming queue play leaves the app in queue mode.
-    /// Returns `None` to let the play proceed.
+    /// Idempotent. The play-task builders ([`Self::play_batch_task`],
+    /// [`Self::play_batch_in_place_task`], [`Self::play_entity_task`]) run it
+    /// themselves; a handler that plays through anything else calls it first.
     ///
-    /// Retained as an `Option` so a future block condition could short-circuit a
-    /// play. The former playlist-edit block was removed: the playlist editor
-    /// (`View::PlaylistEditor`) owns a track buffer fully decoupled from the live
-    /// queue, so a play can no longer disturb an edit session — blocking it served
-    /// no purpose and only navigated the user out of the editor.
+    /// Nothing blocks a play any more: the playlist editor
+    /// (`View::PlaylistEditor`) owns a track buffer fully decoupled from the
+    /// live queue, so a play cannot disturb an edit session.
     ///
     /// Play actions that **replace queue contents** (album/artist/genre/
     /// playlist/song/batch/roulette) should additionally call
     /// [`Self::enter_new_playback_context`]. Play actions that only advance
     /// the playback pointer within the existing queue (`PlaySong` inside the
     /// queue view) must NOT — doing so clears the loaded-playlist header.
-    pub(crate) fn guard_play_action(&mut self) -> Option<Task<Message>> {
-        // Transition radio → queue so the upcoming queue play leaves the app in
-        // queue mode. (Blocking here would prevent ever resuming queue playback
-        // while a radio stream is active — which defeats the purpose.) The engine
-        // stop is handled by the play action that follows.
+    pub(crate) fn guard_play_action(&mut self) {
+        // Never blocks: blocking would prevent ever resuming queue playback
+        // while a radio stream is active. The engine stop is handled by the
+        // play action that follows.
         if self.active_playback.is_radio() {
             self.active_playback = crate::state::ActivePlayback::Queue;
         }
-        None
     }
 
     /// Reset state tied to the *previous* playback context.
@@ -243,10 +241,14 @@ impl Nokkvi {
     }
 
     /// Play an entity by parsing an index string, looking up the item, and calling a shell method.
-    /// Used by albums, artists, genres, playlists (all follow: parse index → get ID → shell → SwitchView).
+    /// Used by albums and artists (parse index → get ID → shell → SwitchView).
+    ///
+    /// The play replaces the queue, so this runs the play prologue itself
+    /// ([`Self::guard_play_action`] + [`Self::enter_new_playback_context`]).
+    /// `items` reads the list after the prologue's `&mut self` borrow ends.
     pub(crate) fn play_entity_task<T, F, Fut>(
-        &self,
-        items: &[T],
+        &mut self,
+        items: impl FnOnce(&Self) -> &[T],
         index_str: &str,
         entity_name: &'static str,
         get_id: impl FnOnce(&T) -> String,
@@ -256,8 +258,10 @@ impl Nokkvi {
         F: FnOnce(nokkvi_data::backend::app_service::AppService, String) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
     {
+        self.guard_play_action();
+        self.enter_new_playback_context();
         if let Ok(index) = index_str.parse::<usize>()
-            && let Some(item) = items.get(index)
+            && let Some(item) = items(self).get(index)
         {
             let id = get_id(item);
             debug!(" Playing {}: index {}", entity_name, index);
@@ -990,10 +994,10 @@ impl Nokkvi {
     ///   (consumes it via `take()`).
     /// - Otherwise returns `Some(add_task())`.
     ///
-    /// **Contract**: call this AFTER `guard_play_action()` has returned `None`
-    /// — the helper does not re-guard. Pairing with `enter_new_playback_context`
-    /// is per-site (Songs skips it inside the browsing-panel branch; the four
-    /// entity sites call it before this helper).
+    /// **Contract**: call this AFTER `guard_play_action()` — the helper does
+    /// not re-guard. Pairing with `enter_new_playback_context` is per-site
+    /// (Songs skips it inside the browsing-panel branch; the four entity sites
+    /// call it before this helper).
     pub(crate) fn redirect_play_to_queue_in_browsing_panel<A, I>(
         &mut self,
         add_task: A,
@@ -1085,30 +1089,28 @@ impl Nokkvi {
     ///
     /// Sibling of [`Self::add_or_insert_batch_to_queue_task`] /
     /// [`Self::play_next_batch_task`] for the third batch-action shape:
-    /// queue replacement + navigation, used by Albums and Songs PlayBatch arms.
-    /// The helper always clears `active_playlist_info` (since the queue is
-    /// being replaced, the previously-loaded-playlist header is no longer
-    /// accurate) and uses `shell_task` + `Navigation::SwitchView(Queue)` on
-    /// success — matching the existing Albums/Songs UX.
+    /// queue replacement + navigation, used by the five library views'
+    /// PlayBatch arms and Harbour. The queue is being replaced, so the helper
+    /// runs the play prologue itself ([`Self::guard_play_action`] +
+    /// [`Self::enter_new_playback_context`]) and uses `shell_task` +
+    /// `Navigation::SwitchView(Queue)` on success.
     ///
     /// Callers should clear their per-view `selected_indices` BEFORE invoking
     /// this helper (selection state is per-view and not accessible from here).
-    /// Similar's PlayBatch deliberately uses `shell_fire_and_forget_task` +
-    /// toast (no navigation) because it lives in the browsing panel where
-    /// the user is already viewing the queue — Similar does not call this
-    /// helper.
+    /// Similar plays through [`Self::play_batch_in_place_task`] instead.
     pub(crate) fn play_batch_task(
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
         force: bool,
     ) -> Task<Message> {
+        self.guard_play_action();
+        self.enter_new_playback_context();
         // Multi-select / context-menu batches are always unanchored (no clicked
         // track to pin), so resolve the one-shot directive centrally here — all
         // five library views then share a single force→shuffle contract.
         let shuffle = self.activate_shuffle_directive(force, false);
         let len = payload.items.len();
         debug!(" Playing batch of {} items (shuffle={:?})", len, shuffle);
-        self.clear_active_playlist();
         self.shell_task(
             move |shell| async move { shell.play_batch(payload, shuffle).await },
             move |result| match result {
@@ -1128,6 +1130,25 @@ impl Nokkvi {
                     ))
                 }
             },
+        )
+    }
+
+    /// Replace the queue with a batch, unshuffled, without leaving the
+    /// current view: a toast confirms it and the queue reloads. Similar uses
+    /// this from the browsing panel, where the queue is already beside the
+    /// results. Runs the same play prologue as [`Self::play_batch_task`].
+    pub(crate) fn play_batch_in_place_task(
+        &mut self,
+        payload: nokkvi_data::types::batch::BatchPayload,
+    ) -> Task<Message> {
+        self.guard_play_action();
+        self.enter_new_playback_context();
+        let len = payload.items.len();
+        debug!(" Playing batch of {} items in place", len);
+        self.shell_fire_and_forget_task(
+            move |shell| async move { shell.play_batch(payload, OneShotShuffle::None).await },
+            format!("Playing batch of {len} items"),
+            "play batch",
         )
     }
 

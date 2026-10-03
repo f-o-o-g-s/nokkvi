@@ -201,6 +201,24 @@ pub(crate) fn make_artist(id: &str, name: &str) -> ArtistUIViewData {
     }
 }
 
+/// Seed an active radio playback so a play handler's `guard_play_action` has
+/// something observable to transition back to queue mode.
+pub(crate) fn seed_radio_playback(app: &mut Nokkvi) {
+    use crate::state::{ActivePlayback, RadioPlaybackState};
+    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: "r1".into(),
+            name: "Test".into(),
+            stream_url: "http://example.invalid/stream".into(),
+            home_page_url: None,
+            cover_art: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+}
+
 /// Create a `GenreUIViewData` with the given fields, defaulting the rest.
 pub(crate) fn make_genre(id: &str, name: &str) -> nokkvi_data::backend::genres::GenreUIViewData {
     nokkvi_data::backend::genres::GenreUIViewData {

@@ -797,16 +797,10 @@ impl Nokkvi {
     fn play_harbour_target(&mut self, play: PlayTarget, force: bool) -> Task<Message> {
         match play {
             PlayTarget::Item(batch) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
-                self.enter_new_playback_context();
                 self.play_batch_task(BatchPayload::new().with_item(batch), force)
             }
             PlayTarget::GenreRandom(name) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 self.play_harbour_genre(name)
             }
@@ -914,29 +908,19 @@ impl Nokkvi {
                 let Some(id) = self.harbour.random_album.as_ref().map(|a| a.id.clone()) else {
                     return no_pick(self);
                 };
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
-                self.enter_new_playback_context();
                 self.play_batch_task(BatchPayload::new().with_item(BatchItem::Album(id)), force)
             }
             RandomKind::Artists => {
                 let Some(id) = self.harbour.random_artist.as_ref().map(|a| a.id.clone()) else {
                     return no_pick(self);
                 };
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
-                self.enter_new_playback_context();
                 self.play_batch_task(BatchPayload::new().with_item(BatchItem::Artist(id)), force)
             }
             RandomKind::Songs => {
                 if self.harbour.random_songs.is_empty() {
                     return no_pick(self);
                 }
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 self.clear_active_playlist();
                 let songs = self.harbour.random_songs.clone();
@@ -950,9 +934,7 @@ impl Nokkvi {
                 let Some(name) = self.harbour.random_genre.as_ref().map(|g| g.name.clone()) else {
                     return no_pick(self);
                 };
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 self.clear_active_playlist();
                 self.play_harbour_genre(name)
@@ -961,9 +943,7 @@ impl Nokkvi {
                 let Some(playlist) = self.harbour.random_playlist.clone() else {
                     return no_pick(self);
                 };
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // The Playlists view's PlayAll contract: set the queue header's
                 // "Playing From" context BEFORE the play so the strip renders

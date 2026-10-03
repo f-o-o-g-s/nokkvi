@@ -186,9 +186,7 @@ impl Nokkvi {
 
         match action {
             GenresAction::PlayGenre(genre_name, force) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
                 // drag-drop position when one is pending, else append).
@@ -248,9 +246,7 @@ impl Nokkvi {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
             GenresAction::PlayAlbum(album_id, force) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue
                 if self.browsing_panel.is_some() {

@@ -29,6 +29,8 @@ All notable changes to this project will be documented in this file.
 - Saving config.toml with an invalid visualizer value, such as text where a number belongs, no longer resets the visualizer to its defaults.
 - Saving config.toml with a typo now shows a warning naming the line of the error.
 - When a section of config.toml holds an invalid value, a warning now names the section that kept its previous values.
+- Playing several selected items, or choosing Shuffle Play, while a radio station plays now hands the player back to the queue.
+- Replacing the queue from Similar or Top Songs results now clears the previous playlist's header.
 
 ### Removed
 

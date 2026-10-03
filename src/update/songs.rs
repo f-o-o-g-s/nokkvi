@@ -170,9 +170,7 @@ impl Nokkvi {
 
         match action {
             SongsAction::PlaySongFromIndex(index, force) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
+                self.guard_play_action();
                 self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue (insert at
                 // drag-drop position when one is pending, else append).
