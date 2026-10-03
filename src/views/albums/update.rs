@@ -318,19 +318,15 @@ impl AlbumsPage {
                                 super::super::expansion::build_trawl_seeds(target_indices, |i| {
                                     match self.expansion.get_entry_at(i, albums, |a| &a.id) {
                                         Some(SlotListEntry::Parent(album)) => {
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                                BatchItem::Album(album.id.clone()),
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_album(
+                                                album.id.clone(),
                                                 album.name.clone(),
                                                 album.artist.clone(),
                                             ))
                                         }
                                         Some(SlotListEntry::Child(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song =
-                                                song.clone().into();
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                                BatchItem::Song(Box::new(item)),
-                                                song.title.clone(),
-                                                song.artist.clone(),
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_song(
+                                                song.clone().into(),
                                             ))
                                         }
                                         None => None,

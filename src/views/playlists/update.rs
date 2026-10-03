@@ -281,21 +281,15 @@ impl PlaylistsPage {
                             super::super::expansion::build_trawl_seeds(target_indices, |i| {
                                 match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
                                     Some(SlotListEntry::Parent(playlist)) => {
-                                        let songs = playlist.song_count;
-                                        let noun = if songs == 1 { "song" } else { "songs" };
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                            BatchItem::Playlist(playlist.id.clone()),
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_playlist(
+                                            playlist.id.clone(),
                                             playlist.name.clone(),
-                                            format!("{songs} {noun}"),
+                                            playlist.song_count,
                                         ))
                                     }
                                     Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                            BatchItem::Song(Box::new(item)),
-                                            song.title.clone(),
-                                            song.artist.clone(),
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_song(
+                                            song.clone().into(),
                                         ))
                                     }
                                     None => None,
@@ -396,21 +390,15 @@ impl PlaylistsPage {
                             super::super::expansion::build_trawl_seeds(target_indices, |i| {
                                 match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
                                     Some(SlotListEntry::Parent(playlist)) => {
-                                        let songs = playlist.song_count;
-                                        let noun = if songs == 1 { "song" } else { "songs" };
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                            BatchItem::Playlist(playlist.id.clone()),
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_playlist(
+                                            playlist.id.clone(),
                                             playlist.name.clone(),
-                                            format!("{songs} {noun}"),
+                                            playlist.song_count,
                                         ))
                                     }
                                     Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                            BatchItem::Song(Box::new(item)),
-                                            song.title.clone(),
-                                            song.artist.clone(),
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::from_song(
+                                            song.clone().into(),
                                         ))
                                     }
                                     None => None,

@@ -382,10 +382,53 @@ impl TrawlSeed {
         }
     }
 
+    // One constructor per seed kind, so every surface that adds seeds (the
+    // library views, the queue, Similar, the Trawl search) writes the same
+    // chip for the same entity.
+
+    /// A song seed: its title over its artist.
+    pub fn from_song(song: Song) -> Self {
+        let (label, sublabel) = (song.title.clone(), song.artist.clone());
+        Self::new(BatchItem::Song(Box::new(song)), label, sublabel)
+    }
+
+    /// An album seed: its name over its artist.
+    pub fn from_album(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        artist: impl Into<String>,
+    ) -> Self {
+        Self::new(BatchItem::Album(id.into()), name, artist)
+    }
+
+    /// An artist seed: its name over the word "Artist".
+    pub fn from_artist(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::new(BatchItem::Artist(id.into()), name, "Artist")
+    }
+
+    /// A genre seed (name-keyed, like the batch pipeline): its name over its
+    /// album count.
+    pub fn from_genre(name: impl Into<String>, album_count: u32) -> Self {
+        let name = name.into();
+        let sublabel = count_label(album_count, "album", "albums");
+        Self::new(BatchItem::Genre(name.clone()), name, sublabel)
+    }
+
+    /// A playlist seed: its name over its song count.
+    pub fn from_playlist(id: impl Into<String>, name: impl Into<String>, song_count: u32) -> Self {
+        let sublabel = count_label(song_count, "song", "songs");
+        Self::new(BatchItem::Playlist(id.into()), name, sublabel)
+    }
+
     /// Identity key (kind + id/name).
     pub fn key(&self) -> (TrawlSeedKind, &str) {
         batch_item_key(&self.item)
     }
+}
+
+/// `"1 album"` / `"3 albums"`.
+fn count_label(n: u32, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The persistent mix crate: seeds + blend + the tray filters.
@@ -594,6 +637,38 @@ mod tests {
 
     fn seed(item: BatchItem) -> TrawlSeed {
         TrawlSeed::new(item, "label", "sublabel")
+    }
+
+    // ---- seed constructors ----------------------------------------------
+
+    #[test]
+    fn seed_constructors_write_each_kinds_chip() {
+        let chip = |s: &TrawlSeed| (s.key().0, s.label.clone(), s.sublabel.clone());
+
+        let mut song = Song::test_default("s1", "Track");
+        song.artist = "Band".into();
+        assert_eq!(
+            chip(&TrawlSeed::from_song(song)),
+            (TrawlSeedKind::Song, "Track".into(), "Band".into())
+        );
+        assert_eq!(
+            chip(&TrawlSeed::from_album("al1", "Record", "Band")),
+            (TrawlSeedKind::Album, "Record".into(), "Band".into())
+        );
+        assert_eq!(
+            chip(&TrawlSeed::from_artist("ar1", "Band")),
+            (TrawlSeedKind::Artist, "Band".into(), "Artist".into())
+        );
+        assert_eq!(
+            chip(&TrawlSeed::from_genre("Rock", 1)),
+            (TrawlSeedKind::Genre, "Rock".into(), "1 album".into())
+        );
+        assert_eq!(
+            chip(&TrawlSeed::from_playlist("pl1", "Mix", 12)),
+            (TrawlSeedKind::Playlist, "Mix".into(), "12 songs".into())
+        );
+        // Genres are name-keyed, like the batch pipeline.
+        assert_eq!(TrawlSeed::from_genre("Rock", 3).key().1, "Rock");
     }
 
     // ---- enums / labels -------------------------------------------------

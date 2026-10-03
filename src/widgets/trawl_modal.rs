@@ -177,8 +177,6 @@ pub(crate) enum TrawlRow {
 /// handler derive rows through here, so a centered index resolves to the row
 /// the user sees (the Harbour row-order lesson).
 pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec<TrawlRow> {
-    use nokkvi_data::types::batch::BatchItem;
-
     let mut rows = Vec::new();
     let query = state.search_query.trim();
 
@@ -223,7 +221,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
         for a in &results.artists {
             push_result(
                 &mut rows,
-                TrawlSeed::new(BatchItem::Artist(a.id.clone()), a.name.clone(), "Artist"),
+                TrawlSeed::from_artist(a.id.clone(), a.name.clone()),
                 // Artist images live in `album_art` keyed by the artist id —
                 // the same single-mini path Harbour's search rows use.
                 Some(a.id.clone()),
@@ -240,7 +238,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
                 .unwrap_or_default();
             push_result(
                 &mut rows,
-                TrawlSeed::new(BatchItem::Album(a.id.clone()), a.name.clone(), sublabel),
+                TrawlSeed::from_album(a.id.clone(), a.name.clone(), sublabel),
                 Some(a.id.clone()),
             );
         }
@@ -249,15 +247,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
         rows.push(TrawlRow::Header("Songs"));
         for s in &results.songs {
             let art = s.album_id.clone();
-            push_result(
-                &mut rows,
-                TrawlSeed::new(
-                    BatchItem::Song(Box::new(s.clone())),
-                    s.title.clone(),
-                    s.artist.clone(),
-                ),
-                art,
-            );
+            push_result(&mut rows, TrawlSeed::from_song(s.clone()), art);
         }
     }
     if !results.genres.is_empty() {
@@ -265,15 +255,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
         for g in &results.genres {
             push_result(
                 &mut rows,
-                {
-                    let n = g.album_count;
-                    let noun = if n == 1 { "album" } else { "albums" };
-                    TrawlSeed::new(
-                        BatchItem::Genre(g.name.clone()),
-                        g.name.clone(),
-                        format!("{n} {noun}"),
-                    )
-                },
+                TrawlSeed::from_genre(g.name.clone(), g.album_count),
                 None,
             );
         }
@@ -283,15 +265,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
         for p in &results.playlists {
             push_result(
                 &mut rows,
-                {
-                    let n = p.song_count;
-                    let noun = if n == 1 { "song" } else { "songs" };
-                    TrawlSeed::new(
-                        BatchItem::Playlist(p.id.clone()),
-                        p.name.clone(),
-                        format!("{n} {noun}"),
-                    )
-                },
+                TrawlSeed::from_playlist(p.id.clone(), p.name.clone(), p.song_count),
                 None,
             );
         }

@@ -234,17 +234,14 @@ impl GenresPage {
                                 super::super::expansion::build_trawl_seeds(target_indices, |i| {
                                     match self.expansion.get_entry_at(i, genres, |g| &g.id) {
                                         Some(SlotListEntry::Parent(genre)) => {
-                                            let albums = genre.album_count;
-                                            let noun = if albums == 1 { "album" } else { "albums" };
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                                BatchItem::Genre(genre.name.clone()),
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_genre(
                                                 genre.name.clone(),
-                                                format!("{albums} {noun}"),
+                                                genre.album_count,
                                             ))
                                         }
                                         Some(SlotListEntry::Child(album, _)) => {
-                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
-                                                BatchItem::Album(album.id.clone()),
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::from_album(
+                                                album.id.clone(),
                                                 album.name.clone(),
                                                 album.artist.clone(),
                                             ))

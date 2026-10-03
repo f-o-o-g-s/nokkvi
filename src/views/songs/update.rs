@@ -190,13 +190,8 @@ impl SongsPage {
                             let seeds =
                                 super::super::expansion::build_trawl_seeds(target_indices, |i| {
                                     songs.get(i).map(|s| {
-                                        let item: nokkvi_data::types::song::Song = s.clone().into();
-                                        nokkvi_data::types::trawl::TrawlSeed::new(
-                                            nokkvi_data::types::batch::BatchItem::Song(Box::new(
-                                                item,
-                                            )),
-                                            s.title.clone(),
-                                            s.artist.clone(),
+                                        nokkvi_data::types::trawl::TrawlSeed::from_song(
+                                            s.clone().into(),
                                         )
                                     })
                                 });

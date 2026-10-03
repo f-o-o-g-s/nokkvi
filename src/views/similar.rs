@@ -265,11 +265,7 @@ impl SimilarPage {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
                             let seeds = super::expansion::build_trawl_seeds(target_indices, |i| {
                                 songs.get(i).map(|s| {
-                                    nokkvi_data::types::trawl::TrawlSeed::new(
-                                        BatchItem::Song(Box::new(s.clone())),
-                                        s.title.clone(),
-                                        s.artist.clone(),
-                                    )
+                                    nokkvi_data::types::trawl::TrawlSeed::from_song(s.clone())
                                 })
                             });
                             (Task::none(), SimilarAction::AddBatchToMix(seeds))

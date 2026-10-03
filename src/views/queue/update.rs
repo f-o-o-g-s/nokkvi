@@ -331,11 +331,7 @@ impl QueuePage {
                                 updated_at: row.updated_at.clone(),
                                 ..Default::default()
                             };
-                            nokkvi_data::types::trawl::TrawlSeed::new(
-                                nokkvi_data::types::batch::BatchItem::Song(Box::new(song)),
-                                row.title.clone(),
-                                row.artist.clone(),
-                            )
+                            nokkvi_data::types::trawl::TrawlSeed::from_song(song)
                         })
                         .collect();
                     if seeds.is_empty() {
