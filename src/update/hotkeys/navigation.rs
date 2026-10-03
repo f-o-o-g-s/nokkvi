@@ -7,6 +7,7 @@ use tracing::{debug, trace};
 use crate::{
     Nokkvi, View,
     app_message::{Message, SplitViewMessage},
+    update::modals::ActiveModal,
     views, widgets,
 };
 
@@ -28,7 +29,7 @@ pub(crate) fn seek_step_delta(step_secs: u32, forward: bool) -> f32 {
 /// pairs the user pressed it on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HorizontalArrowOwner {
-    /// The Trawl modal is open: the arrows step the focused tray control.
+    /// The Trawl modal is on top: the arrows step the focused tray control.
     TrawlTray,
     /// The Settings view: the arrows adjust the focused setting's value.
     SettingsEdit,
@@ -180,7 +181,7 @@ impl Nokkvi {
     /// Which context owns the horizontal arrows right now. Pure, so the rule
     /// both actions obey is assertable without an `AppService`.
     pub(crate) fn horizontal_arrow_owner(&self) -> HorizontalArrowOwner {
-        if self.trawl_modal.is_some() {
+        if self.modal_is_top(ActiveModal::Trawl) {
             HorizontalArrowOwner::TrawlTray
         } else if self.theater.active {
             // Theater hides the view, so a hidden Settings row never edits.
@@ -449,7 +450,9 @@ impl Nokkvi {
         // revealing the OBSCURED view's toolbar would strand a stateful
         // reveal-lock on it (same class as the tray branches' first-statement
         // rule in handle_cycle_sort_mode / handle_settings_category_motion).
-        if let Some(state) = self.trawl_modal.as_mut() {
+        if self.modal_is_top(ActiveModal::Trawl)
+            && let Some(state) = self.trawl_modal.as_mut()
+        {
             state.search_input_focused = true;
             state.tray_cursor = None;
             return iced::widget::operation::focus(

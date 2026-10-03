@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
 - With ReplayGain on, tracks with different gains now follow each other without a gap.
 - Closing the EQ with Escape no longer brings back an unfinished preset name prompt the next time it opens.
 - Escape now plays its sound when it closes the EQ, About or Get Info window, like the other windows.
+- Pressing the EQ key or Shift+I again now closes the EQ or Get Info window it opened.
 - Escape now closes an open window before cancelling a roulette spin running behind it.
 - Enter now reaches an open window instead of stopping a roulette spin running behind it.
 - A list's scrollbar now fades out even when a window opens before it hides.

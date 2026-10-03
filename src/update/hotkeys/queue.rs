@@ -7,10 +7,10 @@ use crate::{Nokkvi, View, app_message::Message};
 
 impl Nokkvi {
     /// Shift+P — Trawl-only: save the mix as an ordinary playlist. The
-    /// binding exists for the mix builder; with the modal closed it stays
-    /// quiet rather than guessing at a target.
+    /// binding exists for the mix builder; with the modal closed (or covered
+    /// by another modal) it stays quiet rather than guessing at a target.
     pub(crate) fn handle_trawl_save_as_playlist_hotkey(&mut self) -> Task<Message> {
-        if self.trawl_modal.is_some() {
+        if self.modal_is_top(crate::update::modals::ActiveModal::Trawl) {
             return self.handle_trawl_modal(
                 crate::widgets::trawl_modal::TrawlModalMessage::SaveAsPlaylist,
             );
@@ -20,10 +20,10 @@ impl Nokkvi {
 
     pub(crate) fn handle_add_to_queue(&mut self) -> Task<Message> {
         debug!(" AddToQueue (Shift+A) hotkey pressed");
-        // Trawl-first: with the modal open the one enqueueable thing is the
+        // Trawl-first: with the modal on top the one enqueueable thing is the
         // mix itself — the Shift+A sibling of Ctrl+Enter → PlayMix. Routing
         // here (not just admitting the key) keeps it off the obscured view.
-        if self.trawl_modal.is_some() {
+        if self.modal_is_top(crate::update::modals::ActiveModal::Trawl) {
             return self
                 .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::AddMixToQueue);
         }

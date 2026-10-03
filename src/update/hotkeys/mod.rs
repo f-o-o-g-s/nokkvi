@@ -911,10 +911,17 @@ impl Nokkvi {
                         )
                     )
                 ),
-                ActiveModal::TextInputDialog
-                | ActiveModal::Eq
-                | ActiveModal::About
-                | ActiveModal::Info => false,
+                // The key that opened EQ / Get Info closes it again (EQ's
+                // Toggle, and handle_get_info's close-if-open).
+                ActiveModal::Eq => matches!(
+                    resolved_action,
+                    Some(nokkvi_data::types::hotkey_config::HotkeyAction::ToggleEqModal)
+                ),
+                ActiveModal::Info => matches!(
+                    resolved_action,
+                    Some(nokkvi_data::types::hotkey_config::HotkeyAction::GetInfo)
+                ),
+                ActiveModal::TextInputDialog | ActiveModal::About => false,
             };
             if !is_escape && !takes_key {
                 return Task::none();
@@ -988,11 +995,11 @@ impl Nokkvi {
     /// settings view is active; no-op everywhere else (the hotkey config can
     /// bind these globally without bleeding into other views).
     ///
-    /// The trawl branch sits FIRST: with the mix builder open, the same
+    /// The trawl branch sits FIRST: with the mix builder on top, the same
     /// action steps the tray-controls focus ring instead — `current_view`
     /// still names the obscured view, so falling through would drive it.
     pub(crate) fn handle_settings_category_motion(&mut self, forward: bool) -> Task<Message> {
-        if self.trawl_modal.is_some() {
+        if self.modal_is_top(ActiveModal::Trawl) {
             return self.handle_trawl_tray_focus_move(forward);
         }
         if self.current_view != View::Settings {

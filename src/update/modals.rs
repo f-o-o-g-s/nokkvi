@@ -84,6 +84,12 @@ impl Nokkvi {
             .find(|&modal| self.modal_is_open(modal))
     }
 
+    /// Whether `modal` is open AND on top. A modal's own key routes ask this,
+    /// not [`Self::modal_is_open`]: one covered by another modal takes none.
+    pub(crate) fn modal_is_top(&self, modal: ActiveModal) -> bool {
+        self.top_modal() == Some(modal)
+    }
+
     /// Close `modal` the way its own close button does, through its own
     /// Close message, so whatever that modal tidies on close (EQ's
     /// preset-name prompt, the MilkDrop picker's preset and lock, the Trawl

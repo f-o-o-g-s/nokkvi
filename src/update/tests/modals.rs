@@ -365,3 +365,124 @@ fn discarding_eq_drops_the_typed_preset_name() {
     assert!(!app.eq_modal.open && !app.eq_modal.save_mode);
     assert!(app.eq_modal.save_name.is_empty(), "the typed name is gone");
 }
+
+// ----------------------------------------------------------------------------
+// A modal's own key
+// ----------------------------------------------------------------------------
+
+fn press(app: &mut Nokkvi, ch: &str, modifiers: iced::keyboard::Modifiers) {
+    let _ = app.update(crate::Message::RawKeyEvent(
+        iced::keyboard::Key::Character(ch.into()),
+        modifiers,
+        iced::event::Status::Ignored,
+        false,
+    ));
+}
+
+fn home_app() -> Nokkvi {
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    app
+}
+
+#[test]
+fn the_eq_key_closes_eq() {
+    // `q` opens EQ; with EQ on top it closes it again (through Toggle, so a
+    // half-typed preset name goes too).
+    let mut app = home_app();
+    let _ = app.handle_eq_modal(EqModalMessage::Open);
+    let _ = app.handle_eq_modal(EqModalMessage::SavePreset);
+
+    press(&mut app, "q", iced::keyboard::Modifiers::empty());
+
+    assert!(!app.eq_modal.open, "q closes EQ");
+    assert!(!app.eq_modal.save_mode);
+}
+
+#[test]
+fn shift_i_closes_get_info() {
+    let mut app = home_app();
+    open_modal(&mut app, ActiveModal::Info);
+
+    press(&mut app, "i", iced::keyboard::Modifiers::SHIFT);
+
+    assert!(!app.info_modal.visible, "Shift+I closes Get Info");
+}
+
+#[test]
+fn a_modals_own_key_does_nothing_under_another_modal() {
+    let mut app = home_app();
+    open_modal(&mut app, ActiveModal::Info);
+    press(&mut app, "q", iced::keyboard::Modifiers::empty());
+    assert!(!app.eq_modal.open, "q opens no EQ over Get Info");
+    assert!(app.info_modal.visible, "and leaves Get Info open");
+
+    let mut app = home_app();
+    open_modal(&mut app, ActiveModal::Eq);
+    open_modal(&mut app, ActiveModal::Info);
+    // EQ is above Info in STACK: Shift+I belongs to EQ, which takes no such key.
+    press(&mut app, "i", iced::keyboard::Modifiers::SHIFT);
+    assert!(app.info_modal.visible, "Get Info under EQ stays open");
+    assert!(app.eq_modal.open);
+}
+
+// ----------------------------------------------------------------------------
+// Trawl's own routes stand down under a higher modal
+// ----------------------------------------------------------------------------
+
+/// Trawl open (crate empty, search unfocused) with EQ above it.
+fn trawl_under_eq() -> Nokkvi {
+    let mut app = home_app();
+    open_modal(&mut app, ActiveModal::Trawl);
+    open_modal(&mut app, ActiveModal::Eq);
+    assert_eq!(app.top_modal(), Some(ActiveModal::Eq));
+    app
+}
+
+fn crate_empty_toasted(app: &Nokkvi) -> bool {
+    app.toast
+        .toasts
+        .iter()
+        .any(|t| t.message.contains("crate is empty"))
+}
+
+#[test]
+fn the_arrows_are_not_trawls_under_a_higher_modal() {
+    let app = trawl_under_eq();
+    assert_eq!(
+        app.horizontal_arrow_owner(),
+        crate::update::hotkeys::navigation::HorizontalArrowOwner::View
+    );
+}
+
+#[test]
+fn trawl_routes_leave_a_hidden_trawl_alone() {
+    let mut app = trawl_under_eq();
+
+    let _ = app.handle_focus_search();
+    assert_eq!(
+        app.trawl_modal.as_ref().map(|t| t.search_input_focused),
+        Some(false),
+        "`/` focuses no hidden search"
+    );
+
+    let _ = app.handle_settings_category_motion(true);
+    assert_eq!(
+        app.trawl_modal.as_ref().map(|t| t.tray_cursor),
+        Some(None),
+        "no hidden tray ring moves"
+    );
+
+    let _ = app.handle_add_to_queue();
+    assert!(
+        !crate_empty_toasted(&app),
+        "add leaves the hidden mix alone"
+    );
+
+    let _ = app.handle_trawl_save_as_playlist_hotkey();
+    assert!(
+        !crate_empty_toasted(&app),
+        "save leaves the hidden mix alone"
+    );
+}
