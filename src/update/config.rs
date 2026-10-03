@@ -70,12 +70,14 @@ impl Nokkvi {
 
     /// React to a settings TOML hot-reload by pulling fresh view-prefs,
     /// hotkey config, and player settings off the shell, then folding them
-    /// back into the live state via `SettingsReloadDataLoaded`.
+    /// back into the live state via `SettingsReloadDataLoaded` (with a warning
+    /// toast for anything config.toml couldn't apply — see
+    /// [`settings_reload_message`]).
     pub(super) fn handle_settings_config_reloaded(&mut self) -> Task<Message> {
         tracing::info!(" [SETTINGS] Config file modified, reloading settings");
         self.shell_task(
             |shell| async move {
-                shell.settings().reload_from_toml().await;
+                let skipped = shell.settings().reload_from_toml().await?;
                 let vp = shell.settings().get_view_preferences().await;
                 let hotkeys = shell
                     .settings()
@@ -89,17 +91,14 @@ impl Nokkvi {
                     .lock()
                     .await
                     .get_player_settings();
-                Ok((vp, hotkeys, settings))
+                Ok(ReloadedSettings {
+                    vp,
+                    hotkeys,
+                    settings,
+                    skipped,
+                })
             },
-            |result: Result<_, anyhow::Error>| match result {
-                Ok((vp, hotkeys, settings)) => {
-                    Message::SettingsReloadDataLoaded(vp, hotkeys, Box::new(settings))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to reload settings: {}", e);
-                    Message::NoOp
-                }
-            },
+            settings_reload_message,
         )
     }
 
@@ -138,5 +137,61 @@ impl Nokkvi {
         self.settings_page.config_dirty = true;
         self.refresh_settings_entries_if_dirty();
         Task::none()
+    }
+}
+
+/// What a settings hot-reload read back off the shell.
+pub(crate) struct ReloadedSettings {
+    pub(crate) vp: nokkvi_data::types::view_preferences::AllViewPreferences,
+    pub(crate) hotkeys: nokkvi_data::types::hotkey_config::HotkeyConfig,
+    pub(crate) settings: nokkvi_data::types::player_settings::LivePlayerSettings,
+    /// Sections present in config.toml but malformed; they kept their values.
+    pub(crate) skipped: Vec<nokkvi_data::services::toml_settings_io::TomlSection>,
+}
+
+/// Map a hot-reload result to its follow-up message. Whatever config.toml
+/// couldn't apply kept its current values, and a warning toast says so — a
+/// hand edit that silently does nothing reads as a bug.
+pub(crate) fn settings_reload_message(result: anyhow::Result<ReloadedSettings>) -> Message {
+    use nokkvi_data::types::toast::{Toast, ToastLevel};
+
+    use crate::app_message::ToastMessage;
+
+    match result {
+        Ok(reloaded) => {
+            let loaded = Message::SettingsReloadDataLoaded(
+                reloaded.vp,
+                reloaded.hotkeys,
+                Box::new(reloaded.settings),
+            );
+            if reloaded.skipped.is_empty() {
+                return loaded;
+            }
+            // Each section's deserialize error is already in the log.
+            let sections = reloaded
+                .skipped
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            Message::Toast(ToastMessage::PushThen(
+                Toast::new(
+                    format!("Couldn't load {sections} from config.toml, kept the current values"),
+                    ToastLevel::Warning,
+                ),
+                Box::new(loaded),
+            ))
+        }
+        Err(e) => {
+            tracing::warn!("Not reloading config.toml, keeping the current settings: {e:#}");
+            // The root cause's first line is the useful part ("TOML parse
+            // error at line 3, column 9"); the rest is a multi-line snippet.
+            let root_cause = e.root_cause().to_string();
+            let reason = root_cause.lines().next().unwrap_or_default();
+            Message::Toast(ToastMessage::Push(Toast::new(
+                format!("Couldn't reload config.toml, kept the current settings: {reason}"),
+                ToastLevel::Warning,
+            )))
+        }
     }
 }

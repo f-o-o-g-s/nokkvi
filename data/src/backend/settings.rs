@@ -90,10 +90,13 @@ impl SettingsService {
         self.settings_manager.clone()
     }
 
-    /// Reload settings from config.toml
-    pub async fn reload_from_toml(&self) {
+    /// Reload settings from config.toml. See
+    /// [`SettingsManager::reload_from_toml`] for the `Ok` / `Err` contract.
+    pub async fn reload_from_toml(
+        &self,
+    ) -> anyhow::Result<Vec<crate::services::toml_settings_io::TomlSection>> {
         let mut sm = self.settings_manager.lock().await;
-        sm.reload_from_toml();
+        sm.reload_from_toml()
     }
 
     // =========================================================================

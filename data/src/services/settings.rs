@@ -265,12 +265,16 @@ impl SettingsManager {
     /// automatically whenever the user next modifies a setting.
     ///
     /// A file that can't be read or parsed (e.g. saved mid-edit with a typo)
-    /// is logged and skipped: the current in-memory settings stay as they are
-    /// until the next save of a valid file triggers another reload.
-    pub fn reload_from_toml(&mut self) {
+    /// returns `Err` and changes nothing: the current in-memory settings stay
+    /// until the next save of a valid file triggers another reload. `Ok`
+    /// carries the sections that were present but malformed, which also kept
+    /// their current values. The caller reports both to the user.
+    pub fn reload_from_toml(
+        &mut self,
+    ) -> Result<Vec<crate::services::toml_settings_io::TomlSection>> {
         // One file read + one parse for all four sections (the per-section
         // readers each re-parse the whole file).
-        self.apply_reloaded_sections(crate::services::toml_settings_io::read_all_toml_sections());
+        self.apply_reloaded_sections(crate::services::toml_settings_io::read_all_toml_sections())
     }
 
     /// The in-memory half of [`Self::reload_from_toml`], split out so tests
@@ -278,14 +282,8 @@ impl SettingsManager {
     fn apply_reloaded_sections(
         &mut self,
         sections: Result<crate::services::toml_settings_io::TomlSections>,
-    ) {
-        let sections = match sections {
-            Ok(sections) => sections,
-            Err(e) => {
-                tracing::warn!("Not reloading config.toml, keeping the current settings: {e:#}");
-                return;
-            }
-        };
+    ) -> Result<Vec<crate::services::toml_settings_io::TomlSection>> {
+        let sections = sections?;
         if let Some(ts) = sections.settings {
             apply_toml_settings_to_internal(&ts, &mut self.settings.player);
         }
@@ -307,6 +305,7 @@ impl SettingsManager {
             self.visualizer = sections.visualizer.unwrap_or_default();
         }
         tracing::debug!(" [SETTINGS] Manager state hot-reloaded from config.toml");
+        Ok(sections.malformed)
     }
 
     // -------------------------------------------------------------------------
@@ -3315,9 +3314,11 @@ mod reload_tests {
         mgr.settings.player.seek_step_secs = 17;
         let visualizer_before = mgr.visualizer().clone();
 
-        mgr.apply_reloaded_sections(Err(anyhow::anyhow!(
+        let result = mgr.apply_reloaded_sections(Err(anyhow::anyhow!(
             "Failed to parse config.toml: TOML parse error at line 3"
         )));
+
+        assert!(result.is_err(), "the caller reports the failure");
 
         assert_eq!(
             *mgr.visualizer(),
@@ -3337,12 +3338,19 @@ mod reload_tests {
             .expect("with_visualizer");
         let visualizer_before = mgr.visualizer().clone();
 
-        mgr.apply_reloaded_sections(Ok(TomlSections {
-            malformed: vec![crate::services::toml_settings_io::TomlSection::Visualizer],
-            ..TomlSections::default()
-        }));
+        let skipped = mgr
+            .apply_reloaded_sections(Ok(TomlSections {
+                malformed: vec![crate::services::toml_settings_io::TomlSection::Visualizer],
+                ..TomlSections::default()
+            }))
+            .expect("the file parsed");
 
         assert_eq!(*mgr.visualizer(), visualizer_before);
+        assert_eq!(
+            skipped,
+            vec![crate::services::toml_settings_io::TomlSection::Visualizer],
+            "the caller is told which section kept its values"
+        );
     }
 
     /// The counterpart that stays: a file that parses but has no
@@ -3354,7 +3362,10 @@ mod reload_tests {
         mgr.with_visualizer(|v| v.opacity = 0.4)
             .expect("with_visualizer");
 
-        mgr.apply_reloaded_sections(Ok(TomlSections::default()));
+        let skipped = mgr
+            .apply_reloaded_sections(Ok(TomlSections::default()))
+            .expect("the file parsed");
+        assert!(skipped.is_empty());
 
         assert_eq!(
             *mgr.visualizer(),

@@ -1283,3 +1283,76 @@ fn light_mode_write_rebuilds_cached_entries_against_new_atomic() {
     let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(prior_config));
     crate::theme::set_light_mode(prior_atomic);
 }
+
+// -- Hot-reload outcome → toast ------------------------------------------
+//
+// A hand edit that config.toml can't apply keeps the current values; the
+// toast is how the user learns their edit didn't take.
+
+fn reloaded_settings(
+    skipped: Vec<nokkvi_data::services::toml_settings_io::TomlSection>,
+) -> crate::update::config::ReloadedSettings {
+    crate::update::config::ReloadedSettings {
+        vp: nokkvi_data::types::toml_views::TomlViewPreferences::default().to_all_view_prefs(),
+        hotkeys: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
+        settings: LivePlayerSettings::default(),
+        skipped,
+    }
+}
+
+#[test]
+fn hot_reload_parse_error_toasts_where_the_error_is() {
+    use crate::app_message::{Message, ToastMessage};
+
+    let parse_error = toml::from_str::<toml::Value>("[settings").expect_err("unterminated table");
+    let error = anyhow::Error::new(parse_error).context("Failed to parse config.toml");
+
+    let msg = crate::update::config::settings_reload_message(Err(error));
+
+    let Message::Toast(ToastMessage::Push(toast)) = msg else {
+        panic!("a failed reload must toast, got {msg:?}");
+    };
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert!(
+        toast.message.contains("line 1"),
+        "the toast names the TOML error's location: {}",
+        toast.message
+    );
+    assert!(
+        !toast.message.contains('\n'),
+        "a toast is one line: {}",
+        toast.message
+    );
+}
+
+#[test]
+fn hot_reload_with_malformed_sections_toasts_then_applies_the_rest() {
+    use nokkvi_data::services::toml_settings_io::TomlSection;
+
+    use crate::app_message::{Message, ToastMessage};
+
+    let msg = crate::update::config::settings_reload_message(Ok(reloaded_settings(vec![
+        TomlSection::Settings,
+        TomlSection::Visualizer,
+    ])));
+
+    let Message::Toast(ToastMessage::PushThen(toast, next)) = msg else {
+        panic!("malformed sections must toast before applying, got {msg:?}");
+    };
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert!(
+        toast.message.contains("[settings]") && toast.message.contains("[visualizer]"),
+        "the toast names each skipped section: {}",
+        toast.message
+    );
+    assert!(matches!(*next, Message::SettingsReloadDataLoaded(..)));
+}
+
+#[test]
+fn clean_hot_reload_applies_without_a_toast() {
+    let msg = crate::update::config::settings_reload_message(Ok(reloaded_settings(Vec::new())));
+    assert!(matches!(
+        msg,
+        crate::app_message::Message::SettingsReloadDataLoaded(..)
+    ));
+}
