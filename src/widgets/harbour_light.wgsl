@@ -22,7 +22,7 @@ struct Scene {
     boat: vec4<f32>,
     // moon x (0..1), height (Y), radius (Y units), breath (0 = no moon)
     moon: vec4<f32>,
-    // star count, unused x3
+    // star count, glow count, bubble count, unused
     sky: vec4<f32>,
     bg: vec4<f32>,
     text: vec4<f32>,
@@ -34,6 +34,10 @@ struct Scene {
     back: array<vec4<f32>, 32>,
     // x (0..1), height (Y), radius (Y units; negative = a sparkle), alpha
     stars: array<vec4<f32>, 64>,
+    // x (0..1), height (Y), radius (Y units), intensity (< 0 = bioluminescent)
+    glows: array<vec4<f32>, 48>,
+    // x (0..1), height (Y), radius (Y units), alpha
+    bubbles: array<vec4<f32>, 32>,
 };
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -344,8 +348,8 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         let hang = exp(-d / len) * rays * fold * senv * (0.55 + 0.6 * lit);
         let hpos_w = clamp(d / 0.3, 0.0, 1.0);
         let wc = ramp(0.85 - 0.6 * hpos_w);
-        water += wc * clamp(hang, 0.0, 1.0) * 0.36;
-        water += wc * exp(-d / 0.08) * fold * senv * 0.06;
+        water += wc * clamp(hang, 0.0, 1.0) * 0.14;
+        water += wc * exp(-d / 0.06) * fold * senv * 0.025;
 
         // Glowing plankton (fine motes + a few nearer ones) and two
         // luminous currents winding through mid-water.
@@ -394,7 +398,40 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     // glow, patchy along its length and brightest on edge-on folds.
     let r2s = vnoise(vec2<f32>(u * 256.0 + q2 * 15.0, 7.0 - q1 * 0.9));
     let arc = (exp(-abs(d0) / 0.0025) * 0.8 + exp(-abs(d0) / 0.012) * 0.25) * (0.6 + 0.4 * r2s);
-    col += mix(lc, text, 0.2) * clamp(arc * fold * senv, 0.0, 1.0) * 0.38;
+    col += mix(lc, text, 0.2) * clamp(arc * fold * senv, 0.0, 1.0) * 0.16;
+
+    // Glow points from the CPU: notes and the anchor's glint in
+    // starlight, kelp beads in bioluminescence.
+    let bio_c = ramp(0.7);
+    let ng = min(u32(scene.sky.y), 48u);
+    for (var i = 0u; i < ng; i++) {
+        let g = scene.glows[i];
+        let gv = vec2<f32>((u - g.x) * aspect, y - g.y);
+        if (max(abs(gv.x), abs(gv.y)) > g.z * 6.0) {
+            continue;
+        }
+        let gd = length(gv);
+        let v = exp(-gd * gd / (g.z * g.z * 0.25)) * 0.55 + exp(-gd / (g.z * 1.2)) * 0.22;
+        col += select(starc, bio_c, g.w < 0.0) * v * abs(g.w);
+    }
+
+    // Bubbles: glassy spheres, a lit rim and a small highlight, the inside
+    // nearly clear.
+    let nb = min(u32(scene.sky.z), 32u);
+    for (var i = 0u; i < nb; i++) {
+        let b = scene.bubbles[i];
+        let bv = vec2<f32>((u - b.x) * aspect, y - b.y);
+        let r = b.z;
+        if (max(abs(bv.x), abs(bv.y)) > r * 2.5) {
+            continue;
+        }
+        let bd = length(bv);
+        let edge = 1.5 / h;
+        let inside = ss(r + edge, r - edge, bd);
+        let rim = ss(r * 0.55, r, bd) * inside;
+        let spec = exp(-dot(bv - vec2<f32>(-0.35, 0.35) * r, bv - vec2<f32>(-0.35, 0.35) * r) / (r * r * 0.06));
+        col += starc * (rim * 0.5 + spec * 0.7 + exp(-max(bd - r, 0.0) / (r * 0.6)) * 0.05) * b.w;
+    }
 
     // A soft glow behind the hull so the dark boat stands out against the
     // night (the boat sprite draws over it).

@@ -723,10 +723,27 @@ const ANCHOR_STROKE_WIDTH_SVG_UNITS: f32 = 1.4;
 /// swap, or icon-set change ([`set_icon_set`](crate::theme::set_icon_set) bumps
 /// the generation) rebuilds the handle on the next render. The boat renders the
 /// handle with no color override, so the baked color is what shows.
-pub(crate) fn themed_anchor_svg() -> String {
+///
+/// The lit (night Trawl, [`BoatPaint::Lit`]) anchor is moonlit metal: the
+/// night silhouette lifted halfway to the aurora's light, so it reads on
+/// the dark seabed.
+pub(crate) fn themed_anchor_svg_painted(paint: BoatPaint) -> String {
     let viz = crate::theme::get_visualizer_colors_dark();
-    let stroke = viz.border_color;
-    let opacity = viz.border_opacity;
+    let (stroke, opacity) = match paint {
+        BoatPaint::Plain => (viz.border_color.clone(), viz.border_opacity),
+        BoatPaint::Lit => {
+            let ink = crate::widgets::harbour_light::NightInk::from_theme();
+            let (a, b) = (ink.silhouette, ink.rim);
+            (
+                color_to_hex(Color::from_rgb(
+                    a.r + (b.r - a.r) * 0.32,
+                    a.g + (b.g - a.g) * 0.32,
+                    a.b + (b.b - a.b) * 0.32,
+                )),
+                1.0,
+            )
+        }
+    };
 
     if crate::theme::icon_set() == IconSet::Phosphor {
         // The Phosphor anchor is a filled glyph with no open stroke to recolor,
@@ -1306,7 +1323,7 @@ mod tests {
         let orig = crate::theme::icon_set();
         crate::theme::set_icon_set(IconSet::Lucide);
         let viz = crate::theme::get_visualizer_colors_dark();
-        let out = themed_anchor_svg();
+        let out = themed_anchor_svg_painted(BoatPaint::Plain);
         crate::theme::set_icon_set(orig);
         assert!(
             out.contains(&format!("stroke=\"{}\"", viz.border_color)),
@@ -1437,7 +1454,7 @@ mod tests {
         let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let orig = crate::theme::icon_set();
         crate::theme::set_icon_set(IconSet::Lucide);
-        let out = themed_anchor_svg();
+        let out = themed_anchor_svg_painted(BoatPaint::Plain);
         crate::theme::set_icon_set(orig);
         assert!(
             out.contains("M12 6v16"),
@@ -1464,7 +1481,7 @@ mod tests {
         let orig = crate::theme::icon_set();
         crate::theme::set_icon_set(IconSet::Phosphor);
         let viz = crate::theme::get_visualizer_colors_dark();
-        let out = themed_anchor_svg();
+        let out = themed_anchor_svg_painted(BoatPaint::Plain);
         crate::theme::set_icon_set(orig);
         assert!(
             out.contains(&format!(

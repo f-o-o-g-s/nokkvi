@@ -28,6 +28,10 @@ const LINE_VEC4S: usize = LINE_SAMPLES / 4;
 const _: () = assert!(LINE_SAMPLES.is_multiple_of(4));
 /// Star slots in the uniform; the constellation must fit.
 pub(crate) const MAX_STARS: usize = 64;
+/// Glow-point slots (kelp beads, notes, the anchor's glint).
+pub(crate) const MAX_GLOWS: usize = 48;
+/// Bubble slots (the anchor's stream and the kelp seeps).
+pub(crate) const MAX_BUBBLES: usize = 32;
 
 /// What the scene hands the shader each frame.
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +53,51 @@ pub(crate) struct SeaLight {
     /// The moon's centre (x across, height above bottom), radius (panel
     /// heights) and breath, for its bloom; `None` when the moon is hidden.
     pub moon: Option<[f32; 4]>,
+    /// Soft glow points: x, height, radius (panel heights), intensity; a
+    /// positive intensity glows starlight, a negative one bioluminescent.
+    pub glows: [[f32; 4]; MAX_GLOWS],
+    pub glow_count: usize,
+    /// Bubbles drawn as glassy spheres: x, height, radius, alpha.
+    pub bubbles: [[f32; 4]; MAX_BUBBLES],
+    pub bubble_count: usize,
+}
+
+/// The night scene's colours for the canvas furniture drawn over the
+/// shader, from the same theme-only palette and the same ramp positions
+/// `harbour_light.wgsl` lights the scene with (`lc` = ramp 0.85, `bio` =
+/// ramp 0.7 for the shader's beads, `starc` = mix(lc, text, 0.6)), so a kelp edge, a fish's back
+/// and the water around them are lit by one light.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NightInk {
+    /// Underwater silhouettes: the night background, barely lifted by the
+    /// light.
+    pub silhouette: iced::Color,
+    /// The aurora's light catching an edge (`lc`).
+    pub rim: iced::Color,
+    /// Starlight (`starc`): notes, highlights.
+    pub starlight: iced::Color,
+}
+
+impl NightInk {
+    pub(crate) fn from_theme() -> Self {
+        let p = PresetPalette::theme_own();
+        let mix = |a: [f32; 3], b: [f32; 3], t: f32| {
+            iced::Color::from_rgb(
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            )
+        };
+        let lc = p.ramp_at(0.85);
+        Self {
+            // From the background and the light only: the ramp's ends are
+            // theme-ordered (some run light to dark), so no ramp end is
+            // assumed dark.
+            silhouette: mix(p.bg.map(|c| c * 0.7), lc, 0.07),
+            rim: mix(lc, lc, 1.0),
+            starlight: mix(lc, p.text, 0.6),
+        }
+    }
 }
 
 /// The GPU uniform. Mirrors `struct Scene` in `harbour_light.wgsl` field for
@@ -64,7 +113,7 @@ struct SceneUniform {
     boat: [f32; 4],
     /// Moon x, height, radius (panel heights), breath (0 = no moon).
     moon: [f32; 4],
-    /// Star count, unused ×3.
+    /// Star, glow and bubble counts, unused.
     sky: [f32; 4],
     bg: [f32; 4],
     text: [f32; 4],
@@ -74,6 +123,8 @@ struct SceneUniform {
     front: [[f32; 4]; LINE_VEC4S],
     back: [[f32; 4]; LINE_VEC4S],
     stars: [[f32; 4]; MAX_STARS],
+    glows: [[f32; 4]; MAX_GLOWS],
+    bubbles: [[f32; 4]; MAX_BUBBLES],
 }
 
 // SAFETY: `repr(C)`, every field an `f32` array, no padding (all 16-byte
@@ -81,8 +132,10 @@ struct SceneUniform {
 unsafe impl bytemuck::Pod for SceneUniform {}
 unsafe impl bytemuck::Zeroable for SceneUniform {}
 
-const _: () =
-    assert!(std::mem::size_of::<SceneUniform>() == 16 * (8 + 6 + 2 * LINE_VEC4S + MAX_STARS));
+const _: () = assert!(
+    std::mem::size_of::<SceneUniform>()
+        == 16 * (8 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
+);
 
 const WGSL: &str = include_str!("harbour_light.wgsl");
 
@@ -145,7 +198,12 @@ impl<Message> shader::Program<Message> for LightProgram {
                 frame: [w, h, self.light.time, 0.0],
                 boat,
                 moon: self.light.moon.unwrap_or([0.0; 4]),
-                sky: [self.light.star_count.min(MAX_STARS) as f32, 0.0, 0.0, 0.0],
+                sky: [
+                    self.light.star_count.min(MAX_STARS) as f32,
+                    self.light.glow_count.min(MAX_GLOWS) as f32,
+                    self.light.bubble_count.min(MAX_BUBBLES) as f32,
+                    0.0,
+                ],
                 bg: rgba(p.bg),
                 text: rgba(p.text),
                 highlight: rgba(p.highlight),
@@ -154,6 +212,8 @@ impl<Message> shader::Program<Message> for LightProgram {
                 front: pack(&self.light.front),
                 back: pack(&self.light.back),
                 stars: self.light.stars,
+                glows: self.light.glows,
+                bubbles: self.light.bubbles,
             },
         }
     }
@@ -332,7 +392,9 @@ mod tests {
                 "ramp",
                 "front",
                 "back",
-                "stars"
+                "stars",
+                "glows",
+                "bubbles"
             ],
             "WGSL `Scene` fields drifted from `SceneUniform`"
         );

@@ -691,7 +691,7 @@ impl BoatState {
         if let Some(h) = &self.anchor_handle {
             return h.clone();
         }
-        let bytes = crate::embedded_svg::themed_anchor_svg().into_bytes();
+        let bytes = crate::embedded_svg::themed_anchor_svg_painted(self.paint).into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.anchor_handle = Some(h.clone());
         h

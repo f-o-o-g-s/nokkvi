@@ -527,7 +527,7 @@ pub(crate) fn icon_set() -> IconSet {
 ///
 /// On an actual change, bumps `theme_generation()` so theme-derived caches
 /// that depend on the set rebuild — notably the boat's anchor sprite, which
-/// `themed_anchor_svg()` renders as the Phosphor or Lucide anchor. Guarded by a
+/// `themed_anchor_svg_painted()` renders as the Phosphor or Lucide anchor. Guarded by a
 /// swap-and-compare so the unconditional `set_icon_set` on every
 /// `PlayerSettingsLoaded` doesn't churn caches when the value is unchanged.
 #[inline]

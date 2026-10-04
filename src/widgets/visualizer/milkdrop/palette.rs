@@ -110,6 +110,15 @@ impl PresetPalette {
         }
     }
 
+    /// The ramp at `x` (0 = dark end, 1 = light end), blended between its
+    /// six stops: the same lookup the shaders' `ramp()` does.
+    pub(crate) fn ramp_at(&self, x: f32) -> Rgb {
+        let s = x.clamp(0.0, 1.0) * 5.0;
+        let i = (s.floor() as usize).min(4);
+        let f = s - i as f32;
+        std::array::from_fn(|c| self.ramp[i][c] + (self.ramp[i + 1][c] - self.ramp[i][c]) * f)
+    }
+
     /// Whether a preset built with `self` looks different under `now`: any
     /// colour changed, or the light/dark flag when the preset reads it.
     pub(crate) fn recolours(&self, now: &Self, uses_light: bool) -> bool {

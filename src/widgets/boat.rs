@@ -291,7 +291,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     if state.anchor_remaining_secs > 0.0 || trawl_anchor_x.is_some() {
         let anchor_x_ratio = trawl_anchor_x.unwrap_or(state.anchor_drop_x);
         let anchor_handle = state.cached_anchor_handle().unwrap_or_else(|| {
-            let bytes = crate::embedded_svg::themed_anchor_svg().into_bytes();
+            let bytes = crate::embedded_svg::themed_anchor_svg_painted(state.paint).into_bytes();
             svg::Handle::from_memory(bytes)
         });
 
@@ -331,6 +331,12 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                 ..rope_color
             },
             stroke_width: rope_stroke_for(boat_h),
+            // The lit scene's rope catches the aurora: a faint light line
+            // under the ink, so it reads against the dark water.
+            sheen: (state.paint == crate::embedded_svg::BoatPaint::Lit).then(|| Color {
+                a: 0.28 * opacity,
+                ..crate::widgets::harbour_light::NightInk::from_theme().rim
+            }),
         };
         // Rope first (deepest), then the anchor above it — the rope's tip
         // tucks behind the anchor's ring.
@@ -397,6 +403,8 @@ struct RopeCanvas {
     sway: f32,
     stroke_color: Color,
     stroke_width: f32,
+    /// A light line drawn wider under the ink (the lit scene), if any.
+    sheen: Option<Color>,
 }
 
 impl<Message> canvas::Program<Message> for RopeCanvas {
@@ -434,6 +442,15 @@ impl<Message> canvas::Program<Message> for RopeCanvas {
             builder.quadratic_curve_to(Point::new(mid_x, mid_y), self.end);
         });
 
+        if let Some(sheen) = self.sheen {
+            frame.stroke(
+                &path,
+                canvas::Stroke::default()
+                    .with_color(sheen)
+                    .with_width(self.stroke_width + 2.0)
+                    .with_line_cap(canvas::LineCap::Round),
+            );
+        }
         frame.stroke(
             &path,
             canvas::Stroke::default()
