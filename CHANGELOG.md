@@ -10,13 +10,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.22.1 — 2026-10-04
+
+### Fixed
+
 - Covers in muted greens, blues, plums and reds, like a dark green cloth binding, now color the accent instead of turning grey.
 - Faintly tinted covers, such as sepia photos or cream paper, now give a matching faint accent instead of grey.
 - A black cover whose only color is a thin rainbow now takes the rainbow's colors.
 - A large muted area, like a dark olive background, now joins the visualizer gradient beside the cover's vivid accent color.
 - On dark themes, bars over a bright cover now use deep cover colors where those stay visible, instead of near-white pastels.
-
-### Removed
 
 ## v0.22.0 — 2026-10-04
 
