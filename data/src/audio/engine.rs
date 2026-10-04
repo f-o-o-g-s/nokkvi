@@ -1238,6 +1238,23 @@ async fn try_gapless_swap(
     }
 }
 
+/// The decode-loop state [`inject_transition_gap`] reads, by name.
+/// `gap_offset_ms` and `skip_fade_pending` are both `&Arc<AtomicU64>`, and
+/// swapping them would read the idle skip latch (`NO_SKIP_FADE_PENDING`) as a
+/// gap length, so they never travel as positional arguments.
+struct TransitionGap<'a> {
+    renderer: &'a PlMutex<AudioRenderer>,
+    /// The pending per-transition gap (ms), consumed one-shot.
+    gap_offset_ms: &'a Arc<AtomicU64>,
+    /// The skip-fade plan window latch; equal to the live generation while open.
+    skip_fade_pending: &'a Arc<AtomicU64>,
+    source_generation: &'a SourceGeneration,
+    decode_gen: &'a DecodeLoopHandle,
+    my_gen: u64,
+    frame_rate: u32,
+    consumed_notify: &'a Arc<Notify>,
+}
+
 /// M8 positive "Gap / Overlap Trim": at the outgoing decoder's EOF, write the
 /// pending per-transition gap into the primary ring as silence, so exactly
 /// `gap_offset_ms` of quiet sits between the outgoing's last sample and
@@ -1257,20 +1274,17 @@ async fn try_gapless_swap(
 /// `write_samples`), dropped before every await; the write-retry wait mirrors
 /// the decode loop's `consumed_notify` pattern and re-checks the loop
 /// generation so a superseding action aborts the injection mid-way.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "decode-loop helper threading the loop's own captured channels; bundling them into a one-off struct would just rename the call site"
-)]
-async fn inject_transition_gap(
-    renderer: &PlMutex<AudioRenderer>,
-    gap_offset_ms: &Arc<AtomicU64>,
-    skip_fade_pending: &Arc<AtomicU64>,
-    source_generation: &SourceGeneration,
-    decode_gen: &DecodeLoopHandle,
-    my_gen: u64,
-    frame_rate: u32,
-    consumed_notify: &Arc<Notify>,
-) {
+async fn inject_transition_gap(gap: TransitionGap<'_>) {
+    let TransitionGap {
+        renderer,
+        gap_offset_ms,
+        skip_fade_pending,
+        source_generation,
+        decode_gen,
+        my_gen,
+        frame_rate,
+        consumed_notify,
+    } = gap;
     // One-shot consume FIRST: whichever way this EOF resolves, the pending
     // value described exactly this transition.
     let gap_ms = gap_offset_ms.swap(0, Ordering::AcqRel);
@@ -2141,16 +2155,16 @@ impl CustomAudioEngine {
                     // gate / fresh load by the same amount). Stands down
                     // when a crossfade or a skip-fade plan owns the
                     // transition.
-                    inject_transition_gap(
-                        &renderer,
-                        &gap_offset_ms,
-                        &skip_fade_pending,
-                        &source_generation,
-                        &decode_gen,
+                    inject_transition_gap(TransitionGap {
+                        renderer: &renderer,
+                        gap_offset_ms: &gap_offset_ms,
+                        skip_fade_pending: &skip_fade_pending,
+                        source_generation: &source_generation,
+                        decode_gen: &decode_gen,
                         my_gen,
                         frame_rate,
-                        &consumed_notify,
-                    )
+                        consumed_notify: &consumed_notify,
+                    })
                     .await;
 
                     let swap_outcome = try_gapless_swap(
@@ -5353,16 +5367,16 @@ mod tests {
         let my_gen = decode_gen.current();
         let notify = Arc::new(Notify::new());
 
-        inject_transition_gap(
-            &engine.renderer,
-            &gap,
-            &skip,
-            &source_generation,
-            &decode_gen,
+        inject_transition_gap(TransitionGap {
+            renderer: &engine.renderer,
+            gap_offset_ms: &gap,
+            skip_fade_pending: &skip,
+            source_generation: &source_generation,
+            decode_gen: &decode_gen,
             my_gen,
-            96_000, // 48 kHz stereo
-            &notify,
-        )
+            frame_rate: 96_000, // 48 kHz stereo
+            consumed_notify: &notify,
+        })
         .await;
 
         assert_eq!(
@@ -5395,16 +5409,16 @@ mod tests {
         assert!(engine.renderer.lock().is_crossfade_armed());
         let gap = Arc::new(AtomicU64::new(500));
         let skip = Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING));
-        inject_transition_gap(
-            &engine.renderer,
-            &gap,
-            &skip,
-            &source_generation,
-            &decode_gen,
+        inject_transition_gap(TransitionGap {
+            renderer: &engine.renderer,
+            gap_offset_ms: &gap,
+            skip_fade_pending: &skip,
+            source_generation: &source_generation,
+            decode_gen: &decode_gen,
             my_gen,
-            96_000,
-            &notify,
-        )
+            frame_rate: 96_000,
+            consumed_notify: &notify,
+        })
         .await;
         assert_eq!(
             engine.renderer.lock().buffer_count(),
@@ -5417,16 +5431,16 @@ mod tests {
         engine.renderer.lock().disarm_crossfade();
         let gap = Arc::new(AtomicU64::new(500));
         let skip = Arc::new(AtomicU64::new(source_generation.current()));
-        inject_transition_gap(
-            &engine.renderer,
-            &gap,
-            &skip,
-            &source_generation,
-            &decode_gen,
+        inject_transition_gap(TransitionGap {
+            renderer: &engine.renderer,
+            gap_offset_ms: &gap,
+            skip_fade_pending: &skip,
+            source_generation: &source_generation,
+            decode_gen: &decode_gen,
             my_gen,
-            96_000,
-            &notify,
-        )
+            frame_rate: 96_000,
+            consumed_notify: &notify,
+        })
         .await;
         assert_eq!(
             engine.renderer.lock().buffer_count(),
