@@ -155,7 +155,7 @@ impl Nokkvi {
         self.ensure_browsing_panel_on_similar();
 
         // Bump generation + set loading
-        self.similar_songs_generation += 1;
+        self.similar_songs_generation = self.similar_songs_generation.wrapping_add(1);
         let generation = self.similar_songs_generation;
         self.similar_songs = Some(SimilarSongsState {
             songs: Vec::new(),

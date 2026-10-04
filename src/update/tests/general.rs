@@ -809,7 +809,11 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.library.albums.is_empty(), "library albums reset");
     assert!(app.library.artists.is_empty(), "library artists reset");
     assert!(app.similar_songs.is_none());
-    assert_eq!(app.similar_songs_generation, 0);
+    assert_eq!(
+        app.similar_songs_generation, 8,
+        "similar generation carries forward bumped (seeded 7) — zeroing it \
+         would let a pre-logout in-flight fetch match a fresh post-login load"
+    );
     assert!(app.harbour.shelves_empty(), "harbour shelves reset");
     assert!(app.harbour.search_query.is_empty(), "harbour query reset");
     assert_eq!(

@@ -1616,7 +1616,8 @@ impl Nokkvi {
     /// - **Core session identity**: app_service, stored_session,
     ///   should_auto_login, screen.
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
-    ///   similar_songs(+generation), active_playlist_info, playlist_editor,
+    ///   similar_songs (+similar_songs_generation carried forward bumped),
+    ///   active_playlist_info, playlist_editor,
     ///   server_version, last_queue_current_index,
     ///   pending_expand (whole `PendingExpandState`), roulette,
     ///   trawl_crate (+trawl_search_generation carried forward bumped —
@@ -1769,7 +1770,10 @@ impl Nokkvi {
         // re-login. Default rebuilds the LRUs at their declared capacities.
         self.artwork = crate::state::ArtworkState::default();
         self.similar_songs = None;
-        self.similar_songs_generation = 0;
+        // Carried forward (bumped), never zeroed: a pre-logout Find Similar
+        // still in flight holds a captured generation that a restarted
+        // counter would re-mint on the next session's first request.
+        self.similar_songs_generation = self.similar_songs_generation.wrapping_add(1);
         // Harbour shelves + search results are keyed on the prior server's IDs
         // — drop them, but carry the stale-drop generations FORWARD (bumped)
         // instead of zeroing them: iced Tasks aren't cancelled by logout, so a

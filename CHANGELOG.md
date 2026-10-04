@@ -71,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - After clicking a song or album, Enter now follows the Enter Behavior setting instead of always replacing the queue with it.
 - With an album or artist expanded, Enter on an album or artist row below it now plays that row instead of a different one.
 - Below an expanded playlist, the artwork panel now loads the collage of the playlist in focus instead of another playlist's.
+- A Find Similar still loading at logout can no longer replace the results of one started after logging back in.
 
 ### Removed
 
