@@ -371,7 +371,7 @@ impl ProcessingState {
 ///   forgets to thread them through.
 #[expect(
     clippy::too_many_arguments,
-    reason = "one bar's peak step; the per-bar loop passes the peak tunables"
+    reason = "one bar's peak step; tick()'s per-bar loop passes locals named like each tunable, the tests pin every slot with a distinct value, and a crossed pair only misdraws a peak cap"
 )]
 fn apply_peak_decay_step(
     display: &mut DisplayBuffers,

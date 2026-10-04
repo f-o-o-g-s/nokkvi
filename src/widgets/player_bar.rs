@@ -1076,7 +1076,7 @@ fn mode_toggle_button<'a>(
 /// argument rather than reading the theme atomic) so it stays unit-testable.
 #[expect(
     clippy::too_many_arguments,
-    reason = "one strip's display inputs; pure, so the tests pass each one directly"
+    reason = "one strip's display inputs from a single caller; pure, so the tests pass each one directly, and a crossed &str only mislabels the capsule end-caps"
 )]
 fn capsule_scrub_labels(
     elapsed: &str,

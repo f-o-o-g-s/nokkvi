@@ -549,7 +549,7 @@ impl FakeoutPattern {
 /// 3. Terminal keyframe at `target_idx` (duration 0).
 #[expect(
     clippy::too_many_arguments,
-    reason = "a pure keyframe builder; the tests call it with each input pinned"
+    reason = "a pure keyframe builder with one caller, which passes locals named like each usize; the handler tests pin the landing on the target and the per-step size"
 )]
 fn build_decel_keyframes(
     cruise_end_offset: usize,
