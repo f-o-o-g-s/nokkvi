@@ -182,6 +182,20 @@ fn playlist_entry_view<'a, Message: Clone + 'a>(
     }
 }
 
+/// The artwork snapshots a playlist row reads, by name: all three are
+/// `&HashMap<String, Handle>`, but `album_art` is keyed by album id and the
+/// other two by playlist id, so crossed positional arguments would compile and
+/// show the wrong cover or none.
+#[derive(Clone, Copy)]
+struct PlaylistRowArtwork<'a> {
+    /// First-album mini per playlist id (the fallback single cover).
+    playlist_artwork: &'a HashMap<String, image::Handle>,
+    /// 80px album minis by album id, for the 2×2 quad.
+    album_art: &'a HashMap<String, image::Handle>,
+    /// User-uploaded custom cover minis by playlist id.
+    playlist_custom_art: &'a HashMap<String, image::Handle>,
+}
+
 impl PlaylistsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: PlaylistsViewData<'a>) -> Element<'a, PlaylistsMessage> {
@@ -415,9 +429,11 @@ impl PlaylistsPage {
                     let row = self.render_playlist_row(
                         playlist,
                         &ctx,
-                        playlist_artwork,
-                        album_art,
-                        playlist_custom_art,
+                        PlaylistRowArtwork {
+                            playlist_artwork,
+                            album_art,
+                            playlist_custom_art,
+                        },
                         data.stable_viewport,
                         open_menu_for_rows,
                         data.session_user_id,
@@ -631,21 +647,20 @@ impl PlaylistsPage {
     }
 
     /// Render a parent playlist row in the slot list
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "three artwork maps plus the row context: borrowed snapshots with distinct types"
-    )]
     fn render_playlist_row<'a>(
         &self,
         playlist: &PlaylistUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
-        playlist_artwork: &'a HashMap<String, image::Handle>,
-        album_art: &'a HashMap<String, image::Handle>,
-        playlist_custom_art: &'a HashMap<String, image::Handle>,
+        artwork: PlaylistRowArtwork<'a>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
         session_user_id: &str,
     ) -> Element<'a, PlaylistsMessage> {
+        let PlaylistRowArtwork {
+            playlist_artwork,
+            album_art,
+            playlist_custom_art,
+        } = artwork;
         use crate::widgets::slot_list::{SLOT_LIST_SLOT_PADDING, slot_list_index_column};
 
         let is_expanded = self.expansion.is_expanded_parent(&playlist.id);
