@@ -1,19 +1,17 @@
-//! Surfing-boat overlay handler — see `widgets/boat.rs` for the physics
-//! model and pure helpers.
+//! Surfing-boat physics, stepped once per frame by
+//! [`handle_frame_tick`](super::frame::handle_frame_tick) — see
+//! `widgets/boat.rs` for the physics model and pure helpers.
 //!
-//! Per-frame: derive visibility, then run one physics step that integrates
-//! the boat's position from the live bar buffer. Bails cheaply when not in
-//! lines mode so the always-on `iced::window::frames()` subscription isn't
-//! expensive.
+//! Two boats: the Lines boat ([`step_boat`]) rides the live visualizer wave
+//! and bails cheaply unless Lines and its boat are on; the Harbour Trawl
+//! longship ([`step_harbour_scene`]) sails a procedural sea.
 
 use std::time::Instant;
 
-use iced::Task;
 use nokkvi_data::types::player_settings::VisualizationMode;
 
 use crate::{
     Nokkvi,
-    app_message::Message,
     visualizer_config::{LinesStyle, VisualizerPlacement},
     widgets::{
         boat::{self, MusicSignals},
@@ -21,65 +19,10 @@ use crate::{
     },
 };
 
-/// Handle a per-frame boat tick. Visibility is derived; physics step runs
-/// against the live bar buffer. When hidden, position/velocity/phase are
-/// preserved so the boat resumes mid-stroke when re-shown.
-pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> {
-    // Theater Mode's chrome flips here, per frame, before every early-out.
-    crate::update::theater::tick(app, now);
-
-    // Drive the now-playing breathing glow off this per-frame frame tick so it
-    // stays smooth at any display refresh rate (a fixed-interval timer steps
-    // visibly on high-Hz displays). Runs BEFORE the boat's early-outs so the
-    // glow animates regardless of visualizer mode; frozen while paused/stopped.
-    if app.playback.playing && !app.playback.paused {
-        let phase = (now.duration_since(app.glow_epoch).as_secs_f32()
-            / crate::widgets::slot_list::GLOW_PERIOD_SECS)
-            .fract();
-        crate::widgets::slot_list::set_now_playing_phase(phase);
-    }
-
-    // The Harbour Trawl scene ticks BEFORE the Lines boat's early-outs: its
-    // sea is procedural (a pure function of a phase this handler advances),
-    // so it is independent of the visualizer mode, the `lines.boat` toggle,
-    // AND the audio-pause freeze below — the scene keeps breathing while the
-    // player is paused or stopped.
-    step_harbour_scene(app, now);
-
-    // Lyrics column center — the SINGLE publisher, for both kinds of sheet.
-    // Runs BEFORE the boat's early-outs (lyrics must animate whatever the
-    // visualizer mode) and with NO pause gate.
-    //
-    // Synced: ease toward the active line at display refresh, smoothing the
-    // 100 ms position ticks into crossfade-tier motion. An in-flight glide
-    // settles to its target even while paused (the retarget only fires on real
-    // line changes, which don't happen while paused).
-    //
-    // Plain: a pure function of the last tick's position, the track duration,
-    // the line count and the user's wheel offset — so it holds still while
-    // paused and jumps whole on a seek or a wheel notch.
-    if app.settings.lyrics_enabled && app.lyrics.matched_song_id.is_some() {
-        let pos = if app.lyrics.doc.synced {
-            crate::widgets::lyrics_viewport::eased_center(
-                app.lyrics.scroll_from,
-                app.lyrics.scroll_to,
-                app.lyrics.anim_start,
-                app.lyrics.anim_duration_ms,
-                now,
-            )
-        } else {
-            crate::widgets::lyrics_viewport::drift_center(
-                app.lyrics.position_ms,
-                // The tick reports whole seconds; 0 means unknown, which
-                // `drift_center` parks on rather than dividing by.
-                app.playback.duration.saturating_mul(1000),
-                app.lyrics.doc.lines.len(),
-                app.lyrics.drift_offset,
-            )
-        };
-        crate::widgets::lyrics_viewport::set_lyrics_center(pos);
-    }
-
+/// One physics step for the Lines boat against the live bar buffer.
+/// Visibility is derived; when hidden, position/velocity/phase are preserved
+/// so the boat resumes mid-stroke when re-shown.
+pub(crate) fn step_boat(app: &mut Nokkvi, now: Instant) {
     // Read mode + config snapshot once per tick. The "visualizer enabled"
     // check is `settings.visualization_mode != VisualizationMode::Off` — that's
     // what gates the shader element in the app_view visualizer-element build
@@ -106,7 +49,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         // Drop the dt baseline so the next visible frame doesn't see a stale gap.
         app.boat.visible = false;
         app.boat.last_tick = None;
-        return Task::none();
+        return;
     }
 
     // Audio pause: the FFT thread's sample buffer drains and the visualizer
@@ -129,7 +72,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         let facing = app.boat.facing;
         let render_inverted = lines_mirror && app.boat.inverted;
         let _ = app.boat.cache_handle_for(tilt, facing, render_inverted);
-        return Task::none();
+        return;
     }
 
     let dt = match app.boat.last_tick {
@@ -239,8 +182,6 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     if app.boat.anchor_remaining_secs > 0.0 {
         let _ = app.boat.cache_anchor_handle();
     }
-
-    Task::none()
 }
 
 /// Per-frame step for the Harbour Trawl panel's trawling-longship scene.
@@ -263,7 +204,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
 ///   the thematic OPPOSITE of trawling, so both its fields are pinned BEFORE
 ///   `step()` each tick — pinning after would let the fire-check inside the
 ///   step land first and stall the boat for a frame every 45–120 s.
-fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
+pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     let on_harbour = app.screen == crate::Screen::Home
         && app.current_view == crate::View::Harbour
         && app.harbour.search_query.trim().is_empty();

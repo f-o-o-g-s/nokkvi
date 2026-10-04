@@ -106,7 +106,7 @@ impl LyricsState {
     ///
     /// Load-bearing at every song change. A new sheet's pre-roll fires no
     /// retarget (`active_index` is `None` on both sides of the compare), so a
-    /// surviving `scroll_to` would have the boat tick keep publishing the
+    /// surviving `scroll_to` would have the frame tick keep publishing the
     /// PREVIOUS track's last line — which `draw` ignores for the live column
     /// but `park_outgoing` would snapshot into the next dissolve.
     fn reset_scroll(&mut self) {

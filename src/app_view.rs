@@ -1142,7 +1142,7 @@ impl Nokkvi {
 
             // Visualizer height scales with window (configurable via config.toml, min 80px)
             // Read height_percent from shared config (hot-reloadable). Sizing logic lives
-            // in `widgets::visualizer::visualizer_area_height` so the boat-tick handler
+            // in `widgets::visualizer::visualizer_area_height` so `update::boat::step_boat`
             // can derive the same value without duplicating the curve.
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
@@ -2016,7 +2016,7 @@ impl Nokkvi {
             && self.scrobble.current_song_id.is_some())
         .then(|| {
             // The outgoing sheet's dissolve progress is read continuously here
-            // (the per-frame boat tick redraws); the 100 ms playback tick
+            // (the per-frame tick redraws); the 100 ms playback tick
             // drops the record once it completes.
             let dissolve = self.lyrics.outgoing.as_ref().and_then(|outgoing| {
                 let progress = outgoing.progress(std::time::Instant::now());

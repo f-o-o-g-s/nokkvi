@@ -165,7 +165,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // facing)` on the first visible tick, so by the time we render the
     // matching handle is cached. The fallback rebuilds inline if a render
     // somehow precedes the tick OR if the theme just changed and the next
-    // BoatTick hasn't refreshed the cache yet — in either case we ship a
+    // frame tick hasn't refreshed the cache yet — in either case we ship a
     // fresh-rotation, fresh-color frame rather than a stale one.
     // The cache key tracks `inverted` only when the mirror flag is on —
     // outside mirrored line mode the renderer always draws the upright

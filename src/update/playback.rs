@@ -840,7 +840,7 @@ impl Nokkvi {
             {
                 // BOTH kinds of sheet follow the clock. A synced one needs it
                 // to find its current line; a plain one because the per-frame
-                // boat tick reads it back through `drift_center`. This block
+                // tick reads it back through `drift_center`. This block
                 // is the only writer of `position_ms`.
                 self.lyrics.position_ms = position_ms;
 

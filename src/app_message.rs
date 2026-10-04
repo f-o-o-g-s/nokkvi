@@ -1603,11 +1603,12 @@ pub enum Message {
     /// availability to either hide the window or quit the app.
     WindowCloseRequested(iced::window::Id),
 
-    // --- Surfing-Boat Overlay (lines mode) ---
-    /// Per-frame tick from `iced::window::frames()` driving the boat overlay's
-    /// eased horizontal motion + waveform-height sampling. Cheap when not in
-    /// lines mode — handler bails after the visibility check.
-    BoatTick(std::time::Instant),
+    // --- Per-Frame Tick ---
+    /// Per-frame tick from `iced::window::frames()`, driving everything that
+    /// animates at display refresh (`update::frame::handle_frame_tick`): Theater
+    /// Mode's chrome, the now-playing glow, the Harbour Trawl scene, the lyrics
+    /// column and the Lines boat. Each step is cheap while its feature is idle.
+    FrameTick(std::time::Instant),
 
     // --- Settings Hot-Reload ---
     SettingsConfigReloaded,

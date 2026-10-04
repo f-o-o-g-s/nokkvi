@@ -206,14 +206,14 @@ impl HarbourState {
 pub struct HarbourScene {
     /// The trawling longship — a SEPARATE `BoatState` from the
     /// Lines-visualizer `Nokkvi.boat`, driven by the same per-frame
-    /// `Message::BoatTick` but stepped against a procedural sea
+    /// `Message::FrameTick` but stepped against a procedural sea
     /// (`widgets::harbour_sea::sea_bars`) so it sails with no audio playing.
     /// Ticks only while the Harbour view is showing with an empty search
     /// (`update::boat::step_harbour_scene`); hidden otherwise with position
     /// preserved, mirroring the Lines boat's hide contract.
     pub boat: crate::widgets::boat::BoatState,
     /// Travelling phase of the procedural sea, in `[0, 1)`. Advanced by the
-    /// boat tick at `harbour_sea::SEA_DRIFT_HZ`; wrap-safe because every
+    /// frame tick at `harbour_sea::SEA_DRIFT_HZ`; wrap-safe because every
     /// layer's phase multiplier is an integer (see
     /// `widgets::harbour_sea::sea_bars`).
     pub sea_phase: f32,

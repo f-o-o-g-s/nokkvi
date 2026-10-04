@@ -207,7 +207,7 @@ pub struct QueueViewData<'a> {
     /// no waveform to surf). Rendered regardless of play state by the view
     /// alongside `over_art_visualizer` (frozen in place while paused). Borrows
     /// the live `BoatState`, so its position is
-    /// already driven by the per-frame boat tick. `pub(crate)` because
+    /// already driven by the per-frame tick. `pub(crate)` because
     /// `OverCoverBoat` wraps the crate-private `BoatState`.
     pub(crate) over_art_boat: Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'a>>,
     /// Synced-lyrics layer for the now-playing cover. `Some` only when lyrics

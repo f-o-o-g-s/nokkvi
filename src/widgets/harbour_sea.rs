@@ -17,7 +17,7 @@
 //! this module.
 //!
 //! Everything here is silence-proof by construction: the sea is a pure
-//! function of a phase the boat tick advances, and the physics' presence
+//! function of a phase the frame tick advances, and the physics' presence
 //! cruise is fed a fixed [`HARBOUR_CRUISE_BAR_ENERGY`] instead of live audio,
 //! so the scene breathes identically with the player stopped, paused, or
 //! playing.

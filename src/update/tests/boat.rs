@@ -23,7 +23,7 @@ mod boat_tests {
 
         // Default mode is Bars — boat should stay hidden even with toggle on.
         app.settings.visualization_mode = VisualizationMode::Bars;
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             !app.boat.visible,
             "boat must be hidden in Bars mode regardless of the boat toggle"
@@ -31,7 +31,7 @@ mod boat_tests {
 
         // Switch to Lines — boat should now be visible.
         app.settings.visualization_mode = VisualizationMode::Lines;
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             app.boat.visible,
             "boat must be visible in Lines mode when the toggle is on"
@@ -45,7 +45,7 @@ mod boat_tests {
         // VisualizationMode::Off is what mounts the visualizer at all (see
         // app_view.rs). When Off, the boat must also be hidden.
         app.settings.visualization_mode = VisualizationMode::Off;
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             !app.boat.visible,
             "boat must be hidden when the visualizer is fully off"
@@ -60,7 +60,7 @@ mod boat_tests {
         // the test stays hermetic against config.debug.toml and default flips.
         enable_boat_in_config(&app, false);
         app.settings.visualization_mode = VisualizationMode::Lines;
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             !app.boat.visible,
             "boat must respect the user's `lines.boat` toggle"
@@ -88,7 +88,7 @@ mod boat_tests {
             let mut cfg = app.visualizer_config.write();
             cfg.lines.placement = VisualizerPlacement::BottomBand;
         }
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             app.boat.visible,
             "boat must show when Lines is placed in the bottom band"
@@ -116,7 +116,7 @@ mod boat_tests {
             let mut cfg = app.visualizer_config.write();
             cfg.lines.placement = VisualizerPlacement::OverCover;
         }
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
         assert!(
             app.boat.visible,
             "boat must also show when Lines is drawn over the cover art"
@@ -143,11 +143,11 @@ mod boat_tests {
         app.boat.facing = 1.0;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         let x0 = app.boat.x_ratio;
 
         let t1 = t0 + Duration::from_millis(100);
-        let _ = app.update(Message::BoatTick(t1));
+        let _ = app.update(Message::FrameTick(t1));
         let x1 = app.boat.x_ratio;
 
         assert_ne!(
@@ -166,8 +166,8 @@ mod boat_tests {
         // Tick a couple of times to seat `last_tick`, advance physics,
         // and let the tack countdown decrement.
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(50)));
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(50)));
         let saved_tack = app.boat.secs_until_next_tack;
         let saved_x = app.boat.x_ratio;
         assert!(
@@ -178,7 +178,7 @@ mod boat_tests {
 
         // Switch to Bars — boat hides, physics fields preserved.
         app.settings.visualization_mode = VisualizationMode::Bars;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
         assert!(!app.boat.visible);
         assert_eq!(
             app.boat.secs_until_next_tack, saved_tack,
@@ -196,7 +196,7 @@ mod boat_tests {
         // Back to Lines — state resumes from where it left off (the
         // first re-show tick has dt=0 because last_tick was cleared).
         app.settings.visualization_mode = VisualizationMode::Lines;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(150)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(150)));
         assert!(app.boat.visible);
         assert_eq!(
             app.boat.secs_until_next_tack, saved_tack,
@@ -217,11 +217,11 @@ mod boat_tests {
         app.settings.visualization_mode = VisualizationMode::Lines;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         assert!(app.boat.last_tick.is_some());
 
         app.settings.visualization_mode = VisualizationMode::Off;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(5)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_secs(5)));
         assert!(
             app.boat.last_tick.is_none(),
             "last_tick must be cleared while hidden so re-show starts with dt=0"
@@ -248,13 +248,13 @@ mod boat_tests {
 
         // First tick seats `last_tick`; dt=0 keeps the snapshot intact.
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         let snap = app.boat.clone();
 
         // Pause and tick after a long gap — under the bug the boat would
         // integrate a half-second of sail thrust against an empty bar buffer.
         app.playback.paused = true;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(500)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(500)));
 
         assert_eq!(
             app.boat.x_ratio, snap.x_ratio,
@@ -310,9 +310,9 @@ mod boat_tests {
         app.boat.x_velocity = 0.05;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         let v_after_first = app.boat.x_velocity;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert!(
             app.boat.visible,
@@ -345,17 +345,17 @@ mod boat_tests {
         app.boat.x_velocity = 0.08;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
 
         app.playback.paused = true;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(200)));
         let frozen_x = app.boat.x_ratio;
 
         // Resume. First tick after unpause sees dt=0 (last_tick was cleared);
         // the second tick has a real gap and must mutate position.
         app.playback.paused = false;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(300)));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(400)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(300)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(400)));
 
         assert_ne!(
             app.boat.x_ratio, frozen_x,
@@ -393,7 +393,7 @@ mod harbour_scene_tests {
         app.harbour_scene.boat.last_tick = Some(Instant::now());
         app.harbour_scene.boat.x_ratio = 0.37;
 
-        let _ = app.update(Message::BoatTick(Instant::now()));
+        let _ = app.update(Message::FrameTick(Instant::now()));
 
         assert!(
             !app.harbour_scene.boat.visible,
@@ -420,8 +420,8 @@ mod harbour_scene_tests {
         app.playback.paused = false;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert!(
             app.harbour_scene.boat.visible,
@@ -449,9 +449,9 @@ mod harbour_scene_tests {
         app.harbour_scene.boat.facing = 1.0;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         let x0 = app.harbour_scene.boat.x_ratio;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert_ne!(
             app.harbour_scene.boat.x_ratio, x0,
@@ -470,8 +470,8 @@ mod harbour_scene_tests {
         app.harbour_scene.boat.secs_until_next_anchor = 0.001;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert_eq!(
             app.harbour_scene.boat.anchor_remaining_secs, 0.0,
@@ -495,9 +495,9 @@ mod harbour_scene_tests {
         let mut app = app_on_harbour();
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(200)));
 
         assert!(
             app.harbour_scene.boat.anchor_sway != 0.0,
@@ -514,12 +514,12 @@ mod harbour_scene_tests {
         let mut app = app_on_harbour();
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         assert!(app.harbour_scene.boat.visible);
         let x = app.harbour_scene.boat.x_ratio;
 
         app.harbour.search_query = "abba".to_string();
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert!(
             !app.harbour_scene.boat.visible,
@@ -543,17 +543,17 @@ mod harbour_scene_tests {
         app.harbour_scene.sea_phase = 0.999;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         assert_eq!(
             app.harbour_scene.sea_cycle, 0,
             "no wrap yet — first tick has dt=0"
         );
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
         assert_eq!(
             app.harbour_scene.sea_cycle, 1,
             "the 0.999 → wrap crossing must bump the cycle counter"
         );
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(200)));
         assert_eq!(
             app.harbour_scene.sea_cycle, 1,
             "an ordinary in-cycle tick must NOT bump the counter"
@@ -569,9 +569,9 @@ mod harbour_scene_tests {
         let mut app = app_on_harbour();
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         // 45 s at SEA_DRIFT_HZ 0.05 = 2.25 cycles.
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(45)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_secs(45)));
         assert_eq!(
             app.harbour_scene.sea_cycle, 2,
             "a 2.25-cycle dt must bump the counter exactly twice"
@@ -588,9 +588,9 @@ mod harbour_scene_tests {
         let mut app = app_on_harbour();
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::FrameTick(t0));
         let p0 = app.harbour_scene.sea_phase;
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(200)));
 
         assert_ne!(
             app.harbour_scene.sea_phase, p0,
@@ -613,8 +613,8 @@ mod harbour_scene_tests {
         app.settings.visualization_mode = VisualizationMode::Off;
 
         let t0 = Instant::now();
-        let _ = app.update(Message::BoatTick(t0));
-        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100)));
 
         assert!(
             app.harbour_scene.boat.visible,

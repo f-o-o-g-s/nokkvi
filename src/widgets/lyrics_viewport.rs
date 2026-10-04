@@ -92,7 +92,7 @@ const HALO_INNER_OFFSETS: [(f32, f32); 8] = [
 ];
 const HALO_OUTER_OFFSETS: [(f32, f32); 4] = [(-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0)];
 
-/// Exponential ease-out — the glide curve driven by the per-frame boat tick.
+/// Exponential ease-out — the glide curve driven by the per-frame tick.
 pub(crate) fn ease_out_expo(t: f32) -> f32 {
     if t >= 1.0 {
         1.0
@@ -104,14 +104,14 @@ pub(crate) fn ease_out_expo(t: f32) -> f32 {
 }
 
 /// The column's live center position in slot-index space (e.g. `2.4` = 40 %
-/// of the way from line 2 to line 3), published by the per-frame boat tick and
+/// of the way from line 2 to line 3), published by the per-frame tick and
 /// read in `draw()`. A process-global atomic — deliberately, NOT an
 /// `Instant::now()` self-animation inside `draw()`: publishing off the tick is
 /// what makes the motion assertable as observable state in `test_app` (the
 /// `NOW_PLAYING_PHASE` precedent in `slot_list.rs`). Do not "simplify" away.
 static LYRICS_CENTER_POS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// Publish the eased center (called once per frame by the boat tick).
+/// Publish the eased center (called once per frame by the frame tick).
 pub(crate) fn set_lyrics_center(pos: f32) {
     LYRICS_CENTER_POS.store(pos.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
@@ -196,7 +196,7 @@ pub(crate) fn drift_offset_for(
     wanted - raw_drift(position_ms, duration_ms, line_count)
 }
 
-/// Compute the eased center for a glide (pure — the boat tick feeds it the
+/// Compute the eased center for a glide (pure — the frame tick feeds it the
 /// state fields + `now`, then publishes the result).
 pub(crate) fn eased_center(
     from: f32,
@@ -595,7 +595,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         }
 
         let slot_h = state.slot_height.max(line_height);
-        // The column's center in slot-index space, published by the boat tick
+        // The column's center in slot-index space, published by the frame tick
         // and clamped to THIS doc so a stale value from a previous one (a long
         // plain sheet before a short synced one) can't fling the column.
         //

@@ -37,7 +37,7 @@ pub(crate) const BOAT_WRAP_MARGIN_BOAT_WIDTHS: f32 = 1.75;
 /// drawn over the now-playing cover art instead of the bottom band. The
 /// bottom-band margin is `boat_w · BOAT_WRAP_MARGIN_BOAT_WIDTHS / area_width`,
 /// which needs the panel width; the over-cover panel size is only known at
-/// render time, not in the boat-tick handler. The over-cover boat sizes its
+/// render time, not in `update::boat::step_boat`. The over-cover boat sizes its
 /// sprite off `min(panel_w, panel_h)` (see `boat_overlay`'s `size_basis`), so
 /// `boat_w / panel_w ≤ BOAT_HEIGHT_FRACTION` — bounded regardless of the panel's
 /// aspect (a tall narrow cover can't make the sprite wider than the column).
@@ -544,7 +544,7 @@ pub struct BoatState {
     pub trace_accum: f32,
     pub rng_state: u32,
     /// Half-width of the off-screen wrap margin in `x_ratio` units. Set by
-    /// the boat-tick handler from the current boat sprite width and
+    /// `update::boat::step_boat` from the current boat sprite width and
     /// visualizer area width — see `BOAT_WRAP_MARGIN_BOAT_WIDTHS`. `step()`
     /// wraps `x_ratio` over `[-x_wrap_margin, 1 + x_wrap_margin)`. Default
     /// of `0.0` reproduces the legacy `rem_euclid(1.0)` behavior, which is

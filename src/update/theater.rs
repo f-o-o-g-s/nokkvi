@@ -98,7 +98,7 @@ pub(crate) fn cursor_hidden(state: &TheaterState, now: Instant, menu_open: bool)
     state.active && !menu_open && !activity_recent(state, now)
 }
 
-/// Per-frame step (from the boat tick): flip the chrome when its target
+/// Per-frame step (from the frame tick): flip the chrome when its target
 /// changed, recording the offset it leaves from. The only place the chrome
 /// flips.
 pub(crate) fn tick(app: &mut Nokkvi, now: Instant) {

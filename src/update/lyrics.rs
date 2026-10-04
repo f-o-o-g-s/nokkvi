@@ -216,7 +216,7 @@ impl Nokkvi {
     /// Stores the offset that produces the WANTED center rather than
     /// accumulating the raw delta: clamping at read time would let a long
     /// shove bank hidden overshoot past the end, so the next notch back would
-    /// do nothing. Recomputed from the same inputs the boat tick uses, so the
+    /// do nothing. Recomputed from the same inputs the frame tick uses, so the
     /// sheet lands exactly where the next frame draws it.
     pub(crate) fn handle_lyrics_wheel(&mut self, delta_lines: f32) {
         use crate::widgets::lyrics_viewport::{drift_center, drift_offset_for};

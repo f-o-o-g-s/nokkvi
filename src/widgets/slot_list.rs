@@ -154,7 +154,7 @@ impl SlotListRowContext {
 // ============================================================================
 
 /// Period of one full breath / one shimmer cycle, in seconds. Driven per frame
-/// by the boat frame tick (`update::boat::handle_boat_tick`) so the motion stays
+/// by the frame tick (`update::frame::handle_frame_tick`) so the motion stays
 /// smooth at any display refresh rate. Tune here to change the speed.
 pub(crate) const GLOW_PERIOD_SECS: f32 = 3.4;
 
@@ -185,8 +185,8 @@ const SHIMMER_SWEEP_FRACTION: f32 = 0.45;
 const INNER_GLOW_LIGHT_LIFT: f32 = 0.55;
 const SHIMMER_LIGHT_LIFT: f32 = 0.85;
 
-/// Global breathing/shimmer phase in `0.0..1.0`, written each frame by the boat
-/// frame tick (`update::boat::handle_boat_tick`) while audio is playing, and
+/// Global breathing/shimmer phase in `0.0..1.0`, written each frame by the
+/// frame tick (`update::frame::handle_frame_tick`) while audio is playing, and
 /// read by the now-playing overlays. A process global (like the theme tokens) so
 /// the row builders stay pure functions of `(state, theme, phase)`.
 static NOW_PLAYING_PHASE: AtomicU32 = AtomicU32::new(0);

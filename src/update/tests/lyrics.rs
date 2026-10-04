@@ -620,7 +620,7 @@ fn toggle_lyrics_off_clears_doc() {
 }
 
 // ---------------------------------------------------------------------------
-// Motion (C2): the boat tick publishes the eased center to a process-global
+// Motion (C2): the frame tick publishes the eased center to a process-global
 // atomic, so these tests serialize on a local lock and reset it in setup —
 // cargo runs tests concurrently in one process and unserialized global-atomic
 // tests are flaky by construction (the THEME_MODE_LOCK precedent).
@@ -634,7 +634,7 @@ fn motion_setup(app: &mut crate::Nokkvi, times_ms: &[u32]) {
 }
 
 #[test]
-fn glide_advances_on_boat_tick_regardless_of_visualizer_mode() {
+fn glide_advances_on_frame_tick_regardless_of_visualizer_mode() {
     let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
     motion_setup(&mut app, &[1_000, 2_000, 3_000]);
@@ -649,7 +649,7 @@ fn glide_advances_on_boat_tick_regardless_of_visualizer_mode() {
     // Land on line 0 (pre-roll → snap), then advance to line 1 (glide).
     let _ = app.handle_playback_state_updated(update_for("song_1", 1_000));
     let now = std::time::Instant::now();
-    let _ = crate::update::boat::handle_boat_tick(&mut app, now);
+    let _ = crate::update::frame::handle_frame_tick(&mut app, now);
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 0.0);
 
     let _ = app.handle_playback_state_updated(update_for("song_1", 2_000));
@@ -658,7 +658,7 @@ fn glide_advances_on_boat_tick_regardless_of_visualizer_mode() {
 
     // Mid-glide: strictly between the endpoints.
     let mid = start + std::time::Duration::from_millis(u64::from(app.lyrics.anim_duration_ms) / 4);
-    let _ = crate::update::boat::handle_boat_tick(&mut app, mid);
+    let _ = crate::update::frame::handle_frame_tick(&mut app, mid);
     let pos = crate::widgets::lyrics_viewport::lyrics_center_pos();
     assert!(
         pos > 0.0 && pos < 1.0,
@@ -668,7 +668,7 @@ fn glide_advances_on_boat_tick_regardless_of_visualizer_mode() {
     // Past the duration (even if playback paused meanwhile): settled on target.
     let done =
         start + std::time::Duration::from_millis(u64::from(app.lyrics.anim_duration_ms) + 50);
-    let _ = crate::update::boat::handle_boat_tick(&mut app, done);
+    let _ = crate::update::frame::handle_frame_tick(&mut app, done);
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 1.0);
 }
 
@@ -682,11 +682,11 @@ fn seek_sized_jump_snaps_first_tick() {
     );
 
     let _ = app.handle_playback_state_updated(update_for("song_1", 1_000));
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     // Jump 0 → 7 (delta 7 > 4): snap — the very next tick lands on target.
     let _ = app.handle_playback_state_updated(update_for("song_1", 8_000));
     assert_eq!(app.lyrics.anim_duration_ms, 0, "seek-sized jump must snap");
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 7.0);
 }
 
@@ -715,7 +715,7 @@ fn plain_sheet_drifts_with_playback() {
     // `update_for` reports a 200 s track, so the 11-line sheet walks 0 -> 10.
     let tick_to = |app: &mut crate::Nokkvi, position_ms| {
         let _ = app.handle_playback_state_updated(update_for("song_1", position_ms));
-        let _ = crate::update::boat::handle_boat_tick(app, std::time::Instant::now());
+        let _ = crate::update::frame::handle_frame_tick(app, std::time::Instant::now());
         crate::widgets::lyrics_viewport::lyrics_center_pos()
     };
 
@@ -734,11 +734,11 @@ fn plain_sheet_jumps_in_one_step_on_a_seek() {
     crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
 
     let _ = app.handle_playback_state_updated(update_for("song_1", 10_000));
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 0.5);
 
     let _ = app.handle_playback_state_updated(update_for("song_1", 150_000));
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 7.5);
 }
 
@@ -752,7 +752,7 @@ fn plain_sheet_parks_when_the_duration_is_unknown() {
     let mut update = update_for("song_1", 100_000);
     update.duration = 0;
     let _ = app.handle_playback_state_updated(update);
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(
         crate::widgets::lyrics_viewport::lyrics_center_pos(),
         0.0,
@@ -769,15 +769,15 @@ fn a_synced_sheet_after_a_plain_one_follows_its_own_glide() {
     seed_matched(&mut app, "song_1", plain_doc(60));
     crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
     let _ = app.handle_playback_state_updated(update_for("song_1", 200_000));
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 59.0);
 
-    // A synced track follows. Its own tick retargets and its own boat tick
+    // A synced track follows. Its own tick retargets and its own frame tick
     // republishes, so the drift value is gone by the first rendered frame.
     seed_matched(&mut app, "song_2", timed_doc(&[1_000, 2_000, 3_000]));
     app.lyrics.active_index = None;
     let _ = app.handle_playback_state_updated(update_for("song_2", 1_000));
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(
         crate::widgets::lyrics_viewport::lyrics_center_pos(),
         0.0,
@@ -814,7 +814,7 @@ fn wheel(app: &mut crate::Nokkvi, delta_lines: f32) {
 
 /// The center the next rendered frame would show.
 fn published_center(app: &mut crate::Nokkvi) -> f32 {
-    let _ = crate::update::boat::handle_boat_tick(app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(app, std::time::Instant::now());
     crate::widgets::lyrics_viewport::lyrics_center_pos()
 }
 
@@ -923,7 +923,7 @@ fn wheel_leaves_the_queue_untouched() {
 fn a_song_change_parks_the_column_so_the_next_dissolve_is_honest() {
     // The pre-roll trap. A new sheet fires no retarget while `active_index` is
     // None on both sides of the compare, so a surviving glide target would have
-    // the boat tick keep publishing the PREVIOUS track's last line through the
+    // the frame tick keep publishing the PREVIOUS track's last line through the
     // new sheet's pre-roll. `park_outgoing` snapshots that atomic at the next
     // transition, and `draw` places the parked sheet at it — a short sheet
     // parked at line 40 culls every line and the dissolve shows nothing.
@@ -950,7 +950,7 @@ fn a_song_change_parks_the_column_so_the_next_dissolve_is_honest() {
         epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.active_index, None, "still pre-roll");
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(
         crate::widgets::lyrics_viewport::lyrics_center_pos(),
         0.0,
@@ -985,7 +985,7 @@ fn a_sheet_resolved_mid_track_renders_in_place_on_its_first_frame() {
         epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.position_ms, 100_000, "seeded from the transport");
-    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(
         crate::widgets::lyrics_viewport::lyrics_center_pos(),
         5.0,

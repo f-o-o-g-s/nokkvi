@@ -212,8 +212,8 @@ pub struct Nokkvi {
     pub playback: crate::state::PlaybackState,
     /// Synced-lyrics state: resolved document, active-line cursor, store index.
     pub lyrics: crate::state::LyricsState,
-    /// Monotonic epoch for the now-playing breathing glow. The per-frame boat
-    /// tick (`update::boat::handle_boat_tick`) derives
+    /// Monotonic epoch for the now-playing breathing glow. The per-frame tick
+    /// (`update::frame::handle_frame_tick`) derives
     /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
     pub glow_epoch: std::time::Instant,
     pub scrobble: crate::state::ScrobbleState,
@@ -296,9 +296,10 @@ pub struct Nokkvi {
     pub visualizer: Option<widgets::visualizer::Visualizer>,
     pub visualizer_config: crate::visualizer_config::SharedVisualizerConfig,
     /// Surfing-boat overlay state (lines-mode only). Phase + last sampled
-    /// (x_ratio, y_ratio) + cached themed-logo SVG handle. Driven by per-frame
-    /// `Message::BoatTick`; visibility derived from
-    /// `settings.visualization_mode == Lines && config.enabled && config.lines.boat`.
+    /// (x_ratio, y_ratio) + cached themed-logo SVG handle. Stepped by
+    /// `update::boat::step_boat` on the per-frame `Message::FrameTick`;
+    /// visibility derived from
+    /// `settings.visualization_mode == Lines && config.lines.boat`.
     pub boat: crate::widgets::boat::BoatState,
     /// The Harbour Trawl panel's longship + procedural sea.
     pub harbour_scene: crate::state::HarbourScene,
@@ -746,11 +747,10 @@ impl Nokkvi {
         let ipc_sub = iced::Subscription::run(services::ipc::run)
             .map(|incoming| Message::Ipc(Box::new(incoming)));
 
-        // Per-frame redraw events drive the surfing-boat overlay's eased
-        // motion. Always-on (cost = one closure call per frame) — the boat
-        // handler bails fast when not in lines mode, so the work is trivial
-        // when the feature is off.
-        let boat_frames = iced::window::frames().map(Message::BoatTick);
+        // Per-frame redraw events drive everything that animates at display
+        // refresh (`update::frame::handle_frame_tick`). Always on: each step
+        // gates itself, so the work is trivial while its feature is idle.
+        let frames = iced::window::frames().map(Message::FrameTick);
 
         // Roulette spin tick — only armed while a spin is active. Iced
         // tears down the subscription as soon as the batch no longer
@@ -779,7 +779,7 @@ impl Nokkvi {
             sse_sub,
             task_status_sub,
             ipc_sub,
-            boat_frames,
+            frames,
             roulette_tick,
         ])
     }

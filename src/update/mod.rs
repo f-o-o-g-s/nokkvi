@@ -51,6 +51,7 @@ mod default_playlist_picker;
 mod dynamic_accent;
 mod editor;
 mod eq_modal;
+mod frame;
 mod genres;
 mod harbour;
 mod hotkeys;
@@ -731,9 +732,9 @@ impl Nokkvi {
             Message::Find(msg) => self.handle_find_message(msg),
 
             // -----------------------------------------------------------------
-            // Surfing-Boat Overlay (lines mode)
+            // Per-Frame Tick
             // -----------------------------------------------------------------
-            Message::BoatTick(now) => boat::handle_boat_tick(self, now),
+            Message::FrameTick(now) => frame::handle_frame_tick(self, now),
 
             // -----------------------------------------------------------------
             // IPC (nokkvi-ipc workspace crate)
