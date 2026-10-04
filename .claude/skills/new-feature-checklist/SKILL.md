@@ -42,6 +42,6 @@ Adding a new slot-list **view**? Follow [new-view.md](new-view.md) (ordered wiri
 
 ## Verification
 - [ ] **TDD**: write tests for observable state mutations *before* implementing handlers (`update/tests/{area}.rs` or the per-area `tests_*.rs` siblings; `test_app()` from `src/test_helpers.rs`)
-- [ ] **All four CI gates clean** (CI fails any of them): `cargo +nightly fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`, `cargo build --release`
+- [ ] **All four CI gates clean** (CI fails any of them): `cargo +nightly fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo build --release`
 - [ ] **Changelog**: add a user-facing entry under `## [Unreleased]` in `CHANGELOG.md` (the `/commit` skill refreshes it in the same commit; `docs-changelog-sync.yml` rebuilds the docs site on CHANGELOG changes)
 - [ ] Manual: happy path + edge cases + stable widget tree (root widget type unchanged across renders)

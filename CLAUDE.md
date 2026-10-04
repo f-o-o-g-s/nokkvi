@@ -15,7 +15,7 @@ cargo test --workspace                       # all tests (bare `cargo test` runs
 cargo test -p nokkvi <name_substring>        # single test in UI crate
 cargo test -p nokkvi-data <name_substring>   # single test in data crate
 cargo test --bin nokkvi -- embedded_svg      # icon-registration test (silently fails otherwise — see "Gotchas")
-cargo clippy --all-targets -- -D warnings    # lint with CI strictness (zero warnings allowed)
+cargo clippy --workspace --all-targets -- -D warnings    # lint with CI strictness (zero warnings allowed)
 cargo +nightly fmt --all                     # format (NIGHTLY rustfmt required — see rustfmt.toml)
 cargo +nightly fmt --all -- --check          # format check
 ```
@@ -126,7 +126,7 @@ When fixing a bug or adding a new update handler:
 
 1. **Red** — write tests in `src/update/tests/` (per-area files: `queue.rs`, `playback.rs`, `navigation.rs`, etc.) using the `test_app()` helper from `src/test_helpers.rs`. Assert against **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
 2. **Green** — minimal implementation to pass.
-3. **Verify** — `cargo test --workspace`, `cargo clippy --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
+3. **Verify** — `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
 
 If structural plumbing (new fields, message variants) is needed, complete it first so the tests compile, but make no behavioral changes until the tests are red.
 

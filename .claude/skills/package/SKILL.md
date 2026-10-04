@@ -97,7 +97,7 @@ cargo +nightly fmt --all -- --check
 ```
 
 ```bash
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ```bash

@@ -30,11 +30,11 @@ The pre-commit hook (`.githooks/pre-commit`) keeps the Navidrome/PipeWire versio
 ### Build & Test
 
 ```bash
-cargo build                   # Debug build
-cargo build --release         # Release build
-cargo test                    # Run tests
-cargo clippy                  # Lint (fix all warnings)
-cargo +nightly fmt --all      # Format (nightly required)
+cargo build                                            # Debug build
+cargo build --release                                  # Release build
+cargo test --workspace                                 # Run tests (all three crates)
+cargo clippy --workspace --all-targets -- -D warnings  # Lint (CI fails on any warning)
+cargo +nightly fmt --all                               # Format (nightly required)
 ```
 
 All of these checks need to pass before submitting a PR.
@@ -70,7 +70,7 @@ Attach the log file when filing an issue.
 
 1. Fork the repo and create a feature branch
 2. Make your changes
-3. Make sure `cargo test`, `cargo clippy`, and `cargo +nightly fmt --all -- --check` pass
+3. Make sure `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo +nightly fmt --all -- --check` pass
 4. Open a PR clearly explaining **what** you did and **why**. Since I rely on AI to help me review code, good comments and a clear PR description make things way easier for me.
 
 ## AI Disclosure

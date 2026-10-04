@@ -55,7 +55,7 @@ Steps to add a new slot-list-based view, in order. Supporting file of the `new-f
 
 16. Verify:
     - `cargo +nightly fmt --all -- --check`
-    - `cargo clippy --all-targets -- -D warnings`
+    - `cargo clippy --workspace --all-targets -- -D warnings`
     - `cargo test --workspace` (bare `cargo test` runs only the root crate and would skip the data-crate tests touched in step 12)
     - Slot navigation (↑/↓, focus, center activation)
     - Search filtering (immediate, no debounce)
