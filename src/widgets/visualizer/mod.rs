@@ -26,12 +26,46 @@ pub enum VisualizationMode {
 }
 
 impl VisualizationMode {
+    /// The widget mode a visualizer setting draws; `None` for Off.
+    pub(crate) fn from_setting(
+        mode: nokkvi_data::types::player_settings::VisualizationMode,
+    ) -> Option<Self> {
+        use nokkvi_data::types::player_settings::VisualizationMode as Mode;
+        match mode {
+            Mode::Off => None,
+            Mode::Bars => Some(Self::Bars),
+            Mode::Lines => Some(Self::Lines),
+            Mode::Scope => Some(Self::Scope),
+            Mode::Milkdrop => Some(Self::Milkdrop),
+        }
+    }
+
     /// Fills the whole over-cover panel (Scope's ring, MilkDrop's frame) rather
     /// than a bottom-anchored band of `height_percent`.
     pub(crate) fn fills_panel(self) -> bool {
         match self {
             Self::Scope | Self::Milkdrop => true,
             Self::Bars | Self::Lines => false,
+        }
+    }
+
+    /// Draws an SDF stroke through a fixed point count (Lines' wave, Scope's
+    /// ring). The shader smooths it, so the FFT output skips the CPU smoothing
+    /// filters and the Bars flash field, and its glow comes from the bloom pass.
+    pub(crate) fn is_stroke(self) -> bool {
+        match self {
+            Self::Lines | Self::Scope => true,
+            Self::Bars | Self::Milkdrop => false,
+        }
+    }
+
+    /// Plots the raw time-domain waveform rather than the FFT bars: the worker
+    /// snapshots each PCM chunk, and `prepare` uploads it into the buffer the
+    /// shaders read as `bar_data`.
+    pub(crate) fn uses_waveform(self) -> bool {
+        match self {
+            Self::Scope => true,
+            Self::Bars | Self::Lines | Self::Milkdrop => false,
         }
     }
 }
@@ -453,16 +487,17 @@ impl Visualizer {
     ///
     /// NOTE: For Bars mode, we do NOT resize here - width() handles that since
     /// bar count is dynamically calculated based on window size.
+    ///
+    /// Picks what this render draws only. The FFT worker's mode is written from
+    /// update (`Nokkvi::sync_visualizer_mode`), never from a `view()` builder.
     pub fn mode(mut self, mode: VisualizationMode) -> Self {
         self.mode = mode;
-        self.state.set_lines_mode(mode == VisualizationMode::Lines);
-        self.state.set_scope_mode(mode == VisualizationMode::Scope);
 
         // Lines and Scope both render a fixed point count (Catmull-Rom in the
         // shader); Bars lets width() pick the count from the window size. Scope
         // reads its own [visualizer.scope] point_count/line_thickness so it can
         // be tuned independently of Lines (see the per-mode branch below).
-        if mode == VisualizationMode::Lines || mode == VisualizationMode::Scope {
+        if mode.is_stroke() {
             let cfg = self.config.read();
             let (config_point_count, config_line_thickness) = if mode == VisualizationMode::Scope {
                 (cfg.scope.point_count, cfg.scope.line_thickness)
@@ -591,10 +626,22 @@ impl Visualizer {
         self.state.set_feed_active(active);
     }
 
-    /// MilkDrop mode: the FFT worker feeds the MilkDrop analyzer instead of
-    /// the spectrum engine.
-    pub fn set_milkdrop_mode(&self, is_milkdrop: bool) {
-        self.state.set_milkdrop_mode(is_milkdrop);
+    /// Point the FFT worker at `mode` (MilkDrop feeds its analyzer instead of
+    /// the spectrum engine). Shared by every clone, so update writes it once.
+    pub fn set_mode(&self, mode: VisualizationMode) {
+        self.state.set_mode(mode);
+    }
+
+    /// The mode the FFT worker processes for.
+    #[cfg(test)]
+    pub(crate) fn worker_mode(&self) -> VisualizationMode {
+        self.state.mode()
+    }
+
+    /// Whether the feed gate is open (the visualizer is not Off).
+    #[cfg(test)]
+    pub(crate) fn feed_active(&self) -> bool {
+        self.state.feed_active()
     }
 
     /// Get callback for clearing sample buffer on track changes

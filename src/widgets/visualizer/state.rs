@@ -7,7 +7,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -17,7 +17,9 @@ use nokkvi_data::audio::spectrum::{self, SpectrumEngine};
 use parking_lot::{Mutex, RwLock};
 use tracing::{debug, trace};
 
-use super::{flash::FlashField, milkdrop::MilkdropShared, particles::ParticleSystem};
+use super::{
+    VisualizationMode, flash::FlashField, milkdrop::MilkdropShared, particles::ParticleSystem,
+};
 use crate::visualizer_config::VisualizerConfig;
 
 /// Maximum number of bars the FFT can meaningfully produce for a given sample rate.
@@ -446,6 +448,32 @@ fn apply_peak_decay_step(
     }
 }
 
+/// The mode the FFT worker processes for, readable lock-free from the worker.
+/// Written from update only (`Visualizer::set_mode`), never from `view()`.
+#[derive(Debug, Default)]
+struct WorkerMode(AtomicU8);
+
+impl WorkerMode {
+    fn load(&self) -> VisualizationMode {
+        match self.0.load(Ordering::Relaxed) {
+            1 => VisualizationMode::Lines,
+            2 => VisualizationMode::Scope,
+            3 => VisualizationMode::Milkdrop,
+            _ => VisualizationMode::Bars,
+        }
+    }
+
+    fn store(&self, mode: VisualizationMode) {
+        let raw = match mode {
+            VisualizationMode::Bars => 0,
+            VisualizationMode::Lines => 1,
+            VisualizationMode::Scope => 2,
+            VisualizationMode::Milkdrop => 3,
+        };
+        self.0.store(raw, Ordering::Relaxed);
+    }
+}
+
 // ========================================
 // Main State Struct
 // ========================================
@@ -506,13 +534,12 @@ pub(crate) struct VisualizerState {
     /// Handle to background FFT thread (wrapped in Arc for Clone)
     fft_thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 
-    // === Visualization mode (for mode-specific smoothing) ===
-    /// True when in lines mode — skips CPU-side smoothing (lines smooth in GPU shader)
-    is_lines_mode: Arc<AtomicBool>,
-    /// True when in scope mode — `tick()` snapshots the raw PCM chunk into
-    /// `display.waveform` (for the circular oscilloscope) and skips CPU
-    /// smoothing of the FFT bars (which Scope doesn't render).
-    is_scope_mode: Arc<AtomicBool>,
+    // === Visualization mode ===
+    /// What `tick()` processes for: MilkDrop feeds the analyzer instead of the
+    /// spectrum engine, a stroke mode skips the CPU smoothing filters and the
+    /// flash field, and a waveform mode snapshots the raw PCM chunk into
+    /// `display.waveform`. Bars until the first `set_mode`.
+    mode: Arc<WorkerMode>,
 
     /// Particle field for Scope mode (the NCS-style glowing dust around the
     /// ring). Simulated each `tick()` while in scope mode; the per-frame GPU
@@ -570,9 +597,6 @@ pub(crate) struct VisualizerState {
     trail_settle_frames: Arc<AtomicU32>,
 
     // === MilkDrop mode ===
-    /// True in MilkDrop mode: `tick()` feeds the analyzer below and skips the
-    /// spectrum engine entirely.
-    is_milkdrop_mode: Arc<AtomicBool>,
     /// The MilkDrop analyzer and its conversion scratch. Only the FFT worker
     /// touches it (`try_lock`); the Arc exists because the state is `Clone`.
     milkdrop_feed: Arc<Mutex<MilkdropFeed>>,
@@ -709,8 +733,7 @@ impl VisualizerState {
             fft_thread_running,
             fft_thread_handle,
             // Visualization mode
-            is_lines_mode: Arc::new(AtomicBool::new(false)),
-            is_scope_mode: Arc::new(AtomicBool::new(false)),
+            mode: Arc::new(WorkerMode::default()),
             // Scope particle field — placeholder size/radius; tick() resizes and
             // drives it from the live [visualizer.scope] config.
             particles: Arc::new(Mutex::new(ParticleSystem::new(
@@ -730,7 +753,6 @@ impl VisualizerState {
             band_mid: Arc::new(AtomicU32::new(0_f32.to_bits())),
             band_treble: Arc::new(AtomicU32::new(0_f32.to_bits())),
             trail_settle_frames: Arc::new(AtomicU32::new(0)),
-            is_milkdrop_mode: Arc::new(AtomicBool::new(false)),
             milkdrop_feed: Arc::new(Mutex::new(MilkdropFeed::default())),
             milkdrop,
         }
@@ -798,6 +820,11 @@ impl VisualizerState {
     /// pipeline stops when the visualizer is off; `true` resumes both.
     pub(crate) fn set_feed_active(&self, active: bool) {
         self.feed_active.store(active, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn feed_active(&self) -> bool {
+        self.feed_active.load(Ordering::Relaxed)
     }
 
     #[cfg(test)]
@@ -881,7 +908,8 @@ impl VisualizerState {
         // MilkDrop renders from the analyzer's features, never from the
         // spectrum engine. `pending_engine_reinit` stays set for the next
         // spectrum mode.
-        if self.is_milkdrop_mode.load(Ordering::Relaxed) {
+        let mode = self.mode.load();
+        if mode == VisualizationMode::Milkdrop {
             return self.milkdrop_tick();
         }
 
@@ -934,13 +962,13 @@ impl VisualizerState {
 
         if buffer.len() >= chunk_size {
             let process_samples: Vec<f64> = buffer.drain(..chunk_size).collect();
-            let is_scope = self.is_scope_mode.load(Ordering::Relaxed);
-
             // Scope mode: snapshot the raw PCM chunk as a time-domain waveform —
             // mixed to mono and resampled to the ring point count, plotted as-is
             // (no phase trigger, no seam closure) so the trace stays pure. The
             // FFT below still runs so the glow/beat/band effects stay reactive.
-            let scope_waveform = is_scope.then(|| raw_waveform(&process_samples, visual_count));
+            let scope_waveform = mode
+                .uses_waveform()
+                .then(|| raw_waveform(&process_samples, visual_count));
 
             // Track processed samples
             {
@@ -969,7 +997,7 @@ impl VisualizerState {
                 // Apply smoothing filters on FFT output (before interpolation).
                 // Only in bars mode — lines/scope do their own GPU-side smoothing
                 // (and scope doesn't render the bars at all).
-                if !self.is_lines_mode.load(Ordering::Relaxed) && !is_scope {
+                if !mode.is_stroke() {
                     if waves {
                         waves_filter(&mut fft_output, waves_smoothing as usize);
                     } else if monstercat > 0.0 {
@@ -988,10 +1016,8 @@ impl VisualizerState {
                 // the display lock so we never hold `display` while iterating the
                 // pool. The result stays in the system's own capacity-reused
                 // buffer and is copied into `display.particles` below.
-                if is_scope
-                    && particles_on
-                    && let Some(mut psys) = self.particles.try_lock()
-                {
+                let scope_particles = mode == VisualizationMode::Scope && particles_on;
+                if scope_particles && let Some(mut psys) = self.particles.try_lock() {
                     psys.set_count(particle_count, scope_radius);
                     let energy = self.current_onset_energy();
                     let beat = self.current_beat_pulse();
@@ -1104,10 +1130,7 @@ impl VisualizerState {
                     // Brief nested lock: the expensive sim already ran above, so
                     // this only memcpys the snapshot. Only this thread ever locks
                     // `particles`, so the re-lock is effectively uncontended.
-                    if is_scope
-                        && particles_on
-                        && let Some(psys) = self.particles.try_lock()
-                    {
+                    if scope_particles && let Some(psys) = self.particles.try_lock() {
                         display.particles.clear();
                         display.particles.extend_from_slice(psys.gpu_data());
                     }
@@ -1258,8 +1281,7 @@ impl VisualizerState {
         };
         // Only Bars mode reads the flash buffer. Elsewhere drop any live events
         // so a switch back to Bars starts from a fresh baseline.
-        if self.is_lines_mode.load(Ordering::Relaxed) || self.is_scope_mode.load(Ordering::Relaxed)
-        {
+        if self.mode.load().is_stroke() {
             effects.flash.reset();
             return;
         }
@@ -1377,22 +1399,18 @@ impl VisualizerState {
         self.display.lock().flash_intensities.clone()
     }
 
-    /// Set the current visualization mode so tick() can skip CPU-side smoothing in lines mode.
-    /// Lines mode performs its own Catmull-Rom smoothing in the GPU shader.
-    pub(crate) fn set_lines_mode(&self, is_lines: bool) {
-        self.is_lines_mode.store(is_lines, Ordering::Relaxed);
+    /// Point `tick()` at a mode: MilkDrop feeds the whole buffered run into
+    /// the MilkDrop analyzer instead of the spectrum engine; Lines and Scope
+    /// skip the CPU smoothing (their shaders smooth); Scope also snapshots the
+    /// raw PCM chunk into the waveform buffer.
+    pub(crate) fn set_mode(&self, mode: VisualizationMode) {
+        self.mode.store(mode);
     }
 
-    /// Set scope mode so tick() snapshots the raw PCM chunk into the waveform
-    /// buffer (for the circular oscilloscope) and skips CPU bar smoothing.
-    pub(crate) fn set_scope_mode(&self, is_scope: bool) {
-        self.is_scope_mode.store(is_scope, Ordering::Relaxed);
-    }
-
-    /// MilkDrop mode: `tick()` feeds the whole buffered run into the MilkDrop
-    /// analyzer instead of the spectrum engine.
-    pub(crate) fn set_milkdrop_mode(&self, is_milkdrop: bool) {
-        self.is_milkdrop_mode.store(is_milkdrop, Ordering::Relaxed);
+    /// The mode `tick()` processes for.
+    #[cfg(test)]
+    pub(crate) fn mode(&self) -> VisualizationMode {
+        self.mode.load()
     }
 
     pub(crate) fn milkdrop_shared(&self) -> Arc<MilkdropShared> {
@@ -1759,6 +1777,29 @@ mod tests {
 
     const HOLD: Duration = Duration::from_millis(500);
     const TICK: Duration = VisualizerTiming::TICK_INTERVAL;
+
+    /// The worker's mode cell starts on Bars and hands back every mode it
+    /// stores (its `u8` encoding is hand-kept in two matches).
+    #[test]
+    fn worker_mode_round_trips_every_mode() {
+        let cell = WorkerMode::default();
+        assert_eq!(cell.load(), VisualizationMode::Bars);
+        let every_mode = |mode: VisualizationMode| match mode {
+            VisualizationMode::Bars
+            | VisualizationMode::Lines
+            | VisualizationMode::Scope
+            | VisualizationMode::Milkdrop => mode,
+        };
+        for mode in [
+            VisualizationMode::Lines,
+            VisualizationMode::Scope,
+            VisualizationMode::Milkdrop,
+            VisualizationMode::Bars,
+        ] {
+            cell.store(every_mode(mode));
+            assert_eq!(cell.load(), mode);
+        }
+    }
 
     /// Pin the typed-struct 60 Hz tick-rate constants so a future agent
     /// who edits `TICK_RATE_HZ` (or the const-fn arithmetic) sees the
@@ -2171,7 +2212,7 @@ mod tests {
     /// feeds it, S16-scaled exactly like the engine's visualizer tap.
     fn milkdrop_state() -> (VisualizerState, impl Fn(&[f32], u32)) {
         let state = test_state();
-        state.set_milkdrop_mode(true);
+        state.set_mode(VisualizationMode::Milkdrop);
         let cb = state.audio_callback();
         (state, cb)
     }

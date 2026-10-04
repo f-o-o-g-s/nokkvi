@@ -203,19 +203,12 @@ impl Nokkvi {
     }
 
     /// Mode edge, computed from the previous and new mode so a config hot
-    /// reload that re-delivers the same mode fires nothing. Entering only flips
-    /// the analyzer on (the tick loads the first preset within 100 ms);
-    /// leaving also releases the renderer.
+    /// reload that re-delivers the same mode fires nothing. Leaving releases
+    /// the renderer. Entering needs nothing here: `sync_visualizer_mode` points
+    /// the FFT worker at the analyzer, and the tick loads the first preset
+    /// within 100 ms.
     pub(crate) fn milkdrop_mode_edge(&mut self, prev: VisualizationMode, new: VisualizationMode) {
-        let was = prev == VisualizationMode::Milkdrop;
-        let is = new == VisualizationMode::Milkdrop;
-        if was == is {
-            return;
-        }
-        if let Some(viz) = &self.visualizer {
-            viz.set_milkdrop_mode(is);
-        }
-        if was {
+        if prev == VisualizationMode::Milkdrop && new != VisualizationMode::Milkdrop {
             self.milkdrop_release();
         }
     }
@@ -908,11 +901,6 @@ impl Nokkvi {
     /// and loads a preset whenever one should be on screen and none is.
     pub(crate) fn milkdrop_tick(&mut self) -> Task<Message> {
         let active = self.milkdrop_mode_active();
-        if let Some(viz) = &self.visualizer {
-            // Level-set every tick: a login after the settings loaded (or the
-            // reverse) still lands on the right analyzer mode.
-            viz.set_milkdrop_mode(active);
-        }
         if !active {
             self.milkdrop.shared.running.store(false, Ordering::Release);
             return Task::none();

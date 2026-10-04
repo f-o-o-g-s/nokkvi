@@ -1722,6 +1722,24 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Hand the visualizer the mode the settings name: the feed gate (Off
+    /// idles the FFT worker and drops incoming audio batches) and the mode the
+    /// worker processes for. The one writer of both, called on every mode
+    /// change and when login builds the visualizer, so either order of login
+    /// and settings load lands on the right mode. Off leaves the worker's mode
+    /// as it was: the closed gate idles it, and the next mode change writes.
+    pub(crate) fn sync_visualizer_mode(&self) {
+        let Some(viz) = &self.visualizer else {
+            return;
+        };
+        let mode = self.settings.visualization_mode;
+        viz.set_feed_active(mode != nokkvi_data::types::player_settings::VisualizationMode::Off);
+        if let Some(worker_mode) = crate::widgets::visualizer::VisualizationMode::from_setting(mode)
+        {
+            viz.set_mode(worker_mode);
+        }
+    }
+
     pub(crate) fn handle_cycle_visualization(&mut self) -> Task<Message> {
         let prev = self.settings.visualization_mode;
         self.settings.visualization_mode = prev.next();
@@ -1735,11 +1753,8 @@ impl Nokkvi {
         // off — ahead of (and independent of) the async engine round-trip below.
         // Gate semantics are pinned at the unit layer (the `feed_inactive_*`
         // tests in visualizer/state.rs and the `viz_*_tap` tests in
-        // streaming_source.rs); this wiring isn't handler-testable because
-        // `test_app()` builds with `visualizer: None`.
-        if let Some(viz) = &self.visualizer {
-            viz.set_feed_active(active);
-        }
+        // streaming_source.rs); `update/tests/visualizer.rs` pins this wiring.
+        self.sync_visualizer_mode();
 
         // Persist the mode and gate the real-time audio tap on the engine (skips
         // the per-sample S16 push + RwLock read when off). Mirrors
@@ -2204,15 +2219,13 @@ impl Nokkvi {
         let prev_mode = self.settings.visualization_mode;
         self.settings.visualization_mode = settings.visualization_mode;
         self.milkdrop_mode_edge(prev_mode, settings.visualization_mode);
-        // Sync the visualizer feed gate to the loaded mode so a persisted "Off"
-        // doesn't leave the FFT worker + audio tap running after login. The
-        // synchronous half idles the UI-side worker now; the engine-side tap
-        // gate is pushed alongside crossfade below.
+        // Sync the visualizer to the loaded mode so a persisted "Off" doesn't
+        // leave the FFT worker + audio tap running after login. The synchronous
+        // half idles the UI-side worker now; the engine-side tap gate is pushed
+        // alongside crossfade below.
+        self.sync_visualizer_mode();
         let viz_active = settings.visualization_mode
             != nokkvi_data::types::player_settings::VisualizationMode::Off;
-        if let Some(viz) = &self.visualizer {
-            viz.set_feed_active(viz_active);
-        }
 
         // Crossfade and bit-perfect are mutually-exclusive modes. The toggle /
         // checkbox paths persist the cleared sibling so disk never holds both,

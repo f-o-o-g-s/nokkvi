@@ -652,6 +652,7 @@ impl Nokkvi {
                     });
 
                 self.visualizer = Some(visualizer);
+                self.sync_visualizer_mode();
 
                 let audio_engine = shell.audio_engine();
                 // Hand the music-output bridge to the engine. The renderer owns

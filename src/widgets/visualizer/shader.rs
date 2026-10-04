@@ -167,6 +167,9 @@ pub(crate) struct VisualizerPrimitive {
     pub peak_color: [f32; 4],
     /// Border color
     pub border_color: [f32; 4],
+    /// Which mode this primitive draws: picks the pipeline and the buffer it
+    /// uploads. Never MilkDrop, which `Visualizer::view` hands its own program.
+    pub mode: VisualizationMode,
     /// Configuration
     pub config: VisualizerConfig,
     /// Reference to state for dirty flag checking
@@ -360,9 +363,12 @@ impl VisualizerPrimitive {
 
         let config = VisualizerConfig {
             bar_count: bar_count_val as u32,
+            // Informational for the shaders only: each mode binds its own
+            // pipeline, so no WGSL branches on it, and Rust reads the
+            // primitive's `mode`, never this. MilkDrop never reaches this
+            // shader (`Visualizer::view` hands it its own program); Bars'
+            // value keeps the match exhaustive.
             mode: match mode {
-                // MilkDrop never reaches this shader (`Visualizer::view` hands it
-                // its own program); Bars' value keeps the match exhaustive.
                 VisualizationMode::Bars | VisualizationMode::Milkdrop => 0,
                 VisualizationMode::Lines => 1,
                 VisualizationMode::Scope => 2,
@@ -411,8 +417,7 @@ impl VisualizerPrimitive {
         // of the user's global Bloom effect; if both are on, take the stronger.
         // (For Scope, params.lines_glow_intensity carries cfg.scope.glow_intensity.)
         let effect_bloom = params.bloom_enabled && params.bloom_intensity > 0.001;
-        let stroke_glow = matches!(mode, VisualizationMode::Lines | VisualizationMode::Scope)
-            && params.lines_glow_intensity > 0.001;
+        let stroke_glow = mode.is_stroke() && params.lines_glow_intensity > 0.001;
         let stroke_bloom_intensity = if stroke_glow {
             LINES_GLOW_BLOOM_GAIN * params.lines_glow_intensity
         } else {
@@ -473,6 +478,7 @@ impl VisualizerPrimitive {
             peak_gradient_colors: peak_gradient,
             peak_color: peak_col,
             border_color: border_col,
+            mode,
             config,
             state: state.clone(),
             has_perspective,
@@ -672,6 +678,7 @@ impl VisualizerPrimitive {
     /// Accepts individual pipeline references to allow the caller to choose
     /// between the standard and MSAA pipeline variants.
     fn draw_bars_and_lines(
+        mode: VisualizationMode,
         config: &VisualizerConfig,
         bind_group: &wgpu::BindGroup,
         bars_pipeline: &wgpu::RenderPipeline,
@@ -683,9 +690,8 @@ impl VisualizerPrimitive {
 
         render_pass.set_bind_group(0, bind_group, &[]);
 
-        match config.mode {
-            0 => {
-                // Bars mode
+        match mode {
+            VisualizationMode::Bars => {
                 render_pass.set_pipeline(bars_pipeline);
 
                 let vertices_per_bar = 6;
@@ -699,8 +705,8 @@ impl VisualizerPrimitive {
 
                 render_pass.draw(0..(total_quads * vertices_per_bar), 0..1);
             }
-            1 => {
-                // Lines mode (SDF stroke: one miter-tiled quad per dense segment).
+            VisualizationMode::Lines => {
+                // SDF stroke: one miter-tiled quad per dense segment.
                 render_pass.set_pipeline(lines_pipeline);
 
                 // MUST match `samples_per_segment` in lines.wgsl (the 6-verts-per-
@@ -715,8 +721,8 @@ impl VisualizerPrimitive {
                 let instance_count = if config.lines_mirror != 0 { 6 } else { 3 };
                 render_pass.draw(0..vertices_per_pass, 0..instance_count);
             }
-            2 => {
-                // Scope mode (circular oscilloscope)
+            VisualizationMode::Scope => {
+                // Circular oscilloscope.
                 render_pass.set_pipeline(scope_pipeline);
 
                 // Closed loop: one miter-tiled quad (6 verts) per dense ring
@@ -731,7 +737,9 @@ impl VisualizerPrimitive {
                 // Instance 0 = fill, 1 = outline (under), 2 = main line (on top).
                 render_pass.draw(0..vertices_per_pass, 0..3);
             }
-            _ => {}
+            // `Visualizer::view` hands MilkDrop its own program, so no
+            // primitive carries it.
+            VisualizationMode::Milkdrop => {}
         }
     }
 
@@ -801,6 +809,7 @@ impl VisualizerPrimitive {
             &pipeline.scope_pipeline
         };
         Self::draw_bars_and_lines(
+            self.mode,
             &self.config,
             &pipeline.bind_group,
             &pipeline.bars_pipeline,
@@ -845,7 +854,7 @@ impl shader::Primitive for VisualizerPrimitive {
         // Convert to f32 for GPU. Scope mode uploads the signed time-domain
         // waveform into the same storage buffer the bars/lines shaders read as
         // `bar_data` — scope.wgsl interprets the entries as signed (-1..1).
-        let bar_data: Vec<f32> = if self.config.mode == 2 {
+        let bar_data: Vec<f32> = if self.mode.uses_waveform() {
             self.state.get_waveform()
         } else {
             fresh_bars.iter().map(|&v| v as f32).collect()
@@ -1301,6 +1310,7 @@ impl shader::Primitive for VisualizerPrimitive {
             &pipeline.scope_pipeline
         };
         Self::draw_bars_and_lines(
+            self.mode,
             &self.config,
             &pipeline.bind_group,
             &pipeline.bars_pipeline,
@@ -1376,6 +1386,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.scope_pipeline_msaa
             };
             Self::draw_bars_and_lines(
+                self.mode,
                 &self.config,
                 &pipeline.bind_group,
                 &pipeline.bars_pipeline_msaa,
@@ -1428,6 +1439,7 @@ impl shader::Primitive for VisualizerPrimitive {
             };
             // Ring/bars/lines only — deliberately NO draw_particles here.
             Self::draw_bars_and_lines(
+                self.mode,
                 &self.config,
                 &pipeline.bind_group,
                 &pipeline.bars_pipeline_msaa,

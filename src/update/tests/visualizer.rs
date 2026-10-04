@@ -157,3 +157,71 @@ fn apply_visualizer_settings_leaves_playback_state_alone() {
         "settings entries must be marked for refresh"
     );
 }
+
+// ============================================================================
+// FFT worker mode: written from update, never from view()
+// ============================================================================
+
+/// A test app with a real visualizer (its FFT worker idles: nothing feeds it).
+fn app_with_visualizer() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.visualizer = Some(crate::widgets::visualizer::Visualizer::new(
+        192,
+        app.visualizer_config.clone(),
+        app.milkdrop.shared.clone(),
+    ));
+    app
+}
+
+/// Each cycle step points the FFT worker at the new mode before any view()
+/// pass runs, and Off closes the feed gate.
+#[test]
+fn cycling_the_visualizer_points_the_fft_worker_at_each_mode() {
+    use nokkvi_data::types::player_settings::VisualizationMode as Setting;
+
+    use crate::widgets::visualizer::VisualizationMode as Worker;
+
+    let mut app = app_with_visualizer();
+    app.settings.visualization_mode = Setting::Bars;
+    for expected in [Worker::Lines, Worker::Scope, Worker::Milkdrop] {
+        let _ = app.handle_cycle_visualization();
+        let viz = app.visualizer.as_ref().expect("visualizer");
+        assert_eq!(viz.worker_mode(), expected);
+        assert!(viz.feed_active(), "{expected:?} keeps the feed open");
+    }
+
+    let _ = app.handle_cycle_visualization();
+    assert_eq!(app.settings.visualization_mode, Setting::Off);
+    let viz = app.visualizer.as_ref().expect("visualizer");
+    assert!(!viz.feed_active(), "Off idles the worker");
+
+    let _ = app.handle_cycle_visualization();
+    let viz = app.visualizer.as_ref().expect("visualizer");
+    assert_eq!(viz.worker_mode(), Worker::Bars);
+    assert!(viz.feed_active());
+}
+
+/// Loading settings (login, hot reload) points the worker at the loaded mode,
+/// and leaving MilkDrop through a reload moves it off the analyzer.
+#[test]
+fn loaded_settings_point_the_fft_worker_at_their_mode() {
+    use nokkvi_data::types::player_settings::{LivePlayerSettings, VisualizationMode as Setting};
+
+    use crate::widgets::visualizer::VisualizationMode as Worker;
+
+    let mut app = app_with_visualizer();
+    for (setting, expected) in [
+        (Setting::Scope, Worker::Scope),
+        (Setting::Milkdrop, Worker::Milkdrop),
+        (Setting::Lines, Worker::Lines),
+    ] {
+        let settings = LivePlayerSettings {
+            visualization_mode: setting,
+            ..Default::default()
+        };
+        let _ = app.handle_player_settings_loaded(settings);
+        let viz = app.visualizer.as_ref().expect("visualizer");
+        assert_eq!(viz.worker_mode(), expected);
+        assert!(viz.feed_active());
+    }
+}

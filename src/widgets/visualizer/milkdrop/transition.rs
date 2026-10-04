@@ -315,6 +315,39 @@ mod tests {
         assert_eq!(seen.len(), BlendPattern::ALL.len());
     }
 
+    /// Every pattern's `shader_id` has its own branch in `blit.wgsl` (Uniform's
+    /// staggered max in `fs_main`, the rest a `case` in `pattern_at`), and every
+    /// `case` names a pattern. A pattern with no branch falls through to the
+    /// switch's `default`, which turns every pixel over at once halfway through
+    /// the fade.
+    #[test]
+    fn blit_wgsl_branches_on_every_blend_pattern() {
+        let blit = super::super::BLIT_WGSL;
+        for pattern in BlendPattern::ALL {
+            let id = pattern.shader_id();
+            let branch = if id == 0 {
+                "params.pattern == 0u".to_owned()
+            } else {
+                format!("case {id}u:")
+            };
+            assert!(
+                blit.contains(&branch),
+                "blit.wgsl has no `{branch}` branch for {pattern:?}",
+            );
+        }
+
+        let ids: std::collections::HashSet<u32> =
+            BlendPattern::ALL.iter().map(|p| p.shader_id()).collect();
+        for case in blit.split("case ").skip(1) {
+            let digits: String = case.chars().take_while(char::is_ascii_digit).collect();
+            let id: u32 = digits.parse().expect("a numeric case label");
+            assert!(
+                ids.contains(&id),
+                "blit.wgsl's `case {id}u` matches no BlendPattern",
+            );
+        }
+    }
+
     #[test]
     fn first_arrival_fades_nothing() {
         let mut pair = SlotPair::default();
