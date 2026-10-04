@@ -234,7 +234,7 @@ pub(crate) fn deserialize_one_or_many<T: serde::de::DeserializeOwned>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use reqwest::StatusCode;
 
     use super::*;
@@ -383,7 +383,7 @@ mod tests {
     /// Answer one HTTP request on an ephemeral port with `status_line` and
     /// `body`, reading the whole request first so closing the socket never
     /// resets it. Returns the base URL.
-    async fn one_shot_server(status_line: &'static str, body: &'static str) -> String {
+    pub(crate) async fn one_shot_server(status_line: &'static str, body: &'static str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

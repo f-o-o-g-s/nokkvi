@@ -1049,6 +1049,9 @@ impl AppService {
         let read_lrc = async |path: std::path::PathBuf| -> LyricsLookup<LrcDocument> {
             let text = match tokio::fs::read_to_string(&path).await {
                 Ok(text) => text,
+                // The index is built at boot, so a file deleted since is gone
+                // for good: an answer, not a failure worth retrying per play.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return LyricsLookup::Miss,
                 Err(e) => {
                     tracing::debug!(error = %e, "lyrics file read failed");
                     return LyricsLookup::Failed;

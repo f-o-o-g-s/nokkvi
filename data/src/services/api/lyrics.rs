@@ -121,13 +121,15 @@ impl LyricsApiService {
     }
 
     /// Fetch structured lyrics for a song id. Pass `enhanced = true` to request
-    /// word-level (`cueLine`/`cue`) timing where the server has it.
+    /// word-level (`cueLine`/`cue`) timing where the server has it. A failed
+    /// envelope is an error (checked reader): its empty list would otherwise
+    /// read as "no lyrics" and be cached for the session.
     pub async fn get_lyrics_by_song_id(
         &self,
         id: &str,
         enhanced: bool,
     ) -> Result<Vec<StructuredLyrics>> {
-        let inner: LyricsListInner = crate::services::api::subsonic::subsonic_get_envelope(
+        let inner: LyricsListInner = crate::services::api::subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getLyricsBySongId",
@@ -150,7 +152,37 @@ impl LyricsApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::api::subsonic::SubsonicEnvelope;
+    use crate::services::api::subsonic::{SubsonicEnvelope, tests::one_shot_server};
+
+    async fn fetch_from(base_url: String) -> Result<Vec<StructuredLyrics>> {
+        let url = url::Url::parse(&base_url).expect("one-shot server url");
+        LyricsApiService::new(ApiClient::new(url, String::new()), base_url, "u=x".into())
+            .get_lyrics_by_song_id("s1", true)
+            .await
+    }
+
+    /// Navidrome reports an error (an unknown id, a failed lyrics read) as HTTP
+    /// 200 with a failed envelope. It must be an error: as an empty list the
+    /// resolve chain would read it as "this song has no lyrics" and cache that
+    /// for the session. A song without lyrics is an ok envelope, still empty.
+    #[tokio::test]
+    async fn a_failed_envelope_is_an_error_not_an_empty_list() {
+        const FAILED: &str = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":70,"message":"data not found"}}}"#;
+        let err = fetch_from(one_shot_server("200 OK", FAILED).await)
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        const NO_LYRICS: &str =
+            r#"{"subsonic-response":{"status":"ok","version":"1.16.1","lyricsList":{}}}"#;
+        let lyrics = fetch_from(one_shot_server("200 OK", NO_LYRICS).await)
+            .await
+            .expect("an ok envelope with no lyrics is not an error");
+        assert!(lyrics.is_empty());
+    }
 
     #[test]
     fn parses_line_level_structured_lyrics() {
