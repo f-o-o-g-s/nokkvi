@@ -1,7 +1,7 @@
 //! Trawl mix-builder modal — state, messages, and the row model.
 //!
 //! The modal is the *editor* for the persistent [`TrawlCrate`] on `Nokkvi`
-//! (`trawl_crate`): a whole-library seed search on top (Harbour's search
+//! (`trawl.mix`): a whole-library seed search on top (Harbour's search
 //! machinery: immediate fire, [`SEARCH_MIN_CHARS`] gate, generation
 //! stale-drop) and the crate tray below (chips, blend, min-length, CTAs).
 //! Opened from the Harbour "Trawl" row; `Some` on `Nokkvi.trawl.modal` =

@@ -9,8 +9,10 @@
 /// cancelled by a session reset, so work dispatched before logout can land
 /// after the next login; a counter restarted at 0 would re-mint the value
 /// that work captured and accept its stale result. A session reset keeps
-/// the counter [`carried_forward`](Self::carried_forward), and nothing can
-/// set or zero the value.
+/// the counter [`carried_forward`](Self::carried_forward). There is no
+/// setter, but `Default` still builds a zeroed one: a group holding a
+/// counter must reset through its `reset_for_session()`, never by being
+/// replaced with `Default::default()`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StaleDropGen(u64);
 

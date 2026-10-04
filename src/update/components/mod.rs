@@ -1695,7 +1695,8 @@ impl Nokkvi {
             settings_page: _,
             similar_page: _,
             harbour_page: _,
-            // The redb handle re-login must reuse (exclusive lock).
+            // Set (not cleared) in phase 1 to the live redb handle, which
+            // re-login must reuse (exclusive lock).
             cached_storage: _,
             current_view: _,
             pre_settings_view: _,
