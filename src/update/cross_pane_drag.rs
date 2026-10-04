@@ -75,7 +75,10 @@ impl Nokkvi {
             CrossPaneDragMessage::Pressed => self.handle_cross_pane_drag_pressed(),
             CrossPaneDragMessage::Moved(pos) => self.handle_cross_pane_drag_moved(pos),
             CrossPaneDragMessage::Released => self.handle_cross_pane_drag_released(),
-            CrossPaneDragMessage::Cancel => self.handle_cross_pane_drag_cancel(),
+            CrossPaneDragMessage::Cancel => {
+                self.cancel_cross_pane_drag();
+                Task::none()
+            }
         }
     }
     /// Look up the currently-hovered slot for the browsing panel's active
@@ -328,13 +331,12 @@ impl Nokkvi {
     /// Intentionally NOT a full `CrossPaneDragUi::default()` reset:
     /// `pending_queue_insert_position` is left alone so a drop that already
     /// dispatched `AddCenterToQueue` can still consume its position.
-    pub(crate) fn handle_cross_pane_drag_cancel(&mut self) -> Task<Message> {
+    pub(crate) fn cancel_cross_pane_drag(&mut self) {
         if self.cross_pane_drag.active.is_some() {
             debug!(" [DRAG] Cross-pane drag cancelled by user");
         }
         self.cross_pane_drag.active = None;
         self.cross_pane_drag.clear_press_tracking();
-        Task::none()
     }
 
     /// Dispatch the browsing panel's active view's AddCenterToQueue message.

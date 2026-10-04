@@ -1074,9 +1074,10 @@ fn mode_toggle_button<'a>(
 /// display is off, the suffix is empty, or there's no bitrate, the affected cap
 /// falls back to time-only (fully opaque). Pure (takes `show_format` as an
 /// argument rather than reading the theme atomic) so it stays unit-testable.
-// Many display inputs (time/codec/rate/bitrate/bit-perfect) — a builder for one
-// strip, not a candidate for a params struct.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one strip's display inputs; pure, so the tests pass each one directly"
+)]
 fn capsule_scrub_labels(
     elapsed: &str,
     duration: &str,

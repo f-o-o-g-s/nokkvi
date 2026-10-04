@@ -206,14 +206,9 @@ impl Nokkvi {
 
         // Fast path: pure navigation messages don't need SettingsViewData at all
         // when entries are already cached — avoid disk I/O for arrow key nav.
-        let is_nav_only = matches!(
-            msg,
-            SettingsMessage::SlotListUp
-                | SettingsMessage::SlotListDown
-                | SettingsMessage::SlotListSetOffset(..)
-        );
-        if is_nav_only
-            && !self.settings_page.cached_entries.is_empty()
+        // Nothing is being edited here (both cursors are None), so a move only
+        // steps the list and snaps off section headers.
+        if !self.settings_page.cached_entries.is_empty()
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
             && self.settings_page.theme_sub_list.is_none()
@@ -221,28 +216,28 @@ impl Nokkvi {
             && self.settings_page.editing_index.is_none()
         {
             let total = self.settings_page.cached_entries.len().max(1);
-            match msg {
+            let slot_list = &mut self.settings_page.slot_list;
+            // `Some(forward)`: the message was a pure move, and which way
+            // header-snapping should step.
+            let moved = match &msg {
                 SettingsMessage::SlotListUp => {
-                    self.settings_page.editing_index = None;
-                    self.settings_page.toggle_cursor = None;
-                    self.settings_page.slot_list.move_up(total);
-                    self.settings_page.snap_to_non_header(false);
+                    slot_list.move_up(total);
+                    Some(false)
                 }
                 SettingsMessage::SlotListDown => {
-                    self.settings_page.editing_index = None;
-                    self.settings_page.toggle_cursor = None;
-                    self.settings_page.slot_list.move_down(total);
-                    self.settings_page.snap_to_non_header(true);
+                    slot_list.move_down(total);
+                    Some(true)
                 }
-                SettingsMessage::SlotListSetOffset(offset, _) => {
-                    self.settings_page.editing_index = None;
-                    self.settings_page.toggle_cursor = None;
-                    self.settings_page.slot_list.set_offset(offset, total);
-                    self.settings_page.snap_to_non_header(true);
+                &SettingsMessage::SlotListSetOffset(offset, _) => {
+                    slot_list.set_offset(offset, total);
+                    Some(true)
                 }
-                _ => unreachable!(),
+                _ => None,
+            };
+            if let Some(forward) = moved {
+                self.settings_page.snap_to_non_header(forward);
+                return self.detail_pane_scroll_task();
             }
-            return self.detail_pane_scroll_task();
         }
 
         // Full path: build SettingsViewData (reads from theme system + config.toml)
@@ -824,11 +819,13 @@ impl Nokkvi {
             // state that silently reverts on the next reload).
             .map(|res| {
                 res.map(|effect| {
-                    if enabling_crossfade {
-                        let _ = mgr.set_bit_perfect(BitPerfectMode::Off);
+                    // The paired switch-off is already applied in memory; a
+                    // failed save only fails to persist it.
+                    if enabling_crossfade && let Err(e) = mgr.set_bit_perfect(BitPerfectMode::Off) {
+                        tracing::warn!(" Saving Bit-Perfect Off (for Crossfade) failed: {e:#}");
                     }
-                    if enabling_bit_perfect {
-                        let _ = mgr.set_crossfade_enabled(false);
+                    if enabling_bit_perfect && let Err(e) = mgr.set_crossfade_enabled(false) {
+                        tracing::warn!(" Saving Crossfade Off (for Bit-Perfect) failed: {e:#}");
                     }
                     (effect, mgr.get_player_settings())
                 })

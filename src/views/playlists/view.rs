@@ -631,11 +631,10 @@ impl PlaylistsPage {
     }
 
     /// Render a parent playlist row in the slot list
-    // Three artwork maps (collage mini, album quad tiles, custom cover) plus
-    // per-row context tip this over clippy's 7-arg line; the args are all
-    // borrowed snapshots with distinct roles, so a bundling struct would only
-    // add indirection. Same tradeoff as the other 15 allows in the tree.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "three artwork maps plus the row context: borrowed snapshots with distinct types"
+    )]
     fn render_playlist_row<'a>(
         &self,
         playlist: &PlaylistUIViewData,
@@ -944,13 +943,16 @@ impl PlaylistsPage {
             song,
             ctx,
             sub_index_label,
-            stable_viewport,
             PlaylistsMessage::SlotList,
-            Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
-            song.artist_id
-                .as_ref()
-                .map(|id| PlaylistsMessage::NavigateAndExpandArtist(id.clone())),
-            1, // depth 1: child tracks under playlist
+            super::super::expansion::ChildTrackRowOptions {
+                stable_viewport,
+                depth: 1, // child tracks under playlist
+                on_star_click: Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
+                on_artist_click: song
+                    .artist_id
+                    .as_ref()
+                    .map(|id| PlaylistsMessage::NavigateAndExpandArtist(id.clone())),
+            },
         );
 
         use crate::widgets::context_menu::{playlist_child_entries, wrap_library_row};

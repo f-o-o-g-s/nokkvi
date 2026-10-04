@@ -48,7 +48,12 @@ impl StateStorage {
             if let Ok(meta) = std::fs::metadata(&path) {
                 let mut perms = meta.permissions();
                 perms.set_mode(0o600);
-                let _ = std::fs::set_permissions(&path, perms);
+                if let Err(e) = std::fs::set_permissions(&path, perms) {
+                    tracing::warn!(
+                        "could not make {} owner-only (it holds session tokens): {e}",
+                        path.display()
+                    );
+                }
             }
         }
 

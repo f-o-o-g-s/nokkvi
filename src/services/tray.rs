@@ -76,10 +76,15 @@ pub struct TrayConnection {
 
 impl TrayConnection {
     pub fn set_playing_state(&self, is_playing: bool, title: impl Into<String>) {
-        let _ = self.sender.send(TrayCommand::SetPlayingState {
+        let command = TrayCommand::SetPlayingState {
             is_playing,
             title: title.into(),
-        });
+        };
+        // A closed channel means the tray thread has ended (icon off, or
+        // shutdown).
+        if self.sender.send(command).is_err() {
+            debug!(" Tray thread gone; dropped a state update");
+        }
     }
 }
 
@@ -91,8 +96,12 @@ struct NokkviTray {
 }
 
 impl NokkviTray {
+    /// Forward a tray click to the app. `try_send` fails when the app is
+    /// behind (the click is dropped) or gone.
     fn emit(&self, event: TrayEvent) {
-        let _ = self.event_tx.try_send(event);
+        if let Err(e) = self.event_tx.try_send(event) {
+            warn!(" Tray: dropped a click: {e}");
+        }
     }
 }
 
@@ -224,7 +233,9 @@ pub(crate) fn run() -> impl Sipper<Never, TrayEvent> {
                 Ok(Some(event)) => output.send(event).await,
                 Ok(None) => {
                     debug!(" Tray event channel closed; subscription ending");
-                    let _ = tray_thread.join();
+                    if tray_thread.join().is_err() {
+                        warn!(" Tray thread panicked");
+                    }
                     break;
                 }
                 Err(_timeout) => {}

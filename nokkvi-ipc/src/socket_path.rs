@@ -26,7 +26,6 @@ use std::{
     env, fs,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 /// Filename prefix shared by every nokkvi socket in [`socket_dir`].
@@ -99,12 +98,9 @@ pub(crate) fn is_alive(path: &Path) -> bool {
     let Ok(addr) = std::os::unix::net::SocketAddr::from_pathname(path) else {
         return false;
     };
-    let Ok(stream) = UnixStream::connect_addr(&addr) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
-    true
+    // A completed connect is the liveness signal; the probe stream is
+    // dropped without reading or writing.
+    UnixStream::connect_addr(&addr).is_ok()
 }
 
 /// Find the first live nokkvi daemon socket in [`socket_dir`].

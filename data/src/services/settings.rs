@@ -90,7 +90,11 @@ impl SettingsManager {
                 Err(e) => {
                     tracing::warn!("Settings deserialization failed, resetting to defaults: {e}");
                     let defaults = UserSettings::default();
-                    let _ = storage.save(crate::services::storage_keys::USER_SETTINGS, &defaults);
+                    if let Err(e) =
+                        storage.save(crate::services::storage_keys::USER_SETTINGS, &defaults)
+                    {
+                        tracing::warn!("Saving the reset settings failed: {e}");
+                    }
                     defaults
                 }
             };
@@ -1120,7 +1124,10 @@ impl SettingsManager {
         self.save()
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per stored playlist-context field"
+    )]
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,

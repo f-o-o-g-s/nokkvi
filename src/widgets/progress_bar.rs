@@ -127,7 +127,10 @@ impl<'a, Message> ProgressBar<'a, Message> {
         self
     }
 
-    #[allow(clippy::wrong_self_convention)] // Builder pattern setter, not an accessor
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "a builder setter named for its flag, not an is_ accessor"
+    )]
     pub fn is_playing(mut self, is_playing: bool) -> Self {
         self.is_playing = is_playing;
         self

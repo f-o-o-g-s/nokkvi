@@ -800,7 +800,11 @@ pub(crate) fn auto_show_on_sort<M: PartialEq>(
 }
 
 #[cfg(test)]
-#[allow(unreachable_pub, dead_code)]
+#[expect(
+    unreachable_pub,
+    dead_code,
+    reason = "the test expands define_view_columns!, whose pub items it doesn't all use"
+)]
 mod tests {
     use super::*;
 

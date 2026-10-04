@@ -2623,7 +2623,10 @@ fn expand_center_on_trawl_row_is_noop() {
 /// The section header's teaser fields, cloned out of a fresh row build:
 /// `(subtitle, art_album_id, art_album_ids, custom_playlist_id)`. `None` =
 /// empty shelf (the header renders its glyph + "Nothing here yet").
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "the four teaser fields as one tuple, named in the doc above"
+)]
 fn header_teaser(
     app: &crate::Nokkvi,
     id: HarbourSectionId,

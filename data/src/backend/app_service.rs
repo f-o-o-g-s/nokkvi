@@ -47,6 +47,15 @@ use crate::{
 /// bare `crate::USER_AGENT` used for Navidrome).
 const RADIO_SCROBBLE_USER_AGENT: &str = "nokkvi (+https://github.com/f-o-o-g-s/nokkvi)";
 
+/// Blank a radio-scrobble credential's legacy redb copy once config.toml
+/// holds it. A failure leaves the old value in redb, where it is only the
+/// lowest-priority fallback, so it is logged rather than failing the save.
+fn clear_legacy_redb_credential(storage: &crate::services::state_storage::StateStorage, key: &str) {
+    if let Err(e) = storage.save(key, &String::new()) {
+        warn!("[APP SERVICE] failed to clear the legacy redb copy of {key}: {e}");
+    }
+}
+
 /// AppService — Application-level orchestration and state management.
 ///
 /// Coordinates between domain services and the playback controller.
@@ -1227,7 +1236,7 @@ impl AppService {
         }
         // Clear the redb copies — config.toml now owns these.
         for (redb_key, _) in KEYS {
-            let _ = storage.save(redb_key, &String::new());
+            clear_legacy_redb_credential(storage, redb_key);
         }
     }
 
@@ -1287,7 +1296,7 @@ impl AppService {
             "listenbrainz_token",
             token,
         )])?;
-        let _ = self.storage.save(LISTENBRAINZ_TOKEN, &String::new());
+        clear_legacy_redb_credential(&self.storage, LISTENBRAINZ_TOKEN);
         Ok(())
     }
 
@@ -1335,8 +1344,8 @@ impl AppService {
             ("lastfm_api_key", api_key),
             ("lastfm_api_secret", api_secret),
         ])?;
-        let _ = self.storage.save(LASTFM_API_KEY, &String::new());
-        let _ = self.storage.save(LASTFM_API_SECRET, &String::new());
+        clear_legacy_redb_credential(&self.storage, LASTFM_API_KEY);
+        clear_legacy_redb_credential(&self.storage, LASTFM_API_SECRET);
         Ok(())
     }
 
@@ -1856,8 +1865,8 @@ impl AppService {
                 })
                 .collect();
             // One reset covers the removal and the re-insert.
-            let _ = qm.remove_entries_by_ids(&entry_ids)?;
-            qm.insert_after_current(extracted)?
+            let removed = qm.remove_entries_by_ids(&entry_ids)?;
+            removed.and(qm.insert_after_current(extracted)?)
         };
         self.queue_service.refresh_from_queue().await?;
         effect.apply_to(&self.audio_engine()).await;

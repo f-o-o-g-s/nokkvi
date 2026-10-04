@@ -88,11 +88,12 @@ fn a_server_that_never_answers_times_out() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let req = IpcRequest::new(1, "show", serde_json::Value::Null);
-        let _ = tx.send(send_request_with_timeout(
+        tx.send(send_request_with_timeout(
             &path,
             &req,
             Duration::from_millis(100),
-        ));
+        ))
+        .expect("the test thread waits for this result");
     });
 
     let result = rx

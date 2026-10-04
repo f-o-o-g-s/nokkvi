@@ -525,6 +525,16 @@ fn child_leading_indent(depth: u8) -> f32 {
     }
 }
 
+/// The per-tree switches and click messages for [`render_child_track_row`].
+/// Named fields, so the two same-typed click messages can't trade places.
+pub(crate) struct ChildTrackRowOptions<M> {
+    pub(crate) stable_viewport: bool,
+    /// Tree depth, for the leading indent and slot style.
+    pub(crate) depth: u8,
+    pub(crate) on_star_click: Option<M>,
+    pub(crate) on_artist_click: Option<M>,
+}
+
 /// Render a child **track** row (used by Albums → Tracks and Playlists → Tracks).
 ///
 /// Layout: `[indent] [track#] [title 60%] [artist 20%] [duration 12%] [star 5%]`
@@ -534,17 +544,19 @@ fn child_leading_indent(depth: u8) -> f32 {
 /// The 4-arm modifier-aware click ladder lives in
 /// [`crate::widgets::slot_list::primary_slot_click_message`] — this renderer
 /// composes through it via [`child_slot_button`].
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     song: &nokkvi_data::backend::songs::SongUIViewData,
     ctx: &SlotListRowContext,
     sub_index_label: &str,
-    stable_viewport: bool,
     wrap: impl Fn(SlotListPageMessage) -> M,
-    on_star_click: Option<M>,
-    on_artist_click: Option<M>,
-    depth: u8,
+    opts: ChildTrackRowOptions<M>,
 ) -> Element<'a, M> {
+    let ChildTrackRowOptions {
+        stable_viewport,
+        depth,
+        on_star_click,
+        on_artist_click,
+    } = opts;
     // Visual hierarchy comes from the per-depth `bg0/bg1/bg2` ramp inside
     // `for_slot`'s unfocused branch — not from forcing the now-playing branch.
     let style = ctx.slot_style(false, false, depth);

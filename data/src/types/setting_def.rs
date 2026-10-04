@@ -234,7 +234,7 @@ macro_rules! define_settings {
         )?
         $(,)?
     ) => {
-        #[allow(dead_code)]
+        #[allow(dead_code, reason = "generated for every settings tab; not every tab reads it")]
         pub const $settings_const: &[$crate::types::setting_def::SettingDef] = &[
             $(
                 $crate::types::setting_def::SettingDef {
@@ -251,7 +251,7 @@ macro_rules! define_settings {
             /// the `TAB_<TAB>_SETTINGS` table. The const exists so structural
             /// sentinel tests can assert a residual field is macro-owned
             /// without exposing it to dispatch.
-            #[allow(dead_code)]
+            #[allow(dead_code, reason = "generated for every settings tab; not every tab reads it")]
             pub const $copy_only_const: &[&str] = &[ $( $ckey, )* ];
         )?
 
@@ -265,7 +265,10 @@ macro_rules! define_settings {
         // `$apply_fn` and `src` / `out` in `$dump_fn`. Once the per-tab
         // follow-ups land entries here, every binding is consumed by the
         // generated arms.
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "a tab whose rows don't need a parameter leaves it unused in the generated body"
+        )]
         pub fn $dispatch_fn(
             key: &str,
             value: $crate::types::setting_value::SettingValue,
@@ -288,7 +291,10 @@ macro_rules! define_settings {
             ::core::option::Option::None
         }
 
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "a tab whose rows don't need a parameter leaves it unused in the generated body"
+        )]
         pub fn $apply_fn(
             ts: &$crate::types::toml_settings::TomlSettings,
             p: &mut $crate::types::settings::PersistedPlayerSettings,
@@ -312,7 +318,10 @@ macro_rules! define_settings {
             )* )?
         }
 
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "a tab whose rows don't need a parameter leaves it unused in the generated body"
+        )]
         pub fn $dump_fn(
             src: &$crate::types::settings::PersistedPlayerSettings,
             out: &mut $crate::types::player_settings::LivePlayerSettings,
@@ -345,7 +354,10 @@ macro_rules! define_settings {
         /// which lives only on the redb-backed `PersistedPlayerSettings`)
         /// declare a no-op `write:` closure so the per-tab function still
         /// claims the key even though the wire copy is a no-op.
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "a tab whose rows don't need a parameter leaves it unused in the generated body"
+        )]
         pub fn $write_fn(
             ps: &$crate::types::player_settings::LivePlayerSettings,
             ts: &mut $crate::types::toml_settings::TomlSettings,
@@ -381,7 +393,12 @@ macro_rules! define_settings {
         /// rows, ToggleSet rows, and dialog sentinel rows stay hand-written
         /// in the UI crate's `items_<tab>.rs` builder, which interleaves them
         /// with the rows returned here.
-        #[allow(dead_code, unused_variables, unused_mut)]
+        #[allow(
+            dead_code,
+            unused_variables,
+            unused_mut,
+            reason = "generated for every settings tab; a tab's rows may not use every parameter"
+        )]
         pub fn $items_fn(
             data: &$data_type,
         ) -> ::std::vec::Vec<$crate::types::setting_item::SettingsEntry> {
@@ -431,7 +448,11 @@ macro_rules! define_settings_dispatch_arm {
                 let $sval: $sty = v;
                 let setter_result: ::anyhow::Result<()> = $sbody;
                 setter_result.map(|()| {
-                    #[allow(unused_mut, unused_assignments)]
+                    #[allow(
+                        unused_mut,
+                        unused_assignments,
+                        reason = "a row without an on_dispatch hook never reassigns the effect"
+                    )]
                     let mut __effect =
                         $crate::types::settings_side_effect::SettingsSideEffect::None;
                     $( __effect = $dbody; )?
@@ -457,7 +478,11 @@ macro_rules! define_settings_dispatch_arm {
                 let $sval: $sty = val;
                 let setter_result: ::anyhow::Result<()> = $sbody;
                 setter_result.map(|()| {
-                    #[allow(unused_mut, unused_assignments)]
+                    #[allow(
+                        unused_mut,
+                        unused_assignments,
+                        reason = "a row without an on_dispatch hook never reassigns the effect"
+                    )]
                     let mut __effect =
                         $crate::types::settings_side_effect::SettingsSideEffect::None;
                     $( __effect = $dbody; )?
@@ -483,7 +508,11 @@ macro_rules! define_settings_dispatch_arm {
                 let $sval: $sty = val;
                 let setter_result: ::anyhow::Result<()> = $sbody;
                 setter_result.map(|()| {
-                    #[allow(unused_mut, unused_assignments)]
+                    #[allow(
+                        unused_mut,
+                        unused_assignments,
+                        reason = "a row without an on_dispatch hook never reassigns the effect"
+                    )]
                     let mut __effect =
                         $crate::types::settings_side_effect::SettingsSideEffect::None;
                     $( __effect = $dbody; )?
@@ -509,7 +538,11 @@ macro_rules! define_settings_dispatch_arm {
                 let $sval: $sty = val;
                 let setter_result: ::anyhow::Result<()> = $sbody;
                 setter_result.map(|()| {
-                    #[allow(unused_mut, unused_assignments)]
+                    #[allow(
+                        unused_mut,
+                        unused_assignments,
+                        reason = "a row without an on_dispatch hook never reassigns the effect"
+                    )]
                     let mut __effect =
                         $crate::types::settings_side_effect::SettingsSideEffect::None;
                     $( __effect = $dbody; )?
@@ -535,7 +568,11 @@ macro_rules! define_settings_dispatch_arm {
                 let $sval: $sty = s;
                 let setter_result: ::anyhow::Result<()> = $sbody;
                 setter_result.map(|()| {
-                    #[allow(unused_mut, unused_assignments)]
+                    #[allow(
+                        unused_mut,
+                        unused_assignments,
+                        reason = "a row without an on_dispatch hook never reassigns the effect"
+                    )]
                     let mut __effect =
                         $crate::types::settings_side_effect::SettingsSideEffect::None;
                     $( __effect = $dbody; )?
@@ -563,7 +600,11 @@ macro_rules! define_settings_dispatch_arm {
 macro_rules! define_settings_view_columns_cov {
     ( cov_fn: [], fields: [ $( $field:ident ),* $(,)? ] ) => {};
     ( cov_fn: [ $cov_fn:ident ], fields: [ $( $field:ident ),* $(,)? ] ) => {
-        #[allow(dead_code, clippy::needless_pass_by_value)]
+        #[allow(
+            dead_code,
+            clippy::needless_pass_by_value,
+            reason = "a compile-time exhaustiveness check over ViewColumns; never called"
+        )]
         fn $cov_fn(v: $crate::types::view_columns::ViewColumns) {
             let $crate::types::view_columns::ViewColumns {
                 $( $field: _, )*

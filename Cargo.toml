@@ -53,6 +53,18 @@ unused_async = "deny"
 # convention in their headers; the lint backs the convention.
 assertions_on_constants = "deny"
 
+# Swallowed outcomes — `result.ok();` throws an error away with no trace,
+# and `let _ = <#[must_use] value>` does the same for a value the API says
+# to act on (a NextTrackResetEffect, a Task). Handle it, log the error, or
+# say why it is dropped with `#[expect(..., reason = "...")]`.
+unused_result_ok = "deny"
+let_underscore_must_use = "warn"
+
+# Every lint suppression says why. Prefer `#[expect(lint, reason = "...")]`,
+# which also fails once the lint stops firing, so a stale suppression
+# can't outlive the code it excused.
+allow_attributes_without_reason = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.21.2"

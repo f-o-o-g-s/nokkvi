@@ -27,7 +27,7 @@ use std::{
 
 use tokio::{sync::Mutex, time::timeout};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Status of a background task
 #[derive(Debug, Clone, PartialEq)]
@@ -223,9 +223,18 @@ impl TaskManager {
         // `TaskTracker::spawn` counts the task before it returns, so a
         // `shutdown_all` right after this call already waits for it.
         self.tracker.spawn(async move {
-            let _ = status_tx.send((reported.clone(), TaskStatus::Running));
+            // A closed status channel means the UI listener is gone; the task
+            // still runs to completion.
+            if status_tx
+                .send((reported.clone(), TaskStatus::Running))
+                .is_err()
+            {
+                trace!("task status listener gone");
+            }
             let status = body(task_name, token).await;
-            let _ = status_tx.send((reported, status));
+            if status_tx.send((reported, status)).is_err() {
+                trace!("task status listener gone");
+            }
         });
 
         handle

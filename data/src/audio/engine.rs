@@ -1096,7 +1096,10 @@ enum GaplessSwapOutcome {
 /// BEFORE the renderer position reset), resets the renderer, stores the
 /// transition info, and fires the completion callback. The `renderer` lock is a
 /// `parking_lot` (sync) mutex and is always scoped + dropped before any `.await`.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "called from the decode-loop task, which holds clones of these engine fields rather than the engine"
+)]
 async fn try_gapless_swap(
     decoder: &tokio::sync::Mutex<AudioDecoder>,
     renderer: &PlMutex<AudioRenderer>,
@@ -1309,6 +1312,10 @@ async fn inject_transition_gap(
         };
         remaining -= written;
         if written < n {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the timeout elapsing is the paused-ring wake-up, not an error"
+            )]
             let _ = tokio::time::timeout(
                 tokio::time::Duration::from_millis(500),
                 consumed_notify.notified(),
@@ -2061,6 +2068,10 @@ impl CustomAudioEngine {
                             //   wake-ups/s instead of 200 wake-ups/s — no more livelock.
                             // On supersede:  generation check fires immediately after the timeout
                             //   (or after a spurious wake), bounding exit latency to ≤500 ms.
+                            #[expect(
+                                clippy::let_underscore_must_use,
+                                reason = "the timeout elapsing is the paused wake-up described above, not an error"
+                            )]
                             let _ = tokio::time::timeout(
                                 tokio::time::Duration::from_millis(500),
                                 consumed_notify.notified(),
@@ -4445,8 +4456,10 @@ impl CustomAudioEngine {
     /// Stop the dedicated render thread
     fn stop_render_thread(&mut self) {
         self.render_running.store(false, Ordering::Release);
-        if let Some(handle) = self.render_thread.take() {
-            let _ = handle.join();
+        if let Some(handle) = self.render_thread.take()
+            && handle.join().is_err()
+        {
+            warn!("render thread panicked before it stopped");
         }
     }
 }

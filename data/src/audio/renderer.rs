@@ -338,7 +338,10 @@ enum RebufferAction {
 /// Never fires during a crossfade, on radio, before the ring has primed once
 /// after a start/seek, at genuine end-of-track (decoder EOF), or with an invalid
 /// format — the guards that keep it from disrupting normal playback.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a pure free function over render_tick's state, so the tests drive every input"
+)]
 fn rebuffer_action(
     playing: bool,
     is_infinite: bool,

@@ -369,7 +369,10 @@ impl ProcessingState {
 ///   until the next call with `Some(bar)` corrects it. Acceptable for
 ///   short animation ticks; flag if a caller ever has bar values and
 ///   forgets to thread them through.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one bar's peak step; the per-bar loop passes the peak tunables"
+)]
 fn apply_peak_decay_step(
     display: &mut DisplayBuffers,
     peaks: &mut PeakState,
@@ -1654,7 +1657,10 @@ impl VisualizerState {
 /// Exponential decay spreading creates sharp triangular peaks. A light
 /// Catmull-Rom pass afterward smooths the kinks where overlapping decays
 /// meet without flattening the distinctive monstercat aesthetic.
-#[allow(clippy::needless_range_loop)]
+#[expect(
+    clippy::needless_range_loop,
+    reason = "the index loops mirror the monstercat filter in cava.c, which this ports"
+)]
 pub(super) fn monstercat_filter(bars: &mut [f64], monstercat: f64) {
     let number_of_bars = bars.len();
     if number_of_bars == 0 {

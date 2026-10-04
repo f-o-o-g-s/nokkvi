@@ -197,7 +197,10 @@ impl ConfigWatcher {
 
         // Create watcher with debounce
         let mut watcher = notify::recommended_watcher(move |res| {
-            let _ = tx.send(res);
+            // A closed channel means the watcher is being dropped.
+            if tx.send(res).is_err() {
+                tracing::trace!("config watcher receiver gone; dropped an event");
+            }
         })?;
 
         // Watch the config directory (not the file directly, for atomic saves)

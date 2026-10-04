@@ -509,12 +509,14 @@ impl ActiveSink {
             Self::NativePipewire(p) => {
                 use crate::audio::music_bridge::MusicCommand;
                 let (title_tx, volume_tx) = p.controls();
-                Some(Box::new(move |cmd| match cmd {
-                    MusicCommand::SetTitle(t) => {
-                        let _ = title_tx.send(t);
-                    }
-                    MusicCommand::SetVolume(v) => {
-                        let _ = volume_tx.send(v);
+                // A closed channel means the PipeWire thread already ended.
+                Some(Box::new(move |cmd| {
+                    let delivered = match cmd {
+                        MusicCommand::SetTitle(t) => title_tx.send(t).is_ok(),
+                        MusicCommand::SetVolume(v) => volume_tx.send(v).is_ok(),
+                    };
+                    if !delivered {
+                        tracing::trace!("🔊 PipeWire thread gone; dropped a sink control");
                     }
                 }))
             }

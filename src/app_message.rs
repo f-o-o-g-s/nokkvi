@@ -1224,9 +1224,10 @@ pub struct HarbourShelvesData {
 /// `generation` captured when its fetch was dispatched; the handler drops any
 /// result whose generation no longer matches `HarbourState::shelves_generation`
 /// (stale-load rejection, Similar-view precedent).
-// Every variant is a loader result, so the shared `Loaded` postfix reads as
-// intent, not noise.
-#[allow(clippy::enum_variant_names)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "every variant is a loader result, so the shared Loaded postfix reads as intent"
+)]
 #[derive(Debug, Clone)]
 pub enum HarbourLoaderMessage {
     /// The joined shelf fetch completed.

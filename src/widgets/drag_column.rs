@@ -97,7 +97,10 @@ pub enum DragEvent {
     },
 }
 
-#[allow(missing_debug_implementations)]
+#[expect(
+    missing_debug_implementations,
+    reason = "holds a boxed drag callback, which has no Debug"
+)]
 pub struct DragColumn<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     spacing: f32,
     padding: Padding,

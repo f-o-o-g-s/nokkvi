@@ -593,13 +593,16 @@ impl AlbumsPage {
             song,
             ctx,
             sub_index_label,
-            stable_viewport,
             AlbumsMessage::SlotList,
-            Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
-            song.artist_id
-                .as_ref()
-                .map(|id| AlbumsMessage::NavigateAndExpandArtist(id.clone())),
-            1, // depth 1: child tracks under album
+            super::super::expansion::ChildTrackRowOptions {
+                stable_viewport,
+                depth: 1, // child tracks under album
+                on_star_click: Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
+                on_artist_click: song
+                    .artist_id
+                    .as_ref()
+                    .map(|id| AlbumsMessage::NavigateAndExpandArtist(id.clone())),
+            },
         );
 
         use crate::widgets::context_menu::wrap_library_row;

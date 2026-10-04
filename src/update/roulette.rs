@@ -547,7 +547,10 @@ impl FakeoutPattern {
 ///    overshoot/false-settle wobble after the natural walk's long
 ///    terminal hold.
 /// 3. Terminal keyframe at `target_idx` (duration 0).
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a pure keyframe builder; the tests call it with each input pinned"
+)]
 fn build_decel_keyframes(
     cruise_end_offset: usize,
     target_idx: usize,

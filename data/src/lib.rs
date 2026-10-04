@@ -7,7 +7,15 @@
     allow(
         clippy::unwrap_used,
         clippy::print_stderr,
-        clippy::field_reassign_with_default
+        clippy::field_reassign_with_default,
+        reason = "tests unwrap, print, and build settings field by field"
+    )
+)]
+#![cfg_attr(
+    test,
+    expect(
+        clippy::let_underscore_must_use,
+        reason = "tests drop must-use values they don't assert on (reset effects, cleanup results)"
     )
 )]
 //! Nokkvi Data Crate

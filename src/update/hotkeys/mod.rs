@@ -146,24 +146,22 @@ impl Nokkvi {
             ));
         }
 
-        #[allow(clippy::collapsible_if)]
         if self.split_view_active()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = self.browsing_panel.as_ref()
             && panel.active_view == crate::views::BrowsingView::Similar
+            && let Some(similar) = &self.similar_songs
         {
-            if let Some(similar) = &self.similar_songs {
-                let center_idx = self
-                    .similar_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(similar.songs.len());
-                if let Some(song) = center_idx.and_then(|idx| similar.songs.get(idx)) {
-                    let item = InfoModalItem::from_song(song);
-                    return self.update(Message::InfoModal(
-                        crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
-                    ));
-                }
+            let center_idx = self
+                .similar_page
+                .common
+                .slot_list
+                .get_center_item_index(similar.songs.len());
+            if let Some(song) = center_idx.and_then(|idx| similar.songs.get(idx)) {
+                let item = InfoModalItem::from_song(song);
+                return self.update(Message::InfoModal(
+                    crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
+                ));
             }
         }
         // Resolve the focused list: under browser focus this is the active tab

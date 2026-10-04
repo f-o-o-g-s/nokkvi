@@ -807,7 +807,10 @@ impl SlotListConfig {
 ///
 /// # Returns
 /// Element containing the scrollable slot list view
-#[expect(clippy::too_many_arguments)] // 7 args; an options-struct would force boxing on_seek
+#[expect(
+    clippy::too_many_arguments,
+    reason = "eight independent inputs, two of them generic closures (on_seek, render_item)"
+)]
 pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     sl: &SlotListView,
     items: &[T],
@@ -851,7 +854,10 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
 /// Same as `slot_list_view_with_scroll` but the inner column of slots is a `DragColumn`
 /// that emits drag events via `on_drag_event`. Slot indices in the `DragEvent` are
 /// raw **slot** indices — caller translates to item indices via `viewport_offset`.
-#[expect(clippy::too_many_arguments)] // Mirrors slot_list_view_with_scroll (8 args) +on_drag_event +drop_indicator_slot; struct would require boxing on_seek
+#[expect(
+    clippy::too_many_arguments,
+    reason = "slot_list_view_with_scroll's inputs plus the drag callback and drop indicator"
+)]
 pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     sl: &SlotListView,
     items: &[T],
@@ -1694,7 +1700,10 @@ pub(crate) fn slot_list_artwork_quad_column<'a, Message: 'a>(
 /// * `style` - Slot styling to determine text colors
 /// * `is_bold` - Whether to bold the title
 /// * `portion` - FillPortion width allocation
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared two-line cell builder: each slot list passes its own text, sizes and click messages"
+)]
 pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
     title: String,
     title_on_press: Option<Message>,

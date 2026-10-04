@@ -11,7 +11,6 @@ use crate::utils::formatters::{
 /// Items that can be shown in the info modal.
 /// Stores owned, cloned data so the modal state is self-contained.
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)] // Always boxed at usage sites (InfoModalMessage::Open, *Action::ShowInfo)
 pub enum InfoModalItem {
     Song {
         title: String,

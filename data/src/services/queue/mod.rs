@@ -431,10 +431,11 @@ impl QueueManager {
     /// duplicate-aware.
     #[cfg(test)]
     pub fn remove_song_by_id(&mut self, id: &str) -> Result<NextTrackResetEffect> {
+        let mut effect = NextTrackResetEffect::new();
         while let Some(idx) = self.index_of(id) {
-            let _ = self.remove_song(idx)?;
+            effect = effect.and(self.remove_song(idx)?);
         }
-        Ok(NextTrackResetEffect::new())
+        Ok(effect)
     }
 
     /// Test helper: remove every queue row matching any of the given
@@ -446,12 +447,13 @@ impl QueueManager {
     /// production removal is per-row ([`Self::remove_entries_by_ids`]).
     #[cfg(test)]
     pub fn remove_songs_by_ids(&mut self, ids: &[String]) -> Result<NextTrackResetEffect> {
+        let mut effect = NextTrackResetEffect::new();
         for id in ids {
             while let Some(idx) = self.index_of(id) {
-                let _ = self.remove_song(idx)?;
+                effect = effect.and(self.remove_song(idx)?);
             }
         }
-        Ok(NextTrackResetEffect::new())
+        Ok(effect)
     }
 
     /// Remove a single queue row by its per-row `entry_id`.
@@ -461,10 +463,10 @@ impl QueueManager {
     /// queue" can target one row without taking the other with it.
     /// No-op if `entry_id` doesn't match any current row.
     pub fn remove_entry_by_id(&mut self, entry_id: u64) -> Result<NextTrackResetEffect> {
-        if let Some(idx) = self.index_of_entry(entry_id) {
-            let _ = self.remove_song(idx)?;
+        match self.index_of_entry(entry_id) {
+            Some(idx) => self.remove_song(idx),
+            None => Ok(NextTrackResetEffect::new()),
         }
-        Ok(NextTrackResetEffect::new())
     }
 
     /// Remove a batch of queue rows by their `entry_id`s, in one pass.
@@ -1039,10 +1041,11 @@ impl QueueManager {
     ) -> Result<NextTrackResetEffect> {
         let clamped = index.min(self.queue.rows.len());
         // One reset covers the insert and the reposition.
-        let _ = self.insert_songs_at(clamped, vec![song])?;
-        let _ = self.reposition_to_index(Some(clamped));
+        let effect = self
+            .insert_songs_at(clamped, vec![song])?
+            .and(self.reposition_to_index(Some(clamped)));
         warn_if_unsaved(self.save_order(), "re-inserting a consumed song");
-        Ok(NextTrackResetEffect::new())
+        Ok(effect)
     }
 
     /// Insert multiple songs at a specific index in the queue.

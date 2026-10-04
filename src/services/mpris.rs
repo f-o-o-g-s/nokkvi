@@ -14,7 +14,7 @@ use std::{sync::mpsc as std_mpsc, time::Duration};
 use iced::task::{Never, Sipper, sipper};
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, Volume};
 use tokio::sync::mpsc as tokio_mpsc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// MPRIS gets a deeper event channel because zbus method calls can burst
 /// (Seek + SetPosition + SetVolume from a single playerctl invocation).
@@ -94,9 +94,18 @@ pub struct MprisConnection {
 }
 
 impl MprisConnection {
+    /// Queue a command for the MPRIS thread. A closed channel means that
+    /// thread has ended (no D-Bus session, or shutdown) and the app runs on
+    /// without MPRIS, so the update is dropped with a trace line.
+    fn send(&self, command: MprisCommand) {
+        if self.sender.send(command).is_err() {
+            trace!(" MPRIS thread gone; dropped a state update");
+        }
+    }
+
     /// Update playback status (Playing/Paused/Stopped)
     pub fn set_playback_status(&self, status: PlaybackStatus) {
-        let _ = self.sender.send(MprisCommand::SetPlaybackStatus(status));
+        self.send(MprisCommand::SetPlaybackStatus(status));
     }
 
     /// Update current track metadata
@@ -108,7 +117,7 @@ impl MprisConnection {
         duration_us: i64,
         art_url: Option<&str>,
     ) {
-        let _ = self.sender.send(MprisCommand::SetMetadata {
+        self.send(MprisCommand::SetMetadata {
             title: title.to_string(),
             artist: artist.to_string(),
             album: album.to_string(),
@@ -119,27 +128,44 @@ impl MprisConnection {
 
     /// Update position (microseconds) — keeps internal state fresh for D-Bus polling
     pub fn set_position(&self, position_us: i64) {
-        let _ = self.sender.send(MprisCommand::SetPosition(position_us));
+        self.send(MprisCommand::SetPosition(position_us));
     }
 
     /// Emit Seeked signal (position in microseconds)
     pub fn seeked(&self, position_us: i64) {
-        let _ = self.sender.send(MprisCommand::Seeked(position_us));
+        self.send(MprisCommand::Seeked(position_us));
     }
 
     /// Update volume (0.0–1.0)
     pub fn set_volume(&self, volume: f64) {
-        let _ = self.sender.send(MprisCommand::SetVolume(volume));
+        self.send(MprisCommand::SetVolume(volume));
     }
 
     /// Update loop status
     pub fn set_loop_status(&self, status: LoopStatus) {
-        let _ = self.sender.send(MprisCommand::SetLoopStatus(status));
+        self.send(MprisCommand::SetLoopStatus(status));
     }
 
     /// Update shuffle status
     pub fn set_shuffle(&self, shuffle: bool) {
-        let _ = self.sender.send(MprisCommand::SetShuffle(shuffle));
+        self.send(MprisCommand::SetShuffle(shuffle));
+    }
+}
+
+/// Forward a D-Bus method call to the app. `try_send` fails when the app
+/// is `MPRIS_EVENT_CHANNEL_DEPTH` events behind (the call is dropped) or
+/// gone, so a failure is a lost media-key press and is logged.
+fn forward(tx: &tokio_mpsc::Sender<MprisEvent>, event: MprisEvent) {
+    if let Err(e) = tx.try_send(event) {
+        warn!(" MPRIS: dropped a D-Bus command: {e}");
+    }
+}
+
+/// Log a failed D-Bus property update or signal. The next update resends
+/// the state, so a failure only leaves a client briefly stale.
+fn log_failed<E: std::fmt::Display>(what: &str, result: Result<(), E>) {
+    if let Err(e) = result {
+        debug!(" MPRIS: {what} failed: {e}");
     }
 }
 
@@ -173,7 +199,9 @@ pub(crate) fn run() -> impl Sipper<Never, MprisEvent> {
                 Ok(None) => {
                     // Channel closed, MPRIS thread died - cleanup and exit loop
                     debug!(" MPRIS event channel closed, subscription ending");
-                    let _ = mpris_thread.join();
+                    if mpris_thread.join().is_err() {
+                        warn!(" MPRIS thread panicked");
+                    }
                     break; // Exit the polling loop
                 }
                 Err(_timeout) => {
@@ -236,73 +264,73 @@ fn run_mpris_thread(
             // PlayPause
             let tx = event_tx.clone();
             player.connect_play_pause(move |_| {
-                let _ = tx.try_send(MprisEvent::PlayPause);
+                forward(&tx, MprisEvent::PlayPause);
             });
 
             // Play
             let tx = event_tx.clone();
             player.connect_play(move |_| {
-                let _ = tx.try_send(MprisEvent::Play);
+                forward(&tx, MprisEvent::Play);
             });
 
             // Pause
             let tx = event_tx.clone();
             player.connect_pause(move |_| {
-                let _ = tx.try_send(MprisEvent::Pause);
+                forward(&tx, MprisEvent::Pause);
             });
 
             // Stop
             let tx = event_tx.clone();
             player.connect_stop(move |_| {
-                let _ = tx.try_send(MprisEvent::Stop);
+                forward(&tx, MprisEvent::Stop);
             });
 
             // Raise
             let tx = event_tx.clone();
             player.connect_raise(move |_| {
-                let _ = tx.try_send(MprisEvent::Raise);
+                forward(&tx, MprisEvent::Raise);
             });
 
             // Next
             let tx = event_tx.clone();
             player.connect_next(move |_| {
-                let _ = tx.try_send(MprisEvent::Next);
+                forward(&tx, MprisEvent::Next);
             });
 
             // Previous
             let tx = event_tx.clone();
             player.connect_previous(move |_| {
-                let _ = tx.try_send(MprisEvent::Previous);
+                forward(&tx, MprisEvent::Previous);
             });
 
             // Seek (offset)
             let tx = event_tx.clone();
             player.connect_seek(move |_, offset| {
-                let _ = tx.try_send(MprisEvent::Seek(offset.as_micros()));
+                forward(&tx, MprisEvent::Seek(offset.as_micros()));
             });
 
             // SetPosition
             let tx = event_tx.clone();
             player.connect_set_position(move |_, _track_id, position| {
-                let _ = tx.try_send(MprisEvent::SetPosition(position.as_micros()));
+                forward(&tx, MprisEvent::SetPosition(position.as_micros()));
             });
 
             // Volume setter
             let tx = event_tx.clone();
             player.connect_set_volume(move |_, volume| {
-                let _ = tx.try_send(MprisEvent::SetVolume(volume));
+                forward(&tx, MprisEvent::SetVolume(volume));
             });
 
             // LoopStatus setter
             let tx = event_tx.clone();
             player.connect_set_loop_status(move |_, status| {
-                let _ = tx.try_send(MprisEvent::SetLoopStatus(status));
+                forward(&tx, MprisEvent::SetLoopStatus(status));
             });
 
             // Shuffle setter
             let tx = event_tx.clone();
             player.connect_set_shuffle(move |_, shuffle| {
-                let _ = tx.try_send(MprisEvent::SetShuffle(shuffle));
+                forward(&tx, MprisEvent::SetShuffle(shuffle));
             });
         }
 
@@ -315,7 +343,10 @@ fn run_mpris_thread(
             // Non-blocking check for commands
             match cmd_rx.try_recv() {
                 Ok(MprisCommand::SetPlaybackStatus(status)) => {
-                    let _ = player.set_playback_status(status).await;
+                    log_failed(
+                        "PlaybackStatus update",
+                        player.set_playback_status(status).await,
+                    );
                 }
                 Ok(MprisCommand::SetMetadata {
                     title,
@@ -334,22 +365,31 @@ fn run_mpris_thread(
                         builder = builder.art_url(url);
                     }
 
-                    let _ = player.set_metadata(builder.build()).await;
+                    log_failed(
+                        "Metadata update",
+                        player.set_metadata(builder.build()).await,
+                    );
                 }
                 Ok(MprisCommand::SetPosition(position_us)) => {
                     player.set_position(Time::from_micros(position_us));
                 }
                 Ok(MprisCommand::Seeked(position_us)) => {
-                    let _ = player.seeked(Time::from_micros(position_us)).await;
+                    log_failed(
+                        "Seeked signal",
+                        player.seeked(Time::from_micros(position_us)).await,
+                    );
                 }
                 Ok(MprisCommand::SetVolume(volume)) => {
-                    let _ = player.set_volume(Volume::from(volume)).await;
+                    log_failed(
+                        "Volume update",
+                        player.set_volume(Volume::from(volume)).await,
+                    );
                 }
                 Ok(MprisCommand::SetLoopStatus(status)) => {
-                    let _ = player.set_loop_status(status).await;
+                    log_failed("LoopStatus update", player.set_loop_status(status).await);
                 }
                 Ok(MprisCommand::SetShuffle(shuffle)) => {
-                    let _ = player.set_shuffle(shuffle).await;
+                    log_failed("Shuffle update", player.set_shuffle(shuffle).await);
                 }
                 Err(std_mpsc::TryRecvError::Empty) => {
                     // No commands, yield for a bit

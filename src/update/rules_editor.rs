@@ -1979,7 +1979,9 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         // 404 tolerated — the sweep or an external cleanup
                         // may have beaten us to it.
-                        let _ = service.delete_playlist(&old_id).await;
+                        if let Err(e) = service.delete_playlist(&old_id).await {
+                            debug!(" [RULES] old draft {old_id} not deleted: {e:#}");
+                        }
                         let id = service
                             .create_smart_playlist(
                                 nokkvi_data::types::rules_session::DRAFT_DISPLAY_NAME,
@@ -2113,8 +2115,12 @@ impl Nokkvi {
         };
         Task::perform(
             async move {
-                if let Ok(api) = shell.playlists_api().await {
-                    let _ = api.delete_playlist(&draft_id).await;
+                if let Ok(api) = shell.playlists_api().await
+                    && let Err(e) = api.delete_playlist(&draft_id).await
+                {
+                    debug!(
+                        " [RULES] draft {draft_id} not deleted (the startup sweep retries): {e:#}"
+                    );
                 }
             },
             |()| Message::NoOp,
@@ -2380,8 +2386,13 @@ impl Nokkvi {
                         // last evaluation: the real playlist's own
                         // evaluatedAt stays stale until its owner's next
                         // first-page read (documented cosmetic caveat).
-                        if let Some(d) = draft_for_task {
-                            let _ = service.delete_playlist(&d.id).await;
+                        if let Some(d) = draft_for_task
+                            && let Err(e) = service.delete_playlist(&d.id).await
+                        {
+                            debug!(
+                                " [RULES] draft {} not deleted after save (the startup sweep retries): {e:#}",
+                                d.id
+                            );
                         }
                         let saved = service
                             .get_playlist_updated_at(&playlist_id)

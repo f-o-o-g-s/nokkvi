@@ -20,9 +20,10 @@ use super::shader::{
 /// is identical, so the helper centralizes the wgpu boilerplate.
 ///
 /// `vs_main` / `fs_main` are the entry points both shaders share.
-// Plumbs the few axes that vary across the bars/lines/scope/particle pipelines;
-// grouping them into a struct would only move the noise to the eight call sites.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the axes that vary across the visualizer pipelines; a struct would move them to every call site"
+)]
 fn build_visualizer_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,

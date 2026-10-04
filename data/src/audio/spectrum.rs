@@ -240,7 +240,6 @@ impl SpectrumEngine {
     /// Compute logarithmic frequency band mapping and per-bar EQ.
     ///
     /// Faithful port of cavacore.c lines 178-296.
-    #[allow(clippy::needless_range_loop)]
     fn compute_band_mapping(
         bar_count: usize,
         sample_rate: u32,
@@ -370,7 +369,10 @@ impl SpectrumEngine {
     ///
     /// Faithful port of `cava_execute()` from cavacore.c lines 300-452.
     /// Input is mono f64 PCM samples. Output slice must be at least `bar_count` long.
-    #[allow(clippy::needless_range_loop)]
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "the index loops mirror cava_execute() in cavacore.c line for line"
+    )]
     pub fn execute(&mut self, input: &[f64], output: &mut [f64]) {
         let new_samples = input.len().min(self.input_buffer.len());
 

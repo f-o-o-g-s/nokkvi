@@ -12,10 +12,10 @@ impl Nokkvi {
     /// Each invocation fetches one page, appends it to the queue, refreshes the UI,
     /// and (if more pages remain) emits the next `ProgressiveQueueAppendPage` message.
     /// A generation counter guards against stale chains from superseded play actions.
-    // Mirrors the `ProgressiveQueueAppendPage` message fields 1:1 (sort/search/filter
-    // + paging cursor + generation) — a params struct would just shuffle the same
-    // values through an extra type for this single-caller internal handler.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the ProgressiveQueueAppendPage message fields 1:1 for this single-caller handler"
+    )]
     pub(crate) fn handle_progressive_queue_append_page(
         &mut self,
         sort_mode: String,

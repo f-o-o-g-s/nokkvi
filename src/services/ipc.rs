@@ -52,8 +52,9 @@ impl IpcResponder {
         // alternative is widening the panic to the IPC subscription.
         if let Ok(mut guard) = self.inner.lock()
             && let Some(tx) = guard.take()
+            && tx.send(response).is_err()
         {
-            let _ = tx.send(response);
+            tracing::debug!("IPC client hung up before its reply");
         }
     }
 }

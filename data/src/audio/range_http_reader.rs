@@ -651,10 +651,16 @@ impl Seek for RangeHttpReader {
         // demuxer's binary-search resync, which reads forward from the seek
         // position. (We do NOT spawn/respawn the background task here — only the
         // cursor moves.)
+        // Best-effort: a chunk that fails here is fetched again by the read
+        // that needs it, which reports the error.
         let target_chunk = Self::chunk_index(self.position);
-        let _ = self.ensure_chunk(target_chunk);
-        if (target_chunk + 1) * CHUNK_SIZE < self.content_length {
-            let _ = self.ensure_chunk(target_chunk + 1);
+        if let Err(e) = self.ensure_chunk(target_chunk) {
+            tracing::debug!("seek prefetch of chunk {target_chunk} failed: {e}");
+        }
+        if (target_chunk + 1) * CHUNK_SIZE < self.content_length
+            && let Err(e) = self.ensure_chunk(target_chunk + 1)
+        {
+            tracing::debug!("seek prefetch of chunk {} failed: {e}", target_chunk + 1);
         }
 
         Ok(self.position)

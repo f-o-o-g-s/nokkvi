@@ -421,7 +421,10 @@ impl Nokkvi {
     /// Insert an entity into the queue at a specific position.
     /// Same as `add_entity_to_queue_task` but inserts at `position` instead of appending.
     /// Used when a cross-pane drag drop targets a specific queue slot.
-    #[expect(clippy::too_many_arguments)] // Mirrors add_entity_to_queue_task (7 args) +1 position; generics make struct awkward
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors add_entity_to_queue_task's arguments plus the insert position"
+    )]
     pub(crate) fn insert_entity_to_queue_at_position_task<T, F, Fut>(
         &self,
         items: &[T],
@@ -1785,10 +1788,14 @@ impl Nokkvi {
             Task::perform(
                 async move {
                     if let Some((draft_id, shell)) = draft_cleanup {
-                        if let Ok(api) = shell.playlists_api().await {
-                            let _ = api.delete_playlist(&draft_id).await;
+                        if let Ok(api) = shell.playlists_api().await
+                            && let Err(e) = api.delete_playlist(&draft_id).await
+                        {
+                            debug!(
+                                " [SESSION-RESET] draft {draft_id} not deleted (the next login's sweep retries): {e:#}"
+                            );
                         }
-                        tracing::debug!(" [SESSION-RESET] draft cleanup attempted");
+                        debug!(" [SESSION-RESET] draft cleanup attempted");
                     }
                     // (1) Stop the engine first (kills PipeWire streams, the
                     // decode loop, and the render thread). Lock, stop, drop the

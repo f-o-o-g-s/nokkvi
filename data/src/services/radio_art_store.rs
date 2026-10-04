@@ -134,7 +134,11 @@ impl RadioArtStore {
             // Delete the legacy blob ONLY after the forward write is durable —
             // a failed save must leave it intact for a clean retry next launch.
             if self.storage.save_binary(RADIO_ART_INDEX, &current).is_ok() {
-                let _ = self.storage.remove(LEGACY_RADIO_ART_INDEX);
+                // A leftover legacy blob is merged again next launch, which
+                // the forward write makes harmless.
+                if let Err(e) = self.storage.remove(LEGACY_RADIO_ART_INDEX) {
+                    tracing::debug!("legacy radio-art index not removed: {e}");
+                }
             } else {
                 // Nothing was durably migrated; report 0 so the caller's log
                 // doesn't claim a migration that the retry next launch will redo.

@@ -1,5 +1,19 @@
 #![warn(unreachable_pub)]
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::print_stderr,
+        reason = "tests unwrap and print freely"
+    )
+)]
+#![cfg_attr(
+    test,
+    expect(
+        clippy::let_underscore_must_use,
+        reason = "handler tests assert state, so they drop the Task a handler returns"
+    )
+)]
 //! Nokkvi
 //!
 //! A Rust/Iced client for Navidrome music servers.
@@ -785,6 +799,26 @@ impl Nokkvi {
     }
 }
 
+/// The lowercased text a string queue sort orders by, shared by
+/// `sort_queue_songs` and `queue_is_sorted` so the two can't disagree on a
+/// field. `None` for the modes that order by a number or shuffle.
+fn queue_sort_text_key(
+    mode: views::QueueSortMode,
+    song: &nokkvi_data::backend::queue::QueueSongUIViewData,
+) -> Option<String> {
+    use views::QueueSortMode;
+    match mode {
+        QueueSortMode::Title => Some(song.title.to_lowercase()),
+        QueueSortMode::Artist => Some(song.artist.to_lowercase()),
+        QueueSortMode::Album => Some(song.album.to_lowercase()),
+        QueueSortMode::Genre => Some(song.genre.to_lowercase()),
+        QueueSortMode::Duration
+        | QueueSortMode::Rating
+        | QueueSortMode::MostPlayed
+        | QueueSortMode::Random => None,
+    }
+}
+
 impl Nokkvi {
     // =========================================================================
     // SECTION: Shell Helpers (KEEP IN main.rs)
@@ -963,16 +997,9 @@ impl Nokkvi {
             | QueueSortMode::Artist
             | QueueSortMode::Album
             | QueueSortMode::Genre => {
-                self.library.queue_songs.sort_by_cached_key(|s| {
-                    let field = match sort_mode {
-                        QueueSortMode::Title => &s.title,
-                        QueueSortMode::Artist => &s.artist,
-                        QueueSortMode::Album => &s.album,
-                        QueueSortMode::Genre => &s.genre,
-                        _ => unreachable!("string sort branch covers only string variants"),
-                    };
-                    field.to_lowercase()
-                });
+                self.library
+                    .queue_songs
+                    .sort_by_cached_key(|s| queue_sort_text_key(sort_mode, s));
                 if !ascending {
                     self.library.queue_songs.reverse();
                 }
@@ -1041,13 +1068,7 @@ impl Nokkvi {
             | QueueSortMode::Artist
             | QueueSortMode::Album
             | QueueSortMode::Genre => {
-                let key = |s: &nokkvi_data::backend::queue::QueueSongUIViewData| match mode {
-                    QueueSortMode::Title => s.title.to_lowercase(),
-                    QueueSortMode::Artist => s.artist.to_lowercase(),
-                    QueueSortMode::Album => s.album.to_lowercase(),
-                    QueueSortMode::Genre => s.genre.to_lowercase(),
-                    _ => unreachable!("string sort branch covers only string variants"),
-                };
+                let key = |s| queue_sort_text_key(mode, s);
                 if ascending {
                     songs.windows(2).all(|w| key(&w[0]) <= key(&w[1]))
                 } else {
@@ -1229,7 +1250,7 @@ pub fn main() -> iced::Result {
     for arg in args.iter().skip(1) {
         match arg.as_str() {
             "-V" | "--version" => {
-                #[allow(clippy::print_stdout)]
+                #[expect(clippy::print_stdout, reason = "command-line output")]
                 {
                     println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
                 }
@@ -1338,6 +1359,10 @@ pub fn main() -> iced::Result {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort, and tracing isn't up yet: this is the log it would write to"
+                )]
                 let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
             Some(
@@ -1412,7 +1437,7 @@ fn switch_view_help() -> String {
 
 /// Print `--help` to stdout. Format follows GNU conventions: usage line,
 /// option table, environment vars, file paths, then a docs URL.
-#[allow(clippy::print_stdout)]
+#[expect(clippy::print_stdout, reason = "command-line output")]
 fn print_cli_help() {
     let name = env!("CARGO_PKG_NAME");
     let version = env!("CARGO_PKG_VERSION");
@@ -1532,7 +1557,7 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
 ///   1 — could not reach a running instance, or server returned an error.
 fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     let Some(path) = nokkvi_ipc::find_live_socket() else {
-        #[allow(clippy::print_stderr)]
+        #[expect(clippy::print_stderr, reason = "command-line error output")]
         {
             eprintln!(
                 "nokkvi {verb}: no live nokkvi instance found in {}",
@@ -1546,7 +1571,7 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     match nokkvi_ipc::client::send_request(&path, &request) {
         Ok(response) => print_ipc_response(verb, response),
         Err(err) => {
-            #[allow(clippy::print_stderr)]
+            #[expect(clippy::print_stderr, reason = "command-line error output")]
             {
                 eprintln!("nokkvi {verb}: {err}");
             }
@@ -1560,7 +1585,7 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
 /// hand-off.
 fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) -> iced::Result {
     if let Some(err) = response.error {
-        #[allow(clippy::print_stderr)]
+        #[expect(clippy::print_stderr, reason = "command-line error output")]
         {
             eprintln!(
                 "nokkvi {verb}: server returned error: {} ({})",
@@ -1569,7 +1594,7 @@ fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) -> iced::Re
         }
         std::process::exit(1);
     }
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout, reason = "command-line output")]
     {
         // Every server success now carries a `data` payload (mutating
         // verbs echo their resulting state; others send `{"ok":true}`),
@@ -1629,7 +1654,7 @@ fn hand_off_to_running_instance(socket: &std::path::Path) -> iced::Result {
         Ok(response) if running_instance_predates_show(&response) => refuse_second_launch(socket),
         Ok(response) => print_ipc_response("show", response),
         Err(err) => {
-            #[allow(clippy::print_stderr)]
+            #[expect(clippy::print_stderr, reason = "command-line error output")]
             {
                 eprintln!(
                     "nokkvi is already running (socket: {}) but did not answer: {err}",
@@ -1654,7 +1679,7 @@ fn running_instance_predates_show(response: &nokkvi_ipc::IpcResponse) -> bool {
 /// reaches iced. Prevents a second instance from tripping redb's exclusive
 /// lock at session-load time and crashing partway into boot.
 fn refuse_second_launch(socket: &std::path::Path) -> ! {
-    #[allow(clippy::print_stderr)]
+    #[expect(clippy::print_stderr, reason = "command-line error output")]
     {
         eprintln!(
             "nokkvi is already running (socket: {}). Refusing second launch.",

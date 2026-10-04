@@ -328,9 +328,14 @@ impl NativePipeWireSink {
 
 impl Drop for NativePipeWireSink {
     fn drop(&mut self) {
-        let _ = self.quit_tx.send(());
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+        // A closed channel means the PipeWire thread already ended.
+        if self.quit_tx.send(()).is_err() {
+            tracing::debug!("🔊 PipeWire thread already gone at sink drop");
+        }
+        if let Some(handle) = self.handle.take()
+            && handle.join().is_err()
+        {
+            tracing::warn!("🔊 PipeWire thread panicked before it stopped");
         }
     }
 }

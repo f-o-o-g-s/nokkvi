@@ -25,6 +25,18 @@ use crate::{
 
 /// PlaybackController — Owns the audio engine and queue navigator.
 ///
+/// After a completion-driven transition, reproject the queue view and tell
+/// the UI the queue changed. A failed refresh is logged (the next queue
+/// reload reconciles the view); a closed channel means the UI side is gone.
+async fn refresh_queue_view_and_signal(qvm: &QueueService, queue_tx: &mpsc::UnboundedSender<()>) {
+    if let Err(e) = qvm.refresh_from_queue().await {
+        warn!(" [COMPLETION] Queue view refresh failed: {e:#}");
+    }
+    if queue_tx.send(()).is_err() {
+        debug!(" [COMPLETION] Queue-changed listener is gone");
+    }
+}
+
 /// Handles all direct playback operations: play/pause/stop/next/previous,
 /// seeking, volume control, mode toggles (random/repeat/consume), and
 /// gapless playback preparation.
@@ -134,9 +146,8 @@ impl PlaybackController {
                             );
                             let song_id = song.id.clone();
                             drop(engine);
-                            let _ = qvm.refresh_from_queue().await;
                             // Signal the UI that queue state has changed (post-consume)
-                            let _ = queue_tx.send(());
+                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
 
                             // Notify repeat-one loop so the UI can scrobble correctly
                             if is_loop {
@@ -144,15 +155,16 @@ impl PlaybackController {
                                     " [COMPLETION] Track looped (repeat-one), notifying scrobble layer: {}",
                                     song_id
                                 );
-                                let _ = tx.send(song_id);
+                                if tx.send(song_id).is_err() {
+                                    debug!(" [COMPLETION] Loop listener is gone");
+                                }
                             }
                         }
                         Ok(None) => {
                             debug!(" [COMPLETION] No next track, playback stopped");
                             drop(engine);
                             // Refresh queue view so UI shows the consumed state
-                            let _ = qvm.refresh_from_queue().await;
-                            let _ = queue_tx.send(());
+                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
                         }
                         Err(e) => {
                             // Surface rather than swallow. A failed transition
@@ -168,8 +180,7 @@ impl PlaybackController {
                             warn!(" [COMPLETION] Auto-advance failed: {}", e);
                             drop(engine);
                             // Reconcile the view with the now-stopped engine.
-                            let _ = qvm.refresh_from_queue().await;
-                            let _ = queue_tx.send(());
+                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
                             return Err(e);
                         }
                     }

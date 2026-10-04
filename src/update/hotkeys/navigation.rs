@@ -64,7 +64,8 @@ impl Nokkvi {
 
         // Cancel active cross-pane drag first
         if self.cross_pane_drag.active.is_some() || self.cross_pane_drag.press_origin.is_some() {
-            return self.handle_cross_pane_drag_cancel();
+            self.cancel_cross_pane_drag();
+            return Task::none();
         }
 
         // Theater Mode leaves after every overlay above has had its Escape and

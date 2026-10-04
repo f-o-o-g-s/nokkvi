@@ -927,7 +927,10 @@ where
 // Overlay Builder
 // ============================================================================
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "called once, from overlay(), with the widget's fields borrowed separately"
+)]
 fn build_overlay<'a, 'b, Key, Message>(
     state: &'b mut State,
     menu: &'b mut Option<Element<'a, Message>>,
@@ -1138,7 +1141,10 @@ mod tests {
     /// / Escape events. The inner payloads are never read — these tests only
     /// exercise constructor / `Into<Element>` plumbing.
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "the payloads are never read: these tests only construct messages"
+    )]
     enum TestMessage {
         Toggle(i32),
         OpenChange(Option<iced::Rectangle>),

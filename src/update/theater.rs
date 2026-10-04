@@ -297,7 +297,7 @@ impl Nokkvi {
         self.open_menu = None;
         self.clear_stranded_within_list_drag();
         self.cancel_roulette_restoring_offset();
-        let _ = self.handle_cross_pane_drag_cancel();
+        self.cancel_cross_pane_drag();
         // A find-and-expand chain would land its expansion on a hidden row.
         self.cancel_pending_expand();
         for common in self.all_slot_list_commons_mut() {
@@ -328,14 +328,9 @@ impl Nokkvi {
     /// closes with it. Never touches the current view, the browsing panel,
     /// the editor or any search query.
     pub(crate) fn exit_theater(&mut self) -> Task<Message> {
-        if !self.theater.active {
+        if !self.leave_theater_state() {
             return Task::none();
         }
-        self.theater.active = false;
-        // The bar unmounts, so its `on_exit` may never fire.
-        self.theater.bar_hovered = false;
-        self.theater.corner_hovered = false;
-        self.open_menu = None;
         // Restore the window mode Theater Fills the Screen replaced. Taken even
         // without a window, so a stale prior never outlives this exit.
         match (self.theater.prior_window_mode.take(), self.main_window_id) {
@@ -390,7 +385,21 @@ impl Nokkvi {
     /// normally.
     pub(crate) fn exit_theater_for_closing_window(&mut self) {
         self.theater.prior_window_mode = None;
-        let _ = self.exit_theater();
+        self.leave_theater_state();
+    }
+
+    /// The state half of leaving theater, shared by both exits. Returns
+    /// whether theater was active.
+    fn leave_theater_state(&mut self) -> bool {
+        if !self.theater.active {
+            return false;
+        }
+        self.theater.active = false;
+        // The bar unmounts, so its `on_exit` may never fire.
+        self.theater.bar_hovered = false;
+        self.theater.corner_hovered = false;
+        self.open_menu = None;
+        true
     }
 
     /// [`theater_key_policy`] refined by the hidden state: a toggle whose

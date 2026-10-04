@@ -1,7 +1,7 @@
 //! Playback control handlers
 
 use iced::Task;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::{
     Nokkvi, View,
@@ -534,9 +534,7 @@ impl Nokkvi {
                 (None, Some(extracted_title.trim().to_string()))
             };
 
-            // Dispatch the metadata update directly
-            // (Using handle_radio_metadata_update directly since we are already in the update fn)
-            let _ = self.handle_radio_metadata_update(artist, title, extracted_url.clone());
+            self.set_radio_metadata(artist, title, extracted_url.clone());
             // Capture the now-playing stream art when the StreamUrl changes
             // (deduped per-station inside the helper).
             radio_icy_capture_task = self.maybe_capture_radio_icy_art(extracted_url);
@@ -1217,7 +1215,9 @@ impl Nokkvi {
             self.playback.paused = true;
             return self.shell_task(
                 |shell| async move {
-                    let _ = shell.play_pause().await;
+                    if let Err(e) = shell.play_pause().await {
+                        warn!(" Play/pause failed: {e:#}");
+                    }
                 },
                 |_| Message::Playback(PlaybackMessage::Tick),
             );
@@ -1231,7 +1231,9 @@ impl Nokkvi {
             self.playback.paused = false;
             let resume_task = self.shell_task(
                 |shell| async move {
-                    let _ = shell.play_pause().await;
+                    if let Err(e) = shell.play_pause().await {
+                        warn!(" Play/pause failed: {e:#}");
+                    }
                 },
                 |_| Message::Playback(PlaybackMessage::Tick),
             );
@@ -1351,7 +1353,9 @@ impl Nokkvi {
         self.playback.paused = true;
         self.shell_task(
             |shell| async move {
-                let _ = shell.pause().await;
+                if let Err(e) = shell.pause().await {
+                    warn!(" Pause failed: {e:#}");
+                }
             },
             |_| Message::Playback(PlaybackMessage::Tick),
         )
@@ -1370,7 +1374,9 @@ impl Nokkvi {
         }
         self.shell_task(
             |shell| async move {
-                let _ = shell.stop().await;
+                if let Err(e) = shell.stop().await {
+                    warn!(" Stop failed: {e:#}");
+                }
             },
             |_| Message::Playback(PlaybackMessage::Tick),
         )
@@ -2626,18 +2632,18 @@ impl Nokkvi {
         );
     }
 
-    pub(crate) fn handle_radio_metadata_update(
+    /// Store a playing station's ICY metadata (no-op off radio).
+    pub(crate) fn set_radio_metadata(
         &mut self,
         icy_artist: Option<String>,
         icy_title: Option<String>,
         icy_url: Option<String>,
-    ) -> Task<Message> {
+    ) {
         if let crate::state::ActivePlayback::Radio(state) = &mut self.active_playback {
             state.icy_artist = icy_artist;
             state.icy_title = icy_title;
             state.icy_url = icy_url;
         }
-        Task::none()
     }
 
     /// Dispatch a `PlaybackMessage` to its handler.
@@ -2768,7 +2774,8 @@ impl Nokkvi {
                 self.handle_initialize_scrobble_state(song_id)
             }
             PlaybackMessage::RadioMetadataUpdate(artist, title) => {
-                self.handle_radio_metadata_update(artist, title, None)
+                self.set_radio_metadata(artist, title, None);
+                Task::none()
             }
         }
     }

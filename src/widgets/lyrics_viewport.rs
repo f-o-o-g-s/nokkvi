@@ -383,7 +383,10 @@ fn falloff_at(distance: f32) -> f32 {
 /// a plain one holds a flat full-brightness band `PLAIN_BAND_LINES` wide either
 /// side of the center before the same curve takes over — no line of an untimed
 /// sheet is current, so none may look it.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the per-frame draw helper; its one caller passes that frame's layout and colors"
+)]
 fn draw_column(
     renderer: &mut iced::Renderer,
     paragraphs: &[Plain<<iced::Renderer as TextRenderer>::Paragraph>],

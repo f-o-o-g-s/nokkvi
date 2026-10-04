@@ -23,6 +23,13 @@ impl NextTrackResetEffect {
         Self { _seal: () }
     }
 
+    /// Fold a second mutation's effect into this one. A reset covers every
+    /// mutation before it, so one applied effect stands in for both.
+    pub(crate) fn and(self, other: Self) -> Self {
+        let Self { _seal: () } = other;
+        self
+    }
+
     /// Consume the effect by resetting the engine's prepared next-track
     /// state. Locks the engine internally — use when the caller does not
     /// already hold the engine lock.

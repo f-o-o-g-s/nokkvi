@@ -751,7 +751,8 @@ mod tests {
     fn edit_config_doc_never_writes_on_failure() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        let cases: [(&str, &[u8], fn(&mut toml_edit::DocumentMut) -> Result<()>); 3] = [
+        type Edit = fn(&mut toml_edit::DocumentMut) -> Result<()>;
+        let cases: [(&str, &[u8], Edit); 3] = [
             ("parse error", b"kept = 1\n[settings\n", set_key),
             ("read error", b"name = \"caf\xe9\"\n", set_key),
             ("closure error", b"kept = 1\n", |_| {

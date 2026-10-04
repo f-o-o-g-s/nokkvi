@@ -82,6 +82,10 @@ pub enum ServerError {
 /// crashed previous instances leave a corpse socket that would otherwise
 /// fail `EADDRINUSE` even though no process holds it).
 pub async fn listen(path: &Path) -> Result<IncomingRequestStream, ServerError> {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "usually there is no stale socket; one that can't be removed makes the bind below fail with its own error"
+    )]
     let _ = tokio::fs::remove_file(path).await;
 
     let name = path

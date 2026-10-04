@@ -56,6 +56,10 @@ impl<A: Send + Sync + 'static> LazyAuthedService<A> {
     /// silent-double-init behavior of the previous `Arc<OnceCell<_>>::set`
     /// pattern at the three migrated call sites).
     pub fn with_auth(self, gw: AuthGateway) -> Self {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a second attach keeps the first gateway (idempotent by design)"
+        )]
         let _ = self.auth_gateway.set(gw);
         self
     }

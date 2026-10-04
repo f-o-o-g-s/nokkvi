@@ -15,6 +15,27 @@ use super::{QueueAction, QueueContextEntry, QueueMessage, QueuePage};
 use crate::widgets::{SlotListPageAction, drag_column::DragEvent};
 
 impl QueuePage {
+    /// The rows a context-menu action targets (the selection when the
+    /// clicked row is in it, else just that row), as per-row `entry_id`s;
+    /// clears the selection.
+    ///
+    /// Filtered indices are resolved to `entry_id`s at this boundary so
+    /// downstream code is both index-free *and* duplicate-aware: two rows of
+    /// the same song_id carry distinct entry_ids, so a right-click targets a
+    /// single row without taking sibling duplicates with it.
+    fn take_context_entry_ids(
+        &mut self,
+        clicked_idx: usize,
+        queue_songs: &[QueueSongUIViewData],
+    ) -> Vec<u64> {
+        let target_indices = self.common.evaluate_context_menu(clicked_idx);
+        self.common.clear_multi_selection();
+        target_indices
+            .iter()
+            .filter_map(|&idx| queue_songs.get(idx).map(|s| s.entry_id))
+            .collect()
+    }
+
     /// Update internal state and return actions for root
     pub fn update(
         &mut self,
@@ -270,30 +291,16 @@ impl QueuePage {
                     self.common.handle_set_offset(clicked_idx, total_items);
                     (Task::none(), QueueAction::PlaySong(clicked_idx))
                 }
-                QueueContextEntry::RemoveFromQueue | QueueContextEntry::PlayNext => {
-                    let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                    self.common.clear_multi_selection();
-
-                    // Resolve filtered indices → per-row `entry_id`s at the
-                    // boundary so downstream code is both index-free *and*
-                    // duplicate-aware. Two rows of the same song_id carry
-                    // distinct entry_ids, so a right-click targets a single
-                    // row without taking sibling duplicates with it.
-                    let target_entry_ids: Vec<u64> = target_indices
-                        .iter()
-                        .filter_map(|&idx| queue_songs.get(idx).map(|s| s.entry_id))
-                        .collect();
-
-                    match entry {
-                        QueueContextEntry::RemoveFromQueue => {
-                            (Task::none(), QueueAction::RemoveFromQueue(target_entry_ids))
-                        }
-                        QueueContextEntry::PlayNext => {
-                            (Task::none(), QueueAction::PlayNext(target_entry_ids))
-                        }
-                        _ => unreachable!(),
-                    }
-                }
+                QueueContextEntry::RemoveFromQueue => (
+                    Task::none(),
+                    QueueAction::RemoveFromQueue(
+                        self.take_context_entry_ids(clicked_idx, queue_songs),
+                    ),
+                ),
+                QueueContextEntry::PlayNext => (
+                    Task::none(),
+                    QueueAction::PlayNext(self.take_context_entry_ids(clicked_idx, queue_songs)),
+                ),
                 QueueContextEntry::AddToPlaylist => {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
                     self.common.clear_multi_selection();

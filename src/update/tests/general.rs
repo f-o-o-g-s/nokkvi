@@ -624,7 +624,7 @@ fn test_handle_radio_metadata_update() {
     });
 
     // Update metadata
-    let _ = app.handle_radio_metadata_update(
+    app.set_radio_metadata(
         Some("Test Artist".to_string()),
         Some("Test Song".to_string()),
         None,

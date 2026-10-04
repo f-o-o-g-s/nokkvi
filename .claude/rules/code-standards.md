@@ -8,8 +8,10 @@
 
 ## Rust Conventions
 
-- **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths. Enforced by the `unwrap_used = "deny"` workspace lint; tests opt out via `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]` at each crate root.
+- **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths. Enforced by the `unwrap_used = "deny"` workspace lint; tests opt out via a crate-root `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr, reason = "..."))]`.
 - **No `println!` / `dbg!` / `todo!()` / `unimplemented!()` / `mem::forget`**: all `deny` at workspace level. Use `tracing` macros for output; prefer `*_or_else` over `*_or` for non-trivial fallbacks (`or_fun_call = "deny"`); `async fn` without `.await` is rejected (`unused_async = "deny"`); enum matches must enumerate every variant rather than `_ =>` (`match_wildcard_for_single_variants = "deny"`); `assert!(<const expr>)` belongs in a `const _: () = assert!(…)` block (`assertions_on_constants = "deny"`). Don't paper over with broader allows — fix at the call site.
+- **No silently dropped outcomes**: `result.ok();` is denied (`unused_result_ok`) and `let _ = <#[must_use] value>` warns (`let_underscore_must_use`, an error under CI's `-D warnings`). Handle the value, log the failure where it is finally handled (a closed channel to a thread that only ends at shutdown is a `debug!`/`trace!`), fold queue effects with `NextTrackResetEffect::and`, or, for a discard that is the design, put `#[expect(clippy::let_underscore_must_use, reason = "...")]` on that statement. Test code is exempt through a crate-root `cfg_attr(test, expect(...))`: handler tests assert state and drop the returned `Task`.
+- **Every lint suppression has a reason** (`allow_attributes_without_reason`): `#[expect(lint, reason = "...")]`, which also fails once the lint stops firing, so a stale suppression shows up. Keep `#[allow(lint, reason = "...")]` for macro-generated items, where some expansions trigger the lint and others don't.
 - **Logging**: stderr is quiet by default; the file log at `~/.local/state/nokkvi/nokkvi.log` stays verbose.
 - **Threading**: theme color reads use `ArcSwap` (lock-free).
 

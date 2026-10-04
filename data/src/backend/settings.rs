@@ -235,7 +235,10 @@ impl SettingsService {
     }
 
     /// Set active playlist context (for queue header bar) and persist
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors SettingsManager::set_active_playlist, one argument per stored playlist-context field"
+    )]
     pub async fn set_active_playlist(
         &self,
         id: Option<String>,

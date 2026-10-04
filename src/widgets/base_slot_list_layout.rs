@@ -717,7 +717,10 @@ fn wrap_with_panel_menu<'a, Message: Clone + 'a>(
 /// adds the surfing-boat overlay on top when Lines rides over the cover.
 /// `placeholder` controls the art-less fill (e.g. Radios passes `RadioTower` so
 /// the tower glyph shows under the visualizer instead of a blank square).
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per optional panel layer (visualizer, boat, lyrics) plus the panel menu's state and callbacks"
+)]
 pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone + 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     over_art: Option<(

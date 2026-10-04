@@ -59,7 +59,10 @@ const LOVE_CHANGED_EXPIRE_MS: i32 = 5_000;
     default_path = "/org/freedesktop/Notifications"
 )]
 trait Notifications {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the D-Bus Notify method takes eight arguments"
+    )]
     fn notify(
         &self,
         app_name: &str,
@@ -74,10 +77,10 @@ trait Notifications {
 }
 
 /// Commands sent from the app to the notification service.
-// The `Show` prefix is a deliberate command-verb convention that pairs each
-// variant with its `show_*` connection method; keep it rather than stripping the
-// shared prefix the lint flags.
-#[allow(clippy::enum_variant_names)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "the Show prefix pairs each command with its show_* connection method"
+)]
 #[derive(Debug, Clone)]
 pub(crate) enum NotificationCommand {
     /// Show (or coalesce-replace) the rate-this-track reminder.
@@ -109,17 +112,23 @@ pub struct NotificationConnection {
 }
 
 impl NotificationConnection {
+    /// Queue a command for the notification service. A closed channel means
+    /// the service has ended (feature off, or shutdown), so it is dropped.
+    fn send(&self, command: NotificationCommand) {
+        if self.sender.send(command).is_err() {
+            debug!("notification service gone; dropped a notification");
+        }
+    }
+
     /// Show (or coalesce-replace) the rate reminder for the given track.
     pub(crate) fn show_rating_reminder(&self, title: String, artist: String) {
-        let _ = self
-            .sender
-            .send(NotificationCommand::ShowRatingReminder { title, artist });
+        self.send(NotificationCommand::ShowRatingReminder { title, artist });
     }
 
     /// Show (or coalesce-replace) a confirmation of the new 0..=5 rating for
     /// the given track.
     pub(crate) fn show_rating_changed(&self, title: String, artist: String, rating: u32) {
-        let _ = self.sender.send(NotificationCommand::ShowRatingChanged {
+        self.send(NotificationCommand::ShowRatingChanged {
             title,
             artist,
             rating,
@@ -129,7 +138,7 @@ impl NotificationConnection {
     /// Show (or coalesce-replace) a confirmation that the given track was loved
     /// (`loved == true`) or unloved (`loved == false`).
     pub(crate) fn show_love_changed(&self, title: String, artist: String, loved: bool) {
-        let _ = self.sender.send(NotificationCommand::ShowLoveChanged {
+        self.send(NotificationCommand::ShowLoveChanged {
             title,
             artist,
             loved,

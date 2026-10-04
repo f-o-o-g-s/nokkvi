@@ -1,4 +1,11 @@
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::print_stderr,
+        reason = "tests unwrap and print freely"
+    )
+)]
 //! IPC layer for nokkvi external control. See `~/nokkvi-new-feats.md` §14.
 //!
 //! # Structural invariant
