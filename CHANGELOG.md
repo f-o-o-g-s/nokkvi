@@ -75,6 +75,10 @@ All notable changes to this project will be documented in this file.
 - After logging back in, the playing playlist's header no longer falls back to a single cover when its first albums left the queue.
 - Rows selected before logging out are no longer still selected after logging back in, where Enter could play different items.
 - When a lyrics lookup fails, for example offline, the song no longer shows no lyrics for the rest of the session.
+- During radio, clicking Shuffle, Repeat, Consume or Lyrics in the player bar's kebab menu now does nothing, like their buttons.
+- During radio, the kebab's Shuffle, Repeat, Consume and Lyrics entries are now greyed out like their buttons.
+- During radio, the kebab's Shuffle, Repeat, Consume and Lyrics checkboxes now stay unticked, as their buttons stay unlit.
+- During radio, the kebab's dot no longer lights up because Shuffle, Repeat, Consume or Lyrics is on.
 
 ### Removed
 

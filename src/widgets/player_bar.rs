@@ -78,7 +78,7 @@ pub(crate) fn transport_section_width() -> f32 {
 }
 
 /// Width of the mode-toggles section for the currently-rendered layout —
-/// `inline_count` mode buttons (7 minus `kebab_mode_count`) plus a kebab
+/// `inline_count` mode buttons (`CULL_ORDER.len()` minus `kebab_mode_count`) plus a kebab
 /// when any modes are culled, plus the hamburger button in `NavLayout::None`.
 /// Returns 0 when no modes are inline and no kebab/hamburger renders.
 #[inline]
@@ -245,36 +245,53 @@ pub(crate) enum ModeId {
     Repeat,
 }
 
-/// Per-render presentation of one mode toggle: dynamic icon + the two label
-/// strings (full tooltip, terse kebab label) + the message its press emits.
-/// Single source of truth for the strings that were previously spelled twice
-/// (the inline tooltip block and the kebab-label block). Widget-type
-/// (icon vs text toggle for EQ/SFX), enabled-policy, the SFX `sound_effects_enabled`
-/// gate, and the three orderings (CULL_ORDER / inline / kebab) stay at the
-/// render sites — the descriptor owns only icon + the two strings + message.
+/// How a mode's inline button looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModeFace {
+    /// SVG icon button ([`mode_toggle_button`]).
+    Icon(&'static str),
+    /// Short text-label button ([`mode_text_toggle`]): EQ and SFX.
+    Text(&'static str),
+}
+
+/// Per-render presentation of one mode toggle, the single source for both
+/// the inline button and the kebab row: face, the two label strings (full
+/// tooltip, terse kebab label), the message its press emits, and its
+/// active / enabled / inline-visibility state. Only the two orderings
+/// ([`CULL_ORDER`] for the inline row, [`KEBAB_GROUPS`] for the kebab) live
+/// outside it.
 struct ModeDescriptor {
-    /// SVG path for the 5 icon-based modes; `None` for EQ/SFX (text toggles).
-    icon: Option<&'static str>,
+    face: ModeFace,
     tooltip: &'static str,
     kebab_label: &'static str,
     message: PlayerBarMessage,
+    /// Whether the mode is on: accent fill inline, checked in the kebab.
+    active: bool,
+    /// Whether presses act. The queue-flow modes (Repeat / Shuffle /
+    /// Consume) and Lyrics go inert during radio, in the row and the kebab
+    /// alike: there is no queue for them to act on, so a press would only
+    /// mutate the dormant library queue.
+    enabled: bool,
+    /// Whether the inline row shows the mode while it isn't folded into the
+    /// kebab. Only SFX hides: its inline button renders only while SFX is on
+    /// (the kebab still lists it, flipping On/Off).
+    shown_inline: bool,
 }
 
 /// Build the per-render descriptor for one mode from the current view state.
 /// Labels/icons are runtime-derived and message ctors are unit variants, so
 /// the descriptor is constructed fresh per render rather than from a const
-/// table. Note: the `active`/enabled args at the render sites (repeat_active,
-/// is_random_mode, mode_controls_enabled, the SFX gate) are NOT owned here —
-/// they are the enabled/active-policy surface the audit deliberately scopes
-/// out and stay render-side.
+/// table.
 fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
     use nokkvi_data::types::player_settings::VisualizationMode;
+    // Queue-flow modes have no queue to act on during radio.
+    let queue_modes_enabled = !data.is_radio;
     match mode {
         ModeId::Repeat => {
             let queue = data.is_repeat_queue_mode;
             let track = data.is_repeat_mode;
             ModeDescriptor {
-                icon: Some(if queue {
+                face: ModeFace::Icon(if queue {
                     "assets/icons/repeat-2.svg"
                 } else {
                     "assets/icons/repeat-1.svg"
@@ -294,10 +311,13 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                     "Repeat: Off"
                 },
                 message: PlayerBarMessage::ToggleRepeat,
+                active: queue || track,
+                enabled: queue_modes_enabled,
+                shown_inline: true,
             }
         }
         ModeId::Shuffle => ModeDescriptor {
-            icon: Some("assets/icons/shuffle.svg"),
+            face: ModeFace::Icon("assets/icons/shuffle.svg"),
             tooltip: if data.is_random_mode {
                 "Shuffle: Playing in random order"
             } else {
@@ -309,9 +329,12 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "Shuffle: Off"
             },
             message: PlayerBarMessage::ToggleRandom,
+            active: data.is_random_mode,
+            enabled: queue_modes_enabled,
+            shown_inline: true,
         },
         ModeId::Consume => ModeDescriptor {
-            icon: Some("assets/icons/cookie.svg"),
+            face: ModeFace::Icon("assets/icons/cookie.svg"),
             tooltip: if data.is_consume_mode {
                 "Consume: Tracks removed from queue after playing"
             } else {
@@ -323,10 +346,12 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "Consume: Off"
             },
             message: PlayerBarMessage::ToggleConsume,
+            active: data.is_consume_mode,
+            enabled: queue_modes_enabled,
+            shown_inline: true,
         },
         ModeId::Eq => ModeDescriptor {
-            // Text toggle "EQ" at the render site.
-            icon: None,
+            face: ModeFace::Text("EQ"),
             tooltip: if data.eq_enabled {
                 "Equalizer: Active"
             } else {
@@ -338,10 +363,12 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "Equalizer: Off"
             },
             message: PlayerBarMessage::ToggleEq,
+            active: data.eq_enabled,
+            enabled: true,
+            shown_inline: true,
         },
         ModeId::Sfx => ModeDescriptor {
-            // Text toggle "SFX" at the render site.
-            icon: None,
+            face: ModeFace::Text("SFX"),
             // The inline SFX button only renders when SFX is on, so its
             // tooltip is a static "enabled" string — intentionally asymmetric
             // with the kebab label (which flips On/Off). A test pins this so a
@@ -353,9 +380,12 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "UI Sound Effects: Off"
             },
             message: PlayerBarMessage::ToggleSoundEffects,
+            active: data.sound_effects_enabled,
+            enabled: true,
+            shown_inline: data.sound_effects_enabled,
         },
         ModeId::Crossfade => ModeDescriptor {
-            icon: Some("assets/icons/blend.svg"),
+            face: ModeFace::Icon("assets/icons/blend.svg"),
             tooltip: if data.crossfade_enabled {
                 "Crossfade: Active — overlaps every track (turns off Bit-Perfect)"
             } else {
@@ -367,13 +397,16 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "Crossfade: Off"
             },
             message: PlayerBarMessage::ToggleCrossfade,
+            active: data.crossfade_enabled,
+            enabled: true,
+            shown_inline: true,
         },
         ModeId::BitPerfect => {
             use nokkvi_data::types::player_settings::BitPerfectMode;
             ModeDescriptor {
                 // Relaxed gets its own icon; Off/Strict share `binary` (Off is
-                // dimmed via the inactive flag at the render site, like Repeat).
-                icon: Some(match data.bit_perfect_mode {
+                // dimmed via the inactive flag, like Repeat).
+                face: ModeFace::Icon(match data.bit_perfect_mode {
                     BitPerfectMode::Relaxed => "assets/icons/combine.svg",
                     BitPerfectMode::Strict | BitPerfectMode::Off => "assets/icons/binary.svg",
                 }),
@@ -392,10 +425,13 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                     BitPerfectMode::Relaxed => "Bit-Perfect: Relaxed",
                 },
                 message: PlayerBarMessage::ToggleBitPerfect,
+                active: data.bit_perfect_mode != BitPerfectMode::Off,
+                enabled: true,
+                shown_inline: true,
             }
         }
         ModeId::Lyrics => ModeDescriptor {
-            icon: Some("assets/icons/captions.svg"),
+            face: ModeFace::Icon("assets/icons/captions.svg"),
             tooltip: if data.lyrics_enabled {
                 "Lyrics: On"
             } else {
@@ -407,9 +443,13 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 "Lyrics: Off"
             },
             message: PlayerBarMessage::ToggleLyrics,
+            active: data.lyrics_enabled,
+            // Lyrics follow the queue's now-playing track.
+            enabled: queue_modes_enabled,
+            shown_inline: true,
         },
         ModeId::Visualizer => ModeDescriptor {
-            icon: Some(match data.visualization_mode {
+            face: ModeFace::Icon(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
                 VisualizationMode::Scope => "assets/icons/radar.svg",
                 VisualizationMode::Milkdrop => "assets/icons/droplet.svg",
@@ -432,7 +472,73 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 VisualizationMode::Milkdrop => "Visualizer: MilkDrop",
             },
             message: PlayerBarMessage::CycleVisualization,
+            active: data.visualization_mode != VisualizationMode::Off,
+            enabled: true,
+            shown_inline: true,
         },
+    }
+}
+
+/// Kebab display order: the queue-flow group, then the audio-output group
+/// (Lyrics trails it). A separator sits between the groups only when both
+/// hold folded-in modes, so it doesn't dangle while the kebab fills up.
+const KEBAB_GROUPS: [&[ModeId]; 2] = [
+    &[ModeId::Shuffle, ModeId::Repeat, ModeId::Consume],
+    &[
+        ModeId::Crossfade,
+        ModeId::BitPerfect,
+        ModeId::Eq,
+        ModeId::Visualizer,
+        ModeId::Sfx,
+        ModeId::Lyrics,
+    ],
+];
+
+/// The inline row's modes, left to right: [`CULL_ORDER`] reversed, so the
+/// row loses modes from its right edge as the window narrows. Skips modes
+/// folded into the kebab and the SFX button while SFX is off.
+fn inline_modes(data: &PlayerBarViewData) -> impl Iterator<Item = ModeDescriptor> + '_ {
+    CULL_ORDER
+        .iter()
+        .rev()
+        .copied()
+        .filter(|&mode| !data.layout.is_in_kebab(mode))
+        .map(|mode| mode_descriptor(mode, data))
+        .filter(|d| d.shown_inline)
+}
+
+/// The kebab's rows for every mode folded into it, in [`KEBAB_GROUPS`]
+/// order. Empty when no mode is folded in.
+fn kebab_rows(
+    data: &PlayerBarViewData,
+) -> Vec<crate::widgets::player_modes_menu::ModeMenuRow<PlayerBarMessage>> {
+    use crate::widgets::player_modes_menu::{mode_menu_item, mode_menu_separator};
+    let mut rows = Vec::with_capacity(data.layout.kebab_mode_count as usize + 1);
+    for group in KEBAB_GROUPS {
+        let mut items = group
+            .iter()
+            .copied()
+            .filter(|&mode| data.layout.is_in_kebab(mode))
+            .map(|mode| {
+                let d = mode_descriptor(mode, data);
+                mode_menu_item(d.kebab_label, d.active, d.message, d.enabled)
+            })
+            .peekable();
+        if items.peek().is_some() && !rows.is_empty() {
+            rows.push(mode_menu_separator());
+        }
+        rows.extend(items);
+    }
+    rows
+}
+
+/// The inline button for one mode, by its face.
+fn inline_mode_button(d: ModeDescriptor) -> Element<'static, PlayerBarMessage> {
+    match d.face {
+        ModeFace::Icon(icon_path) => {
+            mode_toggle_button(icon_path, d.message, d.active, d.tooltip, d.enabled)
+        }
+        ModeFace::Text(label) => mode_text_toggle(label, d.message, d.active, d.tooltip, d.enabled),
     }
 }
 
@@ -873,20 +979,28 @@ fn player_control_button(
 }
 
 /// Build a flat text-labeled mode toggle (used by EQ / SFX inline buttons).
+/// `enabled: false` renders it inert like [`mode_toggle_button`]: dimmed
+/// label, no accent fill, no `on_press`.
 fn mode_text_toggle(
     label: &'static str,
     on_press: PlayerBarMessage,
     active: bool,
     tooltip_text: &str,
+    enabled: bool,
 ) -> Element<'static, PlayerBarMessage> {
-    let label_widget = text(label)
+    let mut label_widget = text(label)
         .size(10.0)
         .font(theme::weighted_ui_font(Weight::Bold));
+    if !enabled {
+        label_widget = label_widget.color(theme::fg4());
+    }
     let inner = fixed_centered(label_widget.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
-    let btn = button(inner)
+    let mut btn = button(inner)
         .padding(0)
-        .style(mode_toggle_style(active))
-        .on_press(on_press);
+        .style(mode_toggle_style(active && enabled));
+    if enabled {
+        btn = btn.on_press(on_press);
+    }
     HoverOverlay::new(
         tooltip(
             btn,
@@ -1270,19 +1384,8 @@ pub(crate) fn player_bar<'a>(
     .height(Length::Fixed(CONTROL_ROW_HEIGHT))
     .width(Length::Fill);
 
-    // Mode toggle buttons with SVG icons
-    let is_random_mode = data.is_random_mode;
-    let is_repeat_mode = data.is_repeat_mode;
-    let is_repeat_queue_mode = data.is_repeat_queue_mode;
-    let is_consume_mode = data.is_consume_mode;
-    let eq_enabled = data.eq_enabled;
     let sound_effects_enabled = data.sound_effects_enabled;
     let sfx_volume = data.sfx_volume;
-    let visualization_mode = data.visualization_mode;
-
-    let repeat_active = is_repeat_mode || is_repeat_queue_mode;
-    use nokkvi_data::types::player_settings::VisualizationMode;
-    let vis_active = visualization_mode != VisualizationMode::Off;
     let window_width = data.window_width;
 
     // SFX volume slider keeps its own width-based gate (independent of the
@@ -1290,218 +1393,18 @@ pub(crate) fn player_bar<'a>(
     // deserves a separate threshold).
     let show_sfx_slider = window_width >= BREAKPOINT_HIDE_SFX_SLIDER;
 
-    // Single source of truth for each mode's icon + the two label strings
-    // (full inline tooltip, terse kebab label) + the toggle message. Built
-    // once per render; the inline row and kebab construction below both pull
-    // from these. Widget-type, enabled-policy, the SFX gate, and the three
-    // orderings stay at the render sites.
-    let repeat = mode_descriptor(ModeId::Repeat, data);
-    let shuffle = mode_descriptor(ModeId::Shuffle, data);
-    let consume = mode_descriptor(ModeId::Consume, data);
-    let eq = mode_descriptor(ModeId::Eq, data);
-    let sfx = mode_descriptor(ModeId::Sfx, data);
-    let crossfade = mode_descriptor(ModeId::Crossfade, data);
-    let bit_perfect = mode_descriptor(ModeId::BitPerfect, data);
-    let visualizer = mode_descriptor(ModeId::Visualizer, data);
-    let lyrics = mode_descriptor(ModeId::Lyrics, data);
-
-    // Per-mode kebab membership — derived once from the layout snapshot so
-    // the inline row and kebab construction stay in sync.
+    // Inline mode toggles, then the kebab with every mode folded into it.
+    // Both come from `mode_descriptor`, so a mode's label, message and
+    // active / enabled state can't differ between the two.
     let layout = data.layout;
-    let repeat_in_kebab = layout.is_in_kebab(ModeId::Repeat);
-    let shuffle_in_kebab = layout.is_in_kebab(ModeId::Shuffle);
-    let consume_in_kebab = layout.is_in_kebab(ModeId::Consume);
-    let eq_in_kebab = layout.is_in_kebab(ModeId::Eq);
-    let sfx_in_kebab = layout.is_in_kebab(ModeId::Sfx);
-    let crossfade_in_kebab = layout.is_in_kebab(ModeId::Crossfade);
-    let bit_perfect_in_kebab = layout.is_in_kebab(ModeId::BitPerfect);
-    let visualizer_in_kebab = layout.is_in_kebab(ModeId::Visualizer);
-    let lyrics_in_kebab = layout.is_in_kebab(ModeId::Lyrics);
-
     let mut mode_toggles_row = iced::widget::Row::new().spacing(4);
-
-    // Inline mode toggles, in the historical visual order. Each mode renders
-    // here only when it's NOT in the kebab. SFX has the additional gate of
-    // `sound_effects_enabled` (preserves the long-standing "no SFX button
-    // when SFX is off" behavior at wide widths).
-    // Queue-flow mode toggles are inert during radio (no queue to act on).
-    // The audio-output modes (crossfade / EQ / visualizer / SFX) stay live.
-    let mode_controls_enabled = !data.is_radio;
-    if !repeat_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            repeat.icon.unwrap_or("assets/icons/repeat-1.svg"),
-            repeat.message.clone(),
-            repeat_active,
-            repeat.tooltip,
-            mode_controls_enabled,
-        ));
-    }
-    if !shuffle_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            shuffle.icon.unwrap_or("assets/icons/shuffle.svg"),
-            shuffle.message.clone(),
-            is_random_mode,
-            shuffle.tooltip,
-            mode_controls_enabled,
-        ));
-    }
-    if !consume_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            consume.icon.unwrap_or("assets/icons/cookie.svg"),
-            consume.message.clone(),
-            is_consume_mode,
-            consume.tooltip,
-            mode_controls_enabled,
-        ));
-    }
-    if !eq_in_kebab {
-        // EQ inline button — flat text-labeled toggle.
-        mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
-            "EQ",
-            eq.message.clone(),
-            eq_enabled,
-            eq.tooltip,
-        ));
-    }
-    if !sfx_in_kebab && sound_effects_enabled {
-        // SFX inline button — flat text-labeled toggle. Only renders when
-        // SFX is on AND not yet folded into the kebab. `sfx.tooltip` is the
-        // static "enabled" string by design (asymmetric with the kebab label).
-        mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
-            "SFX",
-            sfx.message.clone(),
-            true,
-            sfx.tooltip,
-        ));
-    }
-    // Bit-Perfect renders to the LEFT of Crossfade inline so the row's
-    // right-to-left disappear order matches CULL_ORDER (Visualizer, then
-    // Crossfade, then BitPerfect) — gaps close cleanly from the right edge.
-    if !bit_perfect_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            bit_perfect.icon.unwrap_or("assets/icons/binary.svg"),
-            bit_perfect.message.clone(),
-            data.bit_perfect_mode != nokkvi_data::types::player_settings::BitPerfectMode::Off,
-            bit_perfect.tooltip,
-            true,
-        ));
-    }
-    if !crossfade_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            crossfade.icon.unwrap_or("assets/icons/blend.svg"),
-            crossfade.message.clone(),
-            data.crossfade_enabled,
-            crossfade.tooltip,
-            true,
-        ));
-    }
-    if !visualizer_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            visualizer.icon.unwrap_or("assets/icons/audio-lines.svg"),
-            visualizer.message.clone(),
-            vis_active,
-            visualizer.tooltip,
-            true,
-        ));
-    }
-    // Rightmost inline mode (CULL_ORDER[0] — first to fold as the window
-    // narrows). Queue-only surface, so inert during radio like the queue-flow
-    // group.
-    if !lyrics_in_kebab {
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            lyrics.icon.unwrap_or("assets/icons/captions.svg"),
-            lyrics.message.clone(),
-            data.lyrics_enabled,
-            lyrics.tooltip,
-            mode_controls_enabled,
-        ));
+    for mode in inline_modes(data) {
+        mode_toggles_row = mode_toggles_row.push(inline_mode_button(mode));
     }
 
-    // Kebab menu — built only when at least one mode has folded in. Rows
-    // render in the user-specified display order: queue-flow group first
-    // [Shuffle, Repeat, Consume], then audio-output group [Crossfade, EQ,
-    // Visualizer, SFX]. The separator between groups appears only when both
-    // groups have at least one item (so it doesn't dangle as the kebab
-    // fills up gradually).
     if layout.kebab_mode_count > 0 {
-        use crate::widgets::player_modes_menu::{
-            PlayerModesMenu, mode_menu_item, mode_menu_separator,
-        };
-        let queue_group_has_items = shuffle_in_kebab || repeat_in_kebab || consume_in_kebab;
-        let audio_group_has_items = crossfade_in_kebab
-            || bit_perfect_in_kebab
-            || eq_in_kebab
-            || visualizer_in_kebab
-            || sfx_in_kebab;
-
-        let mut kebab_rows = Vec::with_capacity(layout.kebab_mode_count as usize + 1);
-        if shuffle_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                shuffle.kebab_label,
-                is_random_mode,
-                shuffle.message.clone(),
-            ));
-        }
-        if repeat_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                repeat.kebab_label,
-                repeat_active,
-                repeat.message.clone(),
-            ));
-        }
-        if consume_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                consume.kebab_label,
-                is_consume_mode,
-                consume.message.clone(),
-            ));
-        }
-        if queue_group_has_items && audio_group_has_items {
-            kebab_rows.push(mode_menu_separator());
-        }
-        if crossfade_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                crossfade.kebab_label,
-                data.crossfade_enabled,
-                crossfade.message.clone(),
-            ));
-        }
-        if bit_perfect_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                bit_perfect.kebab_label,
-                data.bit_perfect_mode != nokkvi_data::types::player_settings::BitPerfectMode::Off,
-                bit_perfect.message.clone(),
-            ));
-        }
-        if eq_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                eq.kebab_label,
-                eq_enabled,
-                eq.message.clone(),
-            ));
-        }
-        if visualizer_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                visualizer.kebab_label,
-                vis_active,
-                visualizer.message.clone(),
-            ));
-        }
-        if sfx_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                sfx.kebab_label,
-                sound_effects_enabled,
-                sfx.message.clone(),
-            ));
-        }
-        if lyrics_in_kebab {
-            kebab_rows.push(mode_menu_item(
-                lyrics.kebab_label,
-                data.lyrics_enabled,
-                lyrics.message.clone(),
-            ));
-        }
-
+        use crate::widgets::player_modes_menu::PlayerModesMenu;
+        let kebab_rows = kebab_rows(data);
         mode_toggles_row = mode_toggles_row.push(Element::from(
             HoverOverlay::new(PlayerModesMenu::new(
                 kebab_rows,
@@ -2558,8 +2461,8 @@ mod mode_descriptor_tests {
     use nokkvi_data::types::player_settings::VisualizationMode;
 
     use super::{
-        CULL_ORDER, ModeId, PlayerBarLayout, PlayerBarMessage, PlayerBarViewData,
-        capsule_scrub_labels, mode_descriptor,
+        CULL_ORDER, KEBAB_GROUPS, ModeFace, ModeId, PlayerBarLayout, PlayerBarMessage,
+        PlayerBarViewData, capsule_scrub_labels, inline_modes, kebab_rows, mode_descriptor,
     };
 
     const BP_OFF: crate::state::BitPerfectStatus = crate::state::BitPerfectStatus::Off;
@@ -2707,7 +2610,7 @@ mod mode_descriptor_tests {
         let mut data = sample_data();
         data.is_repeat_queue_mode = true;
         let d = mode_descriptor(ModeId::Repeat, &data);
-        assert_eq!(d.icon, Some("assets/icons/repeat-2.svg"));
+        assert_eq!(d.face, ModeFace::Icon("assets/icons/repeat-2.svg"));
         assert_eq!(d.tooltip, "Repeat Queue: Restart queue when it ends");
         assert_eq!(d.kebab_label, "Repeat: Queue");
         assert!(matches!(d.message, PlayerBarMessage::ToggleRepeat));
@@ -2716,13 +2619,13 @@ mod mode_descriptor_tests {
         let mut data = sample_data();
         data.is_repeat_mode = true;
         let d = mode_descriptor(ModeId::Repeat, &data);
-        assert_eq!(d.icon, Some("assets/icons/repeat-1.svg"));
+        assert_eq!(d.face, ModeFace::Icon("assets/icons/repeat-1.svg"));
         assert_eq!(d.tooltip, "Repeat Track: Loop the current track");
         assert_eq!(d.kebab_label, "Repeat: Track");
 
         // Off.
         let d = mode_descriptor(ModeId::Repeat, &sample_data());
-        assert_eq!(d.icon, Some("assets/icons/repeat-1.svg"));
+        assert_eq!(d.face, ModeFace::Icon("assets/icons/repeat-1.svg"));
         assert_eq!(d.tooltip, "Repeat: Off");
         assert_eq!(d.kebab_label, "Repeat: Off");
     }
@@ -2762,23 +2665,23 @@ mod mode_descriptor_tests {
             let mut data = sample_data();
             data.visualization_mode = mode;
             let d = mode_descriptor(ModeId::Visualizer, &data);
-            assert_eq!(d.icon, Some(icon), "icon for {mode:?}");
+            assert_eq!(d.face, ModeFace::Icon(icon), "icon for {mode:?}");
             assert_eq!(d.tooltip, label, "tooltip for {mode:?}");
             assert_eq!(d.kebab_label, label, "kebab_label for {mode:?}");
             assert!(matches!(d.message, PlayerBarMessage::CycleVisualization));
         }
     }
 
-    /// EQ and SFX are the two text-toggle modes (icon == None). SFX has an
+    /// EQ and SFX are the two text-toggle modes (`ModeFace::Text`). SFX has an
     /// intentional inline-vs-kebab string asymmetry: a STATIC tooltip
     /// ("...enabled", since the inline button only renders when on) versus a
     /// kebab label that flips On/Off. EQ has its own Active/Disabled vs On/Off
     /// asymmetry. Pinning both stops a future agent from silently unifying them.
     #[test]
-    fn text_toggle_modes_have_none_icon_and_distinct_sfx_strings() {
+    fn text_toggle_modes_have_text_faces_and_distinct_sfx_strings() {
         // EQ off.
         let eq_off = mode_descriptor(ModeId::Eq, &sample_data());
-        assert_eq!(eq_off.icon, None);
+        assert_eq!(eq_off.face, ModeFace::Text("EQ"));
         assert_eq!(eq_off.tooltip, "Equalizer: Disabled");
         assert_eq!(eq_off.kebab_label, "Equalizer: Off");
         // EQ on.
@@ -2790,7 +2693,7 @@ mod mode_descriptor_tests {
 
         // SFX off — tooltip stays the static "enabled" string by design.
         let sfx_off = mode_descriptor(ModeId::Sfx, &sample_data());
-        assert_eq!(sfx_off.icon, None);
+        assert_eq!(sfx_off.face, ModeFace::Text("SFX"));
         assert_eq!(sfx_off.tooltip, "Sound Effects: UI sounds enabled");
         assert_eq!(sfx_off.kebab_label, "UI Sound Effects: Off");
         // SFX on — tooltip unchanged; only the kebab label flips.
@@ -2825,5 +2728,165 @@ mod mode_descriptor_tests {
             };
             assert!(ok, "wrong message ctor for {mode:?}: {:?}", d.message);
         }
+    }
+
+    fn layout_with_kebab(kebab_mode_count: u8) -> PlayerBarLayout {
+        PlayerBarLayout {
+            kebab_mode_count,
+            ..PlayerBarLayout::default()
+        }
+    }
+
+    /// `(label, enabled)` of every item row, separators as `None`.
+    fn kebab_items(data: &PlayerBarViewData) -> Vec<Option<(String, bool)>> {
+        use crate::widgets::player_modes_menu::ModeMenuRow;
+        kebab_rows(data)
+            .into_iter()
+            .map(|row| match row {
+                ModeMenuRow::Item(item) => Some((item.label, item.enabled)),
+                ModeMenuRow::Separator => None,
+            })
+            .collect()
+    }
+
+    /// The kebab's display order is a second hand-kept list beside
+    /// `CULL_ORDER`; a mode missing from it would vanish once folded in.
+    #[test]
+    fn kebab_groups_list_every_mode_exactly_once() {
+        let listed: Vec<ModeId> = KEBAB_GROUPS
+            .iter()
+            .flat_map(|g| g.iter().copied())
+            .collect();
+        assert_eq!(listed.len(), CULL_ORDER.len());
+        for mode in CULL_ORDER {
+            assert_eq!(
+                listed.iter().filter(|&&m| m == mode).count(),
+                1,
+                "{mode:?} must sit in exactly one kebab group",
+            );
+        }
+    }
+
+    /// At every fold depth the kebab holds exactly the folded modes, the
+    /// inline row holds the rest, and the group separator appears only when
+    /// both groups have items.
+    #[test]
+    fn inline_row_and_kebab_split_the_modes_at_every_width() {
+        for count in 0..=CULL_ORDER.len() as u8 {
+            let mut data = sample_data();
+            data.sound_effects_enabled = true; // SFX shows inline too
+            data.layout = layout_with_kebab(count);
+
+            let items = kebab_items(&data);
+            let item_count = items.iter().flatten().count();
+            assert_eq!(item_count, count as usize, "kebab items at count {count}");
+            assert_eq!(
+                inline_modes(&data).count() + item_count,
+                CULL_ORDER.len(),
+                "inline + kebab at count {count}",
+            );
+
+            let queue_group_folded = KEBAB_GROUPS[0].iter().any(|&m| data.layout.is_in_kebab(m));
+            let audio_group_folded = KEBAB_GROUPS[1].iter().any(|&m| data.layout.is_in_kebab(m));
+            assert_eq!(
+                items.contains(&None),
+                queue_group_folded && audio_group_folded,
+                "separator at count {count}",
+            );
+        }
+    }
+
+    /// The inline row runs left to right in reverse cull order, so it loses
+    /// modes from its right edge as the window narrows.
+    #[test]
+    fn inline_row_runs_in_reverse_cull_order() {
+        let mut data = sample_data();
+        data.sound_effects_enabled = true;
+        let messages: Vec<String> = inline_modes(&data)
+            .map(|d| format!("{:?}", d.message))
+            .collect();
+        let expected: Vec<String> = CULL_ORDER
+            .iter()
+            .rev()
+            .map(|&m| format!("{:?}", mode_descriptor(m, &data).message))
+            .collect();
+        assert_eq!(messages, expected);
+    }
+
+    /// SFX's inline button renders only while SFX is on; the kebab lists it
+    /// either way.
+    #[test]
+    fn sfx_hides_inline_while_off_but_stays_in_the_kebab() {
+        let data = sample_data();
+        assert!(
+            !inline_modes(&data).any(|d| matches!(d.message, PlayerBarMessage::ToggleSoundEffects))
+        );
+
+        let mut data = sample_data();
+        data.layout = layout_with_kebab(CULL_ORDER.len() as u8);
+        assert!(
+            kebab_items(&data)
+                .iter()
+                .flatten()
+                .any(|(label, _)| label == "UI Sound Effects: Off")
+        );
+    }
+
+    /// During radio the queue-flow modes and Lyrics are inert in the kebab
+    /// exactly as in the inline row; the audio-output modes stay live.
+    #[test]
+    fn radio_makes_queue_modes_inert_in_row_and_kebab() {
+        let queue_only = |mode: ModeId| {
+            matches!(
+                mode,
+                ModeId::Repeat | ModeId::Shuffle | ModeId::Consume | ModeId::Lyrics
+            )
+        };
+        let mut data = sample_data();
+        data.is_radio = true;
+        data.is_random_mode = true;
+        data.sound_effects_enabled = true;
+
+        for mode in CULL_ORDER {
+            let d = mode_descriptor(mode, &data);
+            assert_eq!(d.enabled, !queue_only(mode), "{mode:?} during radio");
+        }
+        for d in inline_modes(&data) {
+            assert_eq!(
+                d.enabled,
+                !matches!(
+                    d.message,
+                    PlayerBarMessage::ToggleRepeat
+                        | PlayerBarMessage::ToggleRandom
+                        | PlayerBarMessage::ToggleConsume
+                        | PlayerBarMessage::ToggleLyrics
+                )
+            );
+        }
+
+        data.layout = layout_with_kebab(CULL_ORDER.len() as u8);
+        let items = kebab_items(&data);
+        let enabled_of = |label: &str| {
+            items
+                .iter()
+                .flatten()
+                .find(|(l, _)| l == label)
+                .map(|(_, enabled)| *enabled)
+        };
+        assert_eq!(enabled_of("Shuffle: On"), Some(false));
+        assert_eq!(enabled_of("Repeat: Off"), Some(false));
+        assert_eq!(enabled_of("Consume: Off"), Some(false));
+        assert_eq!(enabled_of("Lyrics: Off"), Some(false));
+        assert_eq!(enabled_of("Crossfade: Off"), Some(true));
+        assert_eq!(enabled_of("Equalizer: Off"), Some(true));
+
+        // Off radio, the same rows act again.
+        data.is_radio = false;
+        assert!(
+            kebab_items(&data)
+                .iter()
+                .flatten()
+                .all(|(_, enabled)| *enabled)
+        );
     }
 }

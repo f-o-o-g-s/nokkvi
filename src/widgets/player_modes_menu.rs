@@ -88,6 +88,19 @@ pub struct ModeMenuItem<Message> {
     pub label: String,
     pub is_active: bool,
     pub on_action: Message,
+    /// `false` renders the row inert, like a disabled inline mode button:
+    /// dimmed label, unchecked glyph, no hover wash, and a press does
+    /// nothing.
+    pub enabled: bool,
+}
+
+impl<Message> ModeMenuItem<Message> {
+    /// Whether the row shows as on: checked glyph and a contribution to the
+    /// trigger's badge dot. A disabled row never does, matching the inline
+    /// buttons, which drop their accent fill while inert.
+    fn shows_active(&self) -> bool {
+        self.enabled && self.is_active
+    }
 }
 
 /// Convenience builder for an item row.
@@ -95,11 +108,13 @@ pub(crate) fn mode_menu_item<Message>(
     label: impl Into<String>,
     is_active: bool,
     on_action: Message,
+    enabled: bool,
 ) -> ModeMenuRow<Message> {
     ModeMenuRow::Item(ModeMenuItem {
         label: label.into(),
         is_active,
         on_action,
+        enabled,
     })
 }
 
@@ -142,7 +157,7 @@ impl<Message: Clone + 'static> PlayerModesMenu<Message> {
 
     fn any_active(&self) -> bool {
         self.rows.iter().any(|row| match row {
-            ModeMenuRow::Item(item) => item.is_active,
+            ModeMenuRow::Item(item) => item.shows_active(),
             ModeMenuRow::Separator => false,
         })
     }
@@ -348,6 +363,24 @@ impl<Message: Clone> MenuOverlay<'_, Message> {
         }
         offsets
     }
+
+    /// The enabled item under `local_y` (relative to the overlay bounds
+    /// top), accounting for variable-height separator rows. Separators,
+    /// padding and disabled items are `None`.
+    fn enabled_item_at(&self, local_y: f32) -> Option<&ModeMenuItem<Message>> {
+        let offsets = self.row_offsets();
+        self.rows
+            .iter()
+            .zip(offsets)
+            .find_map(|(row, row_y)| match row {
+                ModeMenuRow::Item(item)
+                    if item.enabled && local_y >= row_y && local_y < row_y + MENU_ITEM_HEIGHT =>
+                {
+                    Some(item)
+                }
+                ModeMenuRow::Item(_) | ModeMenuRow::Separator => None,
+            })
+    }
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
@@ -416,30 +449,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     return;
                 }
 
-                // Map cursor y to a row index, accounting for variable-height
-                // separator rows.
-                let offsets = self.row_offsets();
-                let local_y = cursor_pos.y - bounds.y;
-                let mut hit: Option<usize> = None;
-                for (i, &row_y) in offsets.iter().enumerate() {
-                    let row_h = match self.rows[i] {
-                        ModeMenuRow::Item(_) => MENU_ITEM_HEIGHT,
-                        ModeMenuRow::Separator => SEPARATOR_ROW_HEIGHT,
-                    };
-                    if local_y >= row_y && local_y < row_y + row_h {
-                        hit = Some(i);
-                        break;
-                    }
-                }
-
-                if let Some(idx) = hit
-                    && let ModeMenuRow::Item(item) = &self.rows[idx]
-                {
+                if let Some(item) = self.enabled_item_at(cursor_pos.y - bounds.y) {
                     shell.publish(item.on_action.clone());
                     shell.publish((self.on_open_change)(false));
-                    shell.capture_event();
                     shell.request_redraw();
                 }
+                // A press on a disabled row, a separator or the padding does
+                // nothing, but it still lands on the menu: capture it so it
+                // isn't delivered to the widget tree underneath.
+                shell.capture_event();
             }
             _ => {}
         }
@@ -507,7 +525,8 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         height: MENU_ITEM_HEIGHT,
                     };
 
-                    let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
+                    let is_hovered =
+                        item.enabled && cursor_pos.is_some_and(|p| item_bounds.contains(p));
                     if is_hovered {
                         renderer.fill_quad(
                             renderer::Quad {
@@ -534,11 +553,13 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         renderer,
                         Point::new(check_x, check_y),
                         self.check_handle,
-                        item.is_active,
+                        item.shows_active(),
                     );
 
                     let text_x = check_x + super::checkbox_glyph::GLYPH_SIZE + MENU_CHECK_GAP;
-                    let text_color = if is_hovered {
+                    let text_color = if !item.enabled {
+                        theme::fg4()
+                    } else if is_hovered {
                         theme::fg0()
                     } else {
                         theme::fg1()
@@ -576,10 +597,20 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(visible_menu_bounds(layout.bounds())) {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
+        let bounds = visible_menu_bounds(layout.bounds());
+        match cursor.position() {
+            Some(p) if bounds.contains(p) => {
+                if self.enabled_item_at(p.y - bounds.y).is_some() {
+                    mouse::Interaction::Pointer
+                } else {
+                    // Anything but `None` over the menu: iced hides the
+                    // cursor from the widgets underneath only while the
+                    // overlay reports an interaction, so `None` here would
+                    // let their hover show through a disabled row.
+                    mouse::Interaction::Idle
+                }
+            }
+            _ => mouse::Interaction::default(),
         }
     }
 }
@@ -591,7 +622,7 @@ mod tests {
     type TestMessage = String;
 
     fn make_item(label: &str, active: bool) -> ModeMenuRow<TestMessage> {
-        mode_menu_item(label, active, label.to_string())
+        mode_menu_item(label, active, label.to_string(), true)
     }
 
     fn make_menu(rows: Vec<ModeMenuRow<TestMessage>>) -> PlayerModesMenu<TestMessage> {
@@ -641,5 +672,48 @@ mod tests {
         let menu = make_menu(Vec::new());
         assert_eq!(menu.menu_inner_height(), 0.0);
         assert!(!menu.any_active());
+    }
+
+    /// An inert row (e.g. Shuffle during radio) keeps its "On" label but
+    /// must not light the trigger's badge dot, like the inline button that
+    /// drops its accent fill while disabled.
+    #[test]
+    fn disabled_active_item_does_not_light_the_badge() {
+        let menu = make_menu(vec![mode_menu_item("a", true, "a".to_string(), false)]);
+        assert!(!menu.any_active());
+    }
+
+    /// A press resolves to an action only over an enabled item: never over
+    /// a disabled row, a separator, or the menu padding.
+    #[test]
+    fn presses_resolve_only_to_enabled_items() {
+        let rows = vec![
+            make_item("a", false),
+            mode_menu_separator(),
+            mode_menu_item("b", true, "b".to_string(), false),
+            make_item("c", false),
+        ];
+        let on_open_change = |_: bool| String::new();
+        let check_handle = Handle::from_memory(Vec::new());
+        let overlay = MenuOverlay {
+            on_open_change: &on_open_change,
+            check_handle: &check_handle,
+            rows: &rows,
+            menu_inner_height: 0.0,
+            anchor: Point::ORIGIN,
+        };
+        let label_at = |y: f32| overlay.enabled_item_at(y).map(|item| item.label.clone());
+
+        let a_top = MENU_PADDING;
+        let separator_top = a_top + MENU_ITEM_HEIGHT;
+        let b_top = separator_top + SEPARATOR_ROW_HEIGHT;
+        let c_top = b_top + MENU_ITEM_HEIGHT;
+        let middle = MENU_ITEM_HEIGHT / 2.0;
+
+        assert_eq!(label_at(a_top + middle).as_deref(), Some("a"));
+        assert_eq!(label_at(separator_top + 1.0), None, "separator");
+        assert_eq!(label_at(b_top + middle), None, "disabled row");
+        assert_eq!(label_at(c_top + middle).as_deref(), Some("c"));
+        assert_eq!(label_at(MENU_PADDING / 2.0), None, "top padding");
     }
 }
