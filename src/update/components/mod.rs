@@ -201,6 +201,14 @@ impl Nokkvi {
     /// `self.active_playlist_info = None; self.persist_active_playlist_info();`
     /// that was duplicated across 12+ call sites.
     pub(crate) fn clear_active_playlist(&mut self) {
+        self.drop_active_playlist_context();
+        self.persist_active_playlist_info();
+    }
+
+    /// Drop the in-memory playlist context without persisting the change.
+    /// Logout uses this directly: the persisted context stays in redb so the
+    /// next login restores it alongside the restored queue.
+    pub(crate) fn drop_active_playlist_context(&mut self) {
         self.active_playlist_info = None;
         // Drop any stale strip expansion so it never carries into the next
         // playlist (or shows over an empty context).
@@ -209,7 +217,6 @@ impl Nokkvi {
         // context so the next playlist's `handle_queue_loaded` re-freezes it
         // from its own queue head.
         self.strip_quad_album_ids.clear();
-        self.persist_active_playlist_info();
     }
 
     /// Persist the current `active_playlist_info` state to redb.
@@ -1618,7 +1625,8 @@ impl Nokkvi {
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs (+similar_songs_generation carried forward bumped),
     ///   active_playlist_info, playlist_editor,
-    ///   server_version, last_queue_current_index,
+    ///   server_version, last_queue_current_index (+entry id),
+    ///   strip_quad_album_ids (with the playlist context),
     ///   pending_expand (whole `PendingExpandState`), roulette,
     ///   trawl_crate (+trawl_search_generation carried forward bumped —
     ///   seeds and search results reference the old server's ids).
@@ -1790,8 +1798,9 @@ impl Nokkvi {
         // modal itself goes with the others below.)
         self.trawl_crate = nokkvi_data::types::trawl::TrawlCrate::default();
         self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
-        self.active_playlist_info = None;
-        self.queue_page.playlist_strip_expanded = false;
+        // In memory only: the persisted context is restored with the queue
+        // at the next login.
+        self.drop_active_playlist_context();
         // A sort dropdown / hover lock set at logout or session-expiry would
         // otherwise survive into the next session: the pick_list / header
         // mouse_area unmount on the Login-screen swap, so their on_close /
@@ -1802,6 +1811,7 @@ impl Nokkvi {
         self.server_version = None;
         self.open_subsonic_extensions = None;
         self.last_queue_current_index = None;
+        self.last_queue_current_entry_id = None;
         self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;
 

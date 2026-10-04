@@ -762,7 +762,10 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     ));
     app.server_version = Some("0.61.1".into());
     app.open_subsonic_extensions = Some(std::iter::once("indexBasedQueue".to_string()).collect());
+    app.strip_quad_album_ids = vec!["a1".into(), "a2".into()];
+    app.queue_page.playlist_strip_expanded = true;
     app.last_queue_current_index = Some(3);
+    app.last_queue_current_entry_id = Some(42);
     app.pending_expand.target = Some(pending_album("a1"));
     app.pending_expand.center_only = true;
 
@@ -831,6 +834,12 @@ fn reset_session_state_clears_all_session_bound_fields() {
         "trawl generation carries forward bumped (seeded 9), like harbour's"
     );
     assert!(app.active_playlist_info.is_none());
+    assert!(
+        app.strip_quad_album_ids.is_empty(),
+        "the strip quad belongs to the playlist context — a survivor would \
+         block the next login's restored context from freezing its own"
+    );
+    assert!(!app.queue_page.playlist_strip_expanded);
     assert!(app.playlist_editor.is_none());
     assert!(app.server_version.is_none());
     assert!(
@@ -838,6 +847,10 @@ fn reset_session_state_clears_all_session_bound_fields() {
         "capability set references the old server — cleared"
     );
     assert!(app.last_queue_current_index.is_none());
+    assert!(
+        app.last_queue_current_entry_id.is_none(),
+        "the playing-row id goes with its index"
+    );
     assert!(app.pending_expand.target.is_none());
     assert!(!app.pending_expand.center_only);
     assert!(app.pending_expand.top_pin.is_none());
@@ -952,6 +965,8 @@ fn logout_and_session_expired_reach_identical_state() {
         server_version,
         open_subsonic_extensions,
         last_queue_current_index,
+        last_queue_current_entry_id,
+        strip_quad_album_ids,
     );
     assert_eq!(
         via_logout.pending_expand.center_only, via_session_expired.pending_expand.center_only,
