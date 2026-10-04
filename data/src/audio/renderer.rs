@@ -333,26 +333,58 @@ enum RebufferAction {
     None,
 }
 
+/// One render tick's view of the stream, as [`rebuffer_action`] reads it.
+/// Named fields because four of them are `bool`.
+#[derive(Clone, Copy, Debug)]
+struct RebufferInputs {
+    playing: bool,
+    /// Radio: never rebuffers.
+    is_infinite: bool,
+    /// No crossfade armed or active: a transition never rebuffers.
+    crossfade_idle: bool,
+    /// The decoder reached the real end of the track.
+    eof: bool,
+    frame_rate: u32,
+    /// Samples in the decoded ring.
+    buffer: usize,
+}
+
+/// The network-rebuffer latch (issue #9), advanced by [`rebuffer_action`].
+/// `Default` is the fresh-ring state every start/stop/seek/finalize resets to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RebufferLatch {
+    /// True while pausing the output to refill the decoded ring after a mid-track
+    /// underrun. Distinct from `paused` (user pause): it silences only
+    /// the stream output, leaving `render_tick` bookkeeping and the UI
+    /// PlaybackState as "playing".
+    rebuffering: bool,
+    /// The ring must reach the resume target once after a start/seek before a
+    /// rebuffer can fire, so a cold track start does not false-pause at 0:00.
+    primed: bool,
+    /// Consecutive ticks held in rebuffer; the safety valve gives up after
+    /// `MAX_REBUFFER_TICKS` so a dead finite socket can't pause forever.
+    ticks: u32,
+}
+
 /// Pure pause-and-rebuffer state machine for the FINITE (seekable, non-infinite)
-/// path. Mutates the latch fields and returns the action `render_tick` applies.
+/// path. Advances the latch and returns the action `render_tick` applies.
 /// Never fires during a crossfade, on radio, before the ring has primed once
 /// after a start/seek, at genuine end-of-track (decoder EOF), or with an invalid
 /// format — the guards that keep it from disrupting normal playback.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a pure free function over render_tick's state, so the tests drive every input"
-)]
-fn rebuffer_action(
-    playing: bool,
-    is_infinite: bool,
-    crossfade_idle: bool,
-    eof: bool,
-    frame_rate: u32,
-    buffer: usize,
-    rebuffering: &mut bool,
-    primed: &mut bool,
-    ticks: &mut u32,
-) -> RebufferAction {
+fn rebuffer_action(inputs: RebufferInputs, latch: &mut RebufferLatch) -> RebufferAction {
+    let RebufferInputs {
+        playing,
+        is_infinite,
+        crossfade_idle,
+        eof,
+        frame_rate,
+        buffer,
+    } = inputs;
+    let RebufferLatch {
+        rebuffering,
+        primed,
+        ticks,
+    } = latch;
     if frame_rate == 0 {
         return RebufferAction::None; // no valid format yet — never rebuffer
     }
@@ -430,17 +462,8 @@ pub struct AudioRenderer {
     /// Set by the engine's decode loop to the cached stream type. The mid-track
     /// network rebuffer only runs on FINITE (seekable) streams, never radio.
     stream_is_infinite: Arc<AtomicBool>,
-    /// True while pausing the output to refill the decoded ring after a mid-track
-    /// underrun (issue #9). Distinct from `paused` (user pause): it silences only
-    /// the stream output, leaving `render_tick` bookkeeping and the UI
-    /// PlaybackState as "playing".
-    rebuffering: bool,
-    /// The ring must reach the resume target once after a start/seek before a
-    /// rebuffer can fire, so a cold track start does not false-pause at 0:00.
-    rebuffer_primed: bool,
-    /// Consecutive ticks held in rebuffer; the safety valve gives up after
-    /// `MAX_REBUFFER_TICKS` so a dead finite socket can't pause forever.
-    rebuffer_ticks: u32,
+    /// Network-rebuffer latch (issue #9); see [`RebufferLatch`].
+    rebuffer: RebufferLatch,
 
     /// Crossfade phase + per-phase data. See [`CrossfadeState`].
     crossfade_state: CrossfadeState,
@@ -776,9 +799,7 @@ impl AudioRenderer {
             source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
             stream_is_infinite: Arc::new(AtomicBool::new(false)),
-            rebuffering: false,
-            rebuffer_primed: false,
-            rebuffer_ticks: 0,
+            rebuffer: RebufferLatch::default(),
             crossfade_state: CrossfadeState::Idle,
             crossfade_curve: CrossfadeCurve::default(),
             crossfade_finalized_elapsed_ms: None,
@@ -1176,12 +1197,10 @@ impl AudioRenderer {
     /// Zero the network-rebuffer latch (issue #9). Called by every lifecycle
     /// transition that starts a fresh ring (start/stop/seek/finalize_crossfade)
     /// so a promoted/new stream re-primes against its OWN format instead of
-    /// carrying a stale `rebuffer_primed` into an unreachable resume target.
+    /// carrying a stale `rebuffer.primed` into an unreachable resume target.
     /// pause() deliberately does NOT use this — it only clears `rebuffering`.
     fn reset_rebuffer_latch(&mut self) {
-        self.rebuffering = false;
-        self.rebuffer_primed = false;
-        self.rebuffer_ticks = 0;
+        self.rebuffer = RebufferLatch::default();
     }
 
     /// Pause playback.
@@ -1216,7 +1235,7 @@ impl AudioRenderer {
         self.paused = true;
         // A user pause subsumes any in-progress network rebuffer (the stream is
         // paused either way); clear the flag so resume goes through start().
-        self.rebuffering = false;
+        self.rebuffer.rebuffering = false;
         // Pause the streaming source — it will emit silence and stop
         // counting samples, so position freezes correctly.
         if let Some(ref stream) = self.primary_stream {
@@ -2159,7 +2178,7 @@ impl AudioRenderer {
         // Update format to the incoming track's format
         self.format = incoming_format;
         // The promoted track must re-prime the network rebuffer against ITS OWN
-        // format — carrying a stale `rebuffer_primed` across a sample-rate change
+        // format — carrying a stale `rebuffer.primed` across a sample-rate change
         // is the one path that can enter rebuffer on a format whose resume target
         // is unreachable (issue #9 crossfade carryover). Reset the latch exactly
         // as start()/stop()/seek() do.
@@ -2505,7 +2524,7 @@ impl AudioRenderer {
         // bookkeeping except the stream-level flip, which the ramp completion
         // applies.
         self.paused = true;
-        self.rebuffering = false;
+        self.rebuffer.rebuffering = false;
         self.begin_fade_out(TransportFadeTarget::Pause, self.fade_pause_ms);
         true
     }
@@ -2522,7 +2541,7 @@ impl AudioRenderer {
         // Same guard-lift as the pause ramp: a stop near end-of-track must
         // not let the completion gate advance the queue mid-ramp.
         self.paused = true;
-        self.rebuffering = false;
+        self.rebuffer.rebuffering = false;
         self.begin_fade_out(TransportFadeTarget::Stop, duration_ms);
         true
     }
@@ -3052,15 +3071,15 @@ impl AudioRenderer {
         let eof = self.decoder_eof.load(Ordering::Acquire);
         let cf_idle = matches!(self.crossfade_state, CrossfadeState::Idle);
         match rebuffer_action(
-            self.playing,
-            is_infinite,
-            cf_idle,
-            eof,
-            frame_rate,
-            self.buffer_count(),
-            &mut self.rebuffering,
-            &mut self.rebuffer_primed,
-            &mut self.rebuffer_ticks,
+            RebufferInputs {
+                playing: self.playing,
+                is_infinite,
+                crossfade_idle: cf_idle,
+                eof,
+                frame_rate,
+                buffer: self.buffer_count(),
+            },
+            &mut self.rebuffer,
         ) {
             RebufferAction::Enter => {
                 if let Some(ref stream) = self.primary_stream {
@@ -3294,135 +3313,163 @@ mod tests {
     #[test]
     fn rebuffer_does_not_enter_before_primed() {
         // Cold start: ring at 0 but never primed → must NOT pause (no 0:00 hitch).
-        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: false,
+            ticks: 0,
+        };
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            FR,
-            0,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: FR,
+                buffer: 0,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::None);
-        assert!(!reb);
+        assert!(!latch.rebuffering);
     }
 
     #[test]
     fn rebuffer_primes_then_enters_on_mid_track_drain() {
-        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: false,
+            ticks: 0,
+        };
         // Reach the resume target → primes (buffer high, no pause).
         rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            FR,
-            FR_S,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: FR,
+                buffer: FR_S,
+            },
+            &mut latch,
         );
-        assert!(primed && !reb);
+        assert!(latch.primed && !latch.rebuffering);
         // Now drain below the low mark mid-track → enter rebuffer.
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            FR,
-            FR_S / 10,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: FR,
+                buffer: FR_S / 10,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::Enter);
-        assert!(reb);
+        assert!(latch.rebuffering);
     }
 
     #[test]
     fn rebuffer_resumes_at_target() {
-        let (mut reb, mut primed, mut ticks) = (true, true, 3);
+        let mut latch = RebufferLatch {
+            rebuffering: true,
+            primed: true,
+            ticks: 3,
+        };
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            FR,
-            FR_S,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: FR,
+                buffer: FR_S,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::Exit);
-        assert!(!reb);
+        assert!(!latch.rebuffering);
     }
 
     #[test]
     fn rebuffer_never_enters_at_eof_or_crossfade_or_radio_or_invalid_format() {
         // primed + drained, but EOF → genuine end-of-track, never rebuffer.
-        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: true,
+            ticks: 0,
+        };
         assert_eq!(
             rebuffer_action(
-                true,
-                false,
-                true,
-                true,
-                FR,
-                0,
-                &mut reb,
-                &mut primed,
-                &mut ticks
+                RebufferInputs {
+                    playing: true,
+                    is_infinite: false,
+                    crossfade_idle: true,
+                    eof: true,
+                    frame_rate: FR,
+                    buffer: 0,
+                },
+                &mut latch,
             ),
             RebufferAction::None
         );
         // crossfade not idle → never rebuffer.
-        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: true,
+            ticks: 0,
+        };
         assert_eq!(
             rebuffer_action(
-                true,
-                false,
-                false,
-                false,
-                FR,
-                0,
-                &mut reb,
-                &mut primed,
-                &mut ticks
+                RebufferInputs {
+                    playing: true,
+                    is_infinite: false,
+                    crossfade_idle: false,
+                    eof: false,
+                    frame_rate: FR,
+                    buffer: 0,
+                },
+                &mut latch,
             ),
             RebufferAction::None
         );
         // radio (infinite) → never rebuffer.
-        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: true,
+            ticks: 0,
+        };
         assert_eq!(
             rebuffer_action(
-                true,
-                true,
-                true,
-                false,
-                FR,
-                0,
-                &mut reb,
-                &mut primed,
-                &mut ticks
+                RebufferInputs {
+                    playing: true,
+                    is_infinite: true,
+                    crossfade_idle: true,
+                    eof: false,
+                    frame_rate: FR,
+                    buffer: 0,
+                },
+                &mut latch,
             ),
             RebufferAction::None
         );
         // invalid format (frame_rate 0) → no-op.
-        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: true,
+            ticks: 0,
+        };
         assert_eq!(
             rebuffer_action(
-                true,
-                false,
-                true,
-                false,
-                0,
-                0,
-                &mut reb,
-                &mut primed,
-                &mut ticks
+                RebufferInputs {
+                    playing: true,
+                    is_infinite: false,
+                    crossfade_idle: true,
+                    eof: false,
+                    frame_rate: 0,
+                    buffer: 0,
+                },
+                &mut latch,
             ),
             RebufferAction::None
         );
@@ -3431,39 +3478,47 @@ mod tests {
     #[test]
     fn rebuffer_exits_if_crossfade_starts_mid_rebuffer() {
         // Already rebuffering, then a crossfade arms (cf_idle=false) → resume.
-        let (mut reb, mut primed, mut ticks) = (true, true, 2);
+        let mut latch = RebufferLatch {
+            rebuffering: true,
+            primed: true,
+            ticks: 2,
+        };
         let a = rebuffer_action(
-            true,
-            false,
-            false,
-            false,
-            FR,
-            0,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: false,
+                eof: false,
+                frame_rate: FR,
+                buffer: 0,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::Exit);
-        assert!(!reb);
+        assert!(!latch.rebuffering);
     }
 
     #[test]
     fn rebuffer_safety_valve_gives_up_after_max_ticks() {
-        let (mut reb, mut primed, mut ticks) = (true, true, MAX_REBUFFER_TICKS);
+        let mut latch = RebufferLatch {
+            rebuffering: true,
+            primed: true,
+            ticks: MAX_REBUFFER_TICKS,
+        };
         // One more tick past the cap on a still-drained stream → give up.
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            FR,
-            0,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: FR,
+                buffer: 0,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::Exit);
-        assert!(!reb);
+        assert!(!latch.rebuffering);
     }
 
     #[test]
@@ -3473,55 +3528,59 @@ mod tests {
         // MUST stay reachable under that cushion. Otherwise the ring can never
         // reach `resume`, so it never primes / never exits and hangs until
         // MAX_REBUFFER_TICKS (issue #9 hi-res unit mismatch).
-        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        let mut latch = RebufferLatch {
+            rebuffering: false,
+            primed: false,
+            ticks: 0,
+        };
         // Ring filled to the backpressure cushion (the most it can ever hold) →
         // must prime even at hi-res.
         rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            HR_FR,
-            HR_BACKPRESSURE_CAP,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: HR_FR,
+                buffer: HR_BACKPRESSURE_CAP,
+            },
+            &mut latch,
         );
         assert!(
-            primed,
+            latch.primed,
             "hi-res must prime once the ring reaches the backpressure cushion"
         );
         // Drain below low mid-track → enter rebuffer.
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            HR_FR,
-            0,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: HR_FR,
+                buffer: 0,
+            },
+            &mut latch,
         );
         assert_eq!(a, RebufferAction::Enter);
         // Refill to the cushion (the most the ring can hold) → must EXIT, not hang.
         let a = rebuffer_action(
-            true,
-            false,
-            true,
-            false,
-            HR_FR,
-            HR_BACKPRESSURE_CAP,
-            &mut reb,
-            &mut primed,
-            &mut ticks,
+            RebufferInputs {
+                playing: true,
+                is_infinite: false,
+                crossfade_idle: true,
+                eof: false,
+                frame_rate: HR_FR,
+                buffer: HR_BACKPRESSURE_CAP,
+            },
+            &mut latch,
         );
         assert_eq!(
             a,
             RebufferAction::Exit,
             "hi-res rebuffer must resume within the backpressure cushion, not hang"
         );
-        assert!(!reb);
+        assert!(!latch.rebuffering);
     }
 
     /// REGRESSION (issue-9 hi-res rebuffer deadlock): the rebuffer must ENTER the
@@ -3563,22 +3622,25 @@ mod tests {
     #[tokio::test]
     async fn reset_rebuffer_latch_zeroes_all_three_fields() {
         let mut renderer = AudioRenderer::new();
-        renderer.rebuffering = true;
-        renderer.rebuffer_primed = true;
-        renderer.rebuffer_ticks = 42;
+        renderer.rebuffer.rebuffering = true;
+        renderer.rebuffer.primed = true;
+        renderer.rebuffer.ticks = 42;
 
         renderer.reset_rebuffer_latch();
 
-        assert!(!renderer.rebuffering, "must clear the rebuffering flag");
         assert!(
-            !renderer.rebuffer_primed,
-            "must clear rebuffer_primed so a fresh ring re-primes"
+            !renderer.rebuffer.rebuffering,
+            "must clear the rebuffering flag"
         );
-        assert_eq!(renderer.rebuffer_ticks, 0, "must reset rebuffer_ticks");
+        assert!(
+            !renderer.rebuffer.primed,
+            "must clear rebuffer.primed so a fresh ring re-primes"
+        );
+        assert_eq!(renderer.rebuffer.ticks, 0, "must reset rebuffer.ticks");
     }
 
     /// A crossfade from a primeable (<=48k) track into a hi-res track must NOT
-    /// carry a stale `rebuffer_primed` across the format change — otherwise the
+    /// carry a stale `rebuffer.primed` across the format change — otherwise the
     /// hi-res track could enter rebuffer on an unreachable resume target and hang
     /// ~10s (issue #9 crossfade carryover). `finalize_crossfade` must reset the
     /// rebuffer latch like `start()`/`stop()`/`seek()` do.
@@ -3587,9 +3649,9 @@ mod tests {
         let mut renderer = AudioRenderer::new();
         let (incoming, _src) = test_active_stream(0);
         // Simulate the latch carried over from the outgoing low-rate track.
-        renderer.rebuffering = true;
-        renderer.rebuffer_primed = true;
-        renderer.rebuffer_ticks = 42;
+        renderer.rebuffer.rebuffering = true;
+        renderer.rebuffer.primed = true;
+        renderer.rebuffer.ticks = 42;
         // Completed crossfade whose incoming track is hi-res (96k stereo).
         renderer.crossfade_state = CrossfadeState::Active {
             stream: incoming,
@@ -3604,16 +3666,16 @@ mod tests {
         renderer.finalize_crossfade();
 
         assert!(
-            !renderer.rebuffer_primed,
-            "finalize_crossfade must clear rebuffer_primed so the promoted track re-primes"
+            !renderer.rebuffer.primed,
+            "finalize_crossfade must clear rebuffer.primed so the promoted track re-primes"
         );
         assert!(
-            !renderer.rebuffering,
+            !renderer.rebuffer.rebuffering,
             "finalize_crossfade must clear the rebuffering flag"
         );
         assert_eq!(
-            renderer.rebuffer_ticks, 0,
-            "finalize_crossfade must reset rebuffer_ticks"
+            renderer.rebuffer.ticks, 0,
+            "finalize_crossfade must reset rebuffer.ticks"
         );
     }
 
