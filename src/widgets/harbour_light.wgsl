@@ -20,6 +20,10 @@ struct Scene {
     frame: vec4<f32>,
     // boat x (0..1 of width), boat centre height (Y), boat height (Y units), shown
     boat: vec4<f32>,
+    // moon x (0..1), height (Y), radius (Y units), breath (0 = no moon)
+    moon: vec4<f32>,
+    // star count, unused x3
+    sky: vec4<f32>,
     bg: vec4<f32>,
     text: vec4<f32>,
     highlight: vec4<f32>,
@@ -28,6 +32,8 @@ struct Scene {
     // waterline heights (Y), 128 samples across the width, 4 per vec4
     front: array<vec4<f32>, 32>,
     back: array<vec4<f32>, 32>,
+    // x (0..1), height (Y), radius (Y units; negative = a sparkle), alpha
+    stars: array<vec4<f32>, 64>,
 };
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -233,6 +239,22 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     var col = bg * (0.62 + 0.45 * ss(1.0, 0.5, y));
     col += air * 0.10 * exp(-max(y - surf, 0.0) / 0.12);
 
+    // The moon, behind the aurora: a luminous disc, its limb a touch
+    // darker and its face faintly mottled, in a soft bloom that breathes.
+    // (During the moon's dream the face's marks arrive as a sprite on top.)
+    let starc = mix(lc, text, 0.6);
+    if (scene.moon.w > 0.0) {
+        let mr = scene.moon.z;
+        let mv = vec2<f32>((u - scene.moon.x) * aspect, y - scene.moon.y);
+        let dm = length(mv);
+        let bloom = exp(-max(dm - mr, 0.0) / (mr * 0.45)) * 0.16 + exp(-dm / (mr * 2.8)) * 0.07;
+        col += starc * bloom * scene.moon.w;
+        let limb = sqrt(max(1.0 - (dm / mr) * (dm / mr), 0.0));
+        let maria = vnoise(mv / mr * 2.2 + 5.0) * 0.6 + vnoise(mv / mr * 5.0 + 9.0) * 0.4;
+        let face = starc * (0.62 + 0.2 * limb) * (1.0 - 0.16 * maria);
+        col = mix(col, face, ss(mr, mr - 1.5 / h, dm));
+    }
+
     let a = aurora(u, px, y, q1, q2);
     let base = arc_base(px, q1, q2);
     let hpos = clamp((y - base) / 0.4, 0.0, 1.0);
@@ -241,6 +263,32 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     col += warm * a.x * ss(0.35, 0.9, hpos) * 0.35;
     col += text * pow(a.x, 3.0) * 0.4;
     col += cc * a.y * 0.45 + hl * a.y * 0.10;
+
+    // The stars (positions, twinkle and the black hole's pull come from the
+    // CPU): a tight core in a soft glow, the sparkles with fine cross
+    // spikes, dimmed where the curtain hangs in front of them.
+    if (y > backs) {
+        var starl = 0.0;
+        let n = min(u32(scene.sky.x), 64u);
+        for (var i = 0u; i < n; i++) {
+            let st = scene.stars[i];
+            let r = abs(st.z);
+            let dv = vec2<f32>((u - st.x) * aspect, y - st.y);
+            if (max(abs(dv.x), abs(dv.y)) > r * 8.0) {
+                continue;
+            }
+            let d2 = dot(dv, dv);
+            var v = exp(-d2 / (r * r * 0.3)) + exp(-sqrt(d2) / (r * 1.4)) * 0.22;
+            if (st.z < 0.0) {
+                let ax = abs(dv.x);
+                let ay = abs(dv.y);
+                v += (exp(-ax / (r * 0.1)) * exp(-ay / (r * 3.2))
+                    + exp(-ay / (r * 0.1)) * exp(-ax / (r * 2.0))) * 0.55;
+            }
+            starl += v * st.w;
+        }
+        col += starc * starl * (1.0 - clamp(a.x * 2.0, 0.0, 1.0) * 0.6);
+    }
 
     // Stretched ripple noise shared by the far swell and the surface.
     let hx = vnoise(vec2<f32>(u * 38.4 + t * 0.1, y * h * 0.25 - t * 0.6)) - 0.5;
@@ -259,39 +307,45 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         col = mix(col, backcol, inback);
     }
 
-    // The near water.
+    // The near water: the aurora's own grammar turned upside down. The
+    // surface is a bright arc, brighter where a fold turns edge-on, with
+    // streaked rays of light hanging from it into the water, kept a step
+    // dimmer than the sky's curtain.
     let d0 = surf - y;
     let inw = ss(-0.002, 0.002, d0);
+    // Slope of the waterline (per panel height): steep stretches are folds
+    // seen edge-on, where the light gathers, as on the curtain.
+    let du = 1.0 / 127.0;
+    let slope = (front_at(u + du) - front_at(u - du)) / (2.0 * du * aspect);
+    let fold = 0.5 + 2.5 * abs(slope) / 0.12;
+    let senv = 0.35 + 0.65 * vnoise(vec2<f32>(u * 6.0 - q2 * 3.0, 41.0));
     if (inw > 0.0) {
         let d = max(d0, 0.0);
         let wtop = ramp(0.4);
         let wdeep = ramp(0.1);
         let bio = ramp(0.7);
-        var water = mix(wtop * 0.30, wdeep * 0.20, ss(0.0, 0.2, d));
+        var water = mix(wtop * 0.26, wdeep * 0.18, ss(0.0, 0.2, d));
         water = mix(water, bg * 0.28, ss(0.12, 0.42, d));
 
-        // The curtain's light over this column, read along a slanting
-        // shaft: where the aurora flares, the water under it brightens.
-        let su = u + d * (0.22 + 0.04 * sin(t * 0.17)) / aspect;
-        let spx = (su - 0.5) * aspect;
-        let sbase = arc_base(spx, q1, q2);
-        let a1 = aurora(su, spx, sbase + 0.03, q1, q2);
-        let a2 = aurora(su + 0.01, spx + 0.01 * aspect, sbase + 0.07, q1, q2);
-        let lit = clamp((a1.x + a2.x + a1.y + a2.y) * 0.5, 0.0, 1.0);
+        // The curtain's light over this column: where the aurora flares,
+        // the water under it brightens.
+        let sbase = arc_base(px, q1, q2);
+        let a1 = aurora(u, px, sbase + 0.03, q1, q2);
+        let lit = clamp(a1.x + a1.y, 0.0, 1.0);
 
-        // Light shafts: two layers at different slants, swaying.
-        let b1 = vnoise(vec2<f32>(su * 70.4 + t * 0.096, 11.8));
-        let b2 = vnoise(vec2<f32>((u + d * 0.12 / aspect) * 144.0 - t * 0.128, 26.6));
-        let beam = 0.25 + 0.9 * pow(ss(0.3, 0.85, b1), 2.0) + 0.45 * pow(ss(0.45, 0.9, b2), 2.0);
-        water += lc * (0.25 + lit) * beam * exp(-d / 0.26) * 0.42;
-
-        // The surface seen from below: a rippling net of light under the
-        // waves and a bright skin right at them.
-        let ca = vnoise(vec2<f32>(u * 25.6 + t * 0.128, y * 16.0 + t * 0.19));
-        let cb = vnoise(vec2<f32>(u * 24.0 - t * 0.16, y * 17.6 - t * 0.128) + 16.0);
-        let cl = pow(clamp(1.0 - abs(ca - cb) * 5.0, 0.0, 1.0), 3.0);
-        water += mix(lc, text, 0.4) * cl * (0.3 + lit) * exp(-d / 0.03) * 0.6;
-        water += lc * (0.12 + lit) * exp(-d / 0.01) * 0.35;
+        // Hanging rays: the sky curtain's three streak layers, reaching
+        // down instead of up and drifting with the water.
+        let r1 = vnoise(vec2<f32>(u * 96.0 - q2 * 9.0, d * 3.84 + q1 * 0.3));
+        let r1c = vnoise(vec2<f32>(u * 96.0 - q2 * 9.0, 31.0 + q1 * 0.25));
+        let r2 = vnoise(vec2<f32>(u * 256.0 + q2 * 15.0, d * 8.0 - q1 * 0.9));
+        let r3 = vnoise(vec2<f32>(u * 640.0 - q2 * 22.0, d * 1.92 + q1 * 0.5));
+        let len = 0.11 * (0.5 + 1.1 * r1c * r1c);
+        let rays = (0.3 + 0.7 * r1 * r1) * (0.6 + 0.4 * r2) * (0.7 + 0.3 * r3);
+        let hang = exp(-d / len) * rays * fold * senv * (0.55 + 0.6 * lit);
+        let hpos_w = clamp(d / 0.3, 0.0, 1.0);
+        let wc = ramp(0.85 - 0.6 * hpos_w);
+        water += wc * clamp(hang, 0.0, 1.0) * 0.36;
+        water += wc * exp(-d / 0.08) * fold * senv * 0.06;
 
         // Glowing plankton (fine motes + a few nearer ones) and two
         // luminous currents winding through mid-water.
@@ -307,8 +361,8 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         let c2 = current(px, y, rb2, renv2, wisp);
         let glow_core = (p1.x + p2.x * 1.3 + (c1.x + c2.x * 0.8) * 0.18) * deep_in;
         let glow_soft = (p1.y * 0.12 + p2.y * 0.2 + (c1.y + c2.y * 0.8) * 0.22) * deep_in;
-        water += bio * (glow_core * 0.8 + glow_soft * 0.9);
-        water += text * ss(0.08, 0.6, glow_core) * 0.9;
+        water += bio * (glow_core * 0.32 + glow_soft * 0.35);
+        water += text * ss(0.1, 0.8, glow_core) * 0.18;
 
         // The seabed: a floor seen at a slight angle, sand ripples and a
         // dancing net of light across it, dim under the deep water.
@@ -335,9 +389,12 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         }
 
         col = mix(col, water, inw);
-        // The crest the boat rides, catching the curtain's light.
-        col += mix(hl, text, 0.4) * exp(-abs(d0) / 0.0022) * (0.25 + 1.4 * lit);
     }
+    // The surface arc, as the curtain's edge: a fine bright line in a soft
+    // glow, patchy along its length and brightest on edge-on folds.
+    let r2s = vnoise(vec2<f32>(u * 256.0 + q2 * 15.0, 7.0 - q1 * 0.9));
+    let arc = (exp(-abs(d0) / 0.0025) * 0.8 + exp(-abs(d0) / 0.012) * 0.25) * (0.6 + 0.4 * r2s);
+    col += mix(lc, text, 0.2) * clamp(arc * fold * senv, 0.0, 1.0) * 0.38;
 
     // A soft glow behind the hull so the dark boat stands out against the
     // night (the boat sprite draws over it).

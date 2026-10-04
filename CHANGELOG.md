@@ -17,8 +17,10 @@ All notable changes to this project will be documented in this file.
 - The `nav-up`, `nav-down` and `enter` commands now do nothing while the EQ, About or Get Info window or a dialog is open, like the keys.
 - With Fade on Skip set to Boundary Fade, Next and Previous now cut straight out of a song the server is still transcoding.
 - Searching in the default playlist picker now keeps the highlighted playlist highlighted while it still matches, instead of jumping to the top.
-- On dark themes, Harbour's Trawl scene now glows with a streaked aurora, light shafts, drifting plankton and a seabed lit from above.
-- On dark themes, the Trawl scene's longship is lit by the aurora, with a glowing sail and a masthead lantern.
+- On dark themes, Harbour's Trawl scene now glows with a streaked aurora, rays of light hanging into the water, drifting plankton and a lit seabed.
+- On dark themes, the Trawl scene's stars and moon now glow softly, with the aurora drifting in front of them.
+- The Trawl scene's sea now sways in gentle, low folds instead of rolling hills.
+- On dark themes, the Trawl scene's longship is moonlit, keeping its colors, with a lantern at the masthead.
 
 ### Fixed
 

@@ -35,7 +35,7 @@ use crate::widgets::{
 pub(crate) const SEA_POINTS: usize = 96;
 
 /// Travelling-phase advance rate in cycles/sec. The front swell's crest
-/// speed is `(SWELL_PHASE_K / SWELL_CYCLES) · SEA_DRIFT_HZ` panel-widths
+/// speed is `(phase_k / cycles) · SEA_DRIFT_HZ` panel-widths
 /// per second — 0.05 gives a ~20 s crest crossing, the calm baseline.
 // TUNE: raise for a livelier sea, lower for glassier water.
 pub(crate) const SEA_DRIFT_HZ: f32 = 0.05;
@@ -54,35 +54,105 @@ pub(crate) const HARBOUR_CRUISE_BAR_ENERGY: f32 = 0.20;
 // TUNE: longer reads as a heavier drag; shorter tucks the anchor under the stern.
 pub(crate) const TRAIL_OFFSET: f32 = 0.08;
 
-/// Sea shape — one slow swell plus a faster low ripple, both travelling.
-/// Every layer's phase multiplier is an INTEGER so the field is exactly
-/// periodic in the `[0, 1)` phase (`sea_bars(0) == sea_bars(1)`): the tick
-/// wraps the phase with `rem_euclid(1.0)` to dodge long-session f32 sin
-/// precision decay, and integer multipliers make that wrap seamless.
-/// `SWELL_CYCLES` / `RIPPLE_CYCLES` are integers too, which additionally
-/// makes the field periodic in X — the boat's toroidal slope sampling near
-/// the wrap seam then reads a REAL gradient instead of a fake edge cliff.
-// TUNE: DC sets the waterline height (fraction of the scene); amps set chop.
+/// Sea shape — a few long, low folds drifting in opposite directions, so
+/// the water sways like the aurora curtain's arc instead of rolling hills
+/// past the boat. Every fold's phase multiplier is an INTEGER so the field is
+/// exactly periodic in the `[0, 1)` phase (`sea_bars(0) == sea_bars(1)`):
+/// the tick wraps the phase with `rem_euclid(1.0)` to dodge long-session f32
+/// sin precision decay, and integer multipliers make that wrap seamless.
+/// Cycle counts are integers too, which additionally makes the field
+/// periodic in X — the boat's toroidal slope sampling near the wrap seam
+/// then reads a REAL gradient instead of a fake edge cliff. A fold's crest
+/// speed is `(phase_k / cycles) · SEA_DRIFT_HZ` panel-widths per second; a
+/// negative `phase_k` drifts it the other way.
+// TUNE: DC sets the waterline height (fraction of the scene); the fold amps
+// set how far the water sways (their sum is the reach above/below DC).
 const SEA_DC: f64 = 0.45;
-const SWELL_AMP: f64 = 0.06;
-const SWELL_CYCLES: f64 = 2.0;
-const SWELL_PHASE_K: f64 = 2.0;
-const RIPPLE_AMP: f64 = 0.025;
-const RIPPLE_CYCLES: f64 = 5.0;
-const RIPPLE_PHASE_K: f64 = 8.0;
-/// Fixed phase offset decorrelating the ripple from the swell so their
-/// crests don't align every cycle.
-const RIPPLE_SHIFT: f64 = 1.3;
 
-/// Back parallax layer — drawn only (the physics never samples it), a dimmer
-/// swell riding higher on the panel. Crest speed `(1 / 2) · SEA_DRIFT_HZ` is
-/// HALF the front's — that speed difference is the whole parallax read.
-// TUNE: BACK_RAISE lifts the horizon; BACK_AMP sets the far swell's chop.
+/// One drifting sine fold of a waterline.
+struct SeaFold {
+    amp: f64,
+    cycles: f64,
+    phase_k: f64,
+    shift: f64,
+}
+
+const FRONT_FOLDS: [SeaFold; 4] = [
+    SeaFold {
+        amp: 0.022,
+        cycles: 1.0,
+        phase_k: 1.0,
+        shift: 0.0,
+    },
+    SeaFold {
+        amp: 0.013,
+        cycles: 2.0,
+        phase_k: -1.0,
+        shift: 1.3,
+    },
+    SeaFold {
+        amp: 0.007,
+        cycles: 3.0,
+        phase_k: 2.0,
+        shift: 2.6,
+    },
+    SeaFold {
+        amp: 0.0035,
+        cycles: 5.0,
+        phase_k: -3.0,
+        shift: 0.4,
+    },
+];
+
+/// Back parallax layer — drawn only (the physics never samples it), a
+/// dimmer, slower sway riding higher on the panel.
+// TUNE: BACK_RAISE lifts the horizon; the fold amps set the far sway.
 const BACK_RAISE: f64 = 0.12;
-const BACK_AMP: f64 = 0.04;
-const BACK_CYCLES: f64 = 2.0;
-const BACK_PHASE_K: f64 = 1.0;
-const BACK_SHIFT: f64 = 0.7;
+const BACK_FOLDS: [SeaFold; 3] = [
+    SeaFold {
+        amp: 0.014,
+        cycles: 1.0,
+        phase_k: -1.0,
+        shift: 0.7,
+    },
+    SeaFold {
+        amp: 0.008,
+        cycles: 3.0,
+        phase_k: 1.0,
+        shift: 2.0,
+    },
+    SeaFold {
+        amp: 0.004,
+        cycles: 4.0,
+        phase_k: -2.0,
+        shift: 4.1,
+    },
+];
+
+/// The farthest a waterline built from `folds` reaches above or below its
+/// rest height (every fold at its crest at once).
+const fn fold_reach(folds: &[SeaFold]) -> f64 {
+    let mut sum = 0.0;
+    let mut i = 0;
+    while i < folds.len() {
+        sum += folds[i].amp;
+        i += 1;
+    }
+    sum
+}
+
+/// Reach of the front water (the line the boat rides) and the far swell.
+const SEA_REACH: f64 = fold_reach(&FRONT_FOLDS);
+const BACK_REACH: f64 = fold_reach(&BACK_FOLDS);
+
+/// Height offset of a waterline built from `folds` at `x ∈ [0, 1]`.
+fn folds_height(folds: &[SeaFold], x: f64, phase: f64) -> f64 {
+    use std::f64::consts::TAU;
+    folds
+        .iter()
+        .map(|f| f.amp * (TAU * (x * f.cycles - f.phase_k * phase) + f.shift).sin())
+        .sum()
+}
 
 /// Scene lighting — the design-panel repaint. The old flat washes (back
 /// 0.10 / front 0.16 / a 0.38-alpha ink crest that measured ~2/255 of
@@ -150,6 +220,10 @@ const SKY_SPARKLE_COUNT: usize = 3;
 /// way OUT and back, so the field's population visibly breathes instead of
 /// every star merely dimming.
 const SKY_FAINT_COUNT: usize = 14;
+const _: () = assert!(
+    SKY_STAR_COUNT + SKY_SPARKLE_COUNT + SKY_FAINT_COUNT
+        <= crate::widgets::harbour_light::MAX_STARS
+);
 const SKY_FAINT_SIZE_MIN: f32 = 0.35;
 const SKY_FAINT_SIZE_SPAN: f32 = 0.30;
 /// Wandering notes: the sky's music glyphs are TRANSIENT — each cycle a few
@@ -1490,15 +1564,10 @@ fn draw_quaver(frame: &mut canvas::Frame, center: Point, s: f32, color: Color) {
 /// the physics steps against and the canvas draws; see the module docs'
 /// coherence contract.
 pub(crate) fn sea_bars(phase: f32) -> Vec<f64> {
-    use std::f64::consts::TAU;
-    let ph = phase as f64;
     (0..SEA_POINTS)
         .map(|i| {
             let x = i as f64 / (SEA_POINTS - 1) as f64;
-            let swell = SWELL_AMP * (TAU * (x * SWELL_CYCLES - SWELL_PHASE_K * ph)).sin();
-            let ripple =
-                RIPPLE_AMP * (TAU * (x * RIPPLE_CYCLES - RIPPLE_PHASE_K * ph) + RIPPLE_SHIFT).sin();
-            (SEA_DC + swell + ripple).clamp(0.0, 1.0)
+            (SEA_DC + folds_height(&FRONT_FOLDS, x, phase as f64)).clamp(0.0, 1.0)
         })
         .collect()
 }
@@ -1507,12 +1576,7 @@ pub(crate) fn sea_bars(phase: f32) -> Vec<f64> {
 /// front waterline at half its crest speed for the parallax depth read.
 /// Analytic (no array) because only the canvas consumes it.
 fn back_swell_height(x: f64, phase: f32) -> f64 {
-    use std::f64::consts::TAU;
-    let ph = phase as f64;
-    (SEA_DC
-        + BACK_RAISE
-        + BACK_AMP * (TAU * (x * BACK_CYCLES - BACK_PHASE_K * ph) + BACK_SHIFT).sin())
-    .clamp(0.0, 1.0)
+    (SEA_DC + BACK_RAISE + folds_height(&BACK_FOLDS, x, phase as f64)).clamp(0.0, 1.0)
 }
 
 /// Whether the scene draws with the night shader light (`harbour_light`)
@@ -1521,6 +1585,113 @@ fn back_swell_height(x: f64, phase: f32) -> f64 {
 /// harbour tick (boat paint) read.
 pub(crate) fn scene_is_lit() -> bool {
     !crate::theme::is_light_mode()
+}
+
+/// A star as the night shader draws it: centre and radius in pixels,
+/// peak alpha (twinkle and the black hole's swallow already applied), and
+/// whether it is one of the bright sparkles (drawn with cross spikes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StarLight {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub alpha: f32,
+    pub sparkle: bool,
+}
+
+/// The black hole open at `(phase, cycle)` in a `w × h` scene, if any:
+/// `(center, s, spin, capture)` for `blackhole_displace` / `_visibility`.
+/// Night only, never on a dream cycle (the moon's ritual owns its sky).
+fn open_blackhole(w: f32, h: f32, phase: f32, cycle: u32) -> Option<(Point, f32, f32, f32)> {
+    if moon_dream_cycle(cycle) || hash01(cycle, BLACKHOLE_SALT) >= BLACKHOLE_CHANCE {
+        return None;
+    }
+    let start = 0.05 + 0.20 * hash01(cycle, BLACKHOLE_SALT ^ 0x9E37);
+    let t = phase - start;
+    if !(0.0..BLACKHOLE_WINDOW).contains(&t) {
+        return None;
+    }
+    let p = t / BLACKHOLE_WINDOW;
+    let (fx, fy) = blackhole_center(cycle);
+    let hole = Point::new(fx * w, fy * h);
+    // Constrained-axis capture radius: identical in the square modes; a
+    // dragged-narrow column shrinks the well instead of reaching off-panel.
+    let capture = BLACKHOLE_CAPTURE_FRAC * h.min(w);
+    let s = blackhole_s(p);
+    // The catch's orbital winding: grows from the plunge's end, scaled by
+    // s so the spit-out unwinds it into the outward whip and it is exactly
+    // zero at both window ends (s is).
+    let spin = s.max(0.0) * BLACKHOLE_HOLD_WHIRL * (p - BLACKHOLE_PLUNGE_END).max(0.0);
+    Some((hole, s, spin, capture))
+}
+
+/// The night sky's stars for this frame in a `w × h` scene: the fixed
+/// constellation (`sky_glyphs`) with each star's twinkle, routed through the
+/// black hole when one is open. The hole is drawn by ABSENCE: identity and
+/// full visibility at s 0 and beyond the capture radius, so non-event
+/// frames, window boundaries and the un-captured sky are the fixed field
+/// exactly; nearing the horizon a star's light stops escaping, so it
+/// shrinks and dims to nothing, and re-lights crossing back out on the
+/// spit.
+pub(crate) fn night_stars(w: f32, h: f32, phase: f32, cycle: u32) -> Vec<StarLight> {
+    let glyph_scale = scene_glyph_scale(h);
+    let blackhole = open_blackhole(w, h, phase, cycle);
+    let mut stars = Vec::with_capacity(SKY_STAR_COUNT + SKY_SPARKLE_COUNT + SKY_FAINT_COUNT);
+    for glyph in sky_glyphs() {
+        let twinkle = 1.0
+            - glyph.twinkle_depth
+                * (0.5
+                    + 0.5
+                        * (std::f32::consts::TAU
+                            * (glyph.twinkle_k as f32 * phase + glyph.twinkle_off))
+                            .sin());
+        let home = Point::new(glyph.x * w, glyph.y * h);
+        let (center, vis) = match blackhole {
+            Some((hole, s, spin, capture)) => {
+                let pos = blackhole_displace(home, hole, s, spin, capture);
+                let grip = blackhole_grip(home.distance(hole), capture);
+                let vis = blackhole_visibility(
+                    pos.distance(hole),
+                    BLACKHOLE_HORIZON_PX * glyph_scale,
+                    s,
+                    grip,
+                );
+                (pos, vis)
+            }
+            None => (home, 1.0),
+        };
+        if vis <= 0.003 {
+            // Fully swallowed — beyond the horizon nothing shines.
+            continue;
+        }
+        // Swallowed light also LOSES SIZE alongside the fade.
+        let swallow_scale = 0.3 + 0.7 * vis;
+        let (radius, alpha, sparkle) = match glyph.kind {
+            SkyGlyphKind::Dot => {
+                // Brightness correlates with size: a magnitude hierarchy
+                // instead of N identical LEDs.
+                let norm = ((glyph.size - 0.7) / 0.6).clamp(0.0, 1.0);
+                (
+                    glyph.size * glyph_scale * swallow_scale,
+                    SKY_STAR_ALPHA * (0.45 + 0.55 * norm),
+                    false,
+                )
+            }
+            SkyGlyphKind::Sparkle => (
+                1.1 * glyph.size * glyph_scale * swallow_scale,
+                SKY_SPARKLE_ALPHA,
+                true,
+            ),
+        };
+        stars.push(StarLight {
+            x: center.x,
+            y: center.y,
+            radius,
+            alpha: alpha * twinkle * vis,
+            sparkle,
+        });
+    }
+    stars
 }
 
 /// The night shader's inputs for this frame: both waterlines resampled
@@ -1533,14 +1704,42 @@ pub(crate) fn sea_light(
     phase: f32,
     cycle: u32,
     boat: &BoatState,
+    w: f32,
+    h: f32,
 ) -> crate::widgets::harbour_light::SeaLight {
-    use crate::widgets::harbour_light::{LINE_SAMPLES, SeaLight};
+    use crate::widgets::harbour_light::{LINE_SAMPLES, MAX_STARS, SeaLight};
     let x_at = |i: usize| i as f32 / (LINE_SAMPLES - 1) as f32;
+    // Stars and moon in the shader's units: x across the width, height
+    // above the bottom and radius in panel heights; a sparkle's radius is
+    // sent negative.
+    let mut stars = [[0.0; 4]; MAX_STARS];
+    let mut star_count = 0;
+    for (slot, star) in stars.iter_mut().zip(night_stars(w, h, phase, cycle)) {
+        let r = star.radius / h;
+        *slot = [
+            star.x / w,
+            1.0 - star.y / h,
+            if star.sparkle { -r } else { r },
+            star.alpha,
+        ];
+        star_count += 1;
+    }
+    let breath = 0.85 + 0.15 * (std::f32::consts::TAU * phase).sin();
     SeaLight {
         front: std::array::from_fn(|i| sample_line_height(bars, x_at(i), false)),
         back: std::array::from_fn(|i| back_swell_height(x_at(i) as f64, phase) as f32),
         time: scene_clock_secs(phase, cycle),
         boat: Some((boat.x_ratio, boat.y_ratio)),
+        stars,
+        star_count,
+        moon: (MOON_ALPHA > 0.0).then(|| {
+            [
+                MOON_X,
+                1.0 - MOON_Y,
+                MOON_RADIUS_PX * scene_glyph_scale(h) / h,
+                breath,
+            ]
+        }),
     }
 }
 
@@ -1604,7 +1803,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         let lit = scene_is_lit();
         let backdrop: Element<'a, M> = if lit {
             crate::widgets::harbour_light::light_backdrop(
-                sea_light(sea_bars, sea_phase, sea_cycle, boat),
+                sea_light(sea_bars, sea_phase, sea_cycle, boat, w, h),
                 w,
                 h,
             )
@@ -1648,12 +1847,14 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         // `moon_dream_veil_key(phase, cycle)` the canvas verses and the
         // tick's cache-warm read — one clock, no drift); every other
         // frame it is the bare resting disc.
-        if MOON_ALPHA > 0.0 {
+        // Lit (night): the shader draws the disc, so the Svg carries only
+        // the face's marks and rests out of the stack between dreams.
+        let veil = moon_dream_veil_key(sea_phase, sea_cycle);
+        if MOON_ALPHA > 0.0 && !(lit && veil == crate::embedded_svg::MOON_VEIL_BARE) {
             let moon_r = MOON_RADIUS_PX * scene_glyph_scale(h);
-            let veil = moon_dream_veil_key(sea_phase, sea_cycle);
             let handle = boat.cached_moon_veil_handle(veil).unwrap_or_else(|| {
                 iced::widget::svg::Handle::from_memory(
-                    crate::embedded_svg::themed_moon_face_veiled(veil).into_bytes(),
+                    crate::embedded_svg::themed_moon_for_scene(veil, lit).into_bytes(),
                 )
             });
             layers = layers.push(
@@ -1853,7 +2054,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .get(1)
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(water);
-        let back_top = (1.0 - (SEA_DC + BACK_RAISE + BACK_AMP) as f32) * h;
+        let back_top = (1.0 - (SEA_DC + BACK_RAISE + BACK_REACH) as f32) * h;
         if !self.lit {
             frame.fill(
                 &fill_under(&back_y),
@@ -1894,7 +2095,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .get(2)
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(water);
-        let surface_y = (1.0 - (SEA_DC + SWELL_AMP + RIPPLE_AMP) as f32) * h;
+        let surface_y = (1.0 - (SEA_DC + SEA_REACH) as f32) * h;
         if !self.lit {
             frame.fill(
                 &fill_under(&front_y),
@@ -2031,7 +2232,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             // the deepest possible trough so no lit air ever shows
             // above a passing wave.
             if MOONBEAM_GAIN > 0.0 {
-                let beam_top = (1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32) * h;
+                let beam_top = (1.0 - (SEA_DC - SEA_REACH) as f32) * h;
                 let peak_y = SEA_BED_TOP * h;
                 let bot_y = 0.92 * h;
                 let peak_frac = (peak_y - beam_top) / (bot_y - beam_top);
@@ -2103,7 +2304,6 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // crossings per cycle over an off-panel margin (no edge pop),
         // bobbing and beating its wings at integer rates.
         let glyph_scale = scene_glyph_scale(h);
-        let mut deferred_arms: Vec<(Point, f32, f32)> = Vec::new();
         if day {
             // Distant sail — day's shooting star: some cycles a tiny
             // hazed ink sail crosses the back parallax swell, riding the
@@ -2187,138 +2387,8 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         let dream_cycle = moon_dream_cycle(self.cycle);
         let blackhole_cycle =
             !day && !dream_cycle && hash01(self.cycle, BLACKHOLE_SALT) < BLACKHOLE_CHANCE;
-        let blackhole: Option<(Point, f32, f32, f32)> = if blackhole_cycle {
-            let start = 0.05 + 0.20 * hash01(self.cycle, BLACKHOLE_SALT ^ 0x9E37);
-            let t = phase - start;
-            if (0.0..BLACKHOLE_WINDOW).contains(&t) {
-                let p = t / BLACKHOLE_WINDOW;
-                let (fx, fy) = blackhole_center(self.cycle);
-                let hole = Point::new(fx * w, fy * h);
-                // Constrained-axis capture radius: identical in the
-                // square modes; a dragged-narrow column shrinks the
-                // well instead of reaching off-panel.
-                let capture = BLACKHOLE_CAPTURE_FRAC * h.min(w);
-                let s = blackhole_s(p);
-                // The catch's orbital winding: grows from the plunge's
-                // end, scaled by s so the spit-out unwinds it into the
-                // outward whip and it is exactly zero at both window
-                // ends (s is).
-                let spin = s.max(0.0) * BLACKHOLE_HOLD_WHIRL * (p - BLACKHOLE_PLUNGE_END).max(0.0);
-                Some((hole, s, spin, capture))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let night_glyphs = if day { Vec::new() } else { sky_glyphs() };
-        for glyph in night_glyphs {
-            let twinkle = 1.0
-                - glyph.twinkle_depth
-                    * (0.5
-                        + 0.5
-                            * (std::f32::consts::TAU
-                                * (glyph.twinkle_k as f32 * phase + glyph.twinkle_off))
-                                .sin());
-            let home = Point::new(glyph.x * w, glyph.y * h);
-            // The hole's gravity, when one is open: identity and full
-            // visibility at s 0 and beyond the capture radius, so
-            // non-event frames, window boundaries, and the un-captured
-            // sky all render the fixed field bit-identically. Nearing
-            // the horizon a star's light stops escaping — it shrinks
-            // and dims to NOTHING, and re-lights crossing back out on
-            // the spit — so the hole is drawn by ABSENCE.
-            let (center, vis) = match blackhole {
-                Some((hole, s, spin, capture)) => {
-                    let pos = blackhole_displace(home, hole, s, spin, capture);
-                    let dx = home.x - hole.x;
-                    let dy = home.y - hole.y;
-                    let grip = blackhole_grip((dx * dx + dy * dy).sqrt(), capture);
-                    let dnx = pos.x - hole.x;
-                    let dny = pos.y - hole.y;
-                    let vis = blackhole_visibility(
-                        (dnx * dnx + dny * dny).sqrt(),
-                        BLACKHOLE_HORIZON_PX * glyph_scale,
-                        s,
-                        grip,
-                    );
-                    (pos, vis)
-                }
-                None => (home, 1.0),
-            };
-            if vis <= 0.003 {
-                // Fully swallowed — beyond the horizon nothing shines.
-                continue;
-            }
-            let twinkle = twinkle * vis;
-            // Swallowed light also LOSES SIZE (the owner's scale-down):
-            // glyph geometry shrinks toward nothing alongside the fade.
-            let swallow_scale = 0.3 + 0.7 * vis;
-            match glyph.kind {
-                SkyGlyphKind::Dot => {
-                    // Crisp core + concentric halo rings — the visualizer
-                    // family's squared-falloff glow discretized to solid
-                    // circles (no blur primitive on a canvas). Brightness
-                    // correlates with size so the sky gains a magnitude
-                    // hierarchy instead of N identical LEDs; the brightest
-                    // tier earns a second, wider ring.
-                    let r = 1.5 * glyph.size * glyph_scale * swallow_scale;
-                    let norm = ((glyph.size - 0.7) / 0.6).clamp(0.0, 1.0);
-                    let peak = SKY_STAR_ALPHA * (0.45 + 0.55 * norm);
-                    frame.fill(
-                        &canvas::Path::circle(center, 1.8 * r),
-                        Color {
-                            a: 0.30 * peak * twinkle,
-                            ..starlight
-                        },
-                    );
-                    if norm > 0.7 {
-                        frame.fill(
-                            &canvas::Path::circle(center, 2.8 * r),
-                            Color {
-                                a: 0.10 * peak * twinkle,
-                                ..starlight
-                            },
-                        );
-                    }
-                    frame.fill(
-                        &canvas::Path::circle(center, r),
-                        Color {
-                            a: peak * twinkle,
-                            ..starlight
-                        },
-                    );
-                }
-                SkyGlyphKind::Sparkle => {
-                    // A lens glint: soft under-glow + bright nucleus here
-                    // (solid), arms deferred to gradient block B so they
-                    // taper to nothing at the tips.
-                    let arm = 3.2 * glyph.size * glyph_scale * swallow_scale;
-                    frame.fill(
-                        &canvas::Path::circle(
-                            center,
-                            2.2 * glyph.size * glyph_scale * swallow_scale,
-                        ),
-                        Color {
-                            a: 0.10 * twinkle,
-                            ..starlight
-                        },
-                    );
-                    frame.fill(
-                        &canvas::Path::circle(
-                            center,
-                            1.1 * glyph.size * glyph_scale * swallow_scale,
-                        ),
-                        Color {
-                            a: 0.35 * twinkle,
-                            ..starlight
-                        },
-                    );
-                    deferred_arms.push((center, arm, SKY_SPARKLE_ALPHA * twinkle));
-                }
-            }
-        }
+        // The stars themselves (and the hole's pull on them) are the night
+        // shader's: `night_stars` feeds `harbour_light`.
 
         // ── Wandering notes ──────────────────────────────────────────────
         // The sky's music glyphs are transient: each cycle a few notes
@@ -2506,16 +2576,19 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 // born at the face and rolls outward (~11 s to cross).
                 // Each ring is a k=1 integer-rate sine with a constant
                 // offset, so phase 0 and phase 1 render identically.
+                // Lit: the shader draws the moon's light as a soft bloom.
                 let last = MOON_GLOW_STACK.len() - 1;
-                draw_glow_stack(&mut frame, mc, m, &MOON_GLOW_STACK, starlight, |i| {
-                    let rank = (last - i) as f32;
-                    (1.0 - MOON_WASH_DEPTH)
-                        + MOON_WASH_DEPTH
-                            * (0.5
-                                + 0.5
-                                    * (std::f32::consts::TAU * (phase - rank * MOON_WASH_LAG))
-                                        .sin())
-                });
+                if !self.lit {
+                    draw_glow_stack(&mut frame, mc, m, &MOON_GLOW_STACK, starlight, |i| {
+                        let rank = (last - i) as f32;
+                        (1.0 - MOON_WASH_DEPTH)
+                            + MOON_WASH_DEPTH
+                                * (0.5
+                                    + 0.5
+                                        * (std::f32::consts::TAU * (phase - rank * MOON_WASH_LAG))
+                                            .sin())
+                    });
+                }
                 // The exhale: some cycles a soft two-stroke ring detaches
                 // at the halo's shoulder, expands past the rim, and
                 // dissolves — wide faint stroke under a narrow brighter
@@ -3100,7 +3173,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 let gate = 0.4
                     + 0.6
                         * ((sample_line_height(bars, gp.x, false) - SEA_DC as f32)
-                            / (SWELL_AMP + RIPPLE_AMP) as f32)
+                            / SEA_REACH as f32)
                             .clamp(0.0, 1.0);
                 let a = GLITTER_ALPHA * bright * gate;
                 if a <= 0.01 {
@@ -3175,7 +3248,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             let c = -CREST_SWEEP_HALF_WIDTH
                 + (sweep_t / CREST_SWEEP_FRACTION) * (1.0 + 2.0 * CREST_SWEEP_HALF_WIDTH);
             let gate = ((sample_line_height(bars, c.clamp(0.0, 1.0), false) - SEA_DC as f32)
-                / (SWELL_AMP + RIPPLE_AMP) as f32)
+                / SEA_REACH as f32)
                 .clamp(0.0, 1.0);
             let peak = CREST_SHIMMER_ALPHA * gate * crest_light_gain;
             if peak > 0.005 {
@@ -3342,92 +3415,6 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                     },
                 );
             }
-        }
-
-        // Deferred sparkle arms: gradient strokes tapering to nothing at
-        // the tips (a lens glint, not an aliased butt-capped cross). The
-        // horizontal arm runs at 0.6× the vertical — classic glint
-        // proportions.
-        for (center, arm, alpha) in deferred_arms {
-            let vertical = canvas::Path::line(
-                Point::new(center.x, center.y - arm),
-                Point::new(center.x, center.y + arm),
-            );
-            frame.stroke(
-                &vertical,
-                canvas::Stroke {
-                    style: canvas::Style::Gradient(canvas::Gradient::Linear(
-                        canvas::gradient::Linear::new(
-                            Point::new(center.x, center.y - arm),
-                            Point::new(center.x, center.y + arm),
-                        )
-                        .add_stop(
-                            0.0,
-                            Color {
-                                a: 0.0,
-                                ..starlight
-                            },
-                        )
-                        .add_stop(
-                            0.5,
-                            Color {
-                                a: alpha,
-                                ..starlight
-                            },
-                        )
-                        .add_stop(
-                            1.0,
-                            Color {
-                                a: 0.0,
-                                ..starlight
-                            },
-                        ),
-                    )),
-                    width: 1.5,
-                    line_cap: canvas::LineCap::Round,
-                    ..canvas::Stroke::default()
-                },
-            );
-            let harm = 0.6 * arm;
-            let horizontal = canvas::Path::line(
-                Point::new(center.x - harm, center.y),
-                Point::new(center.x + harm, center.y),
-            );
-            frame.stroke(
-                &horizontal,
-                canvas::Stroke {
-                    style: canvas::Style::Gradient(canvas::Gradient::Linear(
-                        canvas::gradient::Linear::new(
-                            Point::new(center.x - harm, center.y),
-                            Point::new(center.x + harm, center.y),
-                        )
-                        .add_stop(
-                            0.0,
-                            Color {
-                                a: 0.0,
-                                ..starlight
-                            },
-                        )
-                        .add_stop(
-                            0.5,
-                            Color {
-                                a: alpha,
-                                ..starlight
-                            },
-                        )
-                        .add_stop(
-                            1.0,
-                            Color {
-                                a: 0.0,
-                                ..starlight
-                            },
-                        ),
-                    )),
-                    width: 1.5,
-                    line_cap: canvas::LineCap::Round,
-                    ..canvas::Stroke::default()
-                },
-            );
         }
 
         vec![frame.into_geometry()]
@@ -3925,7 +3912,7 @@ mod tests {
         // The vertical run: top zero-stop at the deepest trough, peak
         // inside the run at the bed vignette's start, bottom dissolving
         // above the bed floor (the glow-stack banding idiom).
-        let trough = 1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32;
+        let trough = 1.0 - (SEA_DC - SEA_REACH) as f32;
         assert!(trough < SEA_BED_TOP && SEA_BED_TOP < 0.92);
     }
 
@@ -4063,7 +4050,7 @@ mod tests {
         // The front crest bottoms out at y ≈ 1 − (DC − amps) ≈ 0.638h;
         // the band (minus bob headroom) must sit below it so a drifter
         // can never fly in air.
-        let trough = 1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32;
+        let trough = 1.0 - (SEA_DC - SEA_REACH) as f32;
         assert!(
             SCHOOL_BAND_TOP - 0.008 > trough,
             "school band must clear the deepest trough ({trough})"

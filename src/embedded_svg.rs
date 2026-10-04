@@ -369,6 +369,34 @@ pub(crate) fn themed_moon_face_veiled(veil: [u8; 4]) -> String {
     out
 }
 
+/// The moon document the harbour scene shows for `veil`. In the lit
+/// (night) scene the disc itself is the shader's (`harbour_light` draws a
+/// luminous moon behind the aurora), so the document keeps only the face's
+/// marks: the disc's fill and outline go transparent.
+pub(crate) fn themed_moon_for_scene(veil: [u8; 4], lit: bool) -> String {
+    let doc = themed_moon_face_veiled(veil);
+    if lit { moon_marks_only(&doc) } else { doc }
+}
+
+/// `doc` with the moon disc (`id="path8"`) made invisible, leaving the
+/// face's marks. The disc's inline style carries one `fill-opacity` and one
+/// `stroke-opacity`; both drop to 0.
+fn moon_marks_only(doc: &str) -> String {
+    let mut out = doc.to_string();
+    if let Some(id_at) = out.find("id=\"path8\"")
+        && let Some(style_at) = out[..id_at].rfind("style=\"")
+    {
+        let start = style_at + "style=\"".len();
+        if let Some(len) = out[start..].find('"') {
+            let style = out[start..start + len]
+                .replace("fill-opacity:1", "fill-opacity:0")
+                .replace("stroke-opacity:1", "stroke-opacity:0");
+            out.replace_range(start..start + len, &style);
+        }
+    }
+    out
+}
+
 /// Convert an `iced::Color` to a `#rrggbb` hex string for SVG fill replacement.
 fn color_to_hex(c: Color) -> String {
     format!(
@@ -401,43 +429,34 @@ pub(crate) fn themed_logo_svg() -> String {
         .replace(LOGO_TOKEN_WOOD, &color_to_hex(theme::logo_wood()))
 }
 
-/// The logo lit the way the night Trawl scene lights everything else: by
-/// the aurora behind it. The hull, shields and spars sink toward the night
-/// background so the boat reads as a silhouette; the sail glows like cloth
-/// with light behind it (bright at the yard, dimming toward the foot); the
-/// outline is a rim light, bright along the top edges and fading to the
-/// background toward the waterline; a small warm lantern hangs at the
-/// masthead. Colours come from the same theme-only palette the scene's
-/// shader uses ([`PresetPalette::theme_own`]), so boat and sky agree.
+/// The logo by moonlight, for the night Trawl scene: the theme's own logo
+/// colours, each sunk toward the night background so the boat belongs to
+/// the dark scene without losing its identity. Light falls from above: the
+/// sail is brightest at the yard and the hull shades toward the waterline.
+/// A small warm lantern hangs at the masthead. The ink outline stays, as on
+/// the plain sprite. Colours come from the theme-only palette the scene's
+/// shader uses ([`PresetPalette::theme_own`]), so boat and night agree.
 ///
 /// [`PresetPalette::theme_own`]: crate::widgets::visualizer::milkdrop::palette::PresetPalette::theme_own
 fn lit_logo_svg() -> String {
     use crate::widgets::visualizer::milkdrop::palette::PresetPalette;
 
-    let pal = PresetPalette::theme_own();
-    let ramp = |x: f32| -> [f32; 3] {
-        let s = x.clamp(0.0, 1.0) * 5.0;
-        let i = (s.floor() as usize).min(4);
-        let f = s - i as f32;
-        std::array::from_fn(|c| pal.ramp[i][c] + (pal.ramp[i + 1][c] - pal.ramp[i][c]) * f)
-    };
-    let rgb = |c: Color| [c.r, c.g, c.b];
-    let mix = |a: [f32; 3], b: [f32; 3], t: f32| -> String {
+    let bg = PresetPalette::theme_own().bg;
+    // `c` sunk toward the night background: `k` = how much of the colour stays.
+    let night = |c: Color, k: f32| -> String {
         color_to_hex(Color::from_rgb(
-            a[0] + (b[0] - a[0]) * t,
-            a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t,
+            bg[0] + (c.r - bg[0]) * k,
+            bg[1] + (c.g - bg[1]) * k,
+            bg[2] + (c.b - bg[2]) * k,
         ))
     };
-    let light = ramp(0.85);
-    let hull = mix(pal.bg, ramp(0.3), 0.3);
-    let shields = mix(pal.bg, rgb(crate::theme::logo_shields()), 0.35);
-    let wood = mix(pal.bg, rgb(crate::theme::logo_wood()), 0.45);
-    let sail_top = mix(light, pal.text, 0.3);
-    let sail_foot = mix(pal.bg, ramp(0.55), 0.5);
-    let rim_top = mix(light, pal.text, 0.5);
-    let rim_mid = mix(pal.bg, light, 0.55);
-    let rim_foot = mix(pal.bg, ramp(0.2), 0.4);
+    let body = crate::theme::logo_body();
+    let sail_top = night(body, 0.86);
+    let sail_foot = night(body, 0.6);
+    let hull_top = night(body, 0.62);
+    let hull_keel = night(body, 0.38);
+    let shields = night(crate::theme::logo_shields(), 0.62);
+    let wood = night(crate::theme::logo_wood(), 0.7);
     let lamp = color_to_hex(crate::theme::logo_wood());
 
     // Sail (path2) and hull (path4) share the BODY token: retarget each by
@@ -454,26 +473,25 @@ fn lit_logo_svg() -> String {
     };
     let mut svg = LOGO_SVG.to_string();
     fill_of(&mut svg, "path2", "url(#nk-sail)");
-    fill_of(&mut svg, "path4", &hull);
+    fill_of(&mut svg, "path4", "url(#nk-hull)");
     let mut svg = svg
         .replace(LOGO_TOKEN_SHIELDS, &shields)
         .replace(LOGO_TOKEN_WOOD, &wood);
 
     // Gradients in the master's user space: the sail spans the yard
-    // (y ≈ 252) to its foot (≈ 545); the rim runs from the masthead
-    // (≈ 213) to the keel (≈ 950).
+    // (y ≈ 252) to its foot (≈ 545); the hull runs from the gunwale
+    // (≈ 380) to the keel (≈ 830).
     let defs = format!(
         "<defs>\
          <linearGradient id=\"nk-sail\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"260\" x2=\"0\" y2=\"545\">\
          <stop offset=\"0\" stop-color=\"{sail_top}\"/><stop offset=\"1\" stop-color=\"{sail_foot}\"/>\
          </linearGradient>\
-         <linearGradient id=\"nk-rim\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"200\" x2=\"0\" y2=\"950\">\
-         <stop offset=\"0\" stop-color=\"{rim_top}\"/><stop offset=\"0.5\" stop-color=\"{rim_mid}\"/>\
-         <stop offset=\"1\" stop-color=\"{rim_foot}\"/>\
+         <linearGradient id=\"nk-hull\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"400\" x2=\"0\" y2=\"830\">\
+         <stop offset=\"0\" stop-color=\"{hull_top}\"/><stop offset=\"1\" stop-color=\"{hull_keel}\"/>\
          </linearGradient>\
          <radialGradient id=\"nk-lamp\">\
-         <stop offset=\"0\" stop-color=\"{lamp}\" stop-opacity=\"0.85\"/>\
-         <stop offset=\"0.35\" stop-color=\"{lamp}\" stop-opacity=\"0.3\"/>\
+         <stop offset=\"0\" stop-color=\"{lamp}\" stop-opacity=\"0.8\"/>\
+         <stop offset=\"0.35\" stop-color=\"{lamp}\" stop-opacity=\"0.28\"/>\
          <stop offset=\"1\" stop-color=\"{lamp}\" stop-opacity=\"0\"/>\
          </radialGradient></defs>"
     );
@@ -583,7 +601,7 @@ pub enum BoatPaint {
     /// The themed logo colours with an ink outline (Lines, the day scene).
     #[default]
     Plain,
-    /// The night Trawl scene's: lit by the aurora behind it (see
+    /// The night Trawl scene's: the logo by moonlight (see
     /// [`lit_logo_svg`]).
     Lit,
 }
@@ -620,7 +638,10 @@ pub(crate) fn themed_boat_svg_painted(
         ),
         BoatPaint::Lit => strip_stroke_width_attrs(&lit_logo_svg()).replace(
             &format!("stroke=\"{LOGO_TOKEN_OUTLINE}\""),
-            &format!("stroke=\"url(#nk-rim)\" stroke-width=\"{boat_stroke_w}\""),
+            &format!(
+                "stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\"",
+                viz.border_color, viz.border_opacity, boat_stroke_w
+            ),
         ),
     };
 
@@ -1353,6 +1374,32 @@ mod tests {
         assert_eq!(
             themed_moon_face_veiled(MOON_VEIL_OPAQUE),
             themed_moon_face_svg()
+        );
+    }
+
+    /// The lit scene's moon document keeps the face's marks and drops the
+    /// disc (the shader draws it).
+    #[test]
+    fn lit_moon_document_hides_only_the_disc() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let lit = themed_moon_for_scene(MOON_VEIL_OPAQUE, true);
+        let disc_style = |doc: &str| {
+            let id_at = doc.find("id=\"path8\"").expect("disc");
+            let style_at = doc[..id_at].rfind("style=\"").expect("disc style");
+            doc[style_at..id_at].to_string()
+        };
+        let style = disc_style(&lit);
+        assert!(style.contains("fill-opacity:0") && style.contains("stroke-opacity:0"));
+        for id in MOON_VEIL_IDS {
+            assert!(
+                lit.contains(&format!("id=\"{id}\" opacity=\"1\"")),
+                "{id} stays"
+            );
+        }
+        assert_eq!(
+            themed_moon_for_scene(MOON_VEIL_OPAQUE, false),
+            themed_moon_face_svg(),
+            "the day scene keeps the whole face"
         );
     }
 

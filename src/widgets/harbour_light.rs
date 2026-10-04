@@ -26,6 +26,8 @@ use crate::widgets::visualizer::milkdrop::palette::PresetPalette;
 pub(crate) const LINE_SAMPLES: usize = 128;
 const LINE_VEC4S: usize = LINE_SAMPLES / 4;
 const _: () = assert!(LINE_SAMPLES.is_multiple_of(4));
+/// Star slots in the uniform; the constellation must fit.
+pub(crate) const MAX_STARS: usize = 64;
 
 /// What the scene hands the shader each frame.
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +42,13 @@ pub(crate) struct SeaLight {
     /// The boat's `x_ratio` and waterline height, for the glow behind it;
     /// `None` hides the glow (boat out of view).
     pub boat: Option<(f32, f32)>,
+    /// The night stars: x (0..1 across), height above the bottom and radius
+    /// (both in panel heights; a negative radius marks a sparkle), alpha.
+    pub stars: [[f32; 4]; MAX_STARS],
+    pub star_count: usize,
+    /// The moon's centre (x across, height above bottom), radius (panel
+    /// heights) and breath, for its bloom; `None` when the moon is hidden.
+    pub moon: Option<[f32; 4]>,
 }
 
 /// The GPU uniform. Mirrors `struct Scene` in `harbour_light.wgsl` field for
@@ -53,6 +62,10 @@ struct SceneUniform {
     /// Boat x (0..1), boat centre height, boat height (both in panel
     /// heights), shown flag.
     boat: [f32; 4],
+    /// Moon x, height, radius (panel heights), breath (0 = no moon).
+    moon: [f32; 4],
+    /// Star count, unused ×3.
+    sky: [f32; 4],
     bg: [f32; 4],
     text: [f32; 4],
     highlight: [f32; 4],
@@ -60,6 +73,7 @@ struct SceneUniform {
     ramp: [[f32; 4]; 6],
     front: [[f32; 4]; LINE_VEC4S],
     back: [[f32; 4]; LINE_VEC4S],
+    stars: [[f32; 4]; MAX_STARS],
 }
 
 // SAFETY: `repr(C)`, every field an `f32` array, no padding (all 16-byte
@@ -67,7 +81,8 @@ struct SceneUniform {
 unsafe impl bytemuck::Pod for SceneUniform {}
 unsafe impl bytemuck::Zeroable for SceneUniform {}
 
-const _: () = assert!(std::mem::size_of::<SceneUniform>() == 16 * (6 + 6 + 2 * LINE_VEC4S));
+const _: () =
+    assert!(std::mem::size_of::<SceneUniform>() == 16 * (8 + 6 + 2 * LINE_VEC4S + MAX_STARS));
 
 const WGSL: &str = include_str!("harbour_light.wgsl");
 
@@ -129,6 +144,8 @@ impl<Message> shader::Program<Message> for LightProgram {
             uniform: SceneUniform {
                 frame: [w, h, self.light.time, 0.0],
                 boat,
+                moon: self.light.moon.unwrap_or([0.0; 4]),
+                sky: [self.light.star_count.min(MAX_STARS) as f32, 0.0, 0.0, 0.0],
                 bg: rgba(p.bg),
                 text: rgba(p.text),
                 highlight: rgba(p.highlight),
@@ -136,6 +153,7 @@ impl<Message> shader::Program<Message> for LightProgram {
                 ramp: p.ramp.map(rgba),
                 front: pack(&self.light.front),
                 back: pack(&self.light.back),
+                stars: self.light.stars,
             },
         }
     }
@@ -305,13 +323,16 @@ mod tests {
             [
                 "frame",
                 "boat",
+                "moon",
+                "sky",
                 "bg",
                 "text",
                 "highlight",
                 "warm",
                 "ramp",
                 "front",
-                "back"
+                "back",
+                "stars"
             ],
             "WGSL `Scene` fields drifted from `SceneUniform`"
         );
