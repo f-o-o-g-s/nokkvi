@@ -163,22 +163,13 @@ pub enum SkipFadeOutcome {
 /// remaining-audio clamp: the position trigger fires exactly `fade` before
 /// the end, but a manual skip can land anywhere — a fade longer than the
 /// outgoing's remaining audio would EOF mid-blend, drain the ring, and cut
-/// to silence.
+/// to silence. `position_ms` is the outgoing's audible position.
 fn skip_fade_duration_ms(
-    requested_ms: u64,
-    outgoing_duration_ms: u64,
-    incoming_duration_ms: u64,
+    lengths: crate::audio::renderer::CrossfadeLengths,
     position_ms: u64,
-    min_track_ms: u64,
 ) -> Option<u64> {
-    let length = crate::audio::renderer::crossfade_length_ms(
-        requested_ms,
-        outgoing_duration_ms,
-        incoming_duration_ms,
-        min_track_ms,
-    )
-    .ok()?;
-    let remaining = outgoing_duration_ms.saturating_sub(position_ms);
+    let length = crate::audio::renderer::crossfade_length_ms(lengths).ok()?;
+    let remaining = lengths.outgoing_ms.saturating_sub(position_ms);
     let effective = length.min(remaining);
     (effective > 0).then_some(effective)
 }
@@ -2586,13 +2577,15 @@ impl CustomAudioEngine {
             return;
         }
         self.renderer.lock().arm_crossfade(
-            // Effective = per-transition bar-snap override when staged (M8),
-            // else the global setting.
-            self.crossfade.effective_duration_ms(),
             &self.next_format,
-            self.duration,
-            incoming_duration_ms,
-            self.crossfade.min_track_ms(),
+            crate::audio::renderer::CrossfadeLengths {
+                // Effective = per-transition bar-snap override when staged (M8),
+                // else the global setting.
+                requested_ms: self.crossfade.effective_duration_ms(),
+                outgoing_ms: self.duration,
+                incoming_ms: incoming_duration_ms,
+                min_track_ms: self.crossfade.min_track_ms(),
+            },
         );
     }
 
@@ -3406,13 +3399,15 @@ impl CustomAudioEngine {
             return SkipFadeOutcome::Blocked;
         }
         let Some(fade_ms) = skip_fade_duration_ms(
-            u64::from(self.fade.fade_skip_ms),
-            self.duration,
-            decoder.duration(),
+            crate::audio::renderer::CrossfadeLengths {
+                requested_ms: u64::from(self.fade.fade_skip_ms),
+                outgoing_ms: self.duration,
+                incoming_ms: decoder.duration(),
+                min_track_ms: self.crossfade.min_track_ms(),
+            },
             // The OUTGOING's audible position (the public `position()` is
             // the target's clock by now).
             self.stream_position(),
-            self.crossfade.min_track_ms(),
         ) else {
             debug!("🔀 [SKIP FADE] Blocked by duration gates — falling back");
             return SkipFadeOutcome::Blocked;
@@ -5400,11 +5395,13 @@ mod tests {
 
         // Armed crossfade — the blend owns the transition.
         engine.renderer.lock().arm_crossfade(
-            5_000,
             &AudioFormat::new(crate::audio::format::SampleFormat::F32, 48_000, 2),
-            200_000,
-            200_000,
-            0,
+            crate::audio::renderer::CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 200_000,
+                incoming_ms: 200_000,
+                min_track_ms: 0,
+            },
         );
         assert!(engine.renderer.lock().is_crossfade_armed());
         let gap = Arc::new(AtomicU64::new(500));
@@ -5798,30 +5795,92 @@ mod tests {
     fn skip_fade_duration_gates_and_clamps() {
         // Normal: 2s fade, both tracks long, mid-track position.
         assert_eq!(
-            skip_fade_duration_ms(2_000, 240_000, 180_000, 100_000, 10_000),
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 2_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 180_000,
+                    min_track_ms: 10_000,
+                },
+                100_000
+            ),
             Some(2_000)
         );
         // shorter/2 clamp: 4s requested, shorter track 6s (floor 0) → 3s.
         assert_eq!(
-            skip_fade_duration_ms(4_000, 240_000, 6_000, 0, 0),
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 4_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 6_000,
+                    min_track_ms: 0,
+                },
+                0
+            ),
             Some(3_000)
         );
         // Min-track floor: shorter track under the floor → refuse.
         assert_eq!(
-            skip_fade_duration_ms(2_000, 240_000, 5_000, 0, 10_000),
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 2_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 5_000,
+                    min_track_ms: 10_000,
+                },
+                0
+            ),
             None
         );
         // Unknown durations → refuse (either side).
-        assert_eq!(skip_fade_duration_ms(2_000, 0, 180_000, 0, 0), None);
-        assert_eq!(skip_fade_duration_ms(2_000, 240_000, 0, 0, 0), None);
+        assert_eq!(
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 2_000,
+                    outgoing_ms: 0,
+                    incoming_ms: 180_000,
+                    min_track_ms: 0,
+                },
+                0
+            ),
+            None
+        );
+        assert_eq!(
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 2_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 0,
+                    min_track_ms: 0,
+                },
+                0
+            ),
+            None
+        );
         // Remaining-audio clamp: 1s left of the outgoing → 1s fade.
         assert_eq!(
-            skip_fade_duration_ms(4_000, 240_000, 180_000, 239_000, 10_000),
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 4_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 180_000,
+                    min_track_ms: 10_000,
+                },
+                239_000
+            ),
             Some(1_000)
         );
         // Nothing left of the outgoing → refuse (hard cut is honest there).
         assert_eq!(
-            skip_fade_duration_ms(4_000, 240_000, 180_000, 240_000, 10_000),
+            skip_fade_duration_ms(
+                crate::audio::renderer::CrossfadeLengths {
+                    requested_ms: 4_000,
+                    outgoing_ms: 240_000,
+                    incoming_ms: 180_000,
+                    min_track_ms: 10_000,
+                },
+                240_000
+            ),
             None
         );
     }

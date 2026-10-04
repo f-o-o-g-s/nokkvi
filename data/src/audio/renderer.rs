@@ -224,6 +224,21 @@ pub(crate) enum CrossfadeLengthRefusal {
     BelowMinTrack { shortest_ms: u64 },
 }
 
+/// The lengths a crossfade decision reads, by name: all four are `u64`
+/// milliseconds, and crossing a pair (the two track durations, or the fade
+/// and the floor) would compile and arm the wrong blend or refuse a valid one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrossfadeLengths {
+    /// The fade length asked for: the setting, or a bar-snapped override.
+    pub requested_ms: u64,
+    /// The outgoing (playing) track's duration; 0 = unknown.
+    pub outgoing_ms: u64,
+    /// The incoming track's duration; 0 = unknown.
+    pub incoming_ms: u64,
+    /// The minimum-track-length floor; 0 = blend every known duration.
+    pub min_track_ms: u64,
+}
+
 /// The blend length both crossfade starts use: the armed auto-advance
 /// trigger ([`AudioRenderer::arm_crossfade`]) and the manual-skip fire
 /// (`engine::skip_fade_duration_ms`, which adds its own remaining-audio
@@ -234,11 +249,14 @@ pub(crate) enum CrossfadeLengthRefusal {
 /// known duration). Otherwise `requested_ms` clamped to half the shorter
 /// track, so the outgoing always has real audio for at least half the fade.
 pub(crate) fn crossfade_length_ms(
-    requested_ms: u64,
-    outgoing_ms: u64,
-    incoming_ms: u64,
-    min_track_ms: u64,
+    lengths: CrossfadeLengths,
 ) -> Result<u64, CrossfadeLengthRefusal> {
+    let CrossfadeLengths {
+        requested_ms,
+        outgoing_ms,
+        incoming_ms,
+        min_track_ms,
+    } = lengths;
     if outgoing_ms == 0 || incoming_ms == 0 {
         return Err(CrossfadeLengthRefusal::UnknownDuration);
     }
@@ -1725,20 +1743,19 @@ impl AudioRenderer {
     /// Guards (inspired by MPD's `CanCrossFadeSong`): the bit-perfect format
     /// gate, then the length rules shared with the manual-skip fire
     /// ([`crossfade_length_ms`]): both durations KNOWN (non-zero — a zero
-    /// `track_duration_ms` would make the Armed position trigger
+    /// `outgoing_ms` would make the Armed position trigger
     /// `pos >= track_duration − fade` fire immediately at track start), both
     /// songs at least `min_track_ms` long (the engine's copy of the
     /// minimum-track-length setting, default 10 s; 0 = blend everything
     /// known), and the length clamped to `min(xfade, shorter / 2)` so the
     /// outgoing track always has real audio for at least half the fade.
-    pub fn arm_crossfade(
-        &mut self,
-        duration_ms: u64,
-        incoming_format: &AudioFormat,
-        track_duration_ms: u64,
-        incoming_duration_ms: u64,
-        min_track_ms: u64,
-    ) {
+    pub fn arm_crossfade(&mut self, incoming_format: &AudioFormat, lengths: CrossfadeLengths) {
+        let CrossfadeLengths {
+            requested_ms: duration_ms,
+            outgoing_ms: track_duration_ms,
+            incoming_ms: incoming_duration_ms,
+            min_track_ms,
+        } = lengths;
         // Bit-perfect gates the crossfade: Strict hard-cuts EVERY transition;
         // Relaxed hard-cuts only when the incoming format differs from the
         // outgoing one (`self.format`). A crossfade applies a gain envelope to
@@ -1754,12 +1771,7 @@ impl AudioRenderer {
             return;
         }
 
-        let effective = match crossfade_length_ms(
-            duration_ms,
-            track_duration_ms,
-            incoming_duration_ms,
-            min_track_ms,
-        ) {
+        let effective = match crossfade_length_ms(lengths) {
             Ok(effective) => effective,
             Err(CrossfadeLengthRefusal::UnknownDuration) => {
                 debug!(
@@ -4482,34 +4494,64 @@ mod tests {
     #[test]
     fn crossfade_length_ms_applies_the_shared_gates() {
         assert_eq!(
-            crossfade_length_ms(5_000, 0, 200_000, 0),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 0,
+                incoming_ms: 200_000,
+                min_track_ms: 0,
+            }),
             Err(CrossfadeLengthRefusal::UnknownDuration),
             "an unknown outgoing duration refuses even with no floor"
         );
         assert_eq!(
-            crossfade_length_ms(5_000, 200_000, 0, 0),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 200_000,
+                incoming_ms: 0,
+                min_track_ms: 0,
+            }),
             Err(CrossfadeLengthRefusal::UnknownDuration),
             "an unknown incoming duration refuses even with no floor"
         );
         assert_eq!(
-            crossfade_length_ms(5_000, 200_000, 20_000, 30_000),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 200_000,
+                incoming_ms: 20_000,
+                min_track_ms: 30_000,
+            }),
             Err(CrossfadeLengthRefusal::BelowMinTrack {
                 shortest_ms: 20_000
             }),
             "the shorter track must reach the configured floor"
         );
         assert_eq!(
-            crossfade_length_ms(5_000, 200_000, 30_000, 30_000),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 200_000,
+                incoming_ms: 30_000,
+                min_track_ms: 30_000,
+            }),
             Ok(5_000),
             "a track exactly at the floor blends"
         );
         assert_eq!(
-            crossfade_length_ms(5_000, 6_000, 200_000, 0),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 6_000,
+                incoming_ms: 200_000,
+                min_track_ms: 0,
+            }),
             Ok(3_000),
             "the length clamps to half the shorter track"
         );
         assert_eq!(
-            crossfade_length_ms(5_000, 200_000, 180_000, 10_000),
+            crossfade_length_ms(CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 200_000,
+                incoming_ms: 180_000,
+                min_track_ms: 10_000,
+            }),
             Ok(5_000),
             "a long pair blends at the requested length"
         );
@@ -4524,13 +4566,29 @@ mod tests {
         let f44 = AudioFormat::new(SampleFormat::S16, 44_100, 2);
         let mut renderer = AudioRenderer::new();
 
-        renderer.arm_crossfade(5_000, &f44, 20_000, 20_000, 30_000);
+        renderer.arm_crossfade(
+            &f44,
+            CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 20_000,
+                incoming_ms: 20_000,
+                min_track_ms: 30_000,
+            },
+        );
         assert!(
             !renderer.is_crossfade_armed(),
             "a 20s pair must NOT arm under a 30s configured floor"
         );
 
-        renderer.arm_crossfade(5_000, &f44, 20_000, 20_000, 10_000);
+        renderer.arm_crossfade(
+            &f44,
+            CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 20_000,
+                incoming_ms: 20_000,
+                min_track_ms: 10_000,
+            },
+        );
         assert!(
             renderer.is_crossfade_armed(),
             "the same 20s pair must arm once the floor drops back to 10s"
@@ -4549,19 +4607,43 @@ mod tests {
         let f44 = AudioFormat::new(SampleFormat::S16, 44_100, 2);
         let mut renderer = AudioRenderer::new();
 
-        renderer.arm_crossfade(5_000, &f44, 0, 20_000, 0);
+        renderer.arm_crossfade(
+            &f44,
+            CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 0,
+                incoming_ms: 20_000,
+                min_track_ms: 0,
+            },
+        );
         assert!(
             !renderer.is_crossfade_armed(),
             "an unknown (0) outgoing duration must never arm — the position \
              trigger would fire immediately"
         );
-        renderer.arm_crossfade(5_000, &f44, 20_000, 0, 0);
+        renderer.arm_crossfade(
+            &f44,
+            CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 20_000,
+                incoming_ms: 0,
+                min_track_ms: 0,
+            },
+        );
         assert!(
             !renderer.is_crossfade_armed(),
             "an unknown (0) incoming duration must never arm"
         );
 
-        renderer.arm_crossfade(5_000, &f44, 5_000, 5_000, 0);
+        renderer.arm_crossfade(
+            &f44,
+            CrossfadeLengths {
+                requested_ms: 5_000,
+                outgoing_ms: 5_000,
+                incoming_ms: 5_000,
+                min_track_ms: 0,
+            },
+        );
         assert!(
             renderer.is_crossfade_armed(),
             "a 5s pair must arm under a 0 floor (blend everything known)"
