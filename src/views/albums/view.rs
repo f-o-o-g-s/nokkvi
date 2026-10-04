@@ -454,7 +454,7 @@ impl AlbumsPage {
             ));
         }
         content_row = content_row.push({
-            use crate::widgets::slot_list::slot_list_text_column;
+            use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
             let artist_click = Some(AlbumsMessage::NavigateAndExpandArtist(
                 album.artist_id.clone(),
             ));
@@ -463,14 +463,16 @@ impl AlbumsPage {
                 crate::widgets::context_menu::LibraryContextEntry::GetInfo,
             ));
             slot_list_text_column(
-                album_name,
-                title_click,
-                album_artist,
-                artist_click,
-                title_size,
-                subtitle_size,
+                SlotTextColumn {
+                    title: album_name,
+                    title_on_press: title_click,
+                    title_size,
+                    subtitle: album_artist,
+                    subtitle_on_press: artist_click,
+                    subtitle_size,
+                    is_bold: ctx.is_center,
+                },
                 style,
-                ctx.is_center,
                 title_portion,
             )
         });

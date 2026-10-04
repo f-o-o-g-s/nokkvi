@@ -466,16 +466,18 @@ impl SimilarPage {
                     ));
                 }
                 content_row = content_row.push({
-                    use crate::widgets::slot_list::slot_list_text_column;
+                    use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
                     slot_list_text_column(
-                        song_title,
-                        None,
-                        song_artist,
-                        None,
-                        title_size,
-                        subtitle_size,
+                        SlotTextColumn {
+                            title: song_title,
+                            title_on_press: None,
+                            title_size,
+                            subtitle: song_artist,
+                            subtitle_on_press: None,
+                            subtitle_size,
+                            is_bold: ctx.is_center,
+                        },
                         style,
-                        ctx.is_center,
                         title_portion,
                     )
                 });

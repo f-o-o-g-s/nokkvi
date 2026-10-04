@@ -269,17 +269,21 @@ where
                 ));
             }
             content_row = content_row.push({
-                use crate::widgets::slot_list::slot_list_text_column;
+                use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
                 let title_click = Some(on_event(SongListRowEvent::TitleClick(ctx.item_index)));
                 slot_list_text_column(
-                    title,
-                    title_click,
-                    artist.clone(),
-                    Some(on_event(SongListRowEvent::NavArtist(artist_id.clone()))),
-                    title_size,
-                    subtitle_size,
+                    SlotTextColumn {
+                        title,
+                        title_on_press: title_click,
+                        title_size,
+                        subtitle: artist.clone(),
+                        subtitle_on_press: Some(on_event(SongListRowEvent::NavArtist(
+                            artist_id.clone(),
+                        ))),
+                        subtitle_size,
+                        is_bold: ctx.is_center || is_current,
+                    },
                     style,
-                    ctx.is_center || is_current,
                     title_portion,
                 )
             });

@@ -1684,6 +1684,22 @@ pub(crate) fn slot_list_artwork_quad_column<'a, Message: 'a>(
         .into()
 }
 
+/// The two lines of a [`slot_list_text_column`], by name: title and subtitle
+/// are both `String`, their clicks both `Option<Message>` and their sizes both
+/// `f32`, so positional arguments could trade places and still compile.
+pub(crate) struct SlotTextColumn<Message> {
+    /// Primary text (e.g., album name, song title).
+    pub(crate) title: String,
+    pub(crate) title_on_press: Option<Message>,
+    pub(crate) title_size: f32,
+    /// Secondary text (e.g., artist name). Empty renders the title alone.
+    pub(crate) subtitle: String,
+    pub(crate) subtitle_on_press: Option<Message>,
+    pub(crate) subtitle_size: f32,
+    /// Bold the title (the centered row, or rows that are always bold).
+    pub(crate) is_bold: bool,
+}
+
 /// Render a text column with title and subtitle for a slot list slot
 ///
 /// Two-line text column for slot list rows (title + subtitle).
@@ -1693,28 +1709,23 @@ pub(crate) fn slot_list_artwork_quad_column<'a, Message: 'a>(
 /// and container bounds. No manual width estimation or font-size shrinking.
 ///
 /// # Arguments
-/// * `title` - Primary text (e.g., album name, song title)
-/// * `subtitle` - Secondary text (e.g., artist name)
-/// * `title_size` - Font size for the title
-/// * `subtitle_size` - Font size for the subtitle
+/// * `text` - The title and subtitle lines with their sizes and clicks
 /// * `style` - Slot styling to determine text colors
-/// * `is_bold` - Whether to bold the title
 /// * `portion` - FillPortion width allocation
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared two-line cell builder: each slot list passes its own text, sizes and click messages"
-)]
 pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
-    title: String,
-    title_on_press: Option<Message>,
-    subtitle: String,
-    subtitle_on_press: Option<Message>,
-    title_size: f32,
-    subtitle_size: f32,
+    text: SlotTextColumn<Message>,
     style: SlotListSlotStyle,
-    is_bold: bool,
     portion: u16,
 ) -> Element<'a, Message> {
+    let SlotTextColumn {
+        title,
+        title_on_press,
+        title_size,
+        subtitle,
+        subtitle_on_press,
+        subtitle_size,
+        is_bold,
+    } = text;
     // When slot text links are disabled, suppress click messages
     let links_enabled = crate::theme::is_slot_text_links();
     let title_on_press = if links_enabled { title_on_press } else { None };

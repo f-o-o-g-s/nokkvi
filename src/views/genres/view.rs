@@ -326,14 +326,16 @@ impl GenresPage {
         // like every other view — the prior hand-built slot_list_text had no
         // weight path and a centered genre could never bold.
         content = content.push(crate::widgets::slot_list::slot_list_text_column(
-            genre.name.clone(),
-            None,
-            String::new(),
-            None,
-            title_size,
-            m.subtitle_size,
+            crate::widgets::slot_list::SlotTextColumn {
+                title: genre.name.clone(),
+                title_on_press: None,
+                title_size,
+                subtitle: String::new(),
+                subtitle_on_press: None,
+                subtitle_size: m.subtitle_size,
+                is_bold: ctx.is_center,
+            },
             style,
-            ctx.is_center,
             45,
         ));
         if self.column_visibility.albumcount {

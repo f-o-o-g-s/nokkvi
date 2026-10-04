@@ -457,7 +457,7 @@ impl ArtistsPage {
             ));
         }
         content_row = content_row.push({
-            use crate::widgets::slot_list::slot_list_text_column;
+            use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
             let title_click = Some(ArtistsMessage::ContextMenuAction(
                 ctx.item_index,
                 crate::widgets::context_menu::LibraryContextEntry::GetInfo,
@@ -468,17 +468,19 @@ impl ArtistsPage {
             // hover color, and the centered-row bold in lockstep with every
             // other view — the hand-rolled column silently missed the gate.
             slot_list_text_column(
-                artist_name,
-                title_click,
-                String::new(),
-                None,
-                title_size,
-                // Unused today (empty subtitle → title-only branch), but plumb
-                // the STANDARD subtitle size so a future subtitle can't land
-                // silently undersized at metadata size.
-                m.subtitle_size,
+                SlotTextColumn {
+                    title: artist_name,
+                    title_on_press: title_click,
+                    title_size,
+                    subtitle: String::new(),
+                    subtitle_on_press: None,
+                    // Unused today (empty subtitle → title-only branch), but plumb
+                    // the STANDARD subtitle size so a future subtitle can't land
+                    // silently undersized at metadata size.
+                    subtitle_size: m.subtitle_size,
+                    is_bold: ctx.is_center,
+                },
                 style,
-                ctx.is_center,
                 name_portion,
             )
         });

@@ -547,7 +547,7 @@ impl Nokkvi {
         use nokkvi_data::utils::scale::calculate_font_size;
 
         use crate::widgets::slot_list::{
-            SlotListSlotStyle, slot_list_artwork_column, slot_list_metadata_column,
+            SlotListSlotStyle, SlotTextColumn, slot_list_artwork_column, slot_list_metadata_column,
             slot_list_text_column,
         };
 
@@ -561,15 +561,17 @@ impl Nokkvi {
         row![
             slot_list_artwork_column(artwork, artwork_size, true, false, 1.0),
             slot_list_text_column(
-                title,
-                None,
-                subtitle,
-                None,
-                title_size,
-                subtitle_size,
+                SlotTextColumn {
+                    title,
+                    title_on_press: None,
+                    title_size,
+                    subtitle,
+                    subtitle_on_press: None,
+                    subtitle_size,
+                    is_bold: true,
+                },
                 style,
-                true,
-                50
+                50,
             ),
             slot_list_metadata_column(meta, None, meta_size, style, 22),
         ]

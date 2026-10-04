@@ -580,16 +580,18 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
             .height(Length::Fill)
             .align_y(Alignment::Center),
         container(crate::widgets::slot_list::slot_list_text_column(
-            song.title.clone(),
-            None, // track title doesn't navigate
-            song.artist.clone(),
-            on_artist_click,
-            title_size,
-            // Standard subtitle size — the artist line is a subtitle like on
-            // every parent row, not metadata (which sizes the track#/duration).
-            ctx.metrics.subtitle_size,
+            crate::widgets::slot_list::SlotTextColumn {
+                title: song.title.clone(),
+                title_on_press: None, // track title doesn't navigate
+                title_size,
+                subtitle: song.artist.clone(),
+                subtitle_on_press: on_artist_click,
+                // Standard subtitle size — the artist line is a subtitle like on
+                // every parent row, not metadata (which sizes the track#/duration).
+                subtitle_size: ctx.metrics.subtitle_size,
+                is_bold: true,
+            },
             style,
-            true,
             80, // combined width 60+20
         ),)
         .width(Length::FillPortion(80))
@@ -721,20 +723,22 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
 
     content = content.push(
         container(crate::widgets::slot_list::slot_list_text_column(
-            album.name.clone(),
-            on_album_click.clone(),
-            if show_artist {
-                album.artist.clone()
-            } else {
-                String::new()
+            crate::widgets::slot_list::SlotTextColumn {
+                title: album.name.clone(),
+                title_on_press: on_album_click.clone(),
+                title_size,
+                subtitle: if show_artist {
+                    album.artist.clone()
+                } else {
+                    String::new()
+                },
+                subtitle_on_press: if show_artist { on_artist_click } else { None },
+                // Standard subtitle size — the artist line is a subtitle like on
+                // every parent row, not metadata (which sizes the year/duration).
+                subtitle_size: ctx.metrics.subtitle_size,
+                is_bold: true,
             },
-            if show_artist { on_artist_click } else { None },
-            title_size,
-            // Standard subtitle size — the artist line is a subtitle like on
-            // every parent row, not metadata (which sizes the year/duration).
-            ctx.metrics.subtitle_size,
             style,
-            true,
             name_portion + if show_artist { 20 } else { 0 },
         ))
         .width(Length::FillPortion(

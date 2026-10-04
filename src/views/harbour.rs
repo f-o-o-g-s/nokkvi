@@ -1485,7 +1485,7 @@ fn render_row<'a>(
     data: &HarbourViewData<'a>,
 ) -> Element<'a, HarbourMessage> {
     use crate::widgets::slot_list::{
-        child_slot_button, slot_list_static_icon_color, slot_list_text_column,
+        SlotTextColumn, child_slot_button, slot_list_static_icon_color, slot_list_text_column,
     };
 
     match row {
@@ -1538,14 +1538,16 @@ fn render_row<'a>(
             // renders in BOTH states so the title baseline never jitters on
             // toggle.
             let text_col = slot_list_text_column(
-                title.clone(),
-                None,
-                subtitle,
-                None,
-                m.title_size,
-                m.subtitle_size,
+                SlotTextColumn {
+                    title: title.clone(),
+                    title_on_press: None,
+                    title_size: m.title_size,
+                    subtitle,
+                    subtitle_on_press: None,
+                    subtitle_size: m.subtitle_size,
+                    is_bold: true,
+                },
                 style,
-                true,
                 100,
             );
 
@@ -1643,14 +1645,16 @@ fn render_row<'a>(
                 .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(anchor)
                 .push(slot_list_text_column(
-                    "Trawl".to_string(),
-                    None,
-                    trawl_row_subtitle(*seeds, *blend),
-                    None,
-                    m.title_size_lg,
-                    m.subtitle_size,
+                    SlotTextColumn {
+                        title: "Trawl".to_string(),
+                        title_on_press: None,
+                        title_size: m.title_size_lg,
+                        subtitle: trawl_row_subtitle(*seeds, *blend),
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
                     style,
-                    ctx.is_center,
                     100,
                 ));
 
@@ -1696,14 +1700,16 @@ fn render_row<'a>(
                 .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(slot_list_text_column(
-                    title.clone(),
-                    None,
-                    subtitle.clone(),
-                    None,
-                    m.title_size_lg,
-                    m.subtitle_size,
+                    SlotTextColumn {
+                        title: title.clone(),
+                        title_on_press: None,
+                        title_size: m.title_size_lg,
+                        subtitle: subtitle.clone(),
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
                     style,
-                    ctx.is_center,
                     100,
                 ));
 
@@ -1766,14 +1772,16 @@ fn render_row<'a>(
                 .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(slot_list_text_column(
-                    kind.title(),
-                    None,
-                    teaser.subtitle,
-                    None,
-                    m.title_size_lg,
-                    m.subtitle_size,
+                    SlotTextColumn {
+                        title: kind.title(),
+                        title_on_press: None,
+                        title_size: m.title_size_lg,
+                        subtitle: teaser.subtitle,
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
                     style,
-                    ctx.is_center,
                     100,
                 ));
 

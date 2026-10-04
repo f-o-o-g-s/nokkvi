@@ -754,19 +754,21 @@ impl PlaylistsPage {
                     crate::widgets::context_menu::LibraryContextEntry::GetInfo,
                 ),
             ));
-            use crate::widgets::slot_list::slot_list_text_column;
+            use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
             slot_list_text_column(
-                playlist.name.clone(),
-                click_title,
-                subtitle,
-                Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
-                title_size,
-                // Unused today (empty subtitle → title-only branch), but plumb
-                // the STANDARD subtitle size so a future subtitle can't land
-                // silently undersized at metadata size.
-                m.subtitle_size,
+                SlotTextColumn {
+                    title: playlist.name.clone(),
+                    title_on_press: click_title,
+                    title_size,
+                    subtitle,
+                    subtitle_on_press: Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
+                    // Unused today (empty subtitle → title-only branch), but plumb
+                    // the STANDARD subtitle size so a future subtitle can't land
+                    // silently undersized at metadata size.
+                    subtitle_size: m.subtitle_size,
+                    is_bold: ctx.is_center,
+                },
                 style,
-                ctx.is_center,
                 name_portion,
             )
         });

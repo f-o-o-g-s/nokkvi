@@ -319,7 +319,7 @@ impl RadiosPage {
         });
 
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListConfig, slot_list_text_column,
+            SLOT_LIST_SLOT_PADDING, SlotListConfig, SlotTextColumn, slot_list_text_column,
             slot_list_view_with_scroll,
         };
 
@@ -435,14 +435,16 @@ impl RadiosPage {
                     .to_owned();
 
                 let text_col = slot_list_text_column::<RadiosMessage>(
-                    station.name.clone(),
-                    None,
-                    subtitle,
-                    None,
-                    m.title_size,
-                    m.subtitle_size,
+                    SlotTextColumn {
+                        title: station.name.clone(),
+                        title_on_press: None,
+                        title_size: m.title_size,
+                        subtitle,
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
                     style,
-                    ctx.is_center,
                     100,
                 );
 

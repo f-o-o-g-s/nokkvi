@@ -267,7 +267,7 @@ impl SongsPage {
                     ));
                 }
                 content_row = content_row.push({
-                    use crate::widgets::slot_list::slot_list_text_column;
+                    use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
                     let artist_click = song
                         .artist_id
                         .as_ref()
@@ -277,14 +277,16 @@ impl SongsPage {
                         crate::widgets::context_menu::LibraryContextEntry::GetInfo,
                     ));
                     slot_list_text_column(
-                        song_title,
-                        title_click,
-                        song_artist,
-                        artist_click,
-                        title_size,
-                        subtitle_size,
+                        SlotTextColumn {
+                            title: song_title,
+                            title_on_press: title_click,
+                            title_size,
+                            subtitle: song_artist,
+                            subtitle_on_press: artist_click,
+                            subtitle_size,
+                            is_bold: ctx.is_center,
+                        },
                         style,
-                        ctx.is_center,
                         title_portion,
                     )
                 });
