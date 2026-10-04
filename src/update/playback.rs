@@ -2374,17 +2374,9 @@ impl Nokkvi {
         // restored banner is complete and shows the correct visibility right
         // away; `handle_playlists_loaded` later re-syncs it against fresh
         // server metadata.
-        self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {
-            crate::state::ActivePlaylistContext::from_persisted(
-                id,
-                settings.active_playlist_name.clone(),
-                settings.active_playlist_comment.clone(),
-                settings.active_playlist_duration,
-                settings.active_playlist_updated.clone(),
-                settings.active_playlist_public,
-                settings.active_playlist_song_count,
-            )
-        });
+        self.active_playlist_info = settings
+            .active_playlist()
+            .map(crate::state::ActivePlaylistContext::from_persisted);
         // Freeze the strip quad identity in case the restored queue landed
         // before this context restore (the usual ordering — context first,
         // queue later — leaves the snapshot empty here and

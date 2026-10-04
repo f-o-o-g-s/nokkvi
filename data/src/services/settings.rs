@@ -1124,27 +1124,32 @@ impl SettingsManager {
         self.save()
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one argument per stored playlist-context field"
-    )]
+    /// Store the active-playlist context, or clear it with `None`.
     pub fn set_active_playlist(
         &mut self,
-        id: Option<String>,
-        name: String,
-        comment: String,
-        duration: f32,
-        updated: String,
-        public: bool,
-        song_count: u32,
+        record: Option<crate::types::active_playlist::ActivePlaylistRecord>,
     ) -> Result<()> {
-        self.settings.player.active_playlist_id = id;
-        self.settings.player.active_playlist_name = name;
-        self.settings.player.active_playlist_comment = comment;
-        self.settings.player.active_playlist_duration = duration;
-        self.settings.player.active_playlist_updated = updated;
-        self.settings.player.active_playlist_public = public;
-        self.settings.player.active_playlist_song_count = song_count;
+        let (id, record) = match record {
+            Some(r) => (Some(r.id.clone()), r),
+            None => (None, Default::default()),
+        };
+        let crate::types::active_playlist::ActivePlaylistRecord {
+            id: _,
+            name,
+            comment,
+            duration_secs,
+            updated,
+            public,
+            song_count,
+        } = record;
+        let p = &mut self.settings.player;
+        p.active_playlist_id = id;
+        p.active_playlist_name = name;
+        p.active_playlist_comment = comment;
+        p.active_playlist_duration = duration_secs;
+        p.active_playlist_updated = updated;
+        p.active_playlist_public = public;
+        p.active_playlist_song_count = song_count;
         self.save_redb_only()
     }
 

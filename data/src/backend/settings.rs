@@ -234,23 +234,14 @@ impl SettingsService {
         sm.set_default_playlist(id, name)
     }
 
-    /// Set active playlist context (for queue header bar) and persist
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "mirrors SettingsManager::set_active_playlist, one argument per stored playlist-context field"
-    )]
+    /// Set active playlist context (for queue header bar) and persist;
+    /// `None` clears it.
     pub async fn set_active_playlist(
         &self,
-        id: Option<String>,
-        name: String,
-        comment: String,
-        duration: f32,
-        updated: String,
-        public: bool,
-        song_count: u32,
+        record: Option<crate::types::active_playlist::ActivePlaylistRecord>,
     ) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
-        sm.set_active_playlist(id, name, comment, duration, updated, public, song_count)
+        sm.set_active_playlist(record)
     }
 
     // =========================================================================

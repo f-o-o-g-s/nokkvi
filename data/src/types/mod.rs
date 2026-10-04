@@ -4,6 +4,7 @@
 //! hotkey configuration, user settings, and thread-safe reactive containers.
 
 pub mod accessors;
+pub mod active_playlist;
 pub mod album;
 pub mod artist;
 pub mod batch;

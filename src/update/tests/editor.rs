@@ -1643,13 +1643,15 @@ fn enter_edit_seeds_staleness_token_from_active_context_when_list_empty() {
     let mut app = test_app();
     // library.playlists is empty; the active context carries the server token.
     app.active_playlist_info = Some(crate::state::ActivePlaylistContext::from_persisted(
-        "pl_1".into(),
-        "Mix".into(),
-        String::new(),
-        0.0,
-        "SERVER_TOKEN".into(),
-        true,
-        3,
+        nokkvi_data::types::active_playlist::ActivePlaylistRecord {
+            id: "pl_1".into(),
+            name: "Mix".into(),
+            comment: String::new(),
+            duration_secs: 0.0,
+            updated: "SERVER_TOKEN".into(),
+            public: true,
+            song_count: 3,
+        },
     ));
 
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {

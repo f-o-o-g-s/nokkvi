@@ -1,5 +1,7 @@
 //! Stored session and active-playlist context.
 
+use nokkvi_data::types::active_playlist::ActivePlaylistRecord;
+
 /// Stored session for JWT-based auto-login.
 ///
 /// Replaces the anonymous `Option<(String, String, String, String)>` tuple
@@ -73,15 +75,16 @@ impl ActivePlaylistContext {
     /// the restored banner is complete and correct (visibility included) before
     /// the playlists list reloads. `handle_playlists_loaded` later re-syncs it
     /// against fresh server metadata.
-    pub fn from_persisted(
-        id: String,
-        name: String,
-        comment: String,
-        duration_secs: f32,
-        updated: String,
-        public: bool,
-        song_count: u32,
-    ) -> Self {
+    pub fn from_persisted(record: ActivePlaylistRecord) -> Self {
+        let ActivePlaylistRecord {
+            id,
+            name,
+            comment,
+            duration_secs,
+            updated,
+            public,
+            song_count,
+        } = record;
         Self {
             id,
             name,
@@ -92,6 +95,32 @@ impl ActivePlaylistContext {
             updated,
             smart: None,
             readonly: None,
+        }
+    }
+
+    /// The persisted shape of this context, for
+    /// `SettingsService::set_active_playlist`. `smart` and `readonly` are
+    /// deliberately not stored (see their field docs).
+    pub fn to_record(&self) -> ActivePlaylistRecord {
+        let Self {
+            id,
+            name,
+            comment,
+            song_count,
+            duration_secs,
+            public,
+            updated,
+            smart: _,
+            readonly: _,
+        } = self;
+        ActivePlaylistRecord {
+            id: id.clone(),
+            name: name.clone(),
+            comment: comment.clone(),
+            duration_secs: *duration_secs,
+            updated: updated.clone(),
+            public: *public,
+            song_count: *song_count,
         }
     }
 
