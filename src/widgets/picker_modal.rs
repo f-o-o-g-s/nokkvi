@@ -140,7 +140,9 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
         window_height,
     } = chrome;
     let modal_height = (window_height * 0.70).max(320.0);
-    let modal_chrome = TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT;
+    // Chrome = fixed bands + the panel's own padding top and bottom, so the
+    // slot budget matches the Fill area main_area really gets.
+    let modal_chrome = TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT + 2.0 * theme::MODAL_PANEL_PADDING;
     let label_size = 13.0;
 
     // ── Title bar: title, optional extras, X ──
@@ -232,7 +234,7 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
     .width(Length::FillPortion(5))
     .height(Length::Fixed(modal_height))
     .clip(true)
-    .padding(Padding::new(4.0))
+    .padding(Padding::new(theme::MODAL_PANEL_PADDING))
     .style(theme::modal_frame_style);
 
     // The panel takes the middle 5/7 of the backdrop's width.

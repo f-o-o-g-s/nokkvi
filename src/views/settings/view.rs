@@ -643,9 +643,11 @@ fn render_picker_modal<'a>(
     build_body: impl FnOnce(f32, f32) -> Element<'a, SettingsMessage>,
 ) -> Element<'a, SettingsMessage> {
     // The modal floats over the settings panel at 70% of window height, minus
-    // chrome (breadcrumb-height title bar + search bar).
+    // chrome (breadcrumb-height title bar + search bar + the panel's own
+    // padding top and bottom).
     let modal_height = window_height * 0.70;
-    let modal_chrome = BREADCRUMB_HEIGHT + FONT_SEARCH_BAR_HEIGHT;
+    let modal_chrome =
+        BREADCRUMB_HEIGHT + FONT_SEARCH_BAR_HEIGHT + 2.0 * theme::MODAL_PANEL_PADDING;
     let main_area = build_body(modal_height, modal_chrome);
 
     // ── Title bar (X back-button on the right) ──
@@ -708,7 +710,7 @@ fn render_picker_modal<'a>(
     .width(Length::FillPortion(5))
     .height(Length::Fixed(modal_height))
     .clip(true)
-    .padding(Padding::new(4.0))
+    .padding(Padding::new(theme::MODAL_PANEL_PADDING))
     .style(move |_: &iced::Theme| container::Style {
         background: Some(modal_bg.into()),
         border: Border {

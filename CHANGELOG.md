@@ -80,6 +80,7 @@ All notable changes to this project will be documented in this file.
 - During radio, the kebab's Shuffle, Repeat, Consume and Lyrics entries are now greyed out like their buttons.
 - During radio, the kebab's Shuffle, Repeat, Consume and Lyrics checkboxes now stay unticked, as their buttons stay unlit.
 - During radio, the kebab's dot no longer lights up because Shuffle, Repeat, Consume or Lyrics is on.
+- The bottom row of the font, theme, default playlist and MilkDrop preset pickers is no longer squashed shorter than the rows above it.
 
 ### Removed
 

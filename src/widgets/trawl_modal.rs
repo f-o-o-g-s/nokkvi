@@ -337,9 +337,10 @@ pub(crate) fn trawl_modal_overlay<'a>(
     album_art: &'a HashMap<String, image::Handle>,
 ) -> iced::Element<'a, TrawlModalMessage> {
     let modal_height = (window_height * 0.70).max(320.0);
-    // Chrome = fixed bands + the panel container's own 4px padding top and
-    // bottom, so the slot budget matches the Fill area main_area really gets.
-    let modal_chrome = TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT + TRAY_HEIGHT + 8.0;
+    // Chrome = fixed bands + the panel's own padding top and bottom, so the
+    // slot budget matches the Fill area main_area really gets.
+    let modal_chrome =
+        TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT + TRAY_HEIGHT + 2.0 * theme::MODAL_PANEL_PADDING;
 
     // ── Title bar ──
     let dim_color = theme::fg4();
@@ -458,7 +459,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
     .width(Length::FillPortion(5))
     .height(Length::Fixed(modal_height))
     .clip(true)
-    .padding(Padding::new(4.0))
+    .padding(Padding::new(theme::MODAL_PANEL_PADDING))
     .style(theme::modal_frame_style);
 
     let modal_row = row![

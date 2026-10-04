@@ -186,6 +186,14 @@ pub(crate) fn modal_scaffold<'a, M: Clone + 'a>(
 /// Conventional backdrop alpha used by every overlay modal.
 pub(crate) const MODAL_BACKDROP_ALPHA: f32 = 0.6;
 
+/// Inner padding, on every side, of the slot-list picker panels: the picker
+/// shell (`widgets::picker_modal`), Trawl, and the settings font / theme
+/// pickers. The slot list fills what is left after the fixed bands AND this
+/// padding top and bottom, so each panel's `with_dynamic_slots` chrome adds
+/// `2.0 * MODAL_PANEL_PADDING`; leaving it out budgets the rows taller than
+/// their Fill area and squashes the last one.
+pub(crate) const MODAL_PANEL_PADDING: f32 = 4.0;
+
 /// Shared `container::Style` for overlay modal panels — flat `bg0_hard()`
 /// fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners.
 ///
