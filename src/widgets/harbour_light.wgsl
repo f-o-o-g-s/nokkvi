@@ -31,6 +31,8 @@ struct Scene {
     // 1 = the day scene (light themes; bg is then the light background and
     // text the dark ink), unused x3
     mode: vec4<f32>,
+    // the logo's shield colour (the sunken shield's paint)
+    shield: vec4<f32>,
     bg: vec4<f32>,
     text: vec4<f32>,
     highlight: vec4<f32>,
@@ -45,6 +47,9 @@ struct Scene {
     glows: array<vec4<f32>, 48>,
     // x (0..1), height (Y), radius (Y units), alpha
     bubbles: array<vec4<f32>, 32>,
+    // the seabed props, fixed slots (harbour_light.rs PROP_*): rocks 0..3,
+    // starfish 3, treasure 4, kelp 5..13, the anchor's shadow 13
+    props: array<vec4<f32>, 16>,
 };
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -236,6 +241,218 @@ fn current(px: f32, y: f32, mid: f32, env: f32, wisp: f32) -> vec2<f32> {
 
 // ── the scene ───────────────────────────────────────────────────────────
 
+// ── the seabed props ────────────────────────────────────────────────────
+// Rocks, the starfish, the sunken treasure and the kelp, drawn in the same
+// light and sand as the floor so they sit IN it: soft contact shadows on
+// the sand first, then each prop shaded from above, crossed by the moving
+// caustics, rim-lit along its top, and fading into drifted sand at its
+// base. `sand` is the sand colour at the near floor, `light` the scene's
+// light (the aurora by night, the sun by day), `silh` the night silhouette
+// or the day's shadowed ink, `lit` how strongly the light falls here.
+
+const PROP_ROCK_BASE: f32 = 0.018;
+const PROP_STAR_Y: f32 = 0.03;
+const PROP_TREASURE_BASE: f32 = 0.012;
+const PROP_KELP_ROOT: f32 = 0.015;
+
+fn rot2(p: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+// Inigo Quilez's five-pointed star distance (outer radius r, inner ratio rf).
+fn sd_star5(p_in: vec2<f32>, r: f32, rf: f32) -> f32 {
+    let k1 = vec2<f32>(0.809016994375, -0.587785252292);
+    let k2 = vec2<f32>(-k1.x, k1.y);
+    var p = vec2<f32>(abs(p_in.x), p_in.y);
+    p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+    p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+    p.x = abs(p.x);
+    p.y -= r;
+    let ba = rf * vec2<f32>(-k1.y, k1.x) - vec2<f32>(0.0, 1.0);
+    let hh = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+    return length(p - ba * hh) * sign(p.y * ba.x - p.x * ba.y);
+}
+
+// The caustic net's brightness at a point (the water's net, re-sampled).
+fn caustic_at(u: f32, y: f32, t: f32) -> f32 {
+    let ca = vnoise(vec2<f32>(u * 25.6 + t * 0.128, y * 16.0 + t * 0.19));
+    let cb = vnoise(vec2<f32>(u * 24.0 - t * 0.16, y * 17.6 - t * 0.128) + 16.0);
+    return pow(clamp(1.0 - abs(ca - cb) * 5.0, 0.0, 1.0), 3.0);
+}
+
+// Drifted sand across a prop's base: 1 above the drift line, 0 in it.
+fn sand_drift(px: f32, y: f32, base: f32, seed: f32) -> f32 {
+    let line = base + 0.002 + 0.002 * sin(px * 70.0 + seed * 3.0) + 0.001 * sin(px * 170.0 + seed);
+    return ss(line - 0.002, line + 0.003, y);
+}
+
+fn seabed_props(u: f32, y: f32, px: f32, aspect: f32, h: f32, t: f32, base_col: vec3<f32>,
+                sand: vec3<f32>, light: vec3<f32>, silh: vec3<f32>, lit: f32, day: bool) -> vec3<f32> {
+    var col = base_col;
+    let pix = 1.0 / h;
+    let cau = caustic_at(u, y, t) * select(0.2 + 0.6 * lit, 1.0, day);
+
+    // Contact shadows: soft dark pools on the sand under everything.
+    var shadow = 0.0;
+    for (var i = 0u; i < 3u; i++) {
+        let r = scene.props[i];
+        let dx = ((u - r.x) * aspect) / (r.y * 1.25);
+        shadow += exp(-dx * dx - pow((y - PROP_ROCK_BASE) / (0.008 + 0.2 * r.z), 2.0)) * 0.7;
+    }
+    let st = scene.props[3];
+    shadow += exp(-pow(((u - st.x) * aspect) / (st.y * 1.6), 2.0) - pow((y - PROP_STAR_Y + 0.006) / 0.007, 2.0)) * 0.45;
+    let tr = scene.props[4];
+    shadow += exp(-pow(((u - tr.x) * aspect) / (tr.y * 0.95), 2.0) - pow((y - PROP_TREASURE_BASE) / (0.012 + 0.3 * tr.y), 2.0)) * 0.75;
+    for (var i = 5u; i < 13u; i++) {
+        let k = scene.props[i];
+        if (k.w > 0.5) {
+            shadow += exp(-pow(((u - k.x) * aspect) / 0.008, 2.0) - pow((y - PROP_KELP_ROOT) / 0.008, 2.0)) * 0.4;
+        }
+    }
+    let an = scene.props[13];
+    shadow += exp(-pow(((u - an.x) * aspect) / max(an.y * 1.4, 0.001), 2.0) - pow((y - 0.004) / 0.010, 2.0)) * 0.6 * an.w;
+    col *= 1.0 - 0.5 * clamp(shadow, 0.0, 1.0) * ss(0.12, 0.0, y);
+    // What a prop's sunk base fades into: the shadowed floor behind it.
+    let behind = mix(col, sand * 0.85, 0.25);
+
+    // Rocks: lumpy mounds lit from above, sand drifted against their feet.
+    for (var i = 0u; i < 3u; i++) {
+        let r = scene.props[i];
+        let q = vec2<f32>(((u - r.x) * aspect) / r.y, (y - PROP_ROCK_BASE) / r.z);
+        if (q.y < -0.6 || abs(q.x) > 1.4 || q.y > 1.4) {
+            continue;
+        }
+        let ang = atan2(q.y, q.x);
+        let rr = 1.0 + 0.16 * (vnoise(vec2<f32>(ang * 2.5 + r.w * 7.0, r.w * 3.0)) - 0.5);
+        let d = (length(q) - rr) * min(r.y, r.z);
+        let inside = ss(pix, -pix, d) * ss(-0.5, -0.1, q.y);
+        if (inside <= 0.0) {
+            continue;
+        }
+        let n = normalize(q / vec2<f32>(r.y, r.z) + vec2<f32>(0.0, 0.0001));
+        let shade = clamp(0.5 + 0.5 * (n.y * 0.85 - n.x * 0.25), 0.0, 1.0);
+        var rock = silh * (0.75 + 0.5 * shade) * (0.9 + 0.2 * vnoise(q * 6.0 + r.w * 11.0));
+        rock += light * (pow(shade, 3.0) * 0.18 + cau * shade * 0.35) * select(0.5 + lit, 0.8, day);
+        rock += light * exp(-abs(d) / (pix * 1.2)) * max(n.y, 0.0) * select(0.35, 0.5, day);
+        rock = mix(behind, rock, sand_drift(px, y, PROP_ROCK_BASE, r.w));
+        col = mix(col, rock, inside);
+    }
+
+    // The starfish, resting on the sand, a little warm.
+    {
+        var p = vec2<f32>((u - st.x) * aspect, (y - PROP_STAR_Y) / 0.6);
+        p = rot2(p, st.z);
+        let d = sd_star5(p, st.y, 0.5) - st.y * 0.12;
+        let inside = ss(pix, -pix, d);
+        if (inside > 0.0) {
+            let body = mix(silh, scene.warm.rgb * select(0.35, 0.75, day), select(0.35, 0.55, day));
+            var star = body * (0.85 + 0.25 * vnoise(p / st.y * 4.0));
+            star += light * cau * 0.3 * select(0.6, 0.9, day);
+            star += light * exp(-abs(d) / (pix * 1.2)) * select(0.3, 0.35, day);
+            col = mix(col, star, inside);
+        }
+    }
+
+    // The sunken treasure.
+    {
+        let sz = tr.y;
+        var p = rot2(vec2<f32>((u - tr.x) * aspect, y - (PROP_TREASURE_BASE + 0.32 * sz)), -tr.z);
+        let wood = scene.warm.rgb;
+        let paint = scene.shield.rgb;
+        let dim = select(0.26, 0.85, day);
+        if (tr.w < 0.5) {
+            // A round shield, standing half sunk: painted boards quartered
+            // in the longship's own shield colour and wood, an iron rim and
+            // a domed iron boss.
+            let rad = sz * 0.78;
+            let q = p / vec2<f32>(0.82, 1.0);
+            let d = length(q) - rad;
+            let inside = ss(pix, -pix, d);
+            if (inside > 0.0) {
+                let quarter = select(paint, wood * 0.85, (q.x * q.y) > 0.0);
+                let board = fract((q.x / rad + 1.0) * 2.5);
+                let seam = ss(0.06, 0.0, min(board, 1.0 - board));
+                let wear = vnoise(q / rad * 7.0);
+                var sh = mix(silh, quarter, dim * (0.65 + 0.35 * wear));
+                sh *= 1.0 - 0.35 * seam;
+                let rim = ss(rad * 0.86, rad * 0.9, length(q));
+                let iron = silh * 0.8 + light * 0.06;
+                sh = mix(sh, iron, rim);
+                let boss = length(q) / (rad * 0.24);
+                let bshade = clamp(1.0 - boss, 0.0, 1.0);
+                sh = mix(sh, iron + light * pow(bshade, 2.0) * 0.5, ss(1.05, 0.95, boss));
+                sh *= 0.85 + 0.25 * (q.y / rad);
+                sh += light * cau * 0.3 * select(0.6, 0.9, day);
+                sh += light * exp(-abs(d) / (pix * 1.2)) * ss(0.0, 0.5, q.y / rad) * 0.5;
+                sh = mix(behind, sh, sand_drift(px, y, PROP_TREASURE_BASE, 5.0));
+                col = mix(col, sh, inside);
+            }
+        } else {
+            // A treasure chest, half sunk, its domed lid ajar with warm gold
+            // light spilling from the gap.
+            let bw = sz * 0.62;
+            let bh = sz * 0.36;
+            let lid_y = bh * 0.5;
+            let body_d = max(abs(p.x) - bw, abs(p.y) - bh * 0.5);
+            let lq = vec2<f32>(p.x / bw, (p.y - lid_y - 0.006) / (sz * 0.26));
+            let lid_d = max((length(lq) - 1.0) * sz * 0.26, lid_y + 0.006 - p.y);
+            let d = min(body_d, lid_d);
+            let inside = ss(pix, -pix, d);
+            // The gold light from the gap reaches past the chest.
+            let gap = exp(-pow((p.y - lid_y - 0.003) / 0.0035, 2.0)) * ss(bw, bw * 0.8, abs(p.x));
+            let spill = exp(-length(vec2<f32>(p.x / bw, (p.y - lid_y) / (sz * 0.5))) * 2.2);
+            let gold = mix(wood, vec3<f32>(1.0, 0.9, 0.6), 0.4);
+            col += gold * spill * select(0.22, 0.12, day) * (1.0 - inside);
+            if (inside > 0.0) {
+                let plank = fract(p.y / (bh * 0.34));
+                var ch = mix(silh, wood * 0.7, dim) * (0.85 + 0.15 * vnoise(p / sz * 9.0));
+                ch *= 1.0 - 0.3 * ss(0.08, 0.0, min(plank, 1.0 - plank)) * step(p.y, lid_y);
+                let band = ss(0.04 * sz, 0.02 * sz, abs(abs(p.x) - bw * 0.55));
+                ch = mix(ch, silh * 0.8 + light * 0.08, band);
+                ch *= 0.8 + 0.3 * clamp(p.y / sz + 0.5, 0.0, 1.0);
+                ch += light * cau * 0.3 * select(0.6, 0.9, day);
+                ch += light * exp(-abs(d) / (pix * 1.2)) * ss(lid_y, lid_y + sz * 0.2, p.y) * 0.5;
+                ch += gold * gap * 1.2;
+                ch = mix(behind, ch, sand_drift(px, y, PROP_TREASURE_BASE, 5.0));
+                col = mix(col, ch, inside);
+            }
+        }
+    }
+
+    // Kelp: tapered fronds swaying from the sand, dark with a lit edge by
+    // night, translucent sunlit green by day.
+    for (var i = 5u; i < 13u; i++) {
+        let k = scene.props[i];
+        if (k.w < 0.5) {
+            continue;
+        }
+        let f = (y - PROP_KELP_ROOT) / k.y;
+        if (f < -0.02 || f > 1.02) {
+            continue;
+        }
+        let fc = clamp(f, 0.0, 1.0);
+        let xc = (k.x - 0.5) * aspect + k.z * pow(fc, 1.7);
+        let hw = 0.0042 - 0.0028 * fc;
+        let dx = px - xc;
+        let cover = ss(hw + pix, hw - pix, abs(dx)) * ss(-0.02, 0.0, f) * ss(1.02, 0.97, f);
+        if (cover <= 0.0) {
+            continue;
+        }
+        var frond: vec3<f32>;
+        if (day) {
+            let green = mix(scene.text.rgb, ramp(0.5), 0.45);
+            frond = green * (0.8 + 0.2 * fc) + light * (0.12 * fc + cau * 0.2);
+        } else {
+            frond = silh + light * exp(-(dx + hw) * (dx + hw) / (pix * pix * 1.5)) * (0.25 + 0.35 * lit);
+        }
+        frond = mix(behind, frond, ss(PROP_KELP_ROOT - 0.002, PROP_KELP_ROOT + 0.004, y));
+        col = mix(col, frond, cover);
+    }
+    return col;
+}
+
 // ── the day scene ───────────────────────────────────────────────────────
 // Light themes: the same scene by sunlight. A soft sky lifting to a warm
 // haze at the horizon, high cirrus streaks drifting (the curtain's grammar
@@ -334,6 +551,9 @@ fn day_scene(u: f32, y: f32, px: f32, aspect: f32, h: f32, t: f32) -> vec3<f32> 
             sand = mix(sand, water, (1.0 - near) * 0.5);
             water = mix(water, sand, onbed);
         }
+        let sand_d = mix(bg * 0.9, warm, 0.22);
+        water = seabed_props(u, y, px, aspect, h, t, water, sand_d, sunlight,
+                             mix(sand_d * 0.55, ink, 0.3), 1.0, true);
         col = mix(col, water, inw);
     }
     // The crest: a bright line of sunlight with glitter riding it.
@@ -549,6 +769,9 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
             sand = mix(sand, water, (1.0 - near) * 0.5);
             water = mix(water, sand, onbed);
         }
+        let silh_n = bg * 0.7 + lc * 0.07;
+        water = seabed_props(u, y, px, aspect, h, t, water, bg * 0.36 + air * 0.05, lc, silh_n,
+                             lit, false);
 
         col = mix(col, water, inw);
     }

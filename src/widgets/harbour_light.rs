@@ -36,6 +36,21 @@ pub(crate) const MAX_STARS: usize = 64;
 pub(crate) const MAX_GLOWS: usize = 48;
 /// Bubble slots (the anchor's stream and the kelp seeps).
 pub(crate) const MAX_BUBBLES: usize = 32;
+/// The seabed props' fixed slots (`props` in the uniform). Positions are x
+/// across (0..1); sizes and heights in panel heights.
+/// - `PROP_ROCKS..+3`: rock mounds (x, half width, height, seed)
+/// - `PROP_STARFISH`: (x, arm, rotation, 0)
+/// - `PROP_TREASURE`: (x, size, tilt radians, kind: 0 shield, 1 chest)
+/// - `PROP_KELP..+KELP_SLOTS`: fronds (root x, height, tip reach, 1 = present)
+/// - `PROP_ANCHOR`: the trawled anchor's shadow (x, half width, 0, strength)
+pub(crate) const PROP_ROCKS: usize = 0;
+pub(crate) const PROP_STARFISH: usize = 3;
+pub(crate) const PROP_TREASURE: usize = 4;
+pub(crate) const PROP_KELP: usize = 5;
+pub(crate) const KELP_SLOTS: usize = 8;
+pub(crate) const PROP_ANCHOR: usize = PROP_KELP + KELP_SLOTS;
+pub(crate) const MAX_PROPS: usize = 16;
+const _: () = assert!(PROP_ANCHOR < MAX_PROPS);
 
 /// What the scene hands the shader each frame.
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +83,8 @@ pub(crate) struct SeaLight {
     pub music: HarbourMusic,
     /// The day scene (light themes) instead of the night.
     pub day: bool,
+    /// The seabed props, in the `PROP_*` slots.
+    pub props: [[f32; 4]; MAX_PROPS],
 }
 
 /// How the night scene follows the music: the aurora's rays reach with a
@@ -201,6 +218,8 @@ struct SceneUniform {
     spectrum: [[f32; 4]; SCENE_BANDS / 4],
     /// 1 = the day scene, unused ×3.
     mode: [f32; 4],
+    /// The logo's shield colour (the sunken shield's paint).
+    shield: [f32; 4],
     bg: [f32; 4],
     text: [f32; 4],
     highlight: [f32; 4],
@@ -211,6 +230,7 @@ struct SceneUniform {
     stars: [[f32; 4]; MAX_STARS],
     glows: [[f32; 4]; MAX_GLOWS],
     bubbles: [[f32; 4]; MAX_BUBBLES],
+    props: [[f32; 4]; MAX_PROPS],
 }
 
 // SAFETY: `repr(C)`, every field an `f32` array, no padding (all 16-byte
@@ -220,7 +240,15 @@ unsafe impl bytemuck::Zeroable for SceneUniform {}
 
 const _: () = assert!(
     std::mem::size_of::<SceneUniform>()
-        == 16 * (10 + SCENE_BANDS / 4 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
+        == 16
+            * (11
+                + SCENE_BANDS / 4
+                + 6
+                + 2 * LINE_VEC4S
+                + MAX_STARS
+                + MAX_GLOWS
+                + MAX_BUBBLES
+                + MAX_PROPS)
 );
 
 const WGSL: &str = include_str!("harbour_light.wgsl");
@@ -320,6 +348,10 @@ impl<Message> shader::Program<Message> for LightProgram {
                     std::array::from_fn(|j| self.light.music.reach[4 * i + j])
                 }),
                 mode: [if self.light.day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+                shield: {
+                    let c = crate::theme::logo_shields();
+                    [c.r, c.g, c.b, 1.0]
+                },
                 bg: rgba(p.bg),
                 text: rgba(p.text),
                 highlight: rgba(p.highlight),
@@ -330,6 +362,7 @@ impl<Message> shader::Program<Message> for LightProgram {
                 stars: self.light.stars,
                 glows: self.light.glows,
                 bubbles: self.light.bubbles,
+                props: self.light.props,
             },
         }
     }
@@ -504,6 +537,7 @@ mod tests {
                 "music",
                 "spectrum",
                 "mode",
+                "shield",
                 "bg",
                 "text",
                 "highlight",
@@ -513,7 +547,8 @@ mod tests {
                 "back",
                 "stars",
                 "glows",
-                "bubbles"
+                "bubbles",
+                "props"
             ],
             "WGSL `Scene` fields drifted from `SceneUniform`"
         );

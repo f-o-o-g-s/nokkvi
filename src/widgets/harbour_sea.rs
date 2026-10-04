@@ -557,16 +557,6 @@ const SCHOOL_MARGIN_PX: f32 = 26.0;
 const SCHOOL_RIM_ALPHA: f32 = 0.30;
 const SCHOOL_SEED: u32 = 0x0005_C001;
 
-/// Kelp — beds of fronds along the floor, swaying on slow integer-rate
-/// sines (wrap-safe): clusters on both flanks plus a couple of shorter
-/// loners toward the middle, each with its own height so the beds read
-/// as growth, not a fence. Ink by day, a dim seafoam by night (dark ink
-/// on the night bed would vanish — the same lesson as the school's
-/// rim). The anchor drags PAST the mid fronds — it draws on the layer
-/// above, which reads as the tackle brushing through the weed.
-// TUNE: SWAY_PX = tip travel; alphas per mode; roots/heights in
-// `kelp_params`.
-const KELP_ALPHA_DAY: f32 = 0.40;
 const KELP_SWAY_PX: f32 = 7.0;
 const KELP_SEED: u32 = 0xCE1F;
 
@@ -578,7 +568,6 @@ const KELP_SEED: u32 = 0xCE1F;
 // TUNE: counts/alphas; reseed BED_SEED to re-deal the arrangement.
 const ROCK_COUNT: usize = 3;
 const BED_INK_ALPHA: f32 = 0.50;
-const BED_RIM_ALPHA: f32 = 0.14;
 const STARFISH_ARM_PX: f32 = 5.0;
 const BED_SEED: u32 = 0x0BED;
 
@@ -1122,28 +1111,6 @@ fn bed_dressing() -> BedDressing {
     }
 }
 
-/// Fill a resting starfish: a fat five-arm star polygon (alternating
-/// outer/inner vertices, inner at 0.55 of the arm) lying flat on the
-/// bed. Chunky arms keep it unmistakably a CREATURE — the sky's stars
-/// are dots, so the silhouettes never collide.
-fn fill_starfish(frame: &mut canvas::Frame, center: Point, arm: f32, rot: f32, color: Color) {
-    use std::f32::consts::TAU;
-    let star = canvas::Path::new(|b| {
-        for i in 0..10 {
-            let ang = rot + i as f32 * (TAU / 10.0) - TAU / 4.0;
-            let rad = if i % 2 == 0 { arm } else { 0.55 * arm };
-            let p = Point::new(center.x + ang.cos() * rad, center.y + ang.sin() * rad);
-            if i == 0 {
-                b.move_to(p);
-            } else {
-                b.line_to(p);
-            }
-        }
-        b.close();
-    });
-    frame.fill(&star, color);
-}
-
 /// Fill the fish silhouette — teardrop body + notched tail — at the
 /// current frame origin, `l` px long, nose toward +x when `dir` is
 /// `1.0` (pass `-1.0` to mirror). Shared by the rare leaping fish and
@@ -1466,6 +1433,86 @@ fn kelp_beads(w: f32, h: f32, phase: f32) -> Vec<(Point, f32)> {
         .collect()
 }
 
+/// What sits on the seabed: a sunken shield or a treasure chest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SunkenTreasure {
+    Shield,
+    #[expect(
+        dead_code,
+        reason = "the chest is the shield's alternative, kept until the owner picks one"
+    )]
+    Chest,
+}
+
+impl SunkenTreasure {
+    fn shader_kind(self) -> f32 {
+        match self {
+            Self::Shield => 0.0,
+            Self::Chest => 1.0,
+        }
+    }
+}
+
+// TUNE: which treasure the trawl drags past.
+pub(crate) const SUNKEN_TREASURE: SunkenTreasure = SunkenTreasure::Shield;
+
+/// The seabed props for the shader's `PROP_*` slots this frame: the rock
+/// mounds, the starfish and the sunken treasure (fixed), the kelp (swaying,
+/// through the same `kelp_spine` reach the beads ride) and the trawled
+/// anchor's shadow. The shader lights, shades and half-buries them in the
+/// same sand and light as the floor.
+pub(crate) fn floor_props(
+    w: f32,
+    h: f32,
+    phase: f32,
+    anchor_x: f32,
+) -> [[f32; 4]; crate::widgets::harbour_light::MAX_PROPS] {
+    use crate::widgets::harbour_light::{
+        KELP_SLOTS, MAX_PROPS, PROP_ANCHOR, PROP_KELP, PROP_ROCKS, PROP_STARFISH, PROP_TREASURE,
+    };
+    let gs = scene_glyph_scale(h);
+    let mut props = [[0.0; 4]; MAX_PROPS];
+    let dressing = bed_dressing();
+    for (i, rock) in dressing.rocks.iter().take(3).enumerate() {
+        props[PROP_ROCKS + i] = [
+            rock.x,
+            14.0 * rock.w * gs / h,
+            9.0 * rock.ht * gs / h,
+            i as f32,
+        ];
+    }
+    props[PROP_STARFISH] = [
+        dressing.star_x,
+        1.5 * STARFISH_ARM_PX * dressing.star_size * gs / h,
+        dressing.star_rot,
+        0.0,
+    ];
+    props[PROP_TREASURE] = [
+        CRATE_X,
+        1.25 * CRATE_SIZE_PX * gs / h,
+        CRATE_TILT_DEG.to_radians(),
+        SUNKEN_TREASURE.shader_kind(),
+    ];
+    for (slot, kelp) in props[PROP_KELP..PROP_KELP + KELP_SLOTS]
+        .iter_mut()
+        .zip(kelp_params())
+    {
+        let spine = kelp_spine(&kelp, w, h, phase);
+        let root = spine(0.0);
+        let tip = spine(1.0);
+        *slot = [kelp.x, kelp.height, (tip.x - root.x) / h, 1.0];
+    }
+    let fade = (anchor_x.min(1.0 - anchor_x) / BOAT_EDGE_FADE).clamp(0.0, 1.0);
+    let (_, boat_h) = crate::widgets::boat::boat_pixel_size(w.min(h));
+    props[PROP_ANCHOR] = [
+        anchor_x,
+        0.45 * boat_h * crate::widgets::boat::ANCHOR_HEIGHT_MULTIPLE_OF_BOAT / h,
+        0.0,
+        fade,
+    ];
+    props
+}
+
 /// A star as the night shader draws it: centre and radius in pixels,
 /// peak alpha (twinkle and the black hole's swallow already applied), and
 /// whether it is one of the bright sparkles (drawn with cross spikes).
@@ -1680,6 +1727,7 @@ pub(crate) fn sea_light(
         bubble_count,
         music: *music,
         day: !scene_is_lit(),
+        props: floor_props(w, h, phase, anchor_x),
     }
 }
 
@@ -2186,201 +2234,11 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             });
         }
 
-        // ── The seabed — rocks, starfish, kelp beds, bubbles ────────────
-        // The trawl's floor, alive without a metaphor to decode: static
-        // furniture (rock mounds, one resting starfish) grounds the
-        // bottom, kelp beds sway over it, and the dragged anchor aerates
-        // the bed with a stream of rising bubbles. All cold (starlight /
-        // seafoam night, ink day); the lantern keeps the one warm note.
-        //
-        // Bed dressing first — it lies UNDER the kelp roots.
-        let dressing = bed_dressing();
-        for rock in &dressing.rocks {
-            let rw = 9.0 * rock.w * glyph_scale;
-            let rh = 4.5 * rock.ht * glyph_scale;
-            let base = Point::new(rock.x * w, 0.982 * h);
-            let dome = canvas::Path::new(|b| {
-                b.move_to(Point::new(base.x - rw, base.y));
-                b.quadratic_curve_to(
-                    Point::new(base.x, base.y - 2.0 * rh),
-                    Point::new(base.x + rw, base.y),
-                );
-                b.close();
-            });
-            frame.fill(&dome, bed_ink(BED_INK_ALPHA));
-            if !day {
-                // Moonlit top: ink mounds vanish on the night bed, so a
-                // faint starlight rim carries the silhouette (the
-                // school's catch-rim lesson).
-                let rim = canvas::Path::new(|b| {
-                    b.move_to(Point::new(base.x - 0.8 * rw, base.y - 0.35 * rh));
-                    b.quadratic_curve_to(
-                        Point::new(base.x, base.y - 2.0 * rh),
-                        Point::new(base.x + 0.8 * rw, base.y - 0.35 * rh),
-                    );
-                });
-                frame.stroke(
-                    &rim,
-                    canvas::Stroke::default()
-                        .with_color(rim_light(BED_RIM_ALPHA))
-                        .with_width(1.0)
-                        .with_line_cap(canvas::LineCap::Round),
-                );
-            }
-        }
-        let star_center = Point::new(dressing.star_x * w, 0.972 * h);
-        let star_arm = STARFISH_ARM_PX * dressing.star_size * glyph_scale;
-        fill_starfish(
-            &mut frame,
-            star_center,
-            star_arm,
-            dressing.star_rot,
-            bed_ink(BED_INK_ALPHA),
-        );
-        if !day {
-            // The same moonlit treatment: a dim seafoam overprint lifts
-            // the creature off the night bed without lighting it up.
-            fill_starfish(
-                &mut frame,
-                star_center,
-                star_arm,
-                dressing.star_rot,
-                Color {
-                    a: 0.6 * NIGHT_RIM_ALPHA,
-                    ..night.rim
-                },
-            );
-        }
-
-        // The sunken crate — grounds like a rock (kelp sways in front of
-        // it, the anchor sprite drags over it on the layer above), so it
-        // draws with the rest of the bed dressing.
-        {
-            let s = CRATE_SIZE_PX * glyph_scale;
-            let crate_ink = bed_ink(BED_INK_ALPHA);
-            frame.with_save(|frame| {
-                // Center sits low enough that the tilted bottom corners
-                // dip a few px below the base line — the half-buried
-                // read, same trick as the rock bases.
-                frame.translate(iced::Vector::new(CRATE_X * w, 0.988 * h - 0.42 * s));
-                frame.rotate(CRATE_TILT_DEG.to_radians());
-                let face = canvas::Path::new(|b| {
-                    b.move_to(Point::new(-0.5 * s, -0.5 * s));
-                    b.line_to(Point::new(0.5 * s, -0.5 * s));
-                    b.line_to(Point::new(0.5 * s, 0.5 * s));
-                    b.line_to(Point::new(-0.5 * s, 0.5 * s));
-                    b.close();
-                });
-                frame.fill(&face, crate_ink);
-                // Frame stroke at the SAME alpha as the fill — the bed
-                // ink ceiling; the outline still reads via double
-                // coverage.
-                frame.stroke(
-                    &face,
-                    canvas::Stroke::default()
-                        .with_color(crate_ink)
-                        .with_width(1.2),
-                );
-                // Slats: two horizontal boards across the face.
-                let slats = canvas::Path::new(|b| {
-                    b.move_to(Point::new(-0.5 * s, -s / 6.0));
-                    b.line_to(Point::new(0.5 * s, -s / 6.0));
-                    b.move_to(Point::new(-0.5 * s, s / 6.0));
-                    b.line_to(Point::new(0.5 * s, s / 6.0));
-                });
-                frame.stroke(
-                    &slats,
-                    canvas::Stroke::default()
-                        .with_color(if day {
-                            Color {
-                                a: CRATE_SLAT_ALPHA * viz.border_opacity,
-                                ..crest
-                            }
-                        } else {
-                            Color {
-                                a: 0.35 * NIGHT_RIM_ALPHA,
-                                ..night.rim
-                            }
-                        })
-                        .with_width(1.0),
-                );
-                if !day {
-                    // Moonlit rim on the up-facing edges: the STRAIGHT
-                    // lit lines are what say crate-not-rock on the dark
-                    // bed (the rocks' rim lesson, squared off).
-                    let rim = canvas::Path::new(|b| {
-                        b.move_to(Point::new(-0.5 * s, -0.5 * s));
-                        b.line_to(Point::new(0.5 * s, -0.5 * s));
-                        b.move_to(Point::new(-0.5 * s, -0.5 * s));
-                        b.line_to(Point::new(-0.5 * s, -0.15 * s));
-                    });
-                    frame.stroke(
-                        &rim,
-                        canvas::Stroke::default()
-                            .with_color(rim_light(CRATE_RIM_ALPHA))
-                            .with_width(1.0)
-                            .with_line_cap(canvas::LineCap::Round),
-                    );
-                }
-            });
-        }
-
-        let kelp_color = Color {
-            a: KELP_ALPHA_DAY * viz.border_opacity,
-            ..crest
-        };
-        for kelp in kelp_params() {
-            let spine = kelp_spine(&kelp, w, h, phase);
-            // Three tapering width tiers over the frond's thirds. By night
-            // the frond is a dark silhouette with the aurora catching its
-            // left edge; its glowing beads are the shader's (`kelp_beads`).
-            for (tier, width) in [2.6_f32, 1.8, 1.0].into_iter().enumerate() {
-                let f0 = tier as f32 / 3.0;
-                let f1 = (tier as f32 + 1.0) / 3.0;
-                let seg = canvas::Path::new(|b| {
-                    b.move_to(spine(f0));
-                    b.line_to(spine((f0 + f1) * 0.5));
-                    b.line_to(spine(f1));
-                });
-                let body = if day {
-                    kelp_color
-                } else {
-                    Color {
-                        a: NIGHT_SILHOUETTE_ALPHA,
-                        ..night.silhouette
-                    }
-                };
-                frame.stroke(
-                    &seg,
-                    canvas::Stroke::default()
-                        .with_color(body)
-                        .with_width(width * glyph_scale)
-                        .with_line_cap(canvas::LineCap::Round),
-                );
-                if !day {
-                    let off = -0.4 * width * glyph_scale;
-                    let edge = canvas::Path::new(|b| {
-                        let at = |f: f32| {
-                            let p = spine(f);
-                            Point::new(p.x + off, p.y)
-                        };
-                        b.move_to(at(f0));
-                        b.line_to(at((f0 + f1) * 0.5));
-                        b.line_to(at(f1));
-                    });
-                    frame.stroke(
-                        &edge,
-                        canvas::Stroke::default()
-                            .with_color(Color {
-                                a: NIGHT_RIM_ALPHA * 0.8,
-                                ..night.rim
-                            })
-                            .with_width(0.7)
-                            .with_line_cap(canvas::LineCap::Round),
-                    );
-                }
-            }
-        }
+        // ── The seabed ─────────────────────────────────────────────────
+        // The rocks, starfish, sunken treasure and kelp are the shader's
+        // (`floor_props` → `harbour_light`), drawn in the floor's own sand
+        // and light with contact shadows; their bubbles and the kelp's
+        // glowing beads ride the shader's lists too.
 
         // The Deep Passage — Jörmungandr's rare glide through the deep
         // lane (y 0.78–0.855h: below the school band, above the bubble
