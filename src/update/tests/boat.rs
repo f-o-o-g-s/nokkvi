@@ -604,6 +604,35 @@ mod harbour_scene_tests {
     }
 
     #[test]
+    fn harbour_boat_is_lit_at_night_and_plain_by_day() {
+        // The night scene lights the boat (the shader's aurora behind it);
+        // the day scene keeps the plain themed sprite. The harbour tick
+        // sets the paint before warming the sprite cache.
+        use crate::embedded_svg::BoatPaint;
+
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let was_light = crate::theme::is_light_mode();
+        let mut app = app_on_harbour();
+
+        crate::theme::set_light_mode(false);
+        let _ = app.update(Message::FrameTick(Instant::now()));
+        let night = app.harbour_scene.boat.paint;
+
+        crate::theme::set_light_mode(true);
+        let _ = app.update(Message::FrameTick(Instant::now()));
+        let day = app.harbour_scene.boat.paint;
+
+        crate::theme::set_light_mode(was_light);
+        assert_eq!(night, BoatPaint::Lit, "the night scene paints the boat lit");
+        assert_eq!(day, BoatPaint::Plain, "the day scene keeps the plain boat");
+        assert_eq!(
+            app.boat.paint,
+            BoatPaint::Plain,
+            "the Lines boat never takes the harbour's paint"
+        );
+    }
+
+    #[test]
     fn harbour_scene_independent_of_lines_visualizer() {
         // The scene must tick regardless of visualization mode — the Lines
         // boat's early-outs must not gate the harbour boat.

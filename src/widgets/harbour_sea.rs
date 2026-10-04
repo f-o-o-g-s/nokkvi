@@ -1515,6 +1515,45 @@ fn back_swell_height(x: f64, phase: f32) -> f64 {
     .clamp(0.0, 1.0)
 }
 
+/// Whether the scene draws with the night shader light (`harbour_light`)
+/// and the lit boat: night, i.e. a dark theme. The day scene is the
+/// canvas's own sunlit look. The one predicate both the view and the
+/// harbour tick (boat paint) read.
+pub(crate) fn scene_is_lit() -> bool {
+    !crate::theme::is_light_mode()
+}
+
+/// The night shader's inputs for this frame: both waterlines resampled
+/// through the SAME functions the canvas draws with ([`sample_line_height`]
+/// over the physics' bars, [`back_swell_height`]), so the lit surface and the
+/// hull agree; a scene clock that runs on across phase wraps; and the boat
+/// for the glow behind it.
+pub(crate) fn sea_light(
+    bars: &[f64],
+    phase: f32,
+    cycle: u32,
+    boat: &BoatState,
+) -> crate::widgets::harbour_light::SeaLight {
+    use crate::widgets::harbour_light::{LINE_SAMPLES, SeaLight};
+    let x_at = |i: usize| i as f32 / (LINE_SAMPLES - 1) as f32;
+    SeaLight {
+        front: std::array::from_fn(|i| sample_line_height(bars, x_at(i), false)),
+        back: std::array::from_fn(|i| back_swell_height(x_at(i) as f64, phase) as f32),
+        time: scene_clock_secs(phase, cycle),
+        boat: Some((boat.x_ratio, boat.y_ratio)),
+    }
+}
+
+/// Seconds of scene time at `(phase, cycle)`: continuous across the phase
+/// wrap, so the shader's slow drifts never jump. The cycle count folds every
+/// `SCENE_CLOCK_CYCLES` (~23 h at 20 s cycles) to keep f32 sin arguments
+/// precise; the one seam per fold is the only discontinuity.
+fn scene_clock_secs(phase: f32, cycle: u32) -> f32 {
+    ((cycle % SCENE_CLOCK_CYCLES) as f32 + phase) / SEA_DRIFT_HZ
+}
+
+const SCENE_CLOCK_CYCLES: u32 = 4096;
+
 /// The Harbour Trawl panel: the animated sea with the longship trawling
 /// across it, docked above the banded TRAWL pill.
 ///
@@ -1558,15 +1597,29 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
     // (all captures are shared refs / scalars) so both mode arms — and the
     // square arm's NESTED responsive — can each take their own copy.
     let scene_layers = move |w: f32, h: f32| -> Element<'a, M> {
-        // Sky + sea backdrop on the shared artwork background so the panel
-        // reads as a sibling of every other artwork column state.
-        let backdrop = container(iced::widget::Space::new())
-            .width(Length::Fixed(w))
-            .height(Length::Fixed(h))
-            .style(|_theme| container::Style {
-                background: Some(crate::widgets::base_slot_list_layout::artwork_outer_bg().into()),
-                ..Default::default()
-            });
+        // Night: the per-pixel light (sky, aurora, water, seabed) under the
+        // canvas furniture. Day: the flat backdrop on the shared artwork
+        // background, so the panel reads as a sibling of every other
+        // artwork column state, with the canvas drawing the sunlit sea.
+        let lit = scene_is_lit();
+        let backdrop: Element<'a, M> = if lit {
+            crate::widgets::harbour_light::light_backdrop(
+                sea_light(sea_bars, sea_phase, sea_cycle, boat),
+                w,
+                h,
+            )
+        } else {
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(h))
+                .style(|_theme| container::Style {
+                    background: Some(
+                        crate::widgets::base_slot_list_layout::artwork_outer_bg().into(),
+                    ),
+                    ..Default::default()
+                })
+                .into()
+        };
 
         let sea = canvas::Canvas::new(SeaCanvas {
             bars: sea_bars,
@@ -1574,6 +1627,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
             cycle: sea_cycle,
             boat_x: boat.x_ratio,
             anchor_x,
+            lit,
         })
         .width(Length::Fixed(w))
         .height(Length::Fixed(h));
@@ -1680,6 +1734,10 @@ struct SeaCanvas<'a> {
     /// roams the wrap margin like `boat_x`, so the bubble pass
     /// edge-fades on it.
     anchor_x: f32,
+    /// The night shader (`harbour_light`) draws the scene's light beneath
+    /// this canvas: skip the passes it replaces (airglow, both water
+    /// bodies, the bed vignette, aurora, moonbeams, the crest lines).
+    lit: bool,
 }
 
 impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
@@ -1757,32 +1815,34 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // motivates every highlight in the scene (light lands at the
         // surface). Fading to alpha-0 at BOTH ends leaves no seam anywhere.
         let glow_peak = 1.0 - SEA_DC as f32;
-        frame.fill_rectangle(
-            Point::ORIGIN,
-            size,
-            canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, h))
-                .add_stop(
-                    0.0,
-                    Color {
-                        a: 0.0,
-                        ..starlight
-                    },
-                )
-                .add_stop(
-                    glow_peak,
-                    Color {
-                        a: SKY_GLOW_ALPHA,
-                        ..starlight
-                    },
-                )
-                .add_stop(
-                    1.0,
-                    Color {
-                        a: 0.0,
-                        ..starlight
-                    },
-                ),
-        );
+        if !self.lit {
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                size,
+                canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, h))
+                    .add_stop(
+                        0.0,
+                        Color {
+                            a: 0.0,
+                            ..starlight
+                        },
+                    )
+                    .add_stop(
+                        glow_peak,
+                        Color {
+                            a: SKY_GLOW_ALPHA,
+                            ..starlight
+                        },
+                    )
+                    .add_stop(
+                        1.0,
+                        Color {
+                            a: 0.0,
+                            ..starlight
+                        },
+                    ),
+            );
+        }
 
         // (2) Back swell — atmospheric perspective: its crest dissolves
         // into the sky like distance haze while its body keeps its weight,
@@ -1794,31 +1854,33 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(water);
         let back_top = (1.0 - (SEA_DC + BACK_RAISE + BACK_AMP) as f32) * h;
-        frame.fill(
-            &fill_under(&back_y),
-            canvas::gradient::Linear::new(Point::new(0.0, back_top), Point::new(0.0, h))
-                .add_stop(
-                    0.0,
-                    Color {
-                        a: SEA_BACK_TOP_ALPHA,
-                        ..water_far
-                    },
-                )
-                .add_stop(
-                    SEA_BACK_FADE_STOP,
-                    Color {
-                        a: SEA_BACK_BODY_ALPHA,
-                        ..water
-                    },
-                )
-                .add_stop(
-                    1.0,
-                    Color {
-                        a: SEA_BACK_BODY_ALPHA,
-                        ..water
-                    },
-                ),
-        );
+        if !self.lit {
+            frame.fill(
+                &fill_under(&back_y),
+                canvas::gradient::Linear::new(Point::new(0.0, back_top), Point::new(0.0, h))
+                    .add_stop(
+                        0.0,
+                        Color {
+                            a: SEA_BACK_TOP_ALPHA,
+                            ..water_far
+                        },
+                    )
+                    .add_stop(
+                        SEA_BACK_FADE_STOP,
+                        Color {
+                            a: SEA_BACK_BODY_ALPHA,
+                            ..water
+                        },
+                    )
+                    .add_stop(
+                        1.0,
+                        Color {
+                            a: SEA_BACK_BODY_ALPHA,
+                            ..water
+                        },
+                    ),
+            );
+        }
 
         // (3) Front water walks the theme ramp: brightest at the lit
         // surface (a brighter gradient slot), sinking through the sea-teal
@@ -1833,31 +1895,33 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(water);
         let surface_y = (1.0 - (SEA_DC + SWELL_AMP + RIPPLE_AMP) as f32) * h;
-        frame.fill(
-            &fill_under(&front_y),
-            canvas::gradient::Linear::new(Point::new(0.0, surface_y), Point::new(0.0, h))
-                .add_stop(
-                    0.0,
-                    Color {
-                        a: SEA_LIT_ALPHA,
-                        ..water_lit
-                    },
-                )
-                .add_stop(
-                    0.5,
-                    Color {
-                        a: SEA_MID_ALPHA,
-                        ..water
-                    },
-                )
-                .add_stop(
-                    1.0,
-                    Color {
-                        a: SEA_DEEP_ALPHA,
-                        ..water
-                    },
-                ),
-        );
+        if !self.lit {
+            frame.fill(
+                &fill_under(&front_y),
+                canvas::gradient::Linear::new(Point::new(0.0, surface_y), Point::new(0.0, h))
+                    .add_stop(
+                        0.0,
+                        Color {
+                            a: SEA_LIT_ALPHA,
+                            ..water_lit
+                        },
+                    )
+                    .add_stop(
+                        0.5,
+                        Color {
+                            a: SEA_MID_ALPHA,
+                            ..water
+                        },
+                    )
+                    .add_stop(
+                        1.0,
+                        Color {
+                            a: SEA_DEEP_ALPHA,
+                            ..water
+                        },
+                    ),
+            );
+        }
 
         // (4) Seabed ink vignette: the bottom of the water deepens toward
         // ink, grounding the trawled anchor and easing the old razor cut
@@ -1865,19 +1929,21 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // trough so the darkening never rides the surface; dialed by
         // border_opacity, the theme's light-mode legibility knob.
         let bed_top = SEA_BED_TOP * h;
-        frame.fill_rectangle(
-            Point::new(0.0, bed_top),
-            Size::new(w, h - bed_top),
-            canvas::gradient::Linear::new(Point::new(0.0, bed_top), Point::new(0.0, h))
-                .add_stop(0.0, Color { a: 0.0, ..crest })
-                .add_stop(
-                    1.0,
-                    Color {
-                        a: SEA_BED_ALPHA * viz.border_opacity,
-                        ..crest
-                    },
-                ),
-        );
+        if !self.lit {
+            frame.fill_rectangle(
+                Point::new(0.0, bed_top),
+                Size::new(w, h - bed_top),
+                canvas::gradient::Linear::new(Point::new(0.0, bed_top), Point::new(0.0, h))
+                    .add_stop(0.0, Color { a: 0.0, ..crest })
+                    .add_stop(
+                        1.0,
+                        Color {
+                            a: SEA_BED_ALPHA * viz.border_opacity,
+                            ..crest
+                        },
+                    ),
+            );
+        }
 
         // (5) Aurora — two seafoam curtains undulating across the upper
         // sky (the default theme is named Svalbard; this is its light).
@@ -1952,7 +2018,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         //
         // Aurora is NIGHT furniture — the day scene (light mode) skips it.
         let day = crate::theme::is_light_mode();
-        if !day {
+        if !day && !self.lit {
             aurora_ribbon(0.10, 0.012, 0.12, 1.4, 1.0, 0.0, aurora_a, AURORA_ALPHA_A);
             aurora_ribbon(0.17, 0.010, 0.09, 2.1, 2.0, 2.4, aurora_b, AURORA_ALPHA_B);
 
@@ -2994,7 +3060,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // long polyline isn't worth the buffer). Night-only: a wide gold
         // halo reads muddy on a light sea, so day skips it rather than
         // recoloring.
-        if !day {
+        if !day && !self.lit {
             frame.stroke(
                 &crest_path,
                 canvas::Stroke::default()
@@ -3007,16 +3073,18 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             );
         }
         // Ink.
-        frame.stroke(
-            &crest_path,
-            canvas::Stroke::default()
-                .with_color(Color {
-                    a: CREST_INK_ALPHA * viz.border_opacity,
-                    ..crest
-                })
-                .with_width(2.0)
-                .with_line_cap(canvas::LineCap::Round),
-        );
+        if !self.lit {
+            frame.stroke(
+                &crest_path,
+                canvas::Stroke::default()
+                    .with_color(Color {
+                        a: CREST_INK_ALPHA * viz.border_opacity,
+                        ..crest
+                    })
+                    .with_width(2.0)
+                    .with_line_cap(canvas::LineCap::Round),
+            );
+        }
 
         // Sun glitter (day only): sparse gold dashes riding the front
         // waterline, each flashing on its own integer rate through a ^4
@@ -3086,22 +3154,24 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                         ..crest_light
                     },
                 );
-        frame.stroke(
-            &crest_path,
-            canvas::Stroke {
-                style: canvas::Style::Gradient(canvas::Gradient::Linear(catch)),
-                width: 1.0,
-                line_cap: canvas::LineCap::Round,
-                ..canvas::Stroke::default()
-            },
-        );
+        if !self.lit {
+            frame.stroke(
+                &crest_path,
+                canvas::Stroke {
+                    style: canvas::Style::Gradient(canvas::Gradient::Linear(catch)),
+                    width: 1.0,
+                    line_cap: canvas::LineCap::Round,
+                    ..canvas::Stroke::default()
+                },
+            );
+        }
 
         // Crest shimmer sweep: for 30% of each cycle a band of light
         // glides along the crest (entering and exiting off-panel, so no
         // edge pop), brightest where the wave actually peaks — the height
         // gate derives from the same field the boat rides.
         let sweep_t = (phase + CREST_SWEEP_OFF).rem_euclid(1.0);
-        if sweep_t < CREST_SWEEP_FRACTION {
+        if sweep_t < CREST_SWEEP_FRACTION && !self.lit {
             let c = -CREST_SWEEP_HALF_WIDTH
                 + (sweep_t / CREST_SWEEP_FRACTION) * (1.0 + 2.0 * CREST_SWEEP_HALF_WIDTH);
             let gate = ((sample_line_height(bars, c.clamp(0.0, 1.0), false) - SEA_DC as f32)

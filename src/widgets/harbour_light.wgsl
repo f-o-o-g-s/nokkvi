@@ -1,0 +1,355 @@
+// Harbour Trawl night light: the sky, the aurora, the water and the seabed
+// of the Trawl scene, drawn per pixel under the canvas furniture (stars,
+// kelp, fish, crate, anchor, boat). A port of the `nokkvi - aurora` MilkDrop
+// preset's curtain, without its feedback buffer: every term is a function of
+// the pixel and the scene clock, so the panel needs no history and a resize
+// or a theme change is clean on the next frame.
+//
+// Coordinates: `uv` runs 0..1 across the panel with y DOWN (the pass viewport
+// is the widget bounds); the scene works in `Y` = height above the panel
+// bottom as a fraction of the panel height (the same convention as
+// `harbour_sea::sea_bars`) and `X` = `uv.x` scaled by the aspect, so a unit
+// in X and Y is one panel height.
+//
+// The waterlines come from the CPU (`front` / `back`, 128 samples each, the
+// same sampler the boat physics and the canvas use), so the hull rides
+// exactly the surface this shader lights.
+
+struct Scene {
+    // panel width px, panel height px, scene clock s, 1 = decode to sRGB-linear
+    frame: vec4<f32>,
+    // boat x (0..1 of width), boat centre height (Y), boat height (Y units), shown
+    boat: vec4<f32>,
+    bg: vec4<f32>,
+    text: vec4<f32>,
+    highlight: vec4<f32>,
+    warm: vec4<f32>,
+    ramp: array<vec4<f32>, 6>,
+    // waterline heights (Y), 128 samples across the width, 4 per vec4
+    front: array<vec4<f32>, 32>,
+    back: array<vec4<f32>, 32>,
+};
+
+@group(0) @binding(0) var<uniform> scene: Scene;
+
+struct VOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> VOut {
+    // One triangle covering the viewport: uv (0,0) top-left .. (2,2).
+    let uv = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    var o: VOut;
+    o.pos = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
+    o.uv = uv;
+    return o;
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+// Hermite step that also runs downhill when `a > b`.
+fn ss(a: f32, b: f32, x: f32) -> f32 {
+    let t = clamp((x - a) / (b - a), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn pcg(v: u32) -> u32 {
+    let s = v * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+// Uniform 0..1 from an integer lattice point.
+fn hash2(c: vec2<f32>) -> f32 {
+    let x = bitcast<u32>(i32(c.x));
+    let y = bitcast<u32>(i32(c.y));
+    return f32(pcg(x ^ pcg(y + 0x9e3779b9u))) * (1.0 / 4294967295.0);
+}
+
+// Smooth value noise, one lattice cell per unit, quintic fade (no grid).
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let a = hash2(i);
+    let b = hash2(i + vec2<f32>(1.0, 0.0));
+    let c = hash2(i + vec2<f32>(0.0, 1.0));
+    let d = hash2(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The theme's visualizer gradient, dark (0) to light (1).
+fn ramp(x: f32) -> vec3<f32> {
+    let s = clamp(x, 0.0, 1.0) * 5.0;
+    var c = mix(scene.ramp[0].rgb, scene.ramp[1].rgb, clamp(s, 0.0, 1.0));
+    c = mix(c, scene.ramp[2].rgb, clamp(s - 1.0, 0.0, 1.0));
+    c = mix(c, scene.ramp[3].rgb, clamp(s - 2.0, 0.0, 1.0));
+    c = mix(c, scene.ramp[4].rgb, clamp(s - 3.0, 0.0, 1.0));
+    c = mix(c, scene.ramp[5].rgb, clamp(s - 4.0, 0.0, 1.0));
+    return c;
+}
+
+fn front_sample(i: u32) -> f32 {
+    return scene.front[i / 4u][i % 4u];
+}
+
+fn back_sample(i: u32) -> f32 {
+    return scene.back[i / 4u][i % 4u];
+}
+
+// Waterline height at `u` (0..1 across), linear between the 128 samples.
+fn front_at(u: f32) -> f32 {
+    let f = clamp(u, 0.0, 1.0) * 127.0;
+    let i0 = u32(floor(f));
+    let i1 = min(i0 + 1u, 127u);
+    return mix(front_sample(i0), front_sample(i1), fract(f));
+}
+
+fn back_at(u: f32) -> f32 {
+    let f = clamp(u, 0.0, 1.0) * 127.0;
+    let i0 = u32(floor(f));
+    let i1 = min(i0 + 1u, 127u);
+    return mix(back_sample(i0), back_sample(i1), fract(f));
+}
+
+// ── the aurora ──────────────────────────────────────────────────────────
+// A folded curtain: a wavy arc (three drifting sine folds) with rays
+// reaching up from it, brightest at the arc, in patches along it and where
+// a fold turns edge-on, streaked by three layers of vertically stretched
+// noise. A fainter, slower curtain hangs higher behind it. `q1` walks the
+// folds, `q2` drifts the curtain sideways.
+
+const AURORA_BASE: f32 = 0.67;
+const AURORA_BACK_BASE: f32 = 0.80;
+
+fn arc_base(px: f32, q1: f32, q2: f32) -> f32 {
+    let xx = px + q2;
+    return AURORA_BASE + 0.035 * sin(xx * 2.1 + q1 * 0.7) + 0.02 * sin(xx * 5.3 - q1 * 1.1)
+        + 0.01 * sin(xx * 11.0 + q1 * 1.9);
+}
+
+// x = the curtain's light at (u, y); y = a soft wide glow standing in for
+// the preset's feedback trail and blur.
+fn aurora(u: f32, px: f32, y: f32, q1: f32, q2: f32) -> vec2<f32> {
+    let xx = px + q2;
+    let base = arc_base(px, q1, q2);
+    let slope = 0.07 * cos(xx * 2.1 + q1 * 0.7) + 0.106 * cos(xx * 5.3 - q1 * 1.1)
+        + 0.11 * cos(xx * 11.0 + q1 * 1.9);
+    let dens = 0.45 + 2.2 * abs(slope);
+    let env = 0.25 + 0.75 * vnoise(vec2<f32>(u * 8.0 + q2 * 4.8, 7.36));
+    let above = y - base;
+    let r1 = vnoise(vec2<f32>(u * 96.0 + q2 * 11.2, y * 3.84 + q1 * 0.48));
+    let r1c = vnoise(vec2<f32>(u * 96.0 + q2 * 11.2, 16.0 + q1 * 0.32));
+    let r2 = vnoise(vec2<f32>(u * 256.0 - q2 * 19.2, y * 8.0 - q1 * 1.28));
+    let r3 = vnoise(vec2<f32>(u * 640.0 + q2 * 28.8, y * 1.92 + q1 * 0.64));
+    let len = 0.15 * (0.5 + 1.1 * r1c * r1c);
+    let body = exp(-max(above, 0.0) / len) * ss(-0.02, 0.004, above);
+    let edge = exp(-abs(above) / 0.014) * (0.6 + 0.4 * r2);
+    let rays = (0.3 + 0.7 * r1 * r1) * (0.6 + 0.4 * r2) * (0.7 + 0.3 * r3);
+    var cur = (body * rays + edge * 0.6) * dens * env * 0.68;
+
+    let xx2 = px * 0.8 - q2 * 0.5 + 3.0;
+    let base2 = AURORA_BACK_BASE + 0.025 * sin(xx2 * 1.7 + q1 * 0.4) + 0.012 * sin(xx2 * 4.1 - q1 * 0.6);
+    let above2 = y - base2;
+    let body2 = exp(-max(above2, 0.0) / 0.12) * ss(-0.07, 0.02, above2);
+    let env2 = 0.3 + 0.7 * vnoise(vec2<f32>(u * 12.8 - q2 * 3.2 + 16.0, 19.5));
+    cur += body2 * env2 * (0.4 + 0.6 * r1) * (0.6 + 0.4 * r3) * 0.3;
+
+    let soft = (exp(-max(above, 0.0) / (len * 2.5)) * ss(-0.08, 0.0, above)
+        + exp(-abs(above) / 0.05) * 0.5) * dens * env * 0.35;
+    return vec2<f32>(clamp(cur, 0.0, 1.0), clamp(soft, 0.0, 1.0));
+}
+
+// ── glowing plankton ────────────────────────────────────────────────────
+// Sparse motes riding a slow current, one per lattice cell at most, each
+// with a short fading tail behind it and its own slow blink. Drawn in the
+// current's frame (X minus the drift), so a mote is still there and its
+// tail runs straight back along -x. x = core + tail, y = a wide halo.
+fn plankton(px: f32, y: f32, t: f32, cell: f32, speed: f32, seed: f32, r: f32, tl: f32,
+            density: f32) -> vec2<f32> {
+    let q = vec2<f32>(px - t * speed, y);
+    let id = floor(q / cell);
+    var core = 0.0;
+    var halo = 0.0;
+    for (var j = -1; j <= 1; j++) {
+        for (var i = -1; i <= 1; i++) {
+            let c = id + vec2<f32>(f32(i), f32(j));
+            if (hash2(c + vec2<f32>(seed, seed * 1.7)) > density) {
+                continue;
+            }
+            let ox = hash2(c + vec2<f32>(seed + 11.0, 3.0));
+            let oy = hash2(c + vec2<f32>(7.0, seed + 13.0));
+            let ph = hash2(c + vec2<f32>(seed + 29.0, 31.0));
+            let wob = 0.1 * sin(t * (0.4 + 0.5 * ph) + ph * 6.283);
+            let pc = (c + vec2<f32>(ox, 0.1 + 0.8 * oy + wob)) * cell;
+            let dv = q - pc;
+            let along = clamp(-dv.x / tl, 0.0, 1.0);
+            let sd = length(vec2<f32>(dv.x + along * tl, dv.y));
+            let blink = pow(0.5 + 0.5 * sin(t * (0.7 + 1.3 * ph) + ph * 40.0), 3.0);
+            let b = blink * (0.5 + 0.5 * hash2(c + vec2<f32>(seed + 41.0, 43.0)));
+            let d2 = dot(dv, dv);
+            core += (exp(-d2 / (r * r)) + exp(-sd * sd / (r * r * 0.5)) * (1.0 - along) * (1.0 - along) * 0.45) * b;
+            halo += exp(-d2 / (r * r * 16.0)) * b;
+        }
+    }
+    return vec2<f32>(core, halo);
+}
+
+// A luminous current: a winding thread with a soft sheath, patchy along its
+// length and wisped by stretched noise drifting with the water.
+fn current(px: f32, y: f32, mid: f32, env: f32, wisp: f32) -> vec2<f32> {
+    let d = abs(y - mid);
+    return vec2<f32>(exp(-d / 0.006) * env * wisp, exp(-d / 0.025) * env);
+}
+
+// ── the scene ───────────────────────────────────────────────────────────
+
+@fragment
+fn fs_main(in: VOut) -> @location(0) vec4<f32> {
+    let w = scene.frame.x;
+    let h = max(scene.frame.y, 1.0);
+    let t = scene.frame.z;
+    let aspect = w / h;
+    let u = in.uv.x;
+    let y = 1.0 - in.uv.y;
+    let px = (u - 0.5) * aspect;
+    let q1 = t * 0.30;
+    let q2 = t * 0.03;
+
+    let bg = scene.bg.rgb;
+    let text = scene.text.rgb;
+    let hl = scene.highlight.rgb;
+    let warm = scene.warm.rgb;
+    let air = ramp(0.25);
+    let lc = ramp(0.85);
+
+    let surf = front_at(u);
+    let backs = back_at(u);
+
+    // Sky: the theme's darkest background, lifting toward the horizon, with
+    // a faint airglow gathering at the waterline.
+    var col = bg * (0.62 + 0.45 * ss(1.0, 0.5, y));
+    col += air * 0.10 * exp(-max(y - surf, 0.0) / 0.12);
+
+    let a = aurora(u, px, y, q1, q2);
+    let base = arc_base(px, q1, q2);
+    let hpos = clamp((y - base) / 0.4, 0.0, 1.0);
+    let cc = ramp(0.92 - 0.85 * hpos);
+    col += cc * a.x * 1.45;
+    col += warm * a.x * ss(0.35, 0.9, hpos) * 0.35;
+    col += text * pow(a.x, 3.0) * 0.4;
+    col += cc * a.y * 0.45 + hl * a.y * 0.10;
+
+    // Stretched ripple noise shared by the far swell and the surface.
+    let hx = vnoise(vec2<f32>(u * 38.4 + t * 0.1, y * h * 0.25 - t * 0.6)) - 0.5;
+    
+    // The far swell: dark distant water with a broken sheen of the curtain
+    // mirrored in it and a faint lit crest.
+    let inback = ss(backs + 0.002, backs - 0.002, y);
+    if (inback > 0.0) {
+        let db = max(backs - y, 0.0);
+        let ru = u + hx * 0.02;
+        let ra = aurora(ru, (ru - 0.5) * aspect, backs + db * 2.5, q1, q2);
+        let rpos = clamp((backs + db * 2.5 - arc_base((ru - 0.5) * aspect, q1, q2)) / 0.4, 0.0, 1.0);
+        var backcol = bg * 0.85 + air * 0.09 * (1.0 - ss(0.0, 0.08, db));
+        backcol += ramp(0.92 - 0.85 * rpos) * (ra.x + ra.y * 0.5) * 0.3 * (0.55 + 0.9 * hx);
+        backcol += mix(hl, text, 0.3) * exp(-db / 0.002) * 0.10;
+        col = mix(col, backcol, inback);
+    }
+
+    // The near water.
+    let d0 = surf - y;
+    let inw = ss(-0.002, 0.002, d0);
+    if (inw > 0.0) {
+        let d = max(d0, 0.0);
+        let wtop = ramp(0.4);
+        let wdeep = ramp(0.1);
+        let bio = ramp(0.7);
+        var water = mix(wtop * 0.30, wdeep * 0.20, ss(0.0, 0.2, d));
+        water = mix(water, bg * 0.28, ss(0.12, 0.42, d));
+
+        // The curtain's light over this column, read along a slanting
+        // shaft: where the aurora flares, the water under it brightens.
+        let su = u + d * (0.22 + 0.04 * sin(t * 0.17)) / aspect;
+        let spx = (su - 0.5) * aspect;
+        let sbase = arc_base(spx, q1, q2);
+        let a1 = aurora(su, spx, sbase + 0.03, q1, q2);
+        let a2 = aurora(su + 0.01, spx + 0.01 * aspect, sbase + 0.07, q1, q2);
+        let lit = clamp((a1.x + a2.x + a1.y + a2.y) * 0.5, 0.0, 1.0);
+
+        // Light shafts: two layers at different slants, swaying.
+        let b1 = vnoise(vec2<f32>(su * 70.4 + t * 0.096, 11.8));
+        let b2 = vnoise(vec2<f32>((u + d * 0.12 / aspect) * 144.0 - t * 0.128, 26.6));
+        let beam = 0.25 + 0.9 * pow(ss(0.3, 0.85, b1), 2.0) + 0.45 * pow(ss(0.45, 0.9, b2), 2.0);
+        water += lc * (0.25 + lit) * beam * exp(-d / 0.26) * 0.42;
+
+        // The surface seen from below: a rippling net of light under the
+        // waves and a bright skin right at them.
+        let ca = vnoise(vec2<f32>(u * 25.6 + t * 0.128, y * 16.0 + t * 0.19));
+        let cb = vnoise(vec2<f32>(u * 24.0 - t * 0.16, y * 17.6 - t * 0.128) + 16.0);
+        let cl = pow(clamp(1.0 - abs(ca - cb) * 5.0, 0.0, 1.0), 3.0);
+        water += mix(lc, text, 0.4) * cl * (0.3 + lit) * exp(-d / 0.03) * 0.6;
+        water += lc * (0.12 + lit) * exp(-d / 0.01) * 0.35;
+
+        // Glowing plankton (fine motes + a few nearer ones) and two
+        // luminous currents winding through mid-water.
+        let deep_in = ss(0.01, 0.04, d);
+        let p1 = plankton(px, y, t, 0.045, 0.012, 3.0, 0.0024, 0.028, 0.42);
+        let p2 = plankton(px, y, t, 0.09, 0.02, 17.0, 0.0038, 0.04, 0.3);
+        let rb = 0.33 + 0.05 * sin(px * 2.3 + t * 0.21) + 0.02 * sin(px * 6.1 - t * 0.33);
+        let rb2 = 0.20 + 0.04 * sin(px * 1.7 - t * 0.17 + 2.0) + 0.015 * sin(px * 5.3 + t * 0.29);
+        let renv = ss(0.3, 0.85, vnoise(vec2<f32>(u * 9.0 + t * 0.1, 23.4)));
+        let renv2 = ss(0.35, 0.9, vnoise(vec2<f32>(u * 7.5 - t * 0.08, 6.1)));
+        let wisp = 0.55 + 0.45 * vnoise(vec2<f32>((px - t * 0.05) * 24.0, y * h * 0.12));
+        let c1 = current(px, y, rb, renv, wisp);
+        let c2 = current(px, y, rb2, renv2, wisp);
+        let glow_core = (p1.x + p2.x * 1.3 + (c1.x + c2.x * 0.8) * 0.18) * deep_in;
+        let glow_soft = (p1.y * 0.12 + p2.y * 0.2 + (c1.y + c2.y * 0.8) * 0.22) * deep_in;
+        water += bio * (glow_core * 0.8 + glow_soft * 0.9);
+        water += text * ss(0.08, 0.6, glow_core) * 0.9;
+
+        // The seabed: a floor seen at a slight angle, sand ripples and a
+        // dancing net of light across it, dim under the deep water.
+        let bt = 0.17 + 0.018 * vnoise(vec2<f32>(u * 19.2, 3.5)) + 0.01 * sin(px * 4.0 + 1.0);
+        let onbed = ss(-0.003, 0.025, bt - y);
+        if (onbed > 0.0) {
+            let fz = max(bt - y, 0.0);
+            let per = 0.03 + fz * 3.0;
+            let fq = vec2<f32>(px / per, 1.0 / per) * 0.05;
+            let fa = vnoise(vec2<f32>((fq.x * 1.6 + t * 0.005) * 32.0, (fq.y * 0.9 + t * 0.004) * 32.0));
+            let fb = vnoise(vec2<f32>((fq.x * 1.5 - t * 0.004) * 32.0, (fq.y - t * 0.005) * 32.0) + 9.6);
+            let fnz = vnoise(fq * 19.2 + 22.4);
+            let fc = pow(clamp(1.0 - abs(fa - fb) * 6.0, 0.0, 1.0), 5.0);
+            let rip = 0.5 + 0.5 * sin(fq.y * 260.0 + fnz * 9.0 + fq.x * 6.0);
+            let near = ss(0.0, 0.16, fz);
+            var sand = mix(wdeep * 0.25 + bg * 0.22, bg * 0.36 + air * 0.05, near);
+            sand *= 0.85 + 0.25 * rip * ss(0.04, 0.14, fz);
+            sand += mix(lc, text, 0.35) * fc * (0.15 + 0.6 * lit) * (0.5 + 0.5 * near) * 0.38;
+            sand += bio * glow_soft * 0.3;
+            let rim = exp(-fz / 0.004);
+            sand += lc * rim * (0.1 + 0.3 * lit) * 0.25;
+            sand = mix(sand, water, (1.0 - near) * 0.5);
+            water = mix(water, sand, onbed);
+        }
+
+        col = mix(col, water, inw);
+        // The crest the boat rides, catching the curtain's light.
+        col += mix(hl, text, 0.4) * exp(-abs(d0) / 0.0022) * (0.25 + 1.4 * lit);
+    }
+
+    // A soft glow behind the hull so the dark boat stands out against the
+    // night (the boat sprite draws over it).
+    if (scene.boat.w > 0.5) {
+        let bd = vec2<f32>((u - scene.boat.x) * aspect, (y - scene.boat.y) * 1.3);
+        col += mix(lc, text, 0.3) * exp(-length(bd) / (scene.boat.z * 0.45)) * 0.16;
+    }
+
+    col *= 0.86 + 0.14 * (1.0 - ss(0.3, 1.1, length(vec2<f32>(px, y - 0.5))));
+    col = max(col, vec3<f32>(0.0));
+    if (scene.frame.w > 0.5) {
+        col = pow(col, vec3<f32>(2.2));
+    }
+    return vec4<f32>(col, 1.0);
+}

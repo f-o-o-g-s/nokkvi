@@ -175,10 +175,11 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     let handle = state
         .cached_handle_for(state.tilt, state.facing, render_inverted)
         .unwrap_or_else(|| {
-            let bytes = crate::embedded_svg::themed_boat_svg(
+            let bytes = crate::embedded_svg::themed_boat_svg_painted(
                 state.tilt,
                 state.facing < 0.0,
                 render_inverted,
+                state.paint,
             )
             .into_bytes();
             svg::Handle::from_memory(bytes)

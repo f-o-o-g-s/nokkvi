@@ -572,7 +572,10 @@ pub struct BoatState {
     /// with the swell instead of drawing rigid. Default `false` keeps the
     /// Lines behavior bit-identical.
     pub trawl_sway: bool,
-    pub tilt_handles: HashMap<(i16, bool, bool), svg::Handle>,
+    /// How the sprite is painted. Only the harbour tick sets it (lit at
+    /// night, plain by day); the Lines boat keeps the default.
+    pub paint: crate::embedded_svg::BoatPaint,
+    pub tilt_handles: HashMap<(i16, bool, bool, crate::embedded_svg::BoatPaint), svg::Handle>,
     /// Single themed anchor-body SVG, rebuilt only on theme change.
     /// (The anchor doesn't rotate — the rope's sway lives in the canvas
     /// path, not the SVG, so we don't need a per-quantized-angle map
@@ -643,12 +646,17 @@ impl BoatState {
         inverted: bool,
     ) -> svg::Handle {
         self.clear_if_theme_changed();
-        let key = (quantize_tilt(tilt), facing < 0.0, inverted);
+        let key = (quantize_tilt(tilt), facing < 0.0, inverted, self.paint);
         if let Some(h) = self.tilt_handles.get(&key) {
             return h.clone();
         }
-        let bytes =
-            crate::embedded_svg::themed_boat_svg(dequantize_tilt(key.0), key.1, key.2).into_bytes();
+        let bytes = crate::embedded_svg::themed_boat_svg_painted(
+            dequantize_tilt(key.0),
+            key.1,
+            key.2,
+            key.3,
+        )
+        .into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.tilt_handles.insert(key, h.clone());
         h
@@ -670,7 +678,7 @@ impl BoatState {
         if self.handle_generation != current_gen {
             return None;
         }
-        let key = (quantize_tilt(tilt), facing < 0.0, inverted);
+        let key = (quantize_tilt(tilt), facing < 0.0, inverted, self.paint);
         self.tilt_handles.get(&key).cloned()
     }
 

@@ -401,6 +401,99 @@ pub(crate) fn themed_logo_svg() -> String {
         .replace(LOGO_TOKEN_WOOD, &color_to_hex(theme::logo_wood()))
 }
 
+/// The logo lit the way the night Trawl scene lights everything else: by
+/// the aurora behind it. The hull, shields and spars sink toward the night
+/// background so the boat reads as a silhouette; the sail glows like cloth
+/// with light behind it (bright at the yard, dimming toward the foot); the
+/// outline is a rim light, bright along the top edges and fading to the
+/// background toward the waterline; a small warm lantern hangs at the
+/// masthead. Colours come from the same theme-only palette the scene's
+/// shader uses ([`PresetPalette::theme_own`]), so boat and sky agree.
+///
+/// [`PresetPalette::theme_own`]: crate::widgets::visualizer::milkdrop::palette::PresetPalette::theme_own
+fn lit_logo_svg() -> String {
+    use crate::widgets::visualizer::milkdrop::palette::PresetPalette;
+
+    let pal = PresetPalette::theme_own();
+    let ramp = |x: f32| -> [f32; 3] {
+        let s = x.clamp(0.0, 1.0) * 5.0;
+        let i = (s.floor() as usize).min(4);
+        let f = s - i as f32;
+        std::array::from_fn(|c| pal.ramp[i][c] + (pal.ramp[i + 1][c] - pal.ramp[i][c]) * f)
+    };
+    let rgb = |c: Color| [c.r, c.g, c.b];
+    let mix = |a: [f32; 3], b: [f32; 3], t: f32| -> String {
+        color_to_hex(Color::from_rgb(
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ))
+    };
+    let light = ramp(0.85);
+    let hull = mix(pal.bg, ramp(0.3), 0.3);
+    let shields = mix(pal.bg, rgb(crate::theme::logo_shields()), 0.35);
+    let wood = mix(pal.bg, rgb(crate::theme::logo_wood()), 0.45);
+    let sail_top = mix(light, pal.text, 0.3);
+    let sail_foot = mix(pal.bg, ramp(0.55), 0.5);
+    let rim_top = mix(light, pal.text, 0.5);
+    let rim_mid = mix(pal.bg, light, 0.55);
+    let rim_foot = mix(pal.bg, ramp(0.2), 0.4);
+    let lamp = color_to_hex(crate::theme::logo_wood());
+
+    // Sail (path2) and hull (path4) share the BODY token: retarget each by
+    // its id, the first `fill="…"` after it.
+    let fill_of = |svg: &mut String, id: &str, fill: &str| {
+        if let Some(at) = svg.find(&format!("id=\"{id}\""))
+            && let Some(rel) = svg[at..].find("fill=\"")
+        {
+            let start = at + rel + "fill=\"".len();
+            if let Some(len) = svg[start..].find('"') {
+                svg.replace_range(start..start + len, fill);
+            }
+        }
+    };
+    let mut svg = LOGO_SVG.to_string();
+    fill_of(&mut svg, "path2", "url(#nk-sail)");
+    fill_of(&mut svg, "path4", &hull);
+    let mut svg = svg
+        .replace(LOGO_TOKEN_SHIELDS, &shields)
+        .replace(LOGO_TOKEN_WOOD, &wood);
+
+    // Gradients in the master's user space: the sail spans the yard
+    // (y ≈ 252) to its foot (≈ 545); the rim runs from the masthead
+    // (≈ 213) to the keel (≈ 950).
+    let defs = format!(
+        "<defs>\
+         <linearGradient id=\"nk-sail\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"260\" x2=\"0\" y2=\"545\">\
+         <stop offset=\"0\" stop-color=\"{sail_top}\"/><stop offset=\"1\" stop-color=\"{sail_foot}\"/>\
+         </linearGradient>\
+         <linearGradient id=\"nk-rim\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"200\" x2=\"0\" y2=\"950\">\
+         <stop offset=\"0\" stop-color=\"{rim_top}\"/><stop offset=\"0.5\" stop-color=\"{rim_mid}\"/>\
+         <stop offset=\"1\" stop-color=\"{rim_foot}\"/>\
+         </linearGradient>\
+         <radialGradient id=\"nk-lamp\">\
+         <stop offset=\"0\" stop-color=\"{lamp}\" stop-opacity=\"0.85\"/>\
+         <stop offset=\"0.35\" stop-color=\"{lamp}\" stop-opacity=\"0.3\"/>\
+         <stop offset=\"1\" stop-color=\"{lamp}\" stop-opacity=\"0\"/>\
+         </radialGradient></defs>"
+    );
+    if let Some(open) = svg.find("<svg")
+        && let Some(end) = svg[open..].find('>')
+    {
+        svg.insert_str(open + end + 1, &defs);
+    }
+    // The masthead lantern, inside the logo group so it tilts and mirrors
+    // with the boat.
+    let lantern = format!(
+        "<circle cx=\"511\" cy=\"200\" r=\"70\" fill=\"url(#nk-lamp)\" stroke=\"none\"/>\
+         <circle cx=\"511\" cy=\"200\" r=\"17\" fill=\"{lamp}\" stroke=\"none\"/>"
+    );
+    if let Some(close) = svg.rfind("</g>") {
+        svg.insert_str(close, &lantern);
+    }
+    svg
+}
+
 /// Boat-context group stroke width as a fraction of the viewBox width. The
 /// master's authored group stroke is `60` units (~6.8% of the 881-unit
 /// viewBox) — far too heavy for the 48–160 px boat sprite. The boat keeps the
@@ -481,6 +574,27 @@ fn strip_stroke_width_attrs(svg: &str) -> String {
 /// automatically via `BoatState::clear_if_theme_changed`, which keys on
 /// `theme_generation()`.
 pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool, vertical_flip: bool) -> String {
+    themed_boat_svg_painted(angle_radians, mirrored, vertical_flip, BoatPaint::Plain)
+}
+
+/// How the boat sprite is painted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum BoatPaint {
+    /// The themed logo colours with an ink outline (Lines, the day scene).
+    #[default]
+    Plain,
+    /// The night Trawl scene's: lit by the aurora behind it (see
+    /// [`lit_logo_svg`]).
+    Lit,
+}
+
+/// [`themed_boat_svg`] with an explicit [`BoatPaint`].
+pub(crate) fn themed_boat_svg_painted(
+    angle_radians: f32,
+    mirrored: bool,
+    vertical_flip: bool,
+    paint: BoatPaint,
+) -> String {
     let viz = crate::theme::get_visualizer_colors_dark();
     let [min_x, min_y, w, h] = LOGO_VIEWBOX;
     let cx = min_x + w / 2.0;
@@ -496,13 +610,19 @@ pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool, vertical_flip:
     //     only on the group (fills are `fill="…"`), so the recolor can't touch a
     //     path fill.
     let boat_stroke_w = w * BOAT_GROUP_STROKE_FRACTION;
-    let mut body = strip_stroke_width_attrs(&themed_logo_svg()).replace(
-        &format!("stroke=\"{LOGO_TOKEN_OUTLINE}\""),
-        &format!(
-            "stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\"",
-            viz.border_color, viz.border_opacity, boat_stroke_w
+    let mut body = match paint {
+        BoatPaint::Plain => strip_stroke_width_attrs(&themed_logo_svg()).replace(
+            &format!("stroke=\"{LOGO_TOKEN_OUTLINE}\""),
+            &format!(
+                "stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\"",
+                viz.border_color, viz.border_opacity, boat_stroke_w
+            ),
         ),
-    );
+        BoatPaint::Lit => strip_stroke_width_attrs(&lit_logo_svg()).replace(
+            &format!("stroke=\"{LOGO_TOKEN_OUTLINE}\""),
+            &format!("stroke=\"url(#nk-rim)\" stroke-width=\"{boat_stroke_w}\""),
+        ),
+    };
 
     // (2) Pad the viewBox in place so a `MAX_TILT` rotation can't clip the
     //     rotated bounding box. Found and replaced (not reconstructed) so f32

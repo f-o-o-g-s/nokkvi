@@ -63,8 +63,23 @@ impl PresetPalette {
     /// themed preset recolours (crossfading) on a track change; the
     /// backgrounds, text and warm roles stay the theme's.
     pub(crate) fn from_theme() -> Self {
+        Self::build(true)
+    }
+
+    /// The theme's own dark palette, never the cover's: the Harbour Trawl
+    /// scene (`harbour_light`) is themed from the theme file alone, like the
+    /// rest of the scene (`get_visualizer_colors_dark`).
+    pub(crate) fn theme_own() -> Self {
+        Self::build(false)
+    }
+
+    fn build(follow_cover: bool) -> Self {
         use crate::theme::{self, read_dark_color};
-        let cover = theme::cover_milkdrop();
+        let cover = if follow_cover {
+            theme::cover_milkdrop()
+        } else {
+            None
+        };
         let accent = rgb(cover
             .as_ref()
             .map_or_else(|| read_dark_color(|t| t.accent), |c| c.accent));

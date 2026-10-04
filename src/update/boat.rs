@@ -265,6 +265,11 @@ pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     // trawl draws the anchor unconditionally.
     let tilt = app.harbour_scene.boat.tilt;
     let facing = app.harbour_scene.boat.facing;
+    app.harbour_scene.boat.paint = if crate::widgets::harbour_sea::scene_is_lit() {
+        crate::embedded_svg::BoatPaint::Lit
+    } else {
+        crate::embedded_svg::BoatPaint::Plain
+    };
     let _ = app.harbour_scene.boat.cache_handle_for(tilt, facing, false);
     let _ = app.harbour_scene.boat.cache_anchor_handle();
     // The moon warms through the veil key: the resting BARE key (every
