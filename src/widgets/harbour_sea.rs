@@ -265,8 +265,21 @@ const GULL_ALPHA: f32 = 0.50;
 /// Off-panel margin (px) a gliding gull fully clears before its travel
 /// fraction wraps — the same no-edge-pop contract as the boat's wrap.
 const GULL_MARGIN_PX: f32 = 30.0;
-/// Wingbeat rate (integer — wrap-safe) and depth of the glide's flap.
-const GULL_FLAP_K: f32 = 6.0;
+/// Flight: bursts of wingbeats between glides. Each gull's burst envelope
+/// runs `GULL_BURST_K` times per sea cycle (~4 s) and its wings beat
+/// `GULL_BEAT_K` times (~2.5 Hz), both integers (wrap-safe); `GLIDE` is the
+/// resting V, `BEAT_AMP` how far a beat swings the wings up and down.
+// TUNE: BEAT_K = wingbeat speed; BURST_K = how often a gull flaps.
+const GULL_BURST_K: f32 = 5.0;
+const GULL_BEAT_K: f32 = 50.0;
+const GULL_GLIDE: f32 = 0.42;
+const GULL_BEAT_AMP: f32 = 0.45;
+/// Fish tails waggle as they swim: `FISH_WAG_K` beats per sea cycle
+/// (~2 Hz; a leaping fish thrashes at `FISH_WAG_K_LEAP`), swinging the
+/// tail `FISH_WAG_RAD` either way about its root. Integers (wrap-safe).
+const FISH_WAG_K: f32 = 40.0;
+const FISH_WAG_K_LEAP: f32 = 70.0;
+const FISH_WAG_RAD: f32 = 0.35;
 /// Seed for the flock's parameter stream.
 const GULL_SEED: u32 = 0x6011_5EA5;
 
@@ -1115,7 +1128,7 @@ fn bed_dressing() -> BedDressing {
 /// current frame origin, `l` px long, nose toward +x when `dir` is
 /// `1.0` (pass `-1.0` to mirror). Shared by the rare leaping fish and
 /// the drifting school so the two can never drift apart in shape.
-fn fill_fish_silhouette(frame: &mut canvas::Frame, l: f32, dir: f32, color: Color) {
+fn fill_fish_silhouette(frame: &mut canvas::Frame, l: f32, dir: f32, wag: f32, color: Color) {
     let body = canvas::Path::new(|b| {
         b.move_to(Point::new(dir * -0.50 * l, 0.0));
         b.quadratic_curve_to(
@@ -1128,11 +1141,18 @@ fn fill_fish_silhouette(frame: &mut canvas::Frame, l: f32, dir: f32, color: Colo
         );
         b.close();
     });
+    // The tail swings `wag` radians about its root as the fish swims.
+    let root = Point::new(dir * -0.45 * l, 0.0);
+    let (sw, cw) = wag.sin_cos();
+    let at = |x: f32, y: f32| {
+        let (dx, dy) = (x - root.x, y - root.y);
+        Point::new(root.x + dx * cw - dy * sw, root.y + dx * sw + dy * cw)
+    };
     let tail = canvas::Path::new(|b| {
-        b.move_to(Point::new(dir * -0.45 * l, 0.0));
-        b.line_to(Point::new(dir * -0.78 * l, -0.24 * l));
-        b.line_to(Point::new(dir * -0.70 * l, 0.0));
-        b.line_to(Point::new(dir * -0.78 * l, 0.24 * l));
+        b.move_to(root);
+        b.line_to(at(dir * -0.78 * l, -0.24 * l));
+        b.line_to(at(dir * -0.70 * l, 0.0));
+        b.line_to(at(dir * -0.78 * l, 0.24 * l));
         b.close();
     });
     frame.fill(&body, color);
@@ -1433,31 +1453,8 @@ fn kelp_beads(w: f32, h: f32, phase: f32) -> Vec<(Point, f32)> {
         .collect()
 }
 
-/// What sits on the seabed: a sunken shield or a treasure chest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SunkenTreasure {
-    Shield,
-    #[expect(
-        dead_code,
-        reason = "the chest is the shield's alternative, kept until the owner picks one"
-    )]
-    Chest,
-}
-
-impl SunkenTreasure {
-    fn shader_kind(self) -> f32 {
-        match self {
-            Self::Shield => 0.0,
-            Self::Chest => 1.0,
-        }
-    }
-}
-
-// TUNE: which treasure the trawl drags past.
-pub(crate) const SUNKEN_TREASURE: SunkenTreasure = SunkenTreasure::Shield;
-
 /// The seabed props for the shader's `PROP_*` slots this frame: the rock
-/// mounds, the starfish and the sunken treasure (fixed), the kelp (swaying,
+/// mounds, the starfish and the sunken shield (fixed), the kelp (swaying,
 /// through the same `kelp_spine` reach the beads ride) and the trawled
 /// anchor's shadow. The shader lights, shades and half-buries them in the
 /// same sand and light as the floor.
@@ -1468,7 +1465,7 @@ pub(crate) fn floor_props(
     anchor_x: f32,
 ) -> [[f32; 4]; crate::widgets::harbour_light::MAX_PROPS] {
     use crate::widgets::harbour_light::{
-        KELP_SLOTS, MAX_PROPS, PROP_ANCHOR, PROP_KELP, PROP_ROCKS, PROP_STARFISH, PROP_TREASURE,
+        KELP_SLOTS, MAX_PROPS, PROP_ANCHOR, PROP_KELP, PROP_ROCKS, PROP_SHIELD, PROP_STARFISH,
     };
     let gs = scene_glyph_scale(h);
     let mut props = [[0.0; 4]; MAX_PROPS];
@@ -1487,11 +1484,11 @@ pub(crate) fn floor_props(
         dressing.star_rot,
         0.0,
     ];
-    props[PROP_TREASURE] = [
+    props[PROP_SHIELD] = [
         CRATE_X,
         1.25 * CRATE_SIZE_PX * gs / h,
         CRATE_TILT_DEG.to_radians(),
-        SUNKEN_TREASURE.shader_kind(),
+        0.0,
     ];
     for (slot, kelp) in props[PROP_KELP..PROP_KELP + KELP_SLOTS]
         .iter_mut()
@@ -2050,8 +2047,11 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                         * (std::f32::consts::TAU * (gull.bob_k as f32 * phase + gull.bob_off))
                             .sin())
                     * h;
-                let flap = 0.42
-                    + 0.16 * (std::f32::consts::TAU * (GULL_FLAP_K * phase + gull.flap_off)).sin();
+                let burst = 0.5
+                    + 0.5 * (std::f32::consts::TAU * (GULL_BURST_K * phase + gull.flap_off)).sin();
+                let beat =
+                    (std::f32::consts::TAU * (GULL_BEAT_K * phase + 3.0 * gull.flap_off)).sin();
+                let flap = GULL_GLIDE + GULL_BEAT_AMP * smoothstep(0.4, 0.8, burst) * beat;
                 let s = 7.0 * gull.size * glyph_scale;
                 draw_gull(&mut frame, Point::new(gx, gy), s, flap, gull_ink);
             }
@@ -2230,12 +2230,13 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 frame.rotate(angle);
                 // Body: a little teardrop; tail: a notched triangle —
                 // the shared silhouette, nose along the rotated +x.
-                fill_fish_silhouette(frame, l, 1.0, fish_color);
+                let wag = FISH_WAG_RAD * (std::f32::consts::TAU * FISH_WAG_K_LEAP * phase).sin();
+                fill_fish_silhouette(frame, l, 1.0, wag, fish_color);
             });
         }
 
         // ── The seabed ─────────────────────────────────────────────────
-        // The rocks, starfish, sunken treasure and kelp are the shader's
+        // The rocks, starfish, sunken shield and kelp are the shader's
         // (`floor_props` → `harbour_light`), drawn in the floor's own sand
         // and light with contact shadows; their bubbles and the kelp's
         // glowing beads ride the shader's lists too.
@@ -2356,7 +2357,9 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             let ink = bed_ink(SCHOOL_ALPHA);
             frame.with_save(|frame| {
                 frame.translate(iced::Vector::new(fx, fy));
-                fill_fish_silhouette(frame, l, dir, ink);
+                let wag = FISH_WAG_RAD
+                    * (std::f32::consts::TAU * (FISH_WAG_K * phase + fish.bob_off)).sin();
+                fill_fish_silhouette(frame, l, dir, wag, ink);
                 if !day {
                     // Starlight catch-rim along the back — moonlight
                     // through water, or the school drowns in the deep.

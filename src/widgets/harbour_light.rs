@@ -40,12 +40,12 @@ pub(crate) const MAX_BUBBLES: usize = 32;
 /// across (0..1); sizes and heights in panel heights.
 /// - `PROP_ROCKS..+3`: rock mounds (x, half width, height, seed)
 /// - `PROP_STARFISH`: (x, arm, rotation, 0)
-/// - `PROP_TREASURE`: (x, size, tilt radians, kind: 0 shield, 1 chest)
+/// - `PROP_SHIELD`: the sunken shield (x, size, tilt radians, 0)
 /// - `PROP_KELP..+KELP_SLOTS`: fronds (root x, height, tip reach, 1 = present)
 /// - `PROP_ANCHOR`: the trawled anchor's shadow (x, half width, 0, strength)
 pub(crate) const PROP_ROCKS: usize = 0;
 pub(crate) const PROP_STARFISH: usize = 3;
-pub(crate) const PROP_TREASURE: usize = 4;
+pub(crate) const PROP_SHIELD: usize = 4;
 pub(crate) const PROP_KELP: usize = 5;
 pub(crate) const KELP_SLOTS: usize = 8;
 pub(crate) const PROP_ANCHOR: usize = PROP_KELP + KELP_SLOTS;
@@ -101,6 +101,9 @@ pub struct HarbourMusic {
     pub surge: f32,
     /// Where the surge is, across the panel (runs past both edges).
     pub surge_x: f32,
+    /// A fast beat pulse (jumps with each kick, falls over ~`PULSE_TAU`):
+    /// the stars brighten and swell on it.
+    pub pulse: f32,
     surge_dir: f32,
     cooldown: f32,
     /// The kick fell back below the re-arm level since the last surge.
@@ -113,6 +116,7 @@ impl Default for HarbourMusic {
             reach: [0.0; SCENE_BANDS],
             surge: 0.0,
             surge_x: 0.5,
+            pulse: 0.0,
             surge_dir: -1.0,
             cooldown: 0.0,
             armed: true,
@@ -130,6 +134,7 @@ const KICK_REARM: f32 = 0.35;
 const SURGE_COOLDOWN: f32 = 0.25;
 const SURGE_SPEED: f32 = 1.6;
 const SURGE_TAU: f32 = 0.45;
+const PULSE_TAU: f32 = 0.18;
 
 impl HarbourMusic {
     /// Advance by `dt` seconds toward the music `now`.
@@ -151,6 +156,7 @@ impl HarbourMusic {
         }
         self.surge_x += SURGE_SPEED * self.surge_dir * dt;
         self.surge *= (-dt / SURGE_TAU).exp();
+        self.pulse = (self.pulse * (-dt / PULSE_TAU).exp()).max(now.kick.clamp(0.0, 1.0));
     }
 
     /// The overall level, 0..1.
@@ -212,7 +218,7 @@ struct SceneUniform {
     moon: [f32; 4],
     /// Star, glow and bubble counts, unused.
     sky: [f32; 4],
-    /// Music level, surge strength, surge x (0..1 across), unused.
+    /// Music level, surge strength, surge x (0..1 across), beat pulse.
     music: [f32; 4],
     /// The smoothed spectrum, bass first.
     spectrum: [[f32; 4]; SCENE_BANDS / 4],
@@ -342,7 +348,7 @@ impl<Message> shader::Program<Message> for LightProgram {
                     self.light.music.level(),
                     self.light.music.surge,
                     self.light.music.surge_x,
-                    0.0,
+                    self.light.music.pulse,
                 ],
                 spectrum: std::array::from_fn(|i| {
                     std::array::from_fn(|j| self.light.music.reach[4 * i + j])
@@ -590,6 +596,17 @@ mod tests {
         m.step(music(0.5, 0.9), 1.0 / 60.0);
         assert!(m.surge > 0.9);
         assert_ne!(m.surge_x < 0.5, first_dir_right, "surges alternate sides");
+    }
+
+    #[test]
+    fn the_beat_pulse_jumps_with_a_kick_and_falls_away() {
+        let mut m = HarbourMusic::default();
+        m.step(music(0.5, 0.9), 1.0 / 60.0);
+        assert!(m.pulse > 0.85, "a kick lights the pulse");
+        for _ in 0..60 {
+            m.step(music(0.5, 0.0), 1.0 / 60.0);
+        }
+        assert!(m.pulse < 0.01, "the pulse falls away between kicks");
     }
 
     #[test]

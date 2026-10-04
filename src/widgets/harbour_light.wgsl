@@ -24,7 +24,7 @@ struct Scene {
     moon: vec4<f32>,
     // star count, glow count, bubble count, unused
     sky: vec4<f32>,
-    // music level, surge strength, surge x (0..1 across), unused
+    // music level, surge strength, surge x (0..1 across), beat pulse
     music: vec4<f32>,
     // the smoothed spectrum, bass first, 8 bands
     spectrum: array<vec4<f32>, 2>,
@@ -48,7 +48,7 @@ struct Scene {
     // x (0..1), height (Y), radius (Y units), alpha
     bubbles: array<vec4<f32>, 32>,
     // the seabed props, fixed slots (harbour_light.rs PROP_*): rocks 0..3,
-    // starfish 3, treasure 4, kelp 5..13, the anchor's shadow 13
+    // starfish 3, the shield 4, kelp 5..13, the anchor's shadow 13
     props: array<vec4<f32>, 16>,
 };
 
@@ -242,7 +242,7 @@ fn current(px: f32, y: f32, mid: f32, env: f32, wisp: f32) -> vec2<f32> {
 // ── the scene ───────────────────────────────────────────────────────────
 
 // ── the seabed props ────────────────────────────────────────────────────
-// Rocks, the starfish, the sunken treasure and the kelp, drawn in the same
+// Rocks, the starfish, the sunken shield and the kelp, drawn in the same
 // light and sand as the floor so they sit IN it: soft contact shadows on
 // the sand first, then each prop shaded from above, crossed by the moving
 // caustics, rim-lit along its top, and fading into drifted sand at its
@@ -252,7 +252,7 @@ fn current(px: f32, y: f32, mid: f32, env: f32, wisp: f32) -> vec2<f32> {
 
 const PROP_ROCK_BASE: f32 = 0.018;
 const PROP_STAR_Y: f32 = 0.03;
-const PROP_TREASURE_BASE: f32 = 0.012;
+const PROP_SHIELD_BASE: f32 = 0.012;
 const PROP_KELP_ROOT: f32 = 0.015;
 
 fn rot2(p: vec2<f32>, a: f32) -> vec2<f32> {
@@ -304,7 +304,7 @@ fn seabed_props(u: f32, y: f32, px: f32, aspect: f32, h: f32, t: f32, base_col: 
     let st = scene.props[3];
     shadow += exp(-pow(((u - st.x) * aspect) / (st.y * 1.6), 2.0) - pow((y - PROP_STAR_Y + 0.006) / 0.007, 2.0)) * 0.45;
     let tr = scene.props[4];
-    shadow += exp(-pow(((u - tr.x) * aspect) / (tr.y * 0.95), 2.0) - pow((y - PROP_TREASURE_BASE) / (0.012 + 0.3 * tr.y), 2.0)) * 0.75;
+    shadow += exp(-pow(((u - tr.x) * aspect) / (tr.y * 0.95), 2.0) - pow((y - PROP_SHIELD_BASE) / (0.012 + 0.3 * tr.y), 2.0)) * 0.75;
     for (var i = 5u; i < 13u; i++) {
         let k = scene.props[i];
         if (k.w > 0.5) {
@@ -355,69 +355,38 @@ fn seabed_props(u: f32, y: f32, px: f32, aspect: f32, h: f32, t: f32, base_col: 
         }
     }
 
-    // The sunken treasure.
+    // The sunken shield.
     {
         let sz = tr.y;
-        var p = rot2(vec2<f32>((u - tr.x) * aspect, y - (PROP_TREASURE_BASE + 0.32 * sz)), -tr.z);
+        var p = rot2(vec2<f32>((u - tr.x) * aspect, y - (PROP_SHIELD_BASE + 0.32 * sz)), -tr.z);
         let wood = scene.warm.rgb;
         let paint = scene.shield.rgb;
         let dim = select(0.26, 0.85, day);
-        if (tr.w < 0.5) {
-            // A round shield, standing half sunk: painted boards quartered
-            // in the longship's own shield colour and wood, an iron rim and
-            // a domed iron boss.
-            let rad = sz * 0.78;
-            let q = p / vec2<f32>(0.82, 1.0);
-            let d = length(q) - rad;
-            let inside = ss(pix, -pix, d);
-            if (inside > 0.0) {
-                let quarter = select(paint, wood * 0.85, (q.x * q.y) > 0.0);
-                let board = fract((q.x / rad + 1.0) * 2.5);
-                let seam = ss(0.06, 0.0, min(board, 1.0 - board));
-                let wear = vnoise(q / rad * 7.0);
-                var sh = mix(silh, quarter, dim * (0.65 + 0.35 * wear));
-                sh *= 1.0 - 0.35 * seam;
-                let rim = ss(rad * 0.86, rad * 0.9, length(q));
-                let iron = silh * 0.8 + light * 0.06;
-                sh = mix(sh, iron, rim);
-                let boss = length(q) / (rad * 0.24);
-                let bshade = clamp(1.0 - boss, 0.0, 1.0);
-                sh = mix(sh, iron + light * pow(bshade, 2.0) * 0.5, ss(1.05, 0.95, boss));
-                sh *= 0.85 + 0.25 * (q.y / rad);
-                sh += light * cau * 0.3 * select(0.6, 0.9, day);
-                sh += light * exp(-abs(d) / (pix * 1.2)) * ss(0.0, 0.5, q.y / rad) * 0.5;
-                sh = mix(behind, sh, sand_drift(px, y, PROP_TREASURE_BASE, 5.0));
-                col = mix(col, sh, inside);
-            }
-        } else {
-            // A treasure chest, half sunk, its domed lid ajar with warm gold
-            // light spilling from the gap.
-            let bw = sz * 0.62;
-            let bh = sz * 0.36;
-            let lid_y = bh * 0.5;
-            let body_d = max(abs(p.x) - bw, abs(p.y) - bh * 0.5);
-            let lq = vec2<f32>(p.x / bw, (p.y - lid_y - 0.006) / (sz * 0.26));
-            let lid_d = max((length(lq) - 1.0) * sz * 0.26, lid_y + 0.006 - p.y);
-            let d = min(body_d, lid_d);
-            let inside = ss(pix, -pix, d);
-            // The gold light from the gap reaches past the chest.
-            let gap = exp(-pow((p.y - lid_y - 0.003) / 0.0035, 2.0)) * ss(bw, bw * 0.8, abs(p.x));
-            let spill = exp(-length(vec2<f32>(p.x / bw, (p.y - lid_y) / (sz * 0.5))) * 2.2);
-            let gold = mix(wood, vec3<f32>(1.0, 0.9, 0.6), 0.4);
-            col += gold * spill * select(0.22, 0.12, day) * (1.0 - inside);
-            if (inside > 0.0) {
-                let plank = fract(p.y / (bh * 0.34));
-                var ch = mix(silh, wood * 0.7, dim) * (0.85 + 0.15 * vnoise(p / sz * 9.0));
-                ch *= 1.0 - 0.3 * ss(0.08, 0.0, min(plank, 1.0 - plank)) * step(p.y, lid_y);
-                let band = ss(0.04 * sz, 0.02 * sz, abs(abs(p.x) - bw * 0.55));
-                ch = mix(ch, silh * 0.8 + light * 0.08, band);
-                ch *= 0.8 + 0.3 * clamp(p.y / sz + 0.5, 0.0, 1.0);
-                ch += light * cau * 0.3 * select(0.6, 0.9, day);
-                ch += light * exp(-abs(d) / (pix * 1.2)) * ss(lid_y, lid_y + sz * 0.2, p.y) * 0.5;
-                ch += gold * gap * 1.2;
-                ch = mix(behind, ch, sand_drift(px, y, PROP_TREASURE_BASE, 5.0));
-                col = mix(col, ch, inside);
-            }
+        // A round shield, standing half sunk: painted boards quartered
+        // in the longship's own shield colour and wood, an iron rim and
+        // a domed iron boss.
+        let rad = sz * 0.78;
+        let q = p / vec2<f32>(0.82, 1.0);
+        let d = length(q) - rad;
+        let inside = ss(pix, -pix, d);
+        if (inside > 0.0) {
+            let quarter = select(paint, wood * 0.85, (q.x * q.y) > 0.0);
+            let board = fract((q.x / rad + 1.0) * 2.5);
+            let seam = ss(0.06, 0.0, min(board, 1.0 - board));
+            let wear = vnoise(q / rad * 7.0);
+            var sh = mix(silh, quarter, dim * (0.65 + 0.35 * wear));
+            sh *= 1.0 - 0.35 * seam;
+            let rim = ss(rad * 0.86, rad * 0.9, length(q));
+            let iron = silh * 0.8 + light * 0.06;
+            sh = mix(sh, iron, rim);
+            let boss = length(q) / (rad * 0.24);
+            let bshade = clamp(1.0 - boss, 0.0, 1.0);
+            sh = mix(sh, iron + light * pow(bshade, 2.0) * 0.5, ss(1.05, 0.95, boss));
+            sh *= 0.85 + 0.25 * (q.y / rad);
+            sh += light * cau * 0.3 * select(0.6, 0.9, day);
+            sh += light * exp(-abs(d) / (pix * 1.2)) * ss(0.0, 0.5, q.y / rad) * 0.5;
+            sh = mix(behind, sh, sand_drift(px, y, PROP_SHIELD_BASE, 5.0));
+            col = mix(col, sh, inside);
         }
     }
 
@@ -654,7 +623,10 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         let n = min(u32(scene.sky.x), 64u);
         for (var i = 0u; i < n; i++) {
             let st = scene.stars[i];
-            let r = abs(st.z);
+            // On the beat about half the sky flares: each star's own share
+            // of the pulse, so the field sparkles rather than blinking whole.
+            let beat = scene.music.w * ss(0.35, 0.85, hash2(vec2<f32>(f32(i), 7.0)));
+            let r = abs(st.z) * (1.0 + 0.3 * beat);
             let dv = vec2<f32>((u - st.x) * aspect, y - st.y);
             if (max(abs(dv.x), abs(dv.y)) > r * 8.0) {
                 continue;
@@ -667,7 +639,7 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
                 v += (exp(-ax / (r * 0.1)) * exp(-ay / (r * 3.2))
                     + exp(-ay / (r * 0.1)) * exp(-ax / (r * 2.0))) * 0.55;
             }
-            starl += v * st.w;
+            starl += v * st.w * (1.0 + 1.2 * beat);
         }
         col += starc * starl * (1.0 - clamp(a.x * 2.0, 0.0, 1.0) * 0.6);
     }

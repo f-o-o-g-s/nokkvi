@@ -24,6 +24,9 @@ All notable changes to this project will be documented in this file.
 - On dark themes, the Trawl scene's fish, rope and anchor now catch the aurora's light, and the kelp glows faintly.
 - The Trawl scene's rocks, starfish and kelp now sit in the sand with soft shadows, lit by the sea floor's own light.
 - The Trawl scene's sunken crate is now a half-buried viking shield painted like the longship's shields.
+- On dark themes, the Trawl scene's stars flare on the beat.
+- The Trawl scene's fish now waggle their tails as they swim.
+- The Trawl scene's gulls now flap their wings in bursts between glides.
 - The Trawl scene's bubbles now look like glass, and on dark themes its sky notes glow softly.
 - On light themes, the Trawl scene is now sunlit: a soft sky with high cloud, a glowing sun, sun shafts and caustics on the sand.
 - On dark themes, the Trawl scene's aurora now follows the music, reaching with the spectrum and surging on each kick, even with the visualizer off.
