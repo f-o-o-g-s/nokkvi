@@ -63,6 +63,74 @@ pub struct SkipFadePlan {
     pub stream_url: String,
 }
 
+/// How a staged song starts once it is the engine's source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StageStart {
+    /// Start playing it.
+    Play,
+    /// Leave it cued: the engine names it and nothing plays. No network I/O
+    /// happens until a later `play()`.
+    Cue,
+}
+
+/// One hard load of a queue song, described: which song, where it streams
+/// from, where it starts and whether it plays. [`Self::load`] is the one
+/// load sequence every queue → engine path shares.
+pub(crate) struct StagedSong<'a> {
+    pub(crate) song_id: &'a str,
+    pub(crate) url: &'a str,
+    /// The song's metadata, for its ReplayGain and expected length. `None`
+    /// only on a defensive pool miss: the load then carries neither.
+    pub(crate) song: Option<&'a Song>,
+    /// Where the fresh start begins (a resumed position); `None` is 0:00.
+    pub(crate) start_ms: Option<u64>,
+    pub(crate) start: StageStart,
+}
+
+impl<'a> StagedSong<'a> {
+    pub(crate) fn new(
+        song_id: &'a str,
+        url: &'a str,
+        song: Option<&'a Song>,
+        start: StageStart,
+    ) -> Self {
+        Self {
+            song_id,
+            url,
+            song,
+            start_ms: None,
+            start,
+        }
+    }
+
+    /// Start the fresh `play()` at `start_ms` instead of 0:00.
+    pub(crate) fn starting_at(mut self, start_ms: Option<u64>) -> Self {
+        self.start_ms = start_ms;
+        self
+    }
+
+    /// Make the song the engine's source with its ReplayGain and expected
+    /// length (`load_track_with_rg`), arm the start offset, then play when
+    /// asked. The offset is armed after the load, whose `set_source` clears
+    /// any older one, and before `play()`, whose fresh-start branch
+    /// consumes it.
+    pub(crate) async fn load(&self, engine: &mut CustomAudioEngine) -> Result<()> {
+        let (replay_gain, expected_duration_ms) = self.song.map_or((None, None), |song| {
+            (song.replay_gain.clone(), song.expected_duration_ms())
+        });
+        engine
+            .load_track_with_rg(self.url, replay_gain, expected_duration_ms)
+            .await;
+        if let Some(start_ms) = self.start_ms {
+            engine.set_pending_start_ms(start_ms);
+        }
+        match self.start {
+            StageStart::Play => engine.play().await,
+            StageStart::Cue => Ok(()),
+        }
+    }
+}
+
 /// What a manual Next resolved to at the queue layer (M7).
 #[derive(Debug)]
 pub enum NextOutcome {
@@ -590,14 +658,9 @@ impl QueueNavigator {
                 song,
                 reason,
             } => {
-                engine
-                    .load_track_with_rg(
-                        &stream_url,
-                        song.replay_gain.clone(),
-                        song.expected_duration_ms(),
-                    )
-                    .await;
-                engine.play().await?;
+                StagedSong::new(&song.id, &stream_url, Some(&song), StageStart::Play)
+                    .load(engine)
+                    .await?;
                 Ok(Some((song, reason)))
             }
         }
@@ -628,16 +691,9 @@ impl QueueNavigator {
 
         *self.current_song_id.lock().await = Some(song.id.clone());
 
-        engine
-            .load_track_with_rg(
-                &stream_url,
-                song.replay_gain.clone(),
-                song.expected_duration_ms(),
-            )
-            .await;
-        engine.play().await?;
-
-        Ok(())
+        StagedSong::new(&song.id, &stream_url, Some(song), StageStart::Play)
+            .load(engine)
+            .await
     }
 
     /// Complete a manual skip to `song` per the engine's one "Fade on Skip"

@@ -16,7 +16,7 @@ use crate::{
     audio::engine::CustomAudioEngine,
     backend::{queue::QueueService, settings::SettingsService},
     services::{
-        playback::{QueueNavigator, RemovalAftermath, StreamSession},
+        playback::{QueueNavigator, RemovalAftermath, StageStart, StagedSong, StreamSession},
         queue::PreviousOutcome,
         task_manager::TaskManager,
     },
@@ -197,6 +197,33 @@ impl PlaybackController {
         self.audio_engine.clone()
     }
 
+    /// The controller's hard-load epilogue: [`StagedSong::load`] under the
+    /// held engine lock, discharge the queue mutation's reset with the lock
+    /// still held (even when `play()` failed: the queue changed either way),
+    /// release the lock, then name the song on the navigator so consume and
+    /// gapless prep follow it. The navigator is named only once the engine
+    /// took the song: a failed `play()` returns its error with the
+    /// navigator unchanged.
+    async fn stage_and_name(
+        &self,
+        mut engine: tokio::sync::MutexGuard<'_, CustomAudioEngine>,
+        staged: StagedSong<'_>,
+        reset: Option<crate::types::next_track_reset::NextTrackResetEffect>,
+    ) -> Result<()> {
+        let loaded = staged.load(&mut engine).await;
+        if let Some(reset) = reset {
+            reset.apply_locked(&mut engine).await;
+        }
+        drop(engine);
+        loaded?;
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(Some(staged.song_id.to_string()))
+            .await;
+        Ok(())
+    }
+
     /// The session a requested play streams from: an error when there is
     /// none, so the caller's toast says why nothing played.
     async fn require_stream_session(&self) -> Result<StreamSession> {
@@ -250,18 +277,18 @@ impl PlaybackController {
                 drop(queue_navigator);
 
                 // Find the song in the pool (O(1) lookup)
-                let queue_manager_arc = self.queue_service.queue_manager();
-                let queue_manager = queue_manager_arc.lock().await;
-                if let Some(song) = queue_manager.get_song(&song_id) {
+                let song = self
+                    .queue_service
+                    .queue_manager()
+                    .lock()
+                    .await
+                    .get_song(&song_id)
+                    .cloned();
+                if let Some(song) = song {
                     let stream_url = session.stream_url(&song.id);
-
-                    // Load and play the track
-                    let rg = song.replay_gain.clone();
-                    let expected_ms = song.expected_duration_ms();
-                    drop(queue_manager);
-                    audio.load_track_with_rg(&stream_url, rg, expected_ms).await;
-                    audio.play().await?;
-                    return Ok(());
+                    let staged =
+                        StagedSong::new(&song.id, &stream_url, Some(&song), StageStart::Play);
+                    return self.stage_and_name(audio, staged, None).await;
                 }
             }
         }
@@ -307,23 +334,8 @@ impl PlaybackController {
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await?;
 
-                // Load and play the track
-                audio
-                    .load_track_with_rg(
-                        &stream_url,
-                        song.replay_gain.clone(),
-                        song.expected_duration_ms(),
-                    )
-                    .await;
-                audio.play().await?;
-
-                // Update navigator's current_song_id so consume/gapless knows what's playing
-                let queue_navigator = self.queue_navigator.lock().await;
-                queue_navigator
-                    .set_current_song_id(Some(song.id.clone()))
-                    .await;
-
-                return Ok(());
+                let staged = StagedSong::new(&song.id, &stream_url, Some(&song), StageStart::Play);
+                return self.stage_and_name(audio, staged, None).await;
             }
         }
 
@@ -888,10 +900,10 @@ impl PlaybackController {
 
     /// Shared engine-load epilogue for the 3 same-shape play primitives:
     /// acquire the engine lock, route the click through "Fade on Skip"
-    /// ([`plan_click_play`], M10), then — on the hard route — load the track,
-    /// play, discharge the queue mutation's `NextTrackResetEffect` while the
-    /// lock is held, drop the lock, and update the navigator's
-    /// `current_song_id` (used by consume mode). On the crossfade route the
+    /// ([`plan_click_play`], M10), then — on the hard route — hand the load
+    /// to [`Self::stage_and_name`] (load, play, discharge the queue
+    /// mutation's `NextTrackResetEffect` under the lock, then name the song
+    /// on the navigator for consume mode). On the crossfade route the
     /// engine keeps playing the outgoing untouched and the skip-fade plan is
     /// completed via [`Self::complete_skip_fade`] (lock-free decoder build,
     /// then the direct-Active fire).
@@ -900,11 +912,11 @@ impl PlaybackController {
     /// ReplayGain; `None` (a defensive pool-miss) degrades to the hard route
     /// with no ReplayGain, exactly as before M10.
     ///
-    /// EXCLUDES `play_song_direct` (method on `QueueNavigator`, caller-held
-    /// `&mut engine`, set-before-load, M7's skip-fade domain),
-    /// `apply_removal_aftermath` (conditional resume, no effect), and the
-    /// cold-start branch (engine lock already held) — none of those is a
-    /// click that starts a different track while one is audibly playing.
+    /// Only the clicks route through "Fade on Skip" here: the cold start,
+    /// the removal aftermath and the pulled-queue cue go straight to
+    /// [`Self::stage_and_name`] (nothing audible to blend, or a resume
+    /// offset a blend would lose), and Next/Previous decide in the navigator
+    /// under its own lock.
     async fn load_play_and_set_current(
         &self,
         stream_url: &str,
@@ -949,21 +961,8 @@ impl PlaybackController {
             }
             ClickPlayRoute::Hard(effect) => effect,
         };
-        let (rg, expected_duration_ms) = song.as_ref().map_or((None, None), |s| {
-            (s.replay_gain.clone(), s.expected_duration_ms())
-        });
-        engine
-            .load_track_with_rg(stream_url, rg, expected_duration_ms)
-            .await;
-        engine.play().await?;
-        effect.apply_locked(&mut engine).await;
-        drop(engine);
-        self.queue_navigator
-            .lock()
-            .await
-            .set_current_song_id(Some(song_id))
-            .await;
-        Ok(())
+        let staged = StagedSong::new(&song_id, stream_url, song.as_ref(), StageStart::Play);
+        self.stage_and_name(engine, staged, Some(effect)).await
     }
 
     /// Whether a play-from-here click should re-anchor the shuffle order
@@ -1190,42 +1189,34 @@ impl PlaybackController {
                 new_index: _,
                 resume,
             } => {
-                let (replay_gain, expected_ms) = {
-                    let qm_arc = self.queue_service.queue_manager();
-                    let qm = qm_arc.lock().await;
-                    qm.get_song(&new_song_id).map_or((None, None), |s| {
-                        (s.replay_gain.clone(), s.expected_duration_ms())
-                    })
-                };
+                let song = self
+                    .queue_service
+                    .queue_manager()
+                    .lock()
+                    .await
+                    .get_song(&new_song_id)
+                    .cloned();
 
                 let stream_url = self
                     .require_stream_session()
                     .await?
                     .stream_url(&new_song_id);
 
-                {
-                    // Always swap the engine source to the new current so the
-                    // engine never keeps streaming (or stays cued on) the
-                    // deleted track. `load_track_with_rg` on a stopped/paused
-                    // engine does no network I/O and starts no renderer — the
-                    // decoder only initialises inside `play()`. Resume playback
-                    // ONLY when the engine was genuinely playing: a stopped or
-                    // paused app must not start playing just because its
-                    // current row was removed.
-                    let mut engine = self.audio_engine.lock().await;
-                    engine
-                        .load_track_with_rg(&stream_url, replay_gain, expected_ms)
-                        .await;
-                    if resume {
-                        engine.play().await?;
-                    }
-                }
-
-                self.queue_navigator
-                    .lock()
-                    .await
-                    .set_current_song_id(Some(new_song_id.clone()))
-                    .await;
+                // Always swap the engine source to the new current so the
+                // engine never keeps streaming (or stays cued on) the deleted
+                // track. A cue on a stopped/paused engine does no network I/O
+                // and starts no renderer — the decoder only initialises
+                // inside `play()`. Resume playback ONLY when the engine was
+                // genuinely playing: a stopped or paused app must not start
+                // playing just because its current row was removed.
+                let start = if resume {
+                    StageStart::Play
+                } else {
+                    StageStart::Cue
+                };
+                let staged = StagedSong::new(&new_song_id, &stream_url, song.as_ref(), start);
+                self.stage_and_name(self.audio_engine.lock().await, staged, None)
+                    .await?;
                 if resume {
                     debug!("▶️ Removal advanced engine to new current: {}", new_song_id);
                 } else {
@@ -1287,39 +1278,29 @@ impl PlaybackController {
         position_ms: i64,
         was_playing: bool,
     ) -> Result<()> {
-        let (replay_gain, expected_ms) = {
-            let qm_arc = self.queue_service.queue_manager();
-            let qm = qm_arc.lock().await;
-            qm.get_song(song_id).map_or((None, None), |s| {
-                (s.replay_gain.clone(), s.expected_duration_ms())
-            })
-        };
+        let song = self
+            .queue_service
+            .queue_manager()
+            .lock()
+            .await
+            .get_song(song_id)
+            .cloned();
 
         let stream_url = self.require_stream_session().await?.stream_url(song_id);
 
-        {
-            let mut engine = self.audio_engine.lock().await;
-            engine
-                .load_track_with_rg(&stream_url, replay_gain, expected_ms)
-                .await;
-            if position_ms > 0 {
-                // Consumed inside play()'s fresh-start branch — on the
-                // playing branch below immediately, on the paused/stopped
-                // branch at the user's next Play. set_source (inside the
-                // load) cleared any stale offset first, so the arm is
-                // always scoped to exactly this staged track.
-                engine.set_pending_start_ms(position_ms as u64);
-            }
-            if was_playing {
-                engine.play().await?;
-            }
-        }
-
-        self.queue_navigator
-            .lock()
-            .await
-            .set_current_song_id(Some(song_id.to_string()))
-            .await;
+        // The offset is consumed inside play()'s fresh-start branch — at once
+        // when the engine was playing, otherwise at the user's next Play.
+        // The load's set_source cleared any stale offset first, so the arm
+        // is always scoped to exactly this staged track.
+        let start = if was_playing {
+            StageStart::Play
+        } else {
+            StageStart::Cue
+        };
+        let staged = StagedSong::new(song_id, &stream_url, song.as_ref(), start)
+            .starting_at((position_ms > 0).then_some(position_ms as u64));
+        self.stage_and_name(self.audio_engine.lock().await, staged, None)
+            .await?;
         debug!(
             "🌊 Pulled queue cued: song={song_id} position={position_ms}ms was_playing={was_playing}"
         );
@@ -1498,25 +1479,28 @@ async fn complete_skip_fade(
     if engine.source_generation() != generation {
         return Ok(());
     }
+    // A seek made during the build was aimed at the target: it starts there
+    // (the later Play's offset, or this fallback's own play()).
+    let start_ms = engine.take_deferred_skip_seek(generation);
     // A Stop or Pause pressed during the unlocked build window flips
     // transport state WITHOUT bumping the source generation (only source
     // CHANGES bump), so the guard above cannot see it — and it must WIN:
     // hard-loading + `play()` here would audibly override the user's
     // action. Stage the skip target as the engine source WITHOUT playing
-    // (`load_track_with_rg` on a silent engine does no network I/O): the
-    // queue already names the target, and the engine's stale source would
-    // otherwise make a later Play resume the OUTGOING against the advanced
-    // queue. The `set_source` bump also closes the pending window.
+    // (a cue on a silent engine does no network I/O): the queue already
+    // names the target, and the engine's stale source would otherwise make
+    // a later Play resume the OUTGOING against the advanced queue. The
+    // `set_source` bump also closes the pending window.
     if !engine.immediate_playing() {
-        engine
-            .load_track_with_rg(
-                &plan.stream_url,
-                plan.song.replay_gain.clone(),
-                plan.song.expected_duration_ms(),
-            )
-            .await;
-        // A seek made during the build arms the offset the later Play uses.
-        engine.apply_deferred_skip_seek(generation).await;
+        StagedSong::new(
+            &plan.song.id,
+            &plan.stream_url,
+            Some(&plan.song),
+            StageStart::Cue,
+        )
+        .starting_at(start_ms)
+        .load(&mut engine)
+        .await?;
         debug!(
             "⏹️ [SKIP FADE] Engine stopped/paused during build — staged {} - {} without playing",
             plan.song.title, plan.song.artist
@@ -1524,18 +1508,15 @@ async fn complete_skip_fade(
         return Ok(());
     }
     engine.run_skip_out_fade().await;
-    engine
-        .load_track_with_rg(
-            &plan.stream_url,
-            plan.song.replay_gain.clone(),
-            plan.song.expected_duration_ms(),
-        )
-        .await;
-    // Between the load (whose `set_source` clears any start offset) and the
-    // play that consumes it: a seek made during the build starts the target
-    // there instead of at 0:00.
-    engine.apply_deferred_skip_seek(generation).await;
-    engine.play().await?;
+    StagedSong::new(
+        &plan.song.id,
+        &plan.stream_url,
+        Some(&plan.song),
+        StageStart::Play,
+    )
+    .starting_at(start_ms)
+    .load(&mut engine)
+    .await?;
     debug!(
         "▶️ Now Playing: {} - {} ({}, skip-fade fallback)",
         plan.song.title, plan.song.artist, plan.reason

@@ -3248,34 +3248,32 @@ impl CustomAudioEngine {
     }
 
     /// Land a seek deferred during `plan_generation`'s build window (see
-    /// `seek`) on the skip target, now that the target is the engine's
-    /// source. The controller calls this on every `complete_skip_fade` exit
-    /// that lands the target:
-    /// - after the fire, a live skip blend runs into the target: `seek`
-    ///   promotes it, then seeks it;
-    /// - after a fallback `load_track_with_rg`, the target is loaded but not
-    ///   started: arm the start offset the next fresh `play()` consumes (the
-    ///   fallback's own `play()`, or the user's later Play).
-    ///
-    /// The record is always consumed; one made under another plan's
-    /// generation is dropped (a second skip replaced the target it was
-    /// aimed at).
+    /// `seek`) on the skip target once the fire started blending into it:
+    /// `seek` promotes the live skip blend, then seeks it. A fallback hard
+    /// load starts the target there instead, through
+    /// [`Self::take_deferred_skip_seek`]. Either way the record is consumed;
+    /// one made under another plan's generation is dropped (a second skip
+    /// replaced the target it was aimed at).
     pub(crate) async fn apply_deferred_skip_seek(&mut self, plan_generation: u64) {
-        let Some(deferred) = self.deferred_skip_seek.take() else {
-            return;
-        };
+        if let Some(position_ms) = self.take_deferred_skip_seek(plan_generation) {
+            self.seek(position_ms).await;
+        }
+    }
+
+    /// The position a seek deferred during `plan_generation`'s build window
+    /// aimed the skip target at, for a fallback hard load to start it from
+    /// (see [`Self::apply_deferred_skip_seek`]). Consumes the record; one
+    /// made under another plan's generation is dropped.
+    pub(crate) fn take_deferred_skip_seek(&mut self, plan_generation: u64) -> Option<u64> {
+        let deferred = self.deferred_skip_seek.take()?;
         if deferred.plan_generation != plan_generation {
             debug!(
                 "🔍 [SEEK] Dropping a seek deferred under plan generation {} (landing plan {})",
                 deferred.plan_generation, plan_generation
             );
-            return;
+            return None;
         }
-        if self.crossfade.skip_fade {
-            self.seek(deferred.position_ms).await;
-        } else {
-            self.set_pending_start_ms(deferred.position_ms);
-        }
+        Some(deferred.position_ms)
     }
 
     /// Whether a planned skip-crossfade's build window is still open: the
