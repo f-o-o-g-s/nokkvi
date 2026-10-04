@@ -22,7 +22,7 @@ cargo +nightly fmt --all -- --check          # format check
 
 CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build) on the latest unpinned stable + nightly, so a stale local toolchain can pass here and fail there (`/package` runs `rustup update stable nightly`). All must pass before merging. `rustfmt.toml` uses unstable features (`imports_granularity = "Crate"`, `group_imports = "StdExternalCrate"`), which is why nightly is required.
 
-System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake`. The audio engine links against `libpipewire-0.3` at build time; `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
+System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang`. The audio engine links against `libpipewire-0.3` at build time; `clang` provides the libclang that `bindgen` loads to generate the `pipewire-sys` / `libspa-sys` bindings (build-only); `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
 
 Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
 

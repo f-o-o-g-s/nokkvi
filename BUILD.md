@@ -16,14 +16,17 @@ rustup toolchain install nightly   # only needed for cargo +nightly fmt
 ### 2. System Dependencies (Arch Linux)
 
 ```bash
-sudo pacman -S pipewire fontconfig pkgconf
+sudo pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang
 ```
 
 | Package | Purpose |
 |---------|---------|
 | `pipewire` | PipeWire development headers (native audio output via `libpipewire-0.3`) |
+| `alsa-lib` | ALSA library that `rodio`'s `cpal` backend links against (`alsa-sys`) |
 | `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
 | `pkgconf` | Build-time dependency resolution for native libraries (provides `pkg-config`) |
+| `cmake` | Builds the bundled libopus (Opus decoding via `symphonia-adapter-libopus`) |
+| `clang` | Provides libclang, which `bindgen` loads to generate the PipeWire bindings at build time |
 
 > **Note:** Nokkvi uses a native PipeWire audio backend — it links directly against `libpipewire-0.3` at build time. A running PipeWire daemon is required for audio output.
 

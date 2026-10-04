@@ -81,7 +81,7 @@ Runtime requirements: `pipewire`, `alsa-lib`, and `fontconfig` installed system-
 ## Quickstart (build from source)
 
 ```bash
-sudo pacman -S pipewire alsa-lib fontconfig pkgconf cmake # Arch system deps (cmake builds bundled libopus)
+sudo pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang # Arch build deps (cmake: bundled libopus; clang: PipeWire bindings)
 cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```
