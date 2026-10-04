@@ -175,12 +175,21 @@ fn grey(l: f32) -> Color {
 }
 
 /// Where the bar ramp and the peaks sit on one palette: `(bottom, top, peak)`
-/// lightness. The natural ramp when it fits; otherwise the longest stretch of
-/// it (up to its natural span, at least [`MIN_RAMP_SPREAD`] where the room
-/// allows) that clears the panel and the cover, with the peaks at its far
-/// end. Measured on greys: lightness drives contrast, and every stop is
-/// checked again with its real color.
-fn layout(dark_bg: bool, palette: &ResolvedTheme, backdrop: Option<Color>) -> (f32, f32, f32) {
+/// lightness. The natural ramp when it fits; otherwise a stretch of it (up to
+/// its natural span, at least [`MIN_RAMP_SPREAD`] where the room allows) that
+/// clears the panel and the cover, with the peaks at its far end. When more
+/// than one band of lightness clears both (a bright cover on a dark panel
+/// leaves one just above the panel and one near white), the ramp goes where
+/// the cover's `anchors` keep the most color (see [`colorfulness`]): near
+/// white every hue fades to a pastel, and bloom washes that out to white.
+/// Measured on greys: lightness drives contrast, and every stop is checked
+/// again with its real color.
+fn layout(
+    dark_bg: bool,
+    palette: &ResolvedTheme,
+    backdrop: Option<Color>,
+    anchors: &[Anchor],
+) -> (f32, f32, f32) {
     let natural = if dark_bg {
         (
             DARK_BAR_LIGHTNESS.0,
@@ -222,22 +231,55 @@ fn layout(dark_bg: bool, palette: &ResolvedTheme, backdrop: Option<Color>) -> (f
     if let Some(start) = open {
         runs.push((start, 1.0));
     }
+    if runs.iter().any(|&(a, b)| a <= b0 && b >= p0) {
+        return natural;
+    }
+    // The ramp each run can hold: (bottom, top, peak), still flipped.
+    let fit = |(a, b): (f32, f32)| {
+        let span = (p0 - b0).min(b - a).max(MIN_RAMP_SPREAD.min(b - a));
+        let bottom = b0.clamp(a, (b - span).max(a));
+        let peak = (bottom + span).min(b);
+        let top = (peak - PEAK_GAP.min(span * 0.45)).min(t0.max(bottom));
+        (bottom, top, peak)
+    };
+    // Color the run's ramp can carry, discounted when the run is too narrow
+    // to give the ramp its minimum spread: a sliver of rich color must not
+    // beat a full-width pastel.
+    let color = |&run: &(f32, f32)| {
+        let (bottom, _, peak) = fit(run);
+        let room = ((run.1 - run.0) / MIN_RAMP_SPREAD).min(1.0);
+        room * colorfulness(anchors, flip(bottom), flip(peak))
+    };
     let overlap = |&(a, b): &(f32, f32)| (b.min(p0) - a.max(b0)).max(0.0);
-    let Some(&(a, b)) = runs.iter().max_by(|x, y| {
-        overlap(x)
-            .total_cmp(&overlap(y))
+    let Some(&best) = runs.iter().max_by(|x, y| {
+        color(x)
+            .total_cmp(&color(y))
+            .then(overlap(x).total_cmp(&overlap(y)))
             .then((x.1 - x.0).total_cmp(&(y.1 - y.0)))
     }) else {
         return natural;
     };
-    if a <= b0 && b >= p0 {
-        return natural;
-    }
-    let span = (p0 - b0).min(b - a).max(MIN_RAMP_SPREAD.min(b - a));
-    let bottom = b0.clamp(a, (b - span).max(a));
-    let peak = (bottom + span).min(b);
-    let top = (peak - PEAK_GAP.min(span * 0.45)).min(t0.max(bottom));
+    let (bottom, top, peak) = fit(best);
     (flip(bottom), flip(top), flip(peak))
+}
+
+/// How much color `anchors` keep on a ramp from lightness `from` to `to`:
+/// their mean chroma there, at each hue's own saturation share. Zero for a
+/// grey cover, which leaves the choice to the other criteria.
+fn colorfulness(anchors: &[Anchor], from: f32, to: f32) -> f32 {
+    const SAMPLES: usize = 5;
+    if anchors.is_empty() {
+        return 0.0;
+    }
+    let total: f32 = (0..SAMPLES)
+        .flat_map(|i| {
+            let l = from + (to - from) * i as f32 / (SAMPLES - 1) as f32;
+            anchors
+                .iter()
+                .map(move |a| a.saturation * max_chroma(l.clamp(0.0, 1.0), a.hue))
+        })
+        .sum();
+    total / (SAMPLES * anchors.len()) as f32
 }
 
 /// The bar ramp's stops for `cover` on one palette: `BAR_STOPS` colors from
@@ -249,7 +291,6 @@ fn bar_stops(
     backdrop: Option<Color>,
 ) -> (Vec<Color>, f32) {
     let dark_bg = legible_text_on(palette.bg0_hard) == Color::WHITE;
-    let (bottom, top, peak) = layout(dark_bg, palette, backdrop);
     let mut by_lightness: Vec<(f32, Anchor)> = cover
         .colors()
         .iter()
@@ -257,6 +298,7 @@ fn bar_stops(
         .collect();
     by_lightness.sort_by(|a, b| a.0.total_cmp(&b.0));
     let anchors: Vec<Anchor> = by_lightness.into_iter().map(|(_, a)| a).collect();
+    let (bottom, top, peak) = layout(dark_bg, palette, backdrop, &anchors);
     let stops = (0..BAR_STOPS)
         .map(|i| {
             let t = i as f32 / (BAR_STOPS - 1) as f32;
@@ -531,6 +573,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The owner's case: a bright orange-and-blue cover on a dark theme left
+    /// room for the ramp just above the panel and again near white, and the
+    /// ramp took the near-white band, where every hue fades to a pastel that
+    /// bloom washes out to white. Where a band below the cover is wide
+    /// enough, the bars keep the cover's color there.
+    #[test]
+    fn a_bright_cover_on_a_dark_theme_keeps_colored_bars() {
+        let orange = seed(0xf0, 0x60, 0x40);
+        let blue = seed(0x30, 0x60, 0xc0);
+        let backdrop_l = 0.68;
+        let cover = CoverPalette::from_colors(vec![orange, blue], backdrop_l).expect("non-empty");
+        let backdrop = grey(backdrop_l);
+        let mut checked = 0;
+        for (name, mode, palette) in all_builtin_palettes() {
+            if legible_text_on(palette.bg0_hard) != Color::WHITE {
+                continue;
+            }
+            // A band below the cover at least the ramp's minimum spread wide.
+            let clears = |l: f32| {
+                let c = grey(l);
+                on_panel(c, BAR_MIN_CONTRAST, &palette)
+                    && contrast_ratio(c, backdrop) >= COVER_MIN_CONTRAST
+            };
+            let below = (0..=50)
+                .map(|k| k as f32 / 50.0)
+                .filter(|&l| l < backdrop_l && clears(l))
+                .collect::<Vec<_>>();
+            let Some((&lo, &hi)) = below.first().zip(below.last()) else {
+                continue;
+            };
+            if hi - lo < MIN_RAMP_SPREAD {
+                continue;
+            }
+            checked += 1;
+            let viz = visualizer_colors(&cover, &palette, &VisualizerColors::default());
+            let mean_chroma = viz
+                .bar_gradient_colors
+                .iter()
+                .map(|stop| parse(stop).into_oklch().c)
+                .sum::<f32>()
+                / BAR_STOPS as f32;
+            assert!(
+                mean_chroma >= 0.08,
+                "{name}/{mode}: bars washed out (mean chroma {mean_chroma:.3}): {:?}",
+                viz.bar_gradient_colors
+            );
+        }
+        assert!(checked > 0, "no dark theme leaves a band below the cover");
     }
 
     /// Six peak slots, as `bars.wgsl` reads them, looping back to the first

@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Faintly tinted covers, such as sepia photos or cream paper, now give a matching faint accent instead of grey.
 - A black cover whose only color is a thin rainbow now takes the rainbow's colors.
 - A large muted area, like a dark olive background, now joins the visualizer gradient beside the cover's vivid accent color.
+- On dark themes, bars over a bright cover now use deep cover colors where those stay visible, instead of near-white pastels.
 
 ### Removed
 
