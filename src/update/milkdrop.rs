@@ -98,7 +98,7 @@ pub(crate) enum AdvanceReason {
 }
 
 impl Nokkvi {
-    pub(super) fn milkdrop_mode_active(&self) -> bool {
+    pub(crate) fn milkdrop_mode_active(&self) -> bool {
         self.settings.visualization_mode == VisualizationMode::Milkdrop
     }
 

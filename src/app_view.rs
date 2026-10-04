@@ -1072,9 +1072,7 @@ impl Nokkvi {
                 crate::app_message::ArtworkMessage::RefreshAlbumArtwork(album_id.to_string()),
             )));
         }
-        if self.settings.visualization_mode
-            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
-        {
+        if self.milkdrop_mode_active() {
             entries.extend(crate::widgets::context_menu::milkdrop_panel_entries(
                 self.milkdrop.locked,
                 self.milkdrop
@@ -1673,9 +1671,7 @@ impl Nokkvi {
             return None;
         }
         // MilkDrop replaces the cover, so there is no cover to frost.
-        if self.settings.visualization_mode
-            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
-        {
+        if self.milkdrop_mode_active() {
             return None;
         }
         let level = self.settings.lyrics_backdrop_blur;
@@ -1958,8 +1954,7 @@ impl Nokkvi {
             current_playing_song_id: self.scrobble.current_song_id.clone(),
             current_playing_entry_id: self.queue_current.entry_id,
             is_playing: self.playback.playing && !self.playback.paused,
-            milkdrop_on: self.settings.visualization_mode
-                == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop,
+            milkdrop_on: self.milkdrop_mode_active(),
             milkdrop_locked: self.milkdrop.locked,
             milkdrop_favorite: self
                 .milkdrop

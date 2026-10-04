@@ -685,10 +685,7 @@ impl Nokkvi {
             viz.reset();
         }
         // Stopped: MilkDrop gives the panel back to the cover.
-        if playback_stopped
-            && self.settings.visualization_mode
-                == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
-        {
+        if playback_stopped && self.milkdrop_mode_active() {
             self.milkdrop_release();
         }
 
@@ -1372,9 +1369,7 @@ impl Nokkvi {
         if let Some(ref viz) = self.visualizer {
             viz.reset();
         }
-        if self.settings.visualization_mode
-            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
-        {
+        if self.milkdrop_mode_active() {
             self.milkdrop_release();
         }
         self.shell_task(
