@@ -750,6 +750,18 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
     app.similar_songs_generation = crate::state::StaleDropGen::at(7);
+    app.session_user_id = "u1".into();
+    app.login_page.password = "hunter2".into();
+    app.login_page.login_in_progress = true;
+    app.rules_editor.caps_state = crate::state::CapsState::FetchFailed;
+    app.rules_editor.preview_generation = crate::state::StaleDropGen::at(4);
+    app.playback.play_attempt = crate::state::StaleDropGen::at(11);
+    crate::test_helpers::seed_radio_playback(app);
+    if let crate::state::ActivePlayback::Radio(radio) = std::mem::take(&mut app.active_playback) {
+        app.playback.station_left_for_play =
+            Some(crate::state::StationLeftForPlay { attempt: 11, radio });
+    }
+    app.harbour.search_generation = crate::state::StaleDropGen::at(2);
     app.harbour.search_query = "night".into();
     app.harbour.shelves_generation = crate::state::StaleDropGen::at(3);
     app.harbour
@@ -778,6 +790,8 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.trawl.search_generation = crate::state::StaleDropGen::at(9);
 
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    app.pane_focus = crate::state::PaneFocus::Browser;
     app.cross_pane_drag.selection_count = 5;
     app.cross_pane_drag.pending_queue_insert_position = Some(2);
     app.start_view_applied = true;
@@ -806,6 +820,19 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.stored_session.is_none());
     assert!(!app.should_auto_login);
     assert_eq!(app.screen, crate::Screen::Login);
+    assert!(app.session_user_id.is_empty());
+    assert!(app.login_page.password.is_empty(), "password dropped");
+    assert!(!app.login_page.login_in_progress);
+    assert_eq!(
+        app.rules_editor.caps_state,
+        crate::state::CapsState::Unfetched,
+        "the capability gate belongs to the old server"
+    );
+    assert_eq!(
+        app.rules_editor.preview_generation.current(),
+        5,
+        "rules preview generation carries forward bumped (seeded 4)"
+    );
 
     // Server-specific data pointing at gone IDs
     assert!(app.library.albums.is_empty(), "library albums reset");
@@ -819,6 +846,11 @@ fn reset_session_state_clears_all_session_bound_fields() {
     );
     assert!(app.harbour.shelves_empty(), "harbour shelves reset");
     assert!(app.harbour.search_query.is_empty(), "harbour query reset");
+    assert_eq!(
+        app.harbour.search_generation.current(),
+        3,
+        "harbour search generation carries forward bumped (seeded 2)"
+    );
     assert_eq!(
         app.harbour.shelves_generation.current(),
         4,
@@ -857,10 +889,24 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(!app.pending_expand.center_only);
     assert!(app.pending_expand.top_pin.is_none());
     assert!(app.roulette.is_none());
+    assert_eq!(
+        app.playback.play_attempt.current(),
+        12,
+        "play attempt carries forward bumped (seeded 11)"
+    );
+    assert!(
+        app.playback.station_left_for_play.is_none(),
+        "a failed play after logout must not hand back the old station"
+    );
 
     // Transient UI work tied to prior session
     assert!(app.open_menu.is_none(), "open_menu cleared (drift bug fix)");
     assert!(app.browsing_panel.is_none());
+    assert_eq!(
+        app.pane_focus,
+        crate::state::PaneFocus::Queue,
+        "focus returns to the queue pane with the panel gone"
+    );
     assert!(app.cross_pane_drag.active.is_none());
     assert!(app.cross_pane_drag.press_origin.is_none());
     assert!(app.cross_pane_drag.pressed_item.is_none());
@@ -889,6 +935,11 @@ fn reset_session_state_preserves_non_session_fields() {
     app.window.height = 567.0;
     app.tray_window_hidden = true;
     app.last_mpris_position_us = 42_000;
+    app.login_page.server_url = "http://navidrome.lan".into();
+    app.login_page.username = "listener".into();
+    app.rules_editor.preview_column_visibility.genre = false;
+    app.playback.title = "Still Playing".into();
+    app.scrobble.current_song_id = Some("s1".into());
     // Toast queue intentionally survives (session-expired's toast must
     // remain visible after reset returns).
     app.toast_info("pre-reset toast");
@@ -918,6 +969,27 @@ fn reset_session_state_preserves_non_session_fields() {
         "window state retained"
     );
     assert!(app.tray_window_hidden, "tray_window_hidden retained");
+    assert_eq!(
+        app.login_page.server_url, "http://navidrome.lan",
+        "server URL stays pre-filled"
+    );
+    assert_eq!(
+        app.login_page.username, "listener",
+        "username stays pre-filled"
+    );
+    assert!(
+        !app.rules_editor.preview_column_visibility.genre,
+        "preview columns are a persisted preference"
+    );
+    assert_eq!(
+        app.playback.title, "Still Playing",
+        "track display stays until the next session's first update"
+    );
+    assert_eq!(
+        app.scrobble.current_song_id.as_deref(),
+        Some("s1"),
+        "song-change detection keys on it, so it stays with the track"
+    );
     assert_eq!(
         app.last_mpris_position_us, 42_000,
         "mpris position retained"

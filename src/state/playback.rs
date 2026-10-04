@@ -98,6 +98,11 @@ pub struct QueueCurrent {
 }
 
 /// Playback-related state for the player bar
+///
+/// Logout resets only what [`Self::reset_for_session`] names. The track
+/// display fields stay: the engine stops asynchronously, so clearing them
+/// here could race its last updates; the Login screen draws no player bar;
+/// and the next session's first update overwrites them.
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
     pub position: u32,
@@ -180,6 +185,14 @@ impl PlaybackState {
     /// Whether a track is actively loaded (playing or paused).
     pub fn has_track(&self) -> bool {
         self.playing || self.paused
+    }
+
+    /// Logout: a play that fails after this must not hand back the old
+    /// session's station, so the attempt counter carries forward and the
+    /// station record goes.
+    pub fn reset_for_session(&mut self) {
+        self.station_left_for_play = None;
+        self.play_attempt.bump();
     }
 }
 

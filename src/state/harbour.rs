@@ -187,6 +187,17 @@ impl HarbourState {
         self.search_playlist_album_ids.clear();
         self.search_genre_album_ids.clear();
     }
+
+    /// Logout: shelves and search results are keyed on the old server's
+    /// ids. Both generations carry forward so a fetch still in flight is
+    /// dropped when it lands after the next login.
+    pub fn reset_for_session(&mut self) {
+        *self = Self {
+            shelves_generation: self.shelves_generation.carried_forward(),
+            search_generation: self.search_generation.carried_forward(),
+            ..Self::default()
+        };
+    }
 }
 
 /// The Harbour Trawl panel's procedural scene: the trawling longship and the

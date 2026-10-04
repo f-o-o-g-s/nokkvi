@@ -1603,10 +1603,13 @@ impl Nokkvi {
     /// `handle_session_expired` (401 from API) end the active Navidrome
     /// session and must leave `Nokkvi` in an identical post-teardown shape
     /// before re-arriving at the Login screen. This helper is the single
-    /// source of truth for that shape, so a future field added to `Nokkvi`
-    /// gets reset uniformly from one site instead of drifting between the
-    /// two callers (the original split forgot `open_menu` + `library` in
-    /// the logout path — see #2.27).
+    /// source of truth for that shape.
+    ///
+    /// What happens to each field is recorded once, in the exhaustive
+    /// `Nokkvi` pattern at the top of the body: adding a field fails to
+    /// compile there until it is sorted into "reset" or "kept". A group
+    /// that keeps part of itself (a carried-forward stale-drop counter, a
+    /// preference) owns a `reset_for_session()` naming what goes.
     ///
     /// The async Task returned must be awaited by the caller (returned
     /// from the handler) so PipeWire streams, the decode loop, and the
@@ -1618,48 +1621,116 @@ impl Nokkvi {
     /// Caller-specific concerns (toast, log prefix) stay at the call
     /// site; this helper logs a single `debug!` line summarizing the
     /// reset for forensic traces.
-    ///
-    /// Reset fields fall into three buckets:
-    /// - **Core session identity**: app_service, stored_session,
-    ///   should_auto_login, screen.
-    /// - **Server-specific data pointing at gone IDs**: library, artwork,
-    ///   similar_songs (+similar_songs_generation carried forward bumped),
-    ///   active_playlist_info, playlist_editor,
-    ///   server_version, queue_current (index + entry id),
-    ///   strip_quad_album_ids (with the playlist context),
-    ///   pending_expand (whole `PendingExpandState`), roulette,
-    ///   trawl.mix (+trawl.search_generation carried forward bumped —
-    ///   seeds and search results reference the old server's ids).
-    /// - **Transient UI work tied to the prior session**: every root modal
-    ///   (`ActiveModal::STACK`, through `discard_modal`), open_menu,
-    ///   browsing_panel, cross_pane_drag (whole `CrossPaneDragUi`),
-    ///   start_view_applied, suppress_next_auto_center.
-    ///
-    /// Side-effect calls (not field resets):
-    /// - `services::navidrome_sse::clear()` drops the static SSE
-    ///   connection registration so the event loop can't keep retrying
-    ///   with stale credentials against the prior server (would 401
-    ///   forever until next `register()`).
-    ///
-    /// Fields explicitly NOT reset (retained across login transitions):
-    /// - retained: cached_storage — explicit DB-lock workaround.
-    /// - retained: login_page — credentials kept so user can re-enter.
-    /// - retained: current_view, pre_settings_view — UI nav memory.
-    /// - retained: modes, settings, hotkey_config — user preferences.
-    /// - retained: sfx_engine, sfx, engine, window, player_bar_layout,
-    ///   visualizer(+config), boat — local UI/audio infrastructure
-    ///   independent of the server.
-    /// - retained: toast — the queue intentionally survives so the
-    ///   session-expired message is visible after this returns.
-    /// - retained: mpris_connection, tray_connection, tray_window_hidden,
-    ///   main_window_id — system integrations bound to the app process,
-    ///   not the session.
-    /// - retained: playback, active_playback, scrobble — track-display
-    ///   fields. Engine-stop is async; resetting these here could race.
-    ///   They are overwritten on next session's first queue load and the
-    ///   Login screen doesn't render the player bar.
-    /// - retained: last_mpris_position_us — overwritten on next playback.
     pub(crate) fn reset_session_state(&mut self) -> Task<Message> {
+        // Every `Nokkvi` field, sorted by what logout does to it. Exhaustive
+        // on purpose: a new field fails to compile here until it is placed
+        // in one list (and, when session-bound, reset below). Binds nothing.
+        let crate::Nokkvi {
+            // ---- Reset below: tied to the server session ----
+            app_service: _,
+            stored_session: _,
+            should_auto_login: _,
+            session_user_id: _,
+            screen: _,
+            server_version: _,
+            open_subsonic_extensions: _,
+            // Password, error and in-progress flag; URL and username stay.
+            login_page: _,
+            // Capability gate; preview generation carried; columns stay.
+            rules_editor: _,
+            // Progressive-load counter carried (shared with a running chain).
+            library: _,
+            artwork: _,
+            similar_songs: _,
+            // Carried, like every stale-drop counter.
+            similar_songs_generation: _,
+            // Shelves + search; both generations carried.
+            harbour: _,
+            // Crate + modal; search generation carried.
+            trawl: _,
+            // Play attempt carried + station record; the track display stays
+            // (see `PlaybackState`).
+            playback: _,
+            // In-flight and queued seek; epoch carried; Seek Step stays.
+            seek: _,
+            // In memory only; the persisted context returns with the queue.
+            active_playlist_info: _,
+            strip_quad_album_ids: _,
+            queue_current: _,
+            playlist_editor: _,
+            pending_expand: _,
+            roulette: _,
+            theater: _,
+            // Renderer, picker and cover; the preset library stays.
+            milkdrop: _,
+            dynamic_accent: _,
+            // The root modals, through `ActiveModal::STACK`.
+            text_input_dialog: _,
+            info_modal: _,
+            about_modal: _,
+            eq_modal: _,
+            default_playlist_picker: _,
+            open_menu: _,
+            browsing_panel: _,
+            pane_focus: _,
+            cross_pane_drag: _,
+            start_view_applied: _,
+            suppress_next_auto_center: _,
+            pending_mode_commits: _,
+            // Dropped so its FFT thread joins now.
+            visualizer: _,
+            // ---- Kept: independent of the server ----
+            // The view pages keep sort, search, scroll and columns; only
+            // their toolbar reveal locks, stranded drags and the queue's
+            // playlist-strip expansion are cleared.
+            albums_page: _,
+            artists_page: _,
+            genres_page: _,
+            playlists_page: _,
+            queue_page: _,
+            songs_page: _,
+            radios_page: _,
+            settings_page: _,
+            similar_page: _,
+            harbour_page: _,
+            // The redb handle re-login must reuse (exclusive lock).
+            cached_storage: _,
+            current_view: _,
+            pre_settings_view: _,
+            editor_return_view: _,
+            settings: _,
+            hotkey_config: _,
+            modes: _,
+            sfx: _,
+            sfx_engine: _,
+            // Settings mirror; the gapless latch re-arms on the first queue
+            // update after login (`queue_current` is reset).
+            engine: _,
+            window: _,
+            player_bar_layout: _,
+            visualizer_config: _,
+            boat: _,
+            harbour_scene: _,
+            glow_epoch: _,
+            mpris_connection: _,
+            notification_connection: _,
+            tray_connection: _,
+            tray_window_hidden: _,
+            main_window_id: _,
+            // ---- Kept: they follow the now-playing track, which the next
+            // session's first update replaces ----
+            active_playback: _,
+            // Song changes are detected against its id, so the lyrics and
+            // the reminder latch below must stay with it.
+            scrobble: _,
+            lyrics: _,
+            last_reminded_song_id: _,
+            last_mpris_position_us: _,
+            radio_scrobble: _,
+            // ---- Kept: the session-expired toast must outlive this reset ----
+            toast: _,
+        } = self;
+
         // Theater Mode never survives to the Login screen (logout or session
         // expiry); its layout must not greet the next login.
         let exit_theater = self.exit_theater();
@@ -1737,83 +1808,38 @@ impl Nokkvi {
             Task::none()
         };
 
-        // Phase 2: reset every session-bound field on Nokkvi.
-        // Grouped by bucket (see doc-comment above).
+        // Phase 2: reset every session-bound field (sorted in the pattern at
+        // the top). Stale-drop counters are carried forward, never zeroed:
+        // iced Tasks outlive logout, and a restarted counter would re-mint a
+        // value an in-flight pre-logout task captured.
         //
-        // Core session identity
+        // Session identity
         self.app_service = None;
         self.stored_session = None;
         self.should_auto_login = false;
         self.session_user_id.clear();
-        // Capability gate is per-server; the generation carries FORWARD
-        // (bumped) like the Harbour/Trawl counters — an in-flight preview
-        // task holds a captured generation a zeroed counter would re-mint.
-        self.rules_editor.caps_state = crate::state::CapsState::default();
-        self.rules_editor.preview_generation.bump();
         self.screen = crate::Screen::Login;
+        self.login_page.reset_for_session();
+        self.server_version = None;
+        self.open_subsonic_extensions = None;
+        self.rules_editor.reset_for_session();
 
-        // Clear transient login state so re-login starts from a clean slate:
-        // drop the prior password and any stale error / in-progress flag. The
-        // server URL and username stay pre-filled for convenience.
-        self.login_page.password.clear();
-        self.login_page.error = None;
-        self.login_page.login_in_progress = false;
-
-        // Server-specific data pointing at gone IDs
-        // ...except the progressive-load counter, carried forward and bumped:
-        // a pre-logout chain's in-flight page task holds a clone of it, and a
-        // fresh counter would leave that clone current.
-        let progressive_queue_generation = self.library.progressive_queue_generation.clone();
-        progressive_queue_generation.bump();
-        // A pre-logout play that fails afterwards must not hand back the
-        // previous session's station.
-        self.playback.station_left_for_play = None;
-        self.playback.play_attempt.bump();
-        self.library = crate::state::LibraryData {
-            progressive_queue_generation,
-            ..Default::default()
-        };
+        // Server data keyed on the old server's ids
+        self.library.reset_for_session();
         // Artwork caches are session-bound: server-A's cover bytes must not be
         // served for server-B's album IDs if the IDs happen to overlap after
         // re-login. Default rebuilds the LRUs at their declared capacities.
         self.artwork = crate::state::ArtworkState::default();
         self.similar_songs = None;
-        // Carried forward (bumped), never zeroed: a pre-logout Find Similar
-        // still in flight holds a captured generation that a restarted
-        // counter would re-mint on the next session's first request.
-        self.similar_songs_generation.bump();
-        // Harbour shelves + search results are keyed on the prior server's IDs
-        // — drop them, but carry the stale-drop generations FORWARD (bumped)
-        // instead of zeroing them: iced Tasks aren't cancelled by logout, so a
-        // pre-logout in-flight fetch holds a captured generation that a
-        // zeroed-then-bumped counter would re-mint, letting server A's response
-        // populate server B's shelves after re-login.
-        self.harbour = crate::state::HarbourState {
-            shelves_generation: self.harbour.shelves_generation.carried_forward(),
-            search_generation: self.harbour.search_generation.carried_forward(),
-            ..Default::default()
-        };
-        // Trawl: seeds + search results are keyed on the prior server's ids.
-        // Same generation carry-forward rationale as Harbour above. (The
-        // modal itself goes with the others below.)
-        self.trawl.mix = nokkvi_data::types::trawl::TrawlCrate::default();
-        self.trawl.search_generation.bump();
-        // In memory only: the persisted context is restored with the queue
-        // at the next login.
+        self.similar_songs_generation = self.similar_songs_generation.carried_forward();
+        self.harbour.reset_for_session();
+        self.trawl.reset_for_session();
         self.drop_active_playlist_context();
-        // A sort dropdown / hover lock set at logout or session-expiry would
-        // otherwise survive into the next session: the pick_list / header
-        // mouse_area unmount on the Login-screen swap, so their on_close /
-        // on_exit can't fire to clear the flag.
-        self.clear_all_toolbar_reveal_locks();
-        self.clear_stranded_within_list_drag();
+        self.queue_current = crate::state::QueueCurrent::default();
         self.playlist_editor = None;
-        self.server_version = None;
-        self.open_subsonic_extensions = None;
-        self.queue_current.index = None;
-        self.queue_current.entry_id = None;
         self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;
+        self.playback.reset_for_session();
 
         // Transient UI work tied to the prior session — including any
         // modals the user might have had open at logout. Without this
@@ -1824,10 +1850,18 @@ impl Nokkvi {
         for modal in crate::update::modals::ActiveModal::STACK {
             self.discard_modal(modal);
         }
-
         self.open_menu = None;
         self.browsing_panel = None;
+        // With the panel gone, focus goes back to the queue pane, as at every
+        // other place the panel closes.
+        self.pane_focus = crate::state::PaneFocus::Queue;
         self.cross_pane_drag = crate::state::CrossPaneDragUi::default();
+        // A sort dropdown / hover lock set at logout or session-expiry would
+        // otherwise survive into the next session: the pick_list / header
+        // mouse_area unmount on the Login-screen swap, so their on_close /
+        // on_exit can't fire to clear the flag.
+        self.clear_all_toolbar_reveal_locks();
+        self.clear_stranded_within_list_drag();
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
         self.pending_mode_commits = 0;

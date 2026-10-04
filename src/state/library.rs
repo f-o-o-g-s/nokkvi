@@ -94,6 +94,18 @@ impl LibraryData {
             })
             .map(|target| target.total)
     }
+
+    /// Logout: every buffer and count belongs to the old server. The
+    /// progressive-load counter is shared with any chain still running, so it
+    /// is kept and bumped, not replaced: that chain's in-flight page must find
+    /// itself stale, and a fresh counter would leave its clone current.
+    pub fn reset_for_session(&mut self) {
+        self.progressive_queue_generation.bump();
+        *self = Self {
+            progressive_queue_generation: self.progressive_queue_generation.clone(),
+            ..Self::default()
+        };
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -103,4 +115,32 @@ pub struct LibraryCounts {
     pub genres: usize,
     pub playlists: usize,
     pub songs: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_for_session_clears_the_data_and_stops_a_running_chain() {
+        let mut library = LibraryData::default();
+        library
+            .queue_songs
+            .push(crate::test_helpers::make_queue_song("s1", "T", "A", "Al"));
+        library.counts.albums = 12;
+        let chain = library.start_progressive_queue_load(500);
+        // The running chain's page task holds a clone of the counter.
+        let held_by_chain = library.progressive_queue_generation.clone();
+
+        library.reset_for_session();
+
+        assert!(library.queue_songs.is_empty());
+        assert_eq!(library.counts.albums, 0);
+        assert_eq!(library.queue_loading_total(), None);
+        assert!(
+            !held_by_chain.is_current(chain),
+            "the chain's own clone sees the bump, so its next page is dropped"
+        );
+        assert_eq!(library.progressive_queue_generation.current(), chain + 1);
+    }
 }

@@ -120,6 +120,14 @@ impl Default for LoginPage {
 }
 
 impl LoginPage {
+    /// Logout: drop the password and any stale error / in-progress flag so
+    /// re-login starts clean. The server URL and username stay pre-filled.
+    pub fn reset_for_session(&mut self) {
+        self.password.clear();
+        self.error = None;
+        self.login_in_progress = false;
+    }
+
     /// Initialize with pre-filled credentials (e.g., from saved auth)
     pub fn with_credentials(server_url: String, username: String, password: String) -> Self {
         Self {

@@ -306,6 +306,16 @@ pub struct RulesEditorState {
     pub preview_column_visibility: PreviewColumnVisibility,
 }
 
+impl RulesEditorState {
+    /// Logout: the capability gate belongs to the old server and the preview
+    /// generation carries forward (a preview load still in flight is
+    /// dropped). The preview columns are a persisted preference and stay.
+    pub fn reset_for_session(&mut self) {
+        self.caps_state = CapsState::default();
+        self.preview_generation = self.preview_generation.carried_forward();
+    }
+}
+
 /// The whole rules-editor session (UI half — the domain half lives in
 /// `nokkvi_data::types::{smart_criteria, rules_session}`).
 #[derive(Debug)]
