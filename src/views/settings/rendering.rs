@@ -1268,29 +1268,46 @@ pub(crate) fn render_detail_header<'a>(
         .into()
 }
 
+/// One settings detail row's display state, by name: `is_focused`,
+/// `is_editing` and `is_capturing` are all `bool`, so positional arguments
+/// could trade places and still compile.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DetailRowState<'s> {
+    /// The keyboard-cursored row: drives the 2 px accent left stripe + `bg1`
+    /// fill, the bold label, the "Enter ↵" affordance, and the hotkey-capture
+    /// / toggle-cursor indicators. Equivalent to `ctx.is_center` in the legacy
+    /// slot list.
+    pub(crate) is_focused: bool,
+    /// The row is the one being edited (a hex color row shows its inline
+    /// editor; the Enter hint hides).
+    pub(crate) is_editing: bool,
+    /// The row is capturing a new hotkey.
+    pub(crate) is_capturing: bool,
+    /// The hex input buffer while editing, else empty.
+    pub(crate) hex_input: &'s str,
+    pub(crate) toggle_cursor: Option<usize>,
+    pub(crate) conflict_text: Option<&'s str>,
+    /// Search-match ranges to highlight in the label.
+    pub(crate) match_spans: Option<&'s [(usize, usize)]>,
+}
+
 /// Render a variable-height detail row: `[label + help text below]
 /// [value widget] [Default: X label]`. Pill groups inside the value
 /// widget wrap; rows grow to fit.
-///
-/// `is_focused` corresponds to "the keyboard-cursored row" — drives the
-/// 2 px accent left stripe + `bg1` fill, the bold label, the
-/// "Enter ↵" affordance, and the hotkey-capture / toggle-cursor
-/// indicators. Equivalent to `ctx.is_center` in the legacy slot list.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one settings row's display state from its single caller, the slot renderer"
-)]
 pub(crate) fn render_detail_row<'a>(
     item: &SettingItem,
     item_index: usize,
-    is_focused: bool,
-    is_editing: bool,
-    is_capturing: bool,
-    hex_input: &str,
-    toggle_cursor: Option<usize>,
-    conflict_text: Option<&str>,
-    match_spans: Option<&[(usize, usize)]>,
+    state: DetailRowState<'_>,
 ) -> Element<'a, SettingsMessage> {
+    let DetailRowState {
+        is_focused,
+        is_editing,
+        is_capturing,
+        hex_input,
+        toggle_cursor,
+        conflict_text,
+        match_spans,
+    } = state;
     let label_size = 13.0;
     let help_size = 11.0;
     let value_size = 13.0;

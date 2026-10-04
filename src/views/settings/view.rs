@@ -20,7 +20,9 @@ use super::{
     BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsMessage,
     SettingsPage, SettingsTab,
     items::SettingsEntry,
-    rendering::{render_detail_header, render_detail_row, transparent_button_style},
+    rendering::{
+        DetailRowState, render_detail_header, render_detail_row, transparent_button_style,
+    },
 };
 use crate::{embedded_svg, theme, widgets::slot_list};
 
@@ -456,17 +458,19 @@ impl SettingsPage {
                     render_detail_row(
                         item,
                         idx,
-                        is_focused,
-                        is_editing,
-                        is_capturing && is_focused,
-                        if is_editing {
-                            hex_input_owned.as_str()
-                        } else {
-                            ""
+                        DetailRowState {
+                            is_focused,
+                            is_editing,
+                            is_capturing: is_capturing && is_focused,
+                            hex_input: if is_editing {
+                                hex_input_owned.as_str()
+                            } else {
+                                ""
+                            },
+                            toggle_cursor,
+                            conflict_text,
+                            match_spans: match_spans.as_deref(),
                         },
-                        toggle_cursor,
-                        conflict_text,
-                        match_spans.as_deref(),
                     )
                 }
             };
