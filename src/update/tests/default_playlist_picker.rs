@@ -55,8 +55,8 @@ fn picker_open_initializes_state_with_library_playlists() {
         .as_ref()
         .expect("picker should be open after Open message");
     // 3 real playlists + 1 prepended Clear entry
-    assert_eq!(state.all_entries.len(), 4);
-    assert!(matches!(state.all_entries[0], PickerEntry::Clear));
+    assert_eq!(state.list.all.len(), 4);
+    assert!(matches!(state.list.all[0], PickerEntry::Clear));
 }
 
 #[test]
@@ -89,13 +89,54 @@ fn picker_search_filters_entries() {
 
     let state = app.default_playlist_picker.as_ref().unwrap();
     // Clear stays + only "Workout" matches → 2 entries
-    assert_eq!(state.filtered.len(), 2);
-    assert!(matches!(state.filtered[0], PickerEntry::Clear));
-    if let PickerEntry::Playlist { name, .. } = &state.filtered[1] {
+    assert_eq!(state.list.filtered.len(), 2);
+    assert!(matches!(state.list.filtered[0], PickerEntry::Clear));
+    if let PickerEntry::Playlist { name, .. } = &state.list.filtered[1] {
         assert_eq!(name, "Workout");
     } else {
         panic!("expected Playlist entry at index 1");
     }
+}
+
+/// Searching keeps the highlighted playlist centered while it still
+/// matches, and only otherwise returns to the top, like the MilkDrop
+/// picker (both run on the shared picker list).
+#[test]
+fn picker_search_keeps_a_matching_centered_playlist() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerMessage as M, PickerEntry};
+
+    let mut app = test_app();
+    seed_playlists(
+        &mut app,
+        vec![("p1", "Workout"), ("p2", "Chill"), ("p3", "Focus")],
+    );
+    let _ = app.handle_default_playlist_picker(M::Open);
+    // Clear → Workout → Chill.
+    let _ = app.handle_default_playlist_picker(M::SlotListDown);
+    let _ = app.handle_default_playlist_picker(M::SlotListDown);
+    let centered = |app: &crate::Nokkvi| {
+        app.default_playlist_picker
+            .as_ref()
+            .and_then(|s| s.list.centered().cloned())
+    };
+    let centered_name = |app: &crate::Nokkvi| match centered(app) {
+        Some(PickerEntry::Playlist { name, .. }) => name,
+        other => panic!("expected a playlist on the centered row, got {other:?}"),
+    };
+    assert_eq!(centered_name(&app), "Chill");
+
+    let _ = app.handle_default_playlist_picker(M::SearchChanged("i".to_string()));
+    assert_eq!(
+        centered_name(&app),
+        "Chill",
+        "still matches: stays centered"
+    );
+
+    let _ = app.handle_default_playlist_picker(M::SearchChanged("fo".to_string()));
+    assert!(
+        matches!(centered(&app), Some(PickerEntry::Clear)),
+        "filtered out: back to the top"
+    );
 }
 
 #[test]
@@ -163,8 +204,8 @@ fn picker_open_with_empty_library_still_offers_clear_entry() {
     let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
 
     let state = app.default_playlist_picker.as_ref().unwrap();
-    assert_eq!(state.all_entries.len(), 1);
-    assert!(matches!(state.all_entries[0], PickerEntry::Clear));
+    assert_eq!(state.list.all.len(), 1);
+    assert!(matches!(state.list.all[0], PickerEntry::Clear));
 }
 
 #[test]
@@ -179,11 +220,7 @@ fn picker_repopulates_when_playlists_load_after_open() {
         "foo".to_string(),
     ));
     assert_eq!(
-        app.default_playlist_picker
-            .as_ref()
-            .unwrap()
-            .all_entries
-            .len(),
+        app.default_playlist_picker.as_ref().unwrap().list.all.len(),
         1
     );
 
@@ -193,15 +230,15 @@ fn picker_repopulates_when_playlists_load_after_open() {
     app.refresh_default_playlist_picker_after_load();
 
     let state = app.default_playlist_picker.as_ref().unwrap();
-    assert_eq!(state.all_entries.len(), 3, "Clear + 2 playlists");
+    assert_eq!(state.list.all.len(), 3, "Clear + 2 playlists");
     assert_eq!(
-        state.search_query, "foo",
+        state.list.search_query, "foo",
         "the user's in-flight search query is preserved across the rebuild"
     );
     // "foo" matches "Foo", and Clear is always visible
-    assert_eq!(state.filtered.len(), 2);
-    assert!(matches!(state.filtered[0], PickerEntry::Clear));
-    if let PickerEntry::Playlist { name, .. } = &state.filtered[1] {
+    assert_eq!(state.list.filtered.len(), 2);
+    assert!(matches!(state.list.filtered[0], PickerEntry::Clear));
+    if let PickerEntry::Playlist { name, .. } = &state.list.filtered[1] {
         assert_eq!(name, "Foo");
     } else {
         panic!("expected Playlist entry at index 1");
@@ -739,7 +776,8 @@ fn picker_excludes_smart_playlists() {
     let state = DefaultPlaylistPickerState::new(&[smart, regular]);
 
     let names: Vec<&str> = state
-        .all_entries
+        .list
+        .all
         .iter()
         .filter_map(|e| match e {
             PickerEntry::Playlist { name, .. } => Some(name.as_str()),

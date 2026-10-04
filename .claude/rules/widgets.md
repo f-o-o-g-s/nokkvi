@@ -83,8 +83,9 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 | Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders |
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
-| Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
-| MilkDrop Preset Picker | `milkdrop_picker.rs` | Modal overlay (default-playlist-picker pattern) over the running visualizer: searchable preset list with a Favorites chip and per-row heart / eye (hide) toggles; state lives on `Nokkvi.milkdrop.picker` |
+| Picker Modal | `picker_modal.rs` | Shared shell of the two root picker modals: `PickerList<T>` (all / search query / filtered / `SlotListView`; `refilter(keep)` keeps the centered entry centered while it still passes, else starts at the top) and `picker_modal(PickerChrome, &list, render_row)` (title bar with optional `after_title` / `before_close` slots + X, search bar, slot list or empty text, modal frame + scaffold, wheel → Up/Down). A new searchable root picker builds on these |
+| Default Playlist Picker | `default_playlist_picker.rs` | Picker-modal entries + row look for choosing the default playlist; state lives on `Nokkvi.default_playlist_picker` |
+| MilkDrop Preset Picker | `milkdrop_picker.rs` | Picker-modal over the running visualizer: preset names with a Favorites chip (`before_close`), a `shown / total` count (`after_title`) and per-row heart / eye (hide) toggles; state lives on `Nokkvi.milkdrop.picker` |
 | Library Filter Trigger | `library_filter_trigger.rs` | Nav-bar button anchoring the multi-library selector popover. Renders a count badge via `badge_pip::draw_badge_pip` when a subset is active. Auto-hidden on single-library servers. `FILTERED_CHASSIS_WIDTH` const pins the filtered render's wider chassis |
 | Badge Pip | `badge_pip.rs` | Tiny "active-state" pip drawn in the top-right of an icon button. Shared between the kebab `player_modes_menu` and `library_filter_trigger` |
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay. CPU-only — reads a shared bar buffer. Two uses: the lines-mode over-cover boat (`boat_overlay(..., None)` — the `None` trail-offset keeps its drop-anchor doodad) and the Harbour Trawl seascape (`harbour_sea::trawl_scene` calls `boat_overlay` with a trail offset for the trawling longship) |
@@ -103,7 +104,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 
 ## Modal Frame Style
 
-`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, `default_playlist_picker`, `milkdrop_picker`, and `trawl_modal` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
+`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, `picker_modal` (both root pickers), and `trawl_modal` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
 
 The settings **font + theme pickers** are the exception: they share their own chrome via `render_picker_modal()` (`src/views/settings/view.rs`) — a dimmed backdrop (press → Escape, wheel → slot Up/Down) behind a centered `bg0_hard()` + 1.5 px `accent()` panel with an X-back title bar, a search bar, and a caller-built slot-list body. `render_font_modal` / `render_theme_modal` differ only in title/placeholder/search-input-id and their row renderer; the theme picker passes `.without_hover_wash()` so each row stays in its own palette (selection shows via a per-row accent ring).
 

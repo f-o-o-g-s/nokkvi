@@ -551,7 +551,7 @@ fn picker_nav_key_passes_through_when_picker_open() {
     let before = app
         .default_playlist_picker
         .as_ref()
-        .map(|p| p.slot_list.viewport_offset);
+        .map(|p| p.list.slot_list.viewport_offset);
 
     let _ = send_raw_key(
         &mut app,
@@ -563,7 +563,7 @@ fn picker_nav_key_passes_through_when_picker_open() {
     let after = app
         .default_playlist_picker
         .as_ref()
-        .map(|p| p.slot_list.viewport_offset);
+        .map(|p| p.list.slot_list.viewport_offset);
     assert_ne!(
         before, after,
         "Tab (SlotListDown) must reach the picker's nav route, not be suppressed"

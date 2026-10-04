@@ -1,11 +1,9 @@
 //! Default-playlist picker — modal overlay that lets the user choose a new
 //! default playlist. Triggered from the chip in the Playlists/Queue headers.
 //!
-//! Mirrors the font picker pattern (`src/views/settings/sub_lists.rs`):
-//! - Searchable list with immediate (non-debounced) filtering
-//! - Slot-list keyboard navigation (Up/Down/Enter)
-//! - Modal panel centered over a dimmed backdrop
-//! - Click-outside / Escape / X dismiss
+//! The list state and modal chrome are the shared picker shell
+//! (`widgets::picker_modal`, also used by the MilkDrop preset picker); this
+//! module owns the entries and how a row looks.
 //!
 //! State lives on `Nokkvi` root (cross-cutting between Playlists and Queue
 //! views), opened via `Message::DefaultPlaylistPicker(Open(...))`.
@@ -13,9 +11,9 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Border, Element, Length, Padding,
+    Alignment, Border, Element, Length,
     font::Weight,
-    widget::{Space, button, column, container, image, mouse_area, row, svg, text},
+    widget::{Space, column, container, image, mouse_area, row, svg, text},
 };
 use nokkvi_data::{
     backend::playlists::PlaylistUIViewData, utils::formatters::format_duration_short,
@@ -23,18 +21,15 @@ use nokkvi_data::{
 
 use crate::{
     embedded_svg, theme,
-    widgets::{SlotListView, slot_list},
+    widgets::picker_modal::{PickerChrome, PickerList, picker_modal},
 };
 
 /// `text_input` ID for the picker's search field. Used by the open handler
 /// to focus the input as soon as the modal opens.
 pub(crate) const PICKER_SEARCH_INPUT_ID: &str = "default_playlist_picker_search";
 
-const TITLE_BAR_HEIGHT: f32 = 38.0;
-const SEARCH_BAR_HEIGHT: f32 = 40.0;
-
-#[derive(Debug, Clone)]
-pub enum PickerEntry {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PickerEntry {
     /// Virtual top entry — selecting it clears the default (id = None).
     Clear,
     /// A real playlist option, projected from `PlaylistUIViewData` so the
@@ -60,10 +55,7 @@ impl PickerEntry {
 /// State for the default-playlist picker overlay.
 #[derive(Debug, Clone)]
 pub struct DefaultPlaylistPickerState {
-    pub all_entries: Vec<PickerEntry>,
-    pub search_query: String,
-    pub filtered: Vec<PickerEntry>,
-    pub slot_list: SlotListView,
+    pub(crate) list: PickerList<PickerEntry>,
 }
 
 impl DefaultPlaylistPickerState {
@@ -82,31 +74,20 @@ impl DefaultPlaylistPickerState {
             });
         }
         Self {
-            filtered: all_entries.clone(),
-            all_entries,
-            search_query: String::new(),
-            slot_list: SlotListView::new(),
+            list: PickerList::new(all_entries),
         }
     }
 
-    /// Recompute `filtered` from `all_entries` against `search_query`.
-    /// "Clear default" remains visible at the top regardless of the query.
+    /// Recompute the filtered entries against the search query (see
+    /// [`PickerList::refilter`]). "Clear default" remains visible at the top
+    /// regardless of the query.
     pub(crate) fn refilter(&mut self) {
-        if self.search_query.is_empty() {
-            self.filtered = self.all_entries.clone();
-        } else {
-            let query = self.search_query.to_lowercase();
-            let mut filtered = vec![PickerEntry::Clear];
-            for entry in &self.all_entries {
-                if let PickerEntry::Playlist { name, .. } = entry
-                    && name.to_lowercase().contains(&query)
-                {
-                    filtered.push(entry.clone());
-                }
+        self.list.refilter(|entry, query| match entry {
+            PickerEntry::Clear => true,
+            PickerEntry::Playlist { name, .. } => {
+                query.is_empty() || name.to_lowercase().contains(query)
             }
-            self.filtered = filtered;
-        }
-        self.slot_list = SlotListView::new();
+        });
     }
 }
 
@@ -122,7 +103,7 @@ pub enum DefaultPlaylistPickerMessage {
     /// Slot navigation.
     SlotListUp,
     SlotListDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
+    SlotListSetOffset(usize),
     /// Click on a specific entry index in the filtered list.
     ClickItem(usize),
     /// Activate the centered entry (Enter / click center).
@@ -140,147 +121,32 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
     window_height: f32,
     playlist_art: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, DefaultPlaylistPickerMessage> {
-    // ── Modal dimensions ──
-    let modal_height = (window_height * 0.70).max(320.0);
-    let modal_chrome = TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT;
-
-    // ── Title bar ──
-    let dim_color = theme::fg4();
-    let active_color = theme::fg0();
-    let label_size = 13.0;
-
-    let close_btn = button(
-        embedded_svg::svg_widget("assets/icons/x.svg")
-            .width(Length::Fixed(label_size))
-            .height(Length::Fixed(label_size))
-            .style(move |_theme, _status| svg::Style {
-                color: Some(dim_color),
-            }),
+    picker_modal(
+        PickerChrome {
+            title: "Default Playlist",
+            after_title: None,
+            before_close: None,
+            search_placeholder: "Type to filter playlists...",
+            search_input_id: PICKER_SEARCH_INPUT_ID,
+            on_search: DefaultPlaylistPickerMessage::SearchChanged,
+            on_close: DefaultPlaylistPickerMessage::Close,
+            on_up: DefaultPlaylistPickerMessage::SlotListUp,
+            on_down: DefaultPlaylistPickerMessage::SlotListDown,
+            on_set_offset: DefaultPlaylistPickerMessage::SlotListSetOffset,
+            empty_text: "No playlists match the search query",
+            window_height,
+        },
+        &state.list,
+        move |entry, ctx| {
+            render_picker_slot(
+                entry,
+                ctx.item_index,
+                ctx.is_center,
+                ctx.row_height,
+                playlist_art,
+            )
+        },
     )
-    .on_press(DefaultPlaylistPickerMessage::Close)
-    .style(theme::transparent_button_style)
-    .padding(Padding::new(2.0));
-
-    let title_row = row![
-        Space::new().width(Length::Fixed(12.0)),
-        text("Default Playlist")
-            .size(label_size)
-            .font(theme::weighted_ui_font(Weight::Bold))
-            .color(active_color),
-        Space::new().width(Length::Fill),
-        close_btn,
-        Space::new().width(Length::Fixed(12.0)),
-    ]
-    .align_y(Alignment::Center)
-    .height(Length::Fixed(TITLE_BAR_HEIGHT));
-    let title_bar = container(title_row).width(Length::Fill);
-
-    // ── Search bar ──
-    let search_input = crate::widgets::search_bar::search_bar(
-        &state.search_query,
-        "Type to filter playlists...",
-        PICKER_SEARCH_INPUT_ID,
-        DefaultPlaylistPickerMessage::SearchChanged,
-        Some(theme::settings_search_input_style),
-    );
-    let search_bar = container(search_input)
-        .width(Length::Fill)
-        .height(Length::Fixed(SEARCH_BAR_HEIGHT))
-        .padding(Padding::new(4.0).left(12.0).right(12.0));
-
-    // ── Slot list or empty state ──
-    let main_area: Element<'a, DefaultPlaylistPickerMessage> = if state.filtered.is_empty() {
-        container(
-            text("No playlists match the search query")
-                .size(14)
-                .font(theme::ui_font())
-                .color(theme::fg4()),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center(Length::Fill)
-        .into()
-    } else {
-        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
-        let entries_owned = state.filtered.clone();
-
-        slot_list::slot_list_view_with_scroll(
-            &state.slot_list,
-            &entries_owned,
-            &config,
-            DefaultPlaylistPickerMessage::SlotListUp,
-            DefaultPlaylistPickerMessage::SlotListDown,
-            {
-                let total = entries_owned.len();
-                move |f| {
-                    DefaultPlaylistPickerMessage::SlotListSetOffset(
-                        (f * total as f32) as usize,
-                        iced::keyboard::Modifiers::default(),
-                    )
-                }
-            },
-            None,
-            move |entry, ctx| {
-                render_picker_slot(
-                    entry,
-                    ctx.item_index,
-                    ctx.is_center,
-                    ctx.row_height,
-                    playlist_art,
-                )
-            },
-        )
-    };
-
-    // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
-    // ui_radius_lg corners. Six overlay modals route through this helper
-    // so a future per-theme tweak to the modal vocabulary lands at one site.
-    let modal_panel = container(
-        column![title_bar, search_bar, main_area]
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::FillPortion(5))
-    .height(Length::Fixed(modal_height))
-    .clip(true)
-    .padding(Padding::new(4.0))
-    .style(theme::modal_frame_style);
-
-    // Wrap the panel in a FillPortion row so it occupies the middle 5/7
-    // of the backdrop's width. Reads as the dialog content for
-    // `theme::modal_scaffold`, which adds the `opaque(...)` press-capture
-    // shield (so a click on padding inside the panel no longer bubbles to
-    // the backdrop and dismisses the modal) and applies
-    // `MODAL_BACKDROP_ALPHA` over `bg0_hard()` for the dim. Scroll-to-nav
-    // is wired on an outer `mouse_area` — `opaque` captures presses but
-    // not scrolls, so the layers compose cleanly.
-    let modal_row = row![
-        Space::new().width(Length::FillPortion(1)),
-        modal_panel,
-        Space::new().width(Length::FillPortion(1)),
-    ]
-    .width(Length::Fill)
-    .align_y(Alignment::Center);
-
-    let scaffold = theme::modal_scaffold(
-        modal_row.into(),
-        DefaultPlaylistPickerMessage::Close,
-        theme::MODAL_BACKDROP_ALPHA,
-    );
-
-    mouse_area(scaffold)
-        .on_scroll(|delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
-            if y > 0.0 {
-                DefaultPlaylistPickerMessage::SlotListUp
-            } else {
-                DefaultPlaylistPickerMessage::SlotListDown
-            }
-        })
-        .into()
 }
 
 fn render_picker_slot<'a>(
@@ -471,8 +337,8 @@ mod tests {
     #[test]
     fn new_prepends_clear_entry() {
         let state = DefaultPlaylistPickerState::new(&sample_playlists());
-        assert!(matches!(state.all_entries[0], PickerEntry::Clear));
-        assert_eq!(state.all_entries.len(), 4);
+        assert!(matches!(state.list.all[0], PickerEntry::Clear));
+        assert_eq!(state.list.all.len(), 4);
     }
 
     #[test]
@@ -482,7 +348,7 @@ mod tests {
         p.duration = 6862.0;
 
         let state = DefaultPlaylistPickerState::new(&[p]);
-        match &state.all_entries[1] {
+        match &state.list.all[1] {
             PickerEntry::Playlist {
                 id,
                 song_count,
@@ -500,20 +366,20 @@ mod tests {
     #[test]
     fn refilter_keeps_clear_entry_visible() {
         let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
-        state.search_query = "zzz_no_match".to_string();
+        state.list.search_query = "zzz_no_match".to_string();
         state.refilter();
-        assert_eq!(state.filtered.len(), 1);
-        assert!(matches!(state.filtered[0], PickerEntry::Clear));
+        assert_eq!(state.list.filtered.len(), 1);
+        assert!(matches!(state.list.filtered[0], PickerEntry::Clear));
     }
 
     #[test]
     fn refilter_matches_substring_case_insensitive() {
         let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
-        state.search_query = "WORK".to_string();
+        state.list.search_query = "WORK".to_string();
         state.refilter();
         // Clear + Workout
-        assert_eq!(state.filtered.len(), 2);
-        if let PickerEntry::Playlist { name, .. } = &state.filtered[1] {
+        assert_eq!(state.list.filtered.len(), 2);
+        if let PickerEntry::Playlist { name, .. } = &state.list.filtered[1] {
             assert_eq!(name, "Workout");
         } else {
             panic!("expected Playlist entry");
@@ -523,8 +389,8 @@ mod tests {
     #[test]
     fn empty_query_returns_all_entries() {
         let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
-        state.search_query = String::new();
+        state.list.search_query = String::new();
         state.refilter();
-        assert_eq!(state.filtered.len(), 4);
+        assert_eq!(state.list.filtered.len(), 4);
     }
 }

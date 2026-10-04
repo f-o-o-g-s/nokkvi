@@ -327,7 +327,7 @@ fn seed_type_tint(item: &nokkvi_data::types::batch::BatchItem) -> iced::Color {
 }
 
 /// The full Trawl modal overlay. Mounted by `wrap_with_global_overlays`;
-/// chrome mirrors `default_playlist_picker_overlay` (shared
+/// chrome mirrors the picker shell (`picker_modal::picker_modal`: shared
 /// `modal_frame_style` + `modal_scaffold`, wheel → list nav) with the crate
 /// tray as an extra fixed band above the panel's bottom edge.
 pub(crate) fn trawl_modal_overlay<'a>(

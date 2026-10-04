@@ -218,7 +218,7 @@ fn choosing_while_paused_loads_the_choice() {
 #[test]
 fn clicking_a_row_chooses_it() {
     let (mut app, _) = open_over_running();
-    let target = app.milkdrop.picker.as_ref().expect("open").filtered[3].clone();
+    let target = app.milkdrop.picker.as_ref().expect("open").list.filtered[3].clone();
     picker(&mut app, P::ClickItem(3));
     assert!(app.milkdrop.picker.is_none());
     assert_eq!(app.milkdrop.current.as_deref(), Some(target.as_str()));
@@ -352,7 +352,7 @@ fn slot_list_keys_steer_the_picker() {
 #[test]
 fn the_heart_toggles_a_rows_favorite() {
     let (mut app, _) = open_over_running();
-    let name = app.milkdrop.picker.as_ref().expect("open").filtered[2].clone();
+    let name = app.milkdrop.picker.as_ref().expect("open").list.filtered[2].clone();
     picker(&mut app, P::ToggleFavorite(name.clone()));
     assert!(app.milkdrop.library.is_favorite(&name));
     assert!(app.milkdrop.picker.is_some(), "stays open");
@@ -363,7 +363,7 @@ fn the_heart_toggles_a_rows_favorite() {
 #[test]
 fn the_eye_hides_and_unhides() {
     let (mut app, _) = open_over_running();
-    let name = app.milkdrop.picker.as_ref().expect("open").filtered[2].clone();
+    let name = app.milkdrop.picker.as_ref().expect("open").list.filtered[2].clone();
     app.milkdrop.history.push(name.clone());
     picker(&mut app, P::ToggleHidden(name.clone()));
     assert!(app.milkdrop.library.is_hidden(&name));
@@ -392,15 +392,19 @@ fn a_hidden_preset_can_still_be_chosen() {
 #[test]
 fn favorites_chip_filters_and_unfavoriting_drops_the_row() {
     let (mut app, _) = open_over_running();
-    let names: Vec<String> = app.milkdrop.picker.as_ref().expect("open").filtered[..2].to_vec();
+    let names: Vec<String> =
+        app.milkdrop.picker.as_ref().expect("open").list.filtered[..2].to_vec();
     for name in &names {
         picker(&mut app, P::ToggleFavorite(name.clone()));
     }
     picker(&mut app, P::ToggleFavoritesOnly);
-    assert_eq!(app.milkdrop.picker.as_ref().expect("open").filtered, names);
+    assert_eq!(
+        app.milkdrop.picker.as_ref().expect("open").list.filtered,
+        names
+    );
     picker(&mut app, P::ToggleFavorite(names[0].clone()));
     assert_eq!(
-        app.milkdrop.picker.as_ref().expect("open").filtered,
+        app.milkdrop.picker.as_ref().expect("open").list.filtered,
         [names[1].clone()]
     );
 }
@@ -412,11 +416,12 @@ fn search_filters_and_previews_the_first_match() {
     let state = app.milkdrop.picker.as_ref().expect("open");
     assert!(
         state
+            .list
             .filtered
             .iter()
             .all(|n| n.to_lowercase().contains("fjord"))
     );
-    assert!(!state.filtered.is_empty());
+    assert!(!state.list.filtered.is_empty());
     assert_eq!(app.milkdrop.current, centered(&app));
 }
 

@@ -1,12 +1,11 @@
 //! MilkDrop preset picker — a searchable modal over the running visualizer.
 //! Opened from the Choose Preset key (`m`) or the Queue / Theater panel menus.
 //!
-//! Mirrors the default-playlist picker (`default_playlist_picker.rs`): a
-//! searchable slot list with immediate filtering, Up/Down/Enter navigation,
-//! centered over the shared modal backdrop, dismissed by Escape / X / a click
-//! outside. The difference is behavioral: the centered row plays live behind
-//! the modal as the list moves, Enter keeps (and locks) it, and closing any
-//! other way returns to the preset that was on screen when the picker opened.
+//! The list state and modal chrome are the shared picker shell
+//! (`widgets::picker_modal`, also used by the default-playlist picker). The
+//! difference is behavioral: the centered row plays live behind the modal as
+//! the list moves, Enter keeps (and locks) it, and closing any other way
+//! returns to the preset that was on screen when the picker opened.
 //!
 //! State lives on `Nokkvi.milkdrop.picker`; the handler is
 //! `update/milkdrop_picker.rs`.
@@ -20,26 +19,20 @@ use nokkvi_data::services::milkdrop_presets::{NOKKVI_PRESET_PREFIX, PresetLibrar
 
 use crate::{
     embedded_svg, theme,
-    widgets::{SlotListView, slot_list},
+    widgets::picker_modal::{PickerChrome, PickerList, picker_modal},
 };
 
 /// `text_input` ID for the picker's search field, focused on open.
 pub(crate) const MILKDROP_PICKER_SEARCH_INPUT_ID: &str = "milkdrop_picker_search";
 
-const TITLE_BAR_HEIGHT: f32 = 38.0;
-const SEARCH_BAR_HEIGHT: f32 = 40.0;
-
 /// State for the preset picker overlay.
 #[derive(Debug, Clone)]
 pub struct MilkdropPickerState {
-    /// Every preset name in the library, in library (name) order.
-    pub all: Vec<String>,
-    pub search_query: String,
+    /// Every preset name in the library, in library (name) order; `filtered`
+    /// holds the names matching the query and the favorites chip.
+    pub(crate) list: PickerList<String>,
     /// Show only favorites (the title-bar chip).
     pub favorites_only: bool,
-    /// The names matching the query and the favorites chip.
-    pub filtered: Vec<String>,
-    pub slot_list: SlotListView,
     /// The preset on screen (or loading) when the picker opened; closing
     /// without choosing returns to it.
     pub original: Option<String>,
@@ -52,53 +45,32 @@ impl MilkdropPickerState {
     /// A picker over every preset in `library`, centered on `original`.
     pub(crate) fn new(library: &PresetLibrary, original: Option<String>, was_locked: bool) -> Self {
         let all: Vec<String> = library.entries().iter().map(|e| e.name.clone()).collect();
-        let mut state = Self {
-            filtered: all.clone(),
-            all,
-            search_query: String::new(),
+        let mut list = PickerList::new(all);
+        if let Some(name) = &original {
+            list.center_on(name);
+        }
+        Self {
+            list,
             favorites_only: false,
-            slot_list: SlotListView::new(),
             original,
             was_locked,
-        };
-        if let Some(name) = state.original.clone() {
-            state.center_on(&name);
         }
-        state
     }
 
-    /// Recompute `filtered` from the query (case-insensitive substring) and
-    /// the favorites chip. Keeps the centered preset centered when it still
-    /// matches; otherwise the list starts at its first row.
+    /// Recompute the filtered names from the query (case-insensitive
+    /// substring) and the favorites chip; see [`PickerList::refilter`] for
+    /// where the centered row lands.
     pub(crate) fn refilter(&mut self, library: &PresetLibrary) {
-        let centered = self.centered().map(str::to_string);
-        let query = self.search_query.to_lowercase();
-        self.filtered = self
-            .all
-            .iter()
-            .filter(|name| !self.favorites_only || library.is_favorite(name))
-            .filter(|name| query.is_empty() || name.to_lowercase().contains(&query))
-            .cloned()
-            .collect();
-        self.slot_list = SlotListView::new();
-        if let Some(name) = centered {
-            self.center_on(&name);
-        }
+        let favorites_only = self.favorites_only;
+        self.list.refilter(|name, query| {
+            (!favorites_only || library.is_favorite(name))
+                && (query.is_empty() || name.to_lowercase().contains(query))
+        });
     }
 
     /// The preset on the centered row.
     pub(crate) fn centered(&self) -> Option<&str> {
-        self.slot_list
-            .get_center_item_index(self.filtered.len())
-            .and_then(|i| self.filtered.get(i))
-            .map(String::as_str)
-    }
-
-    /// Scroll so `name` sits on the centered row (no-op when filtered out).
-    pub(crate) fn center_on(&mut self, name: &str) {
-        if let Some(index) = self.filtered.iter().position(|n| n == name) {
-            self.slot_list.set_offset(index, self.filtered.len());
-        }
+        self.list.centered().map(String::as_str)
     }
 }
 
@@ -138,24 +110,6 @@ pub(crate) fn milkdrop_picker_overlay<'a>(
     state: &'a MilkdropPickerState,
     data: MilkdropPickerViewData<'a>,
 ) -> Element<'a, MilkdropPickerMessage> {
-    let modal_height = (data.window_height * 0.70).max(320.0);
-    let modal_chrome = TITLE_BAR_HEIGHT + SEARCH_BAR_HEIGHT;
-    let label_size = 13.0;
-
-    // ── Title bar: title, Favorites chip, X ──
-    let dim_color = theme::fg4();
-    let close_btn = button(
-        embedded_svg::svg_widget("assets/icons/x.svg")
-            .width(Length::Fixed(label_size))
-            .height(Length::Fixed(label_size))
-            .style(move |_theme, _status| svg::Style {
-                color: Some(dim_color),
-            }),
-    )
-    .on_press(MilkdropPickerMessage::Close)
-    .style(theme::transparent_button_style)
-    .padding(Padding::new(2.0));
-
     let favorites_only = state.favorites_only;
     let chip_color = if favorites_only {
         theme::accent()
@@ -187,123 +141,49 @@ pub(crate) fn milkdrop_picker_overlay<'a>(
     .style(theme::transparent_button_style)
     .padding(Padding::new(4.0).left(8.0).right(8.0));
 
-    let count = format!("{} / {}", state.filtered.len(), state.all.len());
-    let title_row = row![
-        Space::new().width(Length::Fixed(12.0)),
-        text("MilkDrop Presets")
-            .size(label_size)
-            .font(theme::weighted_ui_font(Weight::Bold))
-            .color(theme::fg0()),
-        Space::new().width(Length::Fixed(10.0)),
-        text(count)
-            .size(11.0)
-            .font(theme::ui_font())
-            .color(theme::fg4()),
-        Space::new().width(Length::Fill),
-        favorites_chip,
-        Space::new().width(Length::Fixed(8.0)),
-        close_btn,
-        Space::new().width(Length::Fixed(12.0)),
-    ]
-    .align_y(Alignment::Center)
-    .height(Length::Fixed(TITLE_BAR_HEIGHT));
-    let title_bar = container(title_row).width(Length::Fill);
+    let count = text(format!(
+        "{} / {}",
+        state.list.filtered.len(),
+        state.list.all.len()
+    ))
+    .size(11.0)
+    .font(theme::ui_font())
+    .color(theme::fg4());
 
-    // ── Search bar ──
-    let search_input = crate::widgets::search_bar::search_bar(
-        &state.search_query,
-        "Type to filter presets...",
-        MILKDROP_PICKER_SEARCH_INPUT_ID,
-        MilkdropPickerMessage::SearchChanged,
-        Some(theme::settings_search_input_style),
-    );
-    let search_bar = container(search_input)
-        .width(Length::Fill)
-        .height(Length::Fixed(SEARCH_BAR_HEIGHT))
-        .padding(Padding::new(4.0).left(12.0).right(12.0));
-
-    // ── Slot list or empty state ──
-    let main_area: Element<'a, MilkdropPickerMessage> = if state.filtered.is_empty() {
-        let msg = if state.favorites_only && state.search_query.is_empty() {
-            "No favorite presets yet"
-        } else {
-            "No presets match the search query"
-        };
-        container(
-            text(msg)
-                .size(14)
-                .font(theme::ui_font())
-                .color(theme::fg4()),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center(Length::Fill)
-        .into()
+    let empty_text = if state.favorites_only && state.list.search_query.is_empty() {
+        "No favorite presets yet"
     } else {
-        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
-        let total = state.filtered.len();
-        let library = data.library;
-        let on_screen = data.on_screen;
-        slot_list::slot_list_view_with_scroll(
-            &state.slot_list,
-            &state.filtered,
-            &config,
-            MilkdropPickerMessage::SlotListUp,
-            MilkdropPickerMessage::SlotListDown,
-            move |f| MilkdropPickerMessage::SlotListSetOffset((f * total as f32) as usize),
-            None,
-            move |name, ctx| {
-                render_preset_slot(
-                    name,
-                    PresetFlags::of(library, name, on_screen),
-                    ctx.item_index,
-                    ctx.is_center,
-                    ctx.row_height,
-                )
-            },
-        )
+        "No presets match the search query"
     };
 
-    let modal_panel = container(
-        column![title_bar, search_bar, main_area]
-            .width(Length::Fill)
-            .height(Length::Fill),
+    let library = data.library;
+    let on_screen = data.on_screen;
+    picker_modal(
+        PickerChrome {
+            title: "MilkDrop Presets",
+            after_title: Some(count.into()),
+            before_close: Some(favorites_chip.into()),
+            search_placeholder: "Type to filter presets...",
+            search_input_id: MILKDROP_PICKER_SEARCH_INPUT_ID,
+            on_search: MilkdropPickerMessage::SearchChanged,
+            on_close: MilkdropPickerMessage::Close,
+            on_up: MilkdropPickerMessage::SlotListUp,
+            on_down: MilkdropPickerMessage::SlotListDown,
+            on_set_offset: MilkdropPickerMessage::SlotListSetOffset,
+            empty_text,
+            window_height: data.window_height,
+        },
+        &state.list,
+        move |name, ctx| {
+            render_preset_slot(
+                name,
+                PresetFlags::of(library, name, on_screen),
+                ctx.item_index,
+                ctx.is_center,
+                ctx.row_height,
+            )
+        },
     )
-    .width(Length::FillPortion(5))
-    .height(Length::Fixed(modal_height))
-    .clip(true)
-    .padding(Padding::new(4.0))
-    .style(theme::modal_frame_style);
-
-    let modal_row = row![
-        Space::new().width(Length::FillPortion(1)),
-        modal_panel,
-        Space::new().width(Length::FillPortion(1)),
-    ]
-    .width(Length::Fill)
-    .align_y(Alignment::Center);
-
-    let scaffold = theme::modal_scaffold(
-        modal_row.into(),
-        MilkdropPickerMessage::Close,
-        theme::MODAL_BACKDROP_ALPHA,
-    );
-
-    // `opaque` (inside the scaffold) captures presses, not scrolls, so the
-    // wheel steps the list anywhere over the modal.
-    mouse_area(scaffold)
-        .on_scroll(|delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
-            if y > 0.0 {
-                MilkdropPickerMessage::SlotListUp
-            } else {
-                MilkdropPickerMessage::SlotListDown
-            }
-        })
-        .into()
 }
 
 /// A row's live curation and status flags, read from the library at render
@@ -494,7 +374,7 @@ mod tests {
         let lib = library();
         let state = MilkdropPickerState::new(&lib, Some("Gamma - three".into()), false);
         assert_eq!(state.centered(), Some("Gamma - three"));
-        assert_eq!(state.filtered.len(), 4);
+        assert_eq!(state.list.filtered.len(), 4);
     }
 
     #[test]
@@ -508,12 +388,12 @@ mod tests {
     fn refilter_is_case_insensitive_and_keeps_a_matching_center() {
         let lib = library();
         let mut state = MilkdropPickerState::new(&lib, Some("Gamma - three".into()), false);
-        state.search_query = "A - T".into();
+        state.list.search_query = "A - T".into();
         state.refilter(&lib);
-        assert_eq!(state.filtered, ["Beta - two", "Gamma - three"]);
+        assert_eq!(state.list.filtered, ["Beta - two", "Gamma - three"]);
         assert_eq!(state.centered(), Some("Gamma - three"));
 
-        state.search_query = "fjord".into();
+        state.list.search_query = "fjord".into();
         state.refilter(&lib);
         assert_eq!(state.centered(), Some("nokkvi - fjord"), "center moved off");
     }
@@ -525,7 +405,7 @@ mod tests {
         let mut state = MilkdropPickerState::new(&lib, None, false);
         state.favorites_only = true;
         state.refilter(&lib);
-        assert_eq!(state.filtered, ["Beta - two"]);
+        assert_eq!(state.list.filtered, ["Beta - two"]);
     }
 
     #[test]

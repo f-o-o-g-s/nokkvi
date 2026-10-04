@@ -27,32 +27,32 @@ impl Nokkvi {
             MilkdropPickerMessage::Close => self.close_milkdrop_picker(),
             MilkdropPickerMessage::SearchChanged(query) => {
                 if let Some(state) = self.milkdrop.picker.as_mut() {
-                    state.search_query = query;
+                    state.list.search_query = query;
                     state.refilter(&self.milkdrop.library);
                 }
                 self.milkdrop_picker_sync_preview()
             }
             MilkdropPickerMessage::SlotListUp => {
                 if let Some(state) = self.milkdrop.picker.as_mut() {
-                    state.slot_list.move_up(state.filtered.len());
+                    state.list.move_up();
                 }
                 self.milkdrop_picker_sync_preview()
             }
             MilkdropPickerMessage::SlotListDown => {
                 if let Some(state) = self.milkdrop.picker.as_mut() {
-                    state.slot_list.move_down(state.filtered.len());
+                    state.list.move_down();
                 }
                 self.milkdrop_picker_sync_preview()
             }
             MilkdropPickerMessage::SlotListSetOffset(offset) => {
                 if let Some(state) = self.milkdrop.picker.as_mut() {
-                    state.slot_list.set_offset(offset, state.filtered.len());
+                    state.list.set_offset(offset);
                 }
                 self.milkdrop_picker_sync_preview()
             }
             MilkdropPickerMessage::ClickItem(index) => {
                 if let Some(state) = self.milkdrop.picker.as_mut() {
-                    state.slot_list.set_offset(index, state.filtered.len());
+                    state.list.set_offset(index);
                 }
                 self.choose_milkdrop_picker_center()
             }

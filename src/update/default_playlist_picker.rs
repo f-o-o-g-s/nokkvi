@@ -31,38 +31,36 @@ impl Nokkvi {
             }
             DefaultPlaylistPickerMessage::SearchChanged(query) => {
                 if let Some(state) = self.default_playlist_picker.as_mut() {
-                    state.search_query = query;
+                    state.list.search_query = query;
                     state.refilter();
                 }
                 Task::none()
             }
             DefaultPlaylistPickerMessage::SlotListUp => {
                 if let Some(state) = self.default_playlist_picker.as_mut() {
-                    let total = state.filtered.len();
-                    state.slot_list.move_up(total);
+                    state.list.move_up();
                 }
                 Task::none()
             }
             DefaultPlaylistPickerMessage::SlotListDown => {
                 if let Some(state) = self.default_playlist_picker.as_mut() {
-                    let total = state.filtered.len();
-                    state.slot_list.move_down(total);
+                    state.list.move_down();
                 }
                 Task::none()
             }
-            DefaultPlaylistPickerMessage::SlotListSetOffset(offset, _modifiers) => {
+            DefaultPlaylistPickerMessage::SlotListSetOffset(offset) => {
                 if let Some(state) = self.default_playlist_picker.as_mut() {
-                    let total = state.filtered.len();
-                    state.slot_list.set_offset(offset, total);
+                    state.list.set_offset(offset);
                 }
                 Task::none()
             }
             DefaultPlaylistPickerMessage::ClickItem(index) => self.select_picker_index(index),
             DefaultPlaylistPickerMessage::ActivateCenter => {
-                let center_index = self
-                    .default_playlist_picker
-                    .as_ref()
-                    .and_then(|s| s.slot_list.get_center_item_index(s.filtered.len()));
+                let center_index = self.default_playlist_picker.as_ref().and_then(|s| {
+                    s.list
+                        .slot_list
+                        .get_center_item_index(s.list.filtered.len())
+                });
                 if let Some(idx) = center_index {
                     self.select_picker_index(idx)
                 } else {
@@ -99,14 +97,14 @@ impl Nokkvi {
         let Some(picker) = self.default_playlist_picker.as_mut() else {
             return;
         };
-        let saved_query = std::mem::take(&mut picker.search_query);
-        let saved_offset = picker.slot_list.viewport_offset;
+        let saved_query = std::mem::take(&mut picker.list.search_query);
+        let saved_offset = picker.list.slot_list.viewport_offset;
 
         let mut rebuilt = DefaultPlaylistPickerState::new(&self.library.playlists);
-        rebuilt.search_query = saved_query;
+        rebuilt.list.search_query = saved_query;
         rebuilt.refilter();
-        let total = rebuilt.filtered.len();
-        rebuilt.slot_list.set_offset(saved_offset.min(total), total);
+        let total = rebuilt.list.filtered.len();
+        rebuilt.list.set_offset(saved_offset.min(total));
 
         self.default_playlist_picker = Some(rebuilt);
     }
@@ -115,7 +113,7 @@ impl Nokkvi {
         let entry = self
             .default_playlist_picker
             .as_ref()
-            .and_then(|s| s.filtered.get(index).cloned());
+            .and_then(|s| s.list.filtered.get(index).cloned());
         let Some(entry) = entry else {
             return Task::none();
         };

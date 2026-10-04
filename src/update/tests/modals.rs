@@ -211,7 +211,7 @@ fn escape_closes_a_modal_before_the_roulette_spin_under_it() {
 fn picker_offset(app: &Nokkvi) -> Option<usize> {
     app.default_playlist_picker
         .as_ref()
-        .map(|p| p.slot_list.viewport_offset)
+        .map(|p| p.list.slot_list.viewport_offset)
 }
 
 /// A playlist picker with one row under its Clear entry, so a step moves it.

@@ -27,6 +27,7 @@ pub(crate) mod milkdrop_picker;
 pub(crate) mod modal_button;
 pub(crate) mod nav_bar;
 pub(crate) mod overflow_pin;
+pub(crate) mod picker_modal;
 pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;
