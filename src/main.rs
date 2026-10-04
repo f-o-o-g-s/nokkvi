@@ -226,7 +226,6 @@ pub struct Nokkvi {
     /// has no duration and no song id — see [`crate::state::RadioScrobbleState`].
     pub radio_scrobble: crate::state::RadioScrobbleState,
     pub modes: crate::state::PlaybackModes,
-    pub sfx: crate::state::SfxState,
     pub engine: crate::state::EngineState,
     pub artwork: crate::state::ArtworkState,
     pub window: crate::state::WindowState,
@@ -437,19 +436,24 @@ impl Default for Nokkvi {
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every scalar
             // field (view_columns carries the real shipped column defaults
-            // via ViewColumns::default()) — the 5 fields below are
+            // via ViewColumns::default()) — the fields below are
             // hand-restored to non-zero values so first-launch behavior
             // (before PlayerSettingsLoaded fires) matches the pre-substruct
-            // shape. These 5 must stay in agreement with
-            // PersistedPlayerSettings::default(); the remaining fields
-            // intentionally stay at LivePlayerSettings::default() until
-            // PlayerSettingsLoaded overwrites them from redb.
+            // shape, and the live controls read from here (volume, SFX
+            // volume, Seek Step) start where a fresh install does. These must
+            // stay in agreement with PersistedPlayerSettings::default(); the
+            // remaining fields intentionally stay at
+            // LivePlayerSettings::default() until PlayerSettingsLoaded
+            // overwrites them from redb.
             settings: nokkvi_data::types::player_settings::LivePlayerSettings {
                 scrobbling_enabled: true,
                 scrobble_threshold: 0.50,
                 start_view: "Harbour".to_string(),
                 stable_viewport: true,
                 auto_follow_playing: true,
+                volume: 1.0,
+                sfx_volume: 0.68,
+                seek_step_secs: nokkvi_data::types::player_settings::SEEK_STEP_DEFAULT_SECS,
                 ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
             },
             // UI runtime flags (not persisted)
@@ -468,7 +472,6 @@ impl Default for Nokkvi {
             seek: crate::state::SeekState::default(),
             radio_scrobble: crate::state::RadioScrobbleState::default(),
             modes: crate::state::PlaybackModes::default(),
-            sfx: crate::state::SfxState::default(),
             engine: crate::state::EngineState::default(),
             artwork: crate::state::ArtworkState::default(),
             window: crate::state::WindowState::default(),

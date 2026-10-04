@@ -58,7 +58,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // Plain: a pure function of the last tick's position, the track duration,
     // the line count and the user's wheel offset — so it holds still while
     // paused and jumps whole on a seek or a wheel notch.
-    if app.lyrics.enabled && app.lyrics.matched_song_id.is_some() {
+    if app.settings.lyrics_enabled && app.lyrics.matched_song_id.is_some() {
         let pos = if app.lyrics.doc.synced {
             crate::widgets::lyrics_viewport::eased_center(
                 app.lyrics.scroll_from,

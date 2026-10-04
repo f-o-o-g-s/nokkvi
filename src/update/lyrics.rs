@@ -80,7 +80,7 @@ impl Nokkvi {
     /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
     /// enter-Queue, enter-theater, index-ready, extensions-probe-landed.
     pub(crate) fn lyrics_kick_if_unresolved(&mut self) -> Task<Message> {
-        if self.lyrics.enabled
+        if self.settings.lyrics_enabled
             && self.lyrics_surface_visible()
             && self.active_playback.is_queue()
             && let Some(current) = self.scrobble.current_song_id.clone()
@@ -166,7 +166,7 @@ impl Nokkvi {
     /// (`peek_next_song` → `transition`) is off-limits to side channels; the
     /// debounced cold path covers those transitions instead.
     pub(crate) fn lyrics_prefetch_next_task(&self) -> Task<Message> {
-        if !self.lyrics.enabled
+        if !self.settings.lyrics_enabled
             || !self.lyrics_surface_visible()
             || self.modes.random
             || self.lyrics.pending_next.is_some()
@@ -249,7 +249,7 @@ impl Nokkvi {
     pub(crate) fn handle_lyrics_loader(&mut self, msg: LyricsLoaderMessage) -> Task<Message> {
         match msg {
             LyricsLoaderMessage::DebounceElapsed { song_id, epoch } => {
-                if self.lyrics.enabled
+                if self.settings.lyrics_enabled
                     && self.lyrics.load_epoch.accepts(epoch)
                     && self.scrobble.current_song_id.as_deref() == Some(song_id.as_str())
                 {
@@ -358,7 +358,7 @@ impl Nokkvi {
     pub(crate) fn lyrics_blur_task(&mut self) -> Option<Task<Message>> {
         let level = self.settings.lyrics_backdrop_blur;
         let sigma = level.sigma()?;
-        if !self.lyrics.enabled || !self.lyrics_surface_visible() {
+        if !self.settings.lyrics_enabled || !self.lyrics_surface_visible() {
             return None;
         }
         let album_id = self.current_queue_song_album_id()?.to_string();

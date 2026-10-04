@@ -116,8 +116,8 @@ impl Nokkvi {
 
         let playback = PlaybackSettingsData {
             crossfade_enabled: self.settings.crossfade_enabled,
-            // The live mirror (flipped synchronously by the player-bar toggle).
-            lyrics_enabled: self.lyrics.enabled,
+            // Flipped synchronously by the player-bar toggle.
+            lyrics_enabled: self.settings.lyrics_enabled,
             lyrics_fetch_online: self.settings.lyrics_fetch_online,
             lyrics_backdrop_blur: self.settings.lyrics_backdrop_blur.as_label().into(),
             bit_perfect: self.settings.bit_perfect.as_label().into(),

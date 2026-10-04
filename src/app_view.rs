@@ -613,7 +613,7 @@ impl Nokkvi {
             playback_duration: self.playback.duration,
             playback_playing: self.playback.playing,
             playback_paused: self.playback.paused,
-            volume: self.playback.volume,
+            volume: self.settings.volume,
             has_queue,
             is_radio: self.active_playback.is_radio(),
             is_random_mode: self.modes.random,
@@ -621,10 +621,10 @@ impl Nokkvi {
             is_repeat_queue_mode: self.modes.repeat_queue,
             is_consume_mode: self.modes.consume,
             eq_enabled: self.playback.eq_state.is_enabled(),
-            sound_effects_enabled: self.sfx.enabled,
-            sfx_volume: self.sfx.volume,
+            sound_effects_enabled: self.settings.sound_effects_enabled,
+            sfx_volume: self.settings.sfx_volume,
             crossfade_enabled: self.settings.crossfade_enabled,
-            lyrics_enabled: self.lyrics.enabled,
+            lyrics_enabled: self.settings.lyrics_enabled,
             bit_perfect_mode: self.settings.bit_perfect,
             visualization_mode: self.settings.visualization_mode,
             window_width: self.window.width,
@@ -1669,7 +1669,7 @@ impl Nokkvi {
     /// applies it only on the is-playing branch (the blur is keyed to the
     /// PLAYING track's cover; the paused/centered panel stays sharp).
     pub(crate) fn lyrics_blurred_cover_for_view(&self) -> Option<&iced::widget::image::Handle> {
-        if !self.lyrics.enabled || !self.active_playback.is_queue() {
+        if !self.settings.lyrics_enabled || !self.active_playback.is_queue() {
             return None;
         }
         // MilkDrop replaces the cover, so there is no cover to frost.
@@ -2015,7 +2015,7 @@ impl Nokkvi {
         // survives `stop()`) — so neither means audio is live. The real gate
         // is the transport: playing or paused. Stopped / never-played leaves
         // the cover art bare.
-        (self.lyrics.enabled
+        (self.settings.lyrics_enabled
             && self.active_playback.is_queue()
             && (self.playback.playing || self.playback.paused)
             && self.scrobble.current_song_id.is_some())

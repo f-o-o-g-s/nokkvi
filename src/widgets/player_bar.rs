@@ -632,8 +632,8 @@ pub(crate) struct PlayerBarViewData {
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
-    /// Synced-lyrics overlay toggle (the live mirror of
-    /// `general.lyrics_enabled`). Drives the Lyrics mode button's active state.
+    /// Synced-lyrics overlay toggle (`general.lyrics_enabled`). Drives the
+    /// Lyrics mode button's active state.
     pub lyrics_enabled: bool,
     /// Bit-perfect output mode (the setting: Off / Strict / Relaxed). Drives the
     /// Bit-Perfect mode toggle's icon + active state. Distinct from

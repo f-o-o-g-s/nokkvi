@@ -113,7 +113,6 @@ pub struct PlaybackState {
     pub artist: String,
     /// Album name of the currently playing track
     pub album: String,
-    pub volume: f32,
     /// Audio format suffix (e.g., "flac", "mp3", "opus")
     pub format_suffix: String,
     /// Sample rate in Hz (e.g., 44100, 48000, 96000)
@@ -206,7 +205,6 @@ impl Default for PlaybackState {
             title: "Not Playing".to_string(),
             artist: String::new(),
             album: String::new(),
-            volume: 1.0,
             format_suffix: String::new(),
             sample_rate: 0,
             bit_perfect_status: BitPerfectStatus::Off,

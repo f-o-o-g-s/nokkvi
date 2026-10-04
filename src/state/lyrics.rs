@@ -44,9 +44,6 @@ impl OutgoingLyrics {
 /// Per-session lyrics state, embedded on `Nokkvi`.
 #[derive(Debug, Default)]
 pub struct LyricsState {
-    /// Live mirror of `general.lyrics_enabled` (flipped synchronously by the
-    /// toggle in Stage D; seeded from the persisted setting at login).
-    pub enabled: bool,
     /// The store index, built once at boot. `None` until the build lands (or if
     /// the store dir is unavailable) — the store channel is simply skipped then.
     pub index: Option<Arc<LyricsIndex>>,
@@ -91,7 +88,6 @@ pub struct LyricsState {
 impl LyricsState {
     /// Drop the current document (and any stale prefetch), reset the cursor, and
     /// bump the epoch so an in-flight resolve for the old track is rejected.
-    /// Leaves `enabled` untouched.
     pub fn clear(&mut self) {
         self.doc = LrcDocument::default();
         self.pending_next = None;

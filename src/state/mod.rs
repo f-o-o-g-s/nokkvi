@@ -18,7 +18,7 @@
 //!
 //! 2. Hand-written `impl Default` — when the holder has a sensible empty
 //!    starting state but some field defaults aren't what the holder wants
-//!    (e.g. `SfxState::volume = 0.68`, `WindowState::width = 1200.0`,
+//!    (e.g. `WindowState::width = 1200.0`,
 //!    `CrossPaneDragUi::selection_count = 1`, or a string field that should
 //!    start as `"Not Playing"`). Reach for this over `new()` when no
 //!    constructor arguments are needed; reserve `new()` for shapes that

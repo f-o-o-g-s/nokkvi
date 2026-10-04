@@ -405,7 +405,7 @@ fn volume_changed_sets_state_and_pushes_toast() {
 
     let _ = app.handle_volume_changed(0.42);
 
-    assert!((app.playback.volume - 0.42).abs() < f32::EPSILON);
+    assert!((app.settings.volume - 0.42).abs() < f32::EPSILON);
     let last = app
         .toast
         .toasts
@@ -422,7 +422,7 @@ fn sfx_volume_changed_sets_state_and_pushes_toast() {
 
     let _ = app.handle_sfx_volume_changed(0.7);
 
-    assert!((app.sfx.volume - 0.7).abs() < f32::EPSILON);
+    assert!((app.settings.sfx_volume - 0.7).abs() < f32::EPSILON);
     let last = app
         .toast
         .toasts
@@ -439,7 +439,7 @@ fn volume_committed_sets_state_and_pushes_toast() {
 
     let _ = app.handle_volume_committed(0.42);
 
-    assert!((app.playback.volume - 0.42).abs() < f32::EPSILON);
+    assert!((app.settings.volume - 0.42).abs() < f32::EPSILON);
     let last = app
         .toast
         .toasts
@@ -556,7 +556,7 @@ fn volume_committed_advances_throttle_inside_blocked_window() {
 
     // Final in-memory volume reflects the released value (not the blocked
     // intermediate change).
-    assert!((app.playback.volume - 0.70).abs() < f32::EPSILON);
+    assert!((app.settings.volume - 0.70).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -579,7 +579,7 @@ fn volume_committed_sets_throttle_when_previously_unset() {
 fn sfx_volume_changed_clamps_above_one() {
     let mut app = test_app();
     let _ = app.handle_sfx_volume_changed(1.5);
-    assert!((app.sfx.volume - 1.0).abs() < f32::EPSILON);
+    assert!((app.settings.sfx_volume - 1.0).abs() < f32::EPSILON);
     assert_eq!(
         app.toast.toasts.back().map(|t| t.message.as_str()),
         Some("SFX Volume: 100%")
@@ -1906,7 +1906,7 @@ fn a_landed_seek_stores_the_whole_second_floor_for_the_tick_heuristic() {
 fn loaded_settings_carry_the_seek_step_into_the_cluster() {
     let mut app = test_app();
     assert_eq!(
-        app.seek.step_secs, 5,
+        app.settings.seek_step_secs, 5,
         "the keys jump 5 s until the persisted settings land"
     );
 
@@ -1918,7 +1918,32 @@ fn loaded_settings_carry_the_seek_step_into_the_cluster() {
     );
 
     assert_eq!(
-        app.seek.step_secs, 12,
+        app.settings.seek_step_secs, 12,
         "the Seek Step setting must reach the cluster the seek keys read"
     );
+}
+
+// `self.settings` is the only copy of each persisted setting: the live
+// controls write it directly, so it is current between reloads.
+
+#[test]
+fn volume_change_updates_the_settings() {
+    let mut app = test_app();
+    let _ = app.handle_volume_changed(0.42);
+    assert!((app.settings.volume - 0.42).abs() < f32::EPSILON);
+}
+
+#[test]
+fn sound_effects_toggle_updates_the_settings() {
+    let mut app = test_app();
+    let before = app.settings.sound_effects_enabled;
+    let _ = app.handle_toggle_sound_effects();
+    assert_eq!(app.settings.sound_effects_enabled, !before);
+}
+
+#[test]
+fn sfx_volume_change_updates_the_settings() {
+    let mut app = test_app();
+    let _ = app.handle_sfx_volume_changed(0.25);
+    assert!((app.settings.sfx_volume - 0.25).abs() < f32::EPSILON);
 }

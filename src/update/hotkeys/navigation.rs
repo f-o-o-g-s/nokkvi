@@ -200,7 +200,7 @@ impl Nokkvi {
         if let Some(task) = self.horizontal_arrow_context(forward) {
             return task;
         }
-        self.handle_seek_relative(seek_step_delta(self.seek.step_secs, forward))
+        self.handle_seek_relative(seek_step_delta(self.settings.seek_step_secs, forward))
     }
 
     pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {

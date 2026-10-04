@@ -455,7 +455,7 @@ define_commands! {
         }
     });
     "volume"      => act_str ("value", |app: &mut Nokkvi, raw: &str| {
-        let current = app.playback.volume;
+        let current = app.settings.volume;
         let new = parse_volume_change(raw, current)
             .map_err(|message| ("invalid_args", message))?;
         let task = Task::done(Message::Playback(PlaybackMessage::VolumeCommitted(new)));
@@ -745,7 +745,7 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "album": app.playback.album,
         "position": app.playback.position,
         "duration": app.playback.duration,
-        "volume": round_f32(app.playback.volume),
+        "volume": round_f32(app.settings.volume),
         "random": app.modes.random,
         "repeat": repeat_str(&app.modes),
         "consume": app.modes.consume,

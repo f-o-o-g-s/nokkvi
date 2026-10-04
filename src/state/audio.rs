@@ -1,20 +1,4 @@
-//! SFX and audio-engine transient state.
-
-/// Sound effects engine state
-#[derive(Debug, Clone)]
-pub struct SfxState {
-    pub enabled: bool,
-    pub volume: f32,
-}
-
-impl Default for SfxState {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            volume: 0.68,
-        }
-    }
-}
+//! Audio-engine transient state.
 
 /// Audio engine transient state. The engine-related settings (visualizer
 /// mode, crossfade, bit-perfect, normalization) live on `Nokkvi.settings`

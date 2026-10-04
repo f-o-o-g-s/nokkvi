@@ -125,8 +125,8 @@ fn player_settings_loaded_applies_visualizer_to_shared_config() {
 #[test]
 fn apply_visualizer_settings_leaves_playback_state_alone() {
     let mut app = test_app();
-    app.playback.volume = 0.77;
-    app.sfx.volume = 0.55;
+    app.settings.volume = 0.77;
+    app.settings.sfx_volume = 0.55;
     app.settings_page.config_dirty = false;
 
     let viz = nokkvi_data::types::visualizer_config::VisualizerConfig {
@@ -136,11 +136,11 @@ fn apply_visualizer_settings_leaves_playback_state_alone() {
     let _ = app.apply_visualizer_settings(viz);
 
     assert_eq!(
-        app.playback.volume, 0.77,
+        app.settings.volume, 0.77,
         "visualizer apply must not touch playback volume"
     );
     assert_eq!(
-        app.sfx.volume, 0.55,
+        app.settings.sfx_volume, 0.55,
         "visualizer apply must not touch SFX volume"
     );
     assert_eq!(

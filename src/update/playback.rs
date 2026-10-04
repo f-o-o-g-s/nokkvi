@@ -788,7 +788,7 @@ impl Nokkvi {
                 // showing (no off-surface network) — schedule the debounced
                 // resolve. A skip storm re-clears per skip, so only the track
                 // still current when a window elapses actually dispatches.
-                if self.lyrics.enabled {
+                if self.settings.lyrics_enabled {
                     // Crossfade-coupled dissolve: while the audio blends the
                     // outgoing track into the next, the old sheet fades out in
                     // place over the same duration as the new one resolves in.
@@ -837,7 +837,7 @@ impl Nokkvi {
                 tasks.push(task);
             }
 
-            if self.lyrics.enabled
+            if self.settings.lyrics_enabled
                 && self.lyrics.matched_song_id == song_id
                 && !self.lyrics.doc.lines.is_empty()
             {
@@ -1695,17 +1695,18 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_toggle_sound_effects(&mut self) -> Task<Message> {
-        self.sfx.enabled = !self.sfx.enabled;
-        let label = if self.sfx.enabled {
+        self.settings.sound_effects_enabled = !self.settings.sound_effects_enabled;
+        let label = if self.settings.sound_effects_enabled {
             "UI SFX: On"
         } else {
             "UI SFX: Off"
         };
         self.toast_info(label);
-        self.sfx_engine.set_enabled(self.sfx.enabled);
+        self.sfx_engine
+            .set_enabled(self.settings.sound_effects_enabled);
 
         // Persist to storage
-        let enabled = self.sfx.enabled;
+        let enabled = self.settings.sound_effects_enabled;
         self.shell_spawn("persist_sfx_enabled", move |shell| async move {
             shell.settings().set_sound_effects_enabled(enabled).await
         });
@@ -1713,12 +1714,12 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_sfx_volume_changed(&mut self, vol: f32) -> Task<Message> {
-        self.sfx.volume = vol.clamp(0.0, 1.0);
-        self.sfx_engine.set_volume(self.sfx.volume);
-        Self::push_volume_toast(&mut self.toast, "SFX Volume", self.sfx.volume);
+        self.settings.sfx_volume = vol.clamp(0.0, 1.0);
+        self.sfx_engine.set_volume(self.settings.sfx_volume);
+        Self::push_volume_toast(&mut self.toast, "SFX Volume", self.settings.sfx_volume);
 
         // Persist to storage
-        let vol = self.sfx.volume;
+        let vol = self.settings.sfx_volume;
         self.shell_spawn("persist_sfx_volume", move |shell| async move {
             shell.settings().set_sfx_volume(vol).await
         });
@@ -2042,7 +2043,7 @@ impl Nokkvi {
     /// and [`Self::handle_volume_committed`] so the two paths can never drift on
     /// what "applying" a volume value means.
     fn apply_volume_immediate(&mut self, val: f32) {
-        self.playback.volume = val;
+        self.settings.volume = val;
         Self::push_volume_toast(&mut self.toast, "Volume", val);
         if let Some(ref conn) = self.mpris_connection {
             conn.set_volume(f64::from(val));
@@ -2201,9 +2202,6 @@ impl Nokkvi {
         &mut self,
         mut settings: crate::app_message::LivePlayerSettings,
     ) -> Task<Message> {
-        self.playback.volume = settings.volume;
-        self.sfx.volume = settings.sfx_volume;
-        self.sfx.enabled = settings.sound_effects_enabled;
         // Also runs on every config hot reload: the edge compares against the
         // previous mode, so re-delivering the same one fires nothing. The mode
         // is written ahead of the wholesale `self.settings` replacement below
@@ -2241,17 +2239,6 @@ impl Nokkvi {
                 Ok(())
             });
         }
-        // The seek keys read the step from the seek cluster, not from
-        // `self.settings`, so mirror it here — this runs on the initial load
-        // AND after every settings edit (`handle_settings_general` feeds the
-        // fresh snapshot straight back through this handler).
-        self.seek.step_secs = settings.seek_step_secs;
-        // Seed the live lyrics mirror — the ONE place persisted values reach
-        // live mirrors (the ctor cannot: settings arrive async). The player-bar
-        // toggle flips this mirror synchronously and persists behind it, so a
-        // subsequent settings load round-trips the same value.
-        self.lyrics.enabled = settings.lyrics_enabled;
-
         // Apply EQ settings
         self.playback.eq_state.set_enabled(settings.eq_enabled);
         for (i, &gain) in settings.eq_gains.iter().enumerate() {
@@ -2429,12 +2416,13 @@ impl Nokkvi {
         }
 
         // Apply settings to engines
-        self.sfx_engine.set_enabled(self.sfx.enabled);
-        self.sfx_engine.set_volume(self.sfx.volume);
+        self.sfx_engine
+            .set_enabled(self.settings.sound_effects_enabled);
+        self.sfx_engine.set_volume(self.settings.sfx_volume);
 
         // Send initial volume to PipeWire so the shell mixer shows the
         // correct percentage from startup (before user drags the slider).
-        self.sfx_engine.set_output_volume(self.playback.volume);
+        self.sfx_engine.set_output_volume(self.settings.volume);
 
         // Apply theme mode from config.toml (single source of truth)
         let config_light_mode = crate::theme_config::load_light_mode_from_config();
@@ -2528,13 +2516,13 @@ impl Nokkvi {
         }
 
         // Apply volume to audio engine
-        let vol = self.playback.volume;
+        let vol = self.settings.volume;
         self.shell_spawn("apply_volume", move |shell| async move {
             shell.set_volume(vol).await
         });
 
-        // Settings-visible state changed wholesale above (self.settings, the
-        // live mirrors, the theme atomics) — refresh the cached entries
+        // Settings-visible state changed wholesale above (self.settings,
+        // the theme atomics) — refresh the cached entries
         // when the Settings view is showing. This also fixes the
         // settings-TOML reload chain ordering: HotkeyConfigUpdated used to
         // refresh BEFORE this handler mutated the state it renders. One

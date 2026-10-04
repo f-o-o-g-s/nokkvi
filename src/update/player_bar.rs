@@ -57,14 +57,13 @@ impl Nokkvi {
                 Task::done(Message::Playback(PlaybackMessage::ToggleBitPerfect))
             }
             PlayerBarMessage::ToggleLyrics => {
-                // Flip the LIVE mirror synchronously (the single value the
-                // render reads — observable in tests, where the async persist
-                // below never runs), then persist + drive the surface.
-                // Deliberately NOT the Crossfade re-dispatch hop: that extra
-                // Task indirection is inert in test_app and adds nothing here.
-                self.lyrics.enabled = !self.lyrics.enabled;
-                let enabled = self.lyrics.enabled;
-                self.settings.lyrics_enabled = enabled;
+                // Flip the setting synchronously (the value the render reads —
+                // observable in tests, where the async persist below never
+                // runs), then persist + drive the surface. Deliberately NOT
+                // the Crossfade re-dispatch hop: that extra Task indirection
+                // is inert in test_app and adds nothing here.
+                self.settings.lyrics_enabled = !self.settings.lyrics_enabled;
+                let enabled = self.settings.lyrics_enabled;
                 let persist = self.shell_task(
                     move |shell| async move {
                         let mgr = shell.settings().settings_manager();
@@ -92,11 +91,12 @@ impl Nokkvi {
                 Task::batch([persist, drive])
             }
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
-                scroll_volume_to_committed_message(self.playback.volume, delta),
+                scroll_volume_to_committed_message(self.settings.volume, delta),
             ),
-            PlayerBarMessage::ScrollSfxVolume(delta) => {
-                Task::done(scroll_sfx_volume_to_message(self.sfx.volume, delta))
-            }
+            PlayerBarMessage::ScrollSfxVolume(delta) => Task::done(scroll_sfx_volume_to_message(
+                self.settings.sfx_volume,
+                delta,
+            )),
             PlayerBarMessage::OpenSettings => Task::done(Message::Navigation(
                 NavigationMessage::SwitchView(crate::View::Settings),
             )),

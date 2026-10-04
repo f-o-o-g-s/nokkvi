@@ -1651,7 +1651,7 @@ impl Nokkvi {
             // Play attempt carried + station record; the track display stays
             // (see `PlaybackState`).
             playback: _,
-            // In-flight and queued seek; epoch carried; Seek Step stays.
+            // In-flight and queued seek; epoch carried.
             seek: _,
             // In memory only; the persisted context returns with the queue.
             active_playlist_info: _,
@@ -1704,7 +1704,6 @@ impl Nokkvi {
             settings: _,
             hotkey_config: _,
             modes: _,
-            sfx: _,
             sfx_engine: _,
             window: _,
             player_bar_layout: _,

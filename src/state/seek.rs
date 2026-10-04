@@ -28,8 +28,9 @@ impl SeekRequest {
     }
 }
 
-/// Seek arbitration state, plus the live Seek Step setting the hotkeys read.
-#[derive(Debug)]
+/// Seek arbitration state. The Seek Step the keys jump by is
+/// `settings.seek_step_secs`.
+#[derive(Debug, Default)]
 pub struct SeekState {
     /// A seek has been dispatched and no `SeekApplied` has come back yet.
     in_flight: bool,
@@ -40,23 +41,6 @@ pub struct SeekState {
     /// so an update built before (or during) a seek is recognisable as stale
     /// and dropped instead of dragging the clock back.
     pub epoch: super::StaleDropGen,
-    /// Seconds the Seek Backward / Seek Forward keys jump. Mirrored from
-    /// `general.seek_step`; 5 until the settings load.
-    pub step_secs: u32,
-}
-
-/// The Seek Step setting's default, used until persisted settings land.
-pub(crate) const DEFAULT_SEEK_STEP_SECS: u32 = 5;
-
-impl Default for SeekState {
-    fn default() -> Self {
-        Self {
-            in_flight: false,
-            queued: None,
-            epoch: super::StaleDropGen::default(),
-            step_secs: DEFAULT_SEEK_STEP_SECS,
-        }
-    }
 }
 
 impl SeekState {
@@ -100,8 +84,7 @@ impl SeekState {
 
     /// Drop everything outstanding on logout / session expiry. The dispatched
     /// task is not cancelled, so the epoch bump is what keeps its late
-    /// `SeekApplied` from writing a dead session's position. `step_secs` is a
-    /// user preference and survives.
+    /// `SeekApplied` from writing a dead session's position.
     pub fn reset_for_session(&mut self) {
         self.in_flight = false;
         self.queued = None;
@@ -235,11 +218,9 @@ mod tests {
         let mut state = in_flight();
         assert_eq!(state.request(SeekRequest::Relative(5.0)), None);
         let epoch = state.epoch.current();
-        state.step_secs = 12;
         state.reset_for_session();
         assert!(!state.in_flight());
         assert_eq!(state.queued(), None);
         assert_eq!(state.epoch.current(), epoch.wrapping_add(1));
-        assert_eq!(state.step_secs, 12, "the Seek Step setting is a preference");
     }
 }

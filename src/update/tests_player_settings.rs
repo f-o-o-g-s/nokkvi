@@ -283,3 +283,20 @@ fn nokkvi_has_eq_modal_sibling_field() {
     let _: f32 = app.window.scale_factor;
     let _: iced::keyboard::Modifiers = app.window.keyboard_modifiers;
 }
+
+#[test]
+fn live_controls_start_at_their_persisted_defaults() {
+    // Volume, SFX and Seek Step are read straight from `settings` before
+    // `PlayerSettingsLoaded` lands, so they start at the persisted defaults
+    // rather than `LivePlayerSettings`' all-zero derive.
+    let app = test_app();
+    let persisted = PersistedPlayerSettings::default();
+    assert!((f64::from(app.settings.volume) - persisted.volume).abs() < 1e-6);
+    assert!((f64::from(app.settings.sfx_volume) - persisted.sfx_volume).abs() < 1e-6);
+    assert_eq!(
+        app.settings.sound_effects_enabled,
+        persisted.sound_effects_enabled
+    );
+    assert_eq!(app.settings.seek_step_secs, persisted.seek_step_secs);
+    assert_eq!(app.settings.lyrics_enabled, persisted.lyrics_enabled);
+}
