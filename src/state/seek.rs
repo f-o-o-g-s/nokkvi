@@ -39,7 +39,7 @@ pub struct SeekState {
     /// `PlaybackStateUpdate` carries the epoch its tick read the engine under,
     /// so an update built before (or during) a seek is recognisable as stale
     /// and dropped instead of dragging the clock back.
-    pub epoch: u64,
+    pub epoch: super::StaleDropGen,
     /// Seconds the Seek Backward / Seek Forward keys jump. Mirrored from
     /// `general.seek_step`; 5 until the settings load.
     pub step_secs: u32,
@@ -53,7 +53,7 @@ impl Default for SeekState {
         Self {
             in_flight: false,
             queued: None,
-            epoch: 0,
+            epoch: super::StaleDropGen::default(),
             step_secs: DEFAULT_SEEK_STEP_SECS,
         }
     }
@@ -105,7 +105,7 @@ impl SeekState {
     pub fn reset_for_session(&mut self) {
         self.in_flight = false;
         self.queued = None;
-        self.epoch = self.epoch.wrapping_add(1);
+        self.epoch.bump();
     }
 }
 
@@ -234,12 +234,12 @@ mod tests {
     fn reset_for_session_clears_the_cluster_and_bumps_the_epoch() {
         let mut state = in_flight();
         assert_eq!(state.request(SeekRequest::Relative(5.0)), None);
-        let epoch = state.epoch;
+        let epoch = state.epoch.current();
         state.step_secs = 12;
         state.reset_for_session();
         assert!(!state.in_flight());
         assert_eq!(state.queued(), None);
-        assert_eq!(state.epoch, epoch.wrapping_add(1));
+        assert_eq!(state.epoch.current(), epoch.wrapping_add(1));
         assert_eq!(state.step_secs, 12, "the Seek Step setting is a preference");
     }
 }

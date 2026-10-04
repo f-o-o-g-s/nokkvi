@@ -397,7 +397,7 @@ impl Nokkvi {
         // the root counter would otherwise be adopted by the NEXT session
         // (e.g. a blank-create that dispatches no preview of its own),
         // seeding it with a foreign draft handle + stale results.
-        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
+        self.rules_editor.preview_generation.bump();
         self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;

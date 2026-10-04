@@ -799,7 +799,7 @@ impl Nokkvi {
                 total,
                 evaluated_at,
             } => {
-                if generation != self.rules_editor.preview_generation {
+                if !self.rules_editor.preview_generation.accepts(generation) {
                     // A newer request superseded this write — the server
                     // object it minted must not leak: delete it unless it
                     // IS the session's current draft.
@@ -821,7 +821,7 @@ impl Nokkvi {
                 self.handle_preview_loaded(generation, source_id, rows, total, evaluated_at)
             }
             RulesEditorMessage::DraftUnavailable { generation, error } => {
-                if generation == self.rules_editor.preview_generation {
+                if self.rules_editor.preview_generation.accepts(generation) {
                     warn!("draft create failed: {error}");
                     self.with_rules_session(|s| {
                         // Authoring-only mode: the form stays fully usable
@@ -832,7 +832,7 @@ impl Nokkvi {
                 Task::none()
             }
             RulesEditorMessage::PreviewPageLoaded { generation, rows } => {
-                if generation != self.rules_editor.preview_generation {
+                if !self.rules_editor.preview_generation.accepts(generation) {
                     return Task::none();
                 }
                 self.with_rules_session(|s| {
@@ -874,7 +874,7 @@ impl Nokkvi {
                 )
             }
             RulesEditorMessage::PreviewFailed { generation, error } => {
-                if generation != self.rules_editor.preview_generation {
+                if !self.rules_editor.preview_generation.accepts(generation) {
                     return Task::none();
                 }
                 // Draft 404 mid-session (sweep race / external cleanup):
@@ -1084,7 +1084,7 @@ impl Nokkvi {
             return Task::none();
         };
         self.with_rules_session(|s| s.preview.page_loading = true);
-        let generation = self.rules_editor.preview_generation;
+        let generation = self.rules_editor.preview_generation.current();
         self.shell_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
@@ -1832,8 +1832,7 @@ impl Nokkvi {
         }) else {
             return Task::none();
         };
-        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
-        let generation = self.rules_editor.preview_generation;
+        let generation = self.rules_editor.preview_generation.bump();
         self.with_rules_session(|s| {
             s.captured_generation = generation;
             s.preview.phase = Some(PreviewPhase::Evaluating);
@@ -1915,8 +1914,7 @@ impl Nokkvi {
             return self.dispatch_re_evaluate();
         }
 
-        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
-        let generation = self.rules_editor.preview_generation;
+        let generation = self.rules_editor.preview_generation.bump();
         self.with_rules_session(|s| {
             s.captured_generation = generation;
             s.preview.phase = Some(PreviewPhase::Evaluating);
@@ -2167,7 +2165,7 @@ impl Nokkvi {
         total: Option<u32>,
         evaluated_at: Option<String>,
     ) -> Task<Message> {
-        if generation != self.rules_editor.preview_generation {
+        if !self.rules_editor.preview_generation.accepts(generation) {
             debug!("dropping stale rules evaluation (gen {generation})");
             return Task::none();
         }

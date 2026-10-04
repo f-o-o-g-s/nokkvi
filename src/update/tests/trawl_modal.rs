@@ -91,16 +91,16 @@ fn crate_survives_close_and_reopen() {
 fn search_bumps_generation_every_keystroke_even_clears() {
     let mut app = test_app();
     open_modal(&mut app);
-    let g0 = app.trawl.search_generation;
+    let g0 = app.trawl.search_generation.current();
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("bu".into()));
-    assert_eq!(app.trawl.search_generation, g0.wrapping_add(1));
+    assert_eq!(app.trawl.search_generation.current(), g0.wrapping_add(1));
     assert!(app.trawl.modal.as_ref().is_some_and(|s| s.search_loading));
 
     // Clearing below the threshold ALSO bumps — a late in-flight result must
     // not repopulate an emptied query.
     let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("b".into()));
-    assert_eq!(app.trawl.search_generation, g0.wrapping_add(2));
+    assert_eq!(app.trawl.search_generation.current(), g0.wrapping_add(2));
     let state = app.trawl.modal.as_ref().expect("open");
     assert!(state.search_results.is_none());
     assert!(!state.search_loading, "sub-threshold clears loading");
@@ -110,7 +110,7 @@ fn search_bumps_generation_every_keystroke_even_clears() {
 fn search_loaded_stale_generation_is_dropped() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl.search_generation = 7;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(7);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_loading = true;
     }
@@ -129,7 +129,7 @@ fn search_loaded_stale_generation_is_dropped() {
 fn search_loaded_current_generation_stores_results() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl.search_generation = 4;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(4);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_loading = true;
@@ -154,7 +154,7 @@ fn search_loaded_current_generation_stores_results() {
 fn search_loaded_error_clears_results_and_toasts() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl.search_generation = 2;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(2);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_results = Some(*results_with_genre());
         state.search_loading = true;
@@ -177,7 +177,7 @@ fn search_loaded_error_clears_results_and_toasts() {
 fn click_result_row_toggles_seed_in_and_out() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
@@ -404,7 +404,7 @@ fn nav_key_passes_through_to_trawl_modal() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
@@ -461,7 +461,7 @@ fn enter_in_modal_toggles_centered_seed_not_play() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
@@ -621,7 +621,7 @@ fn tab_unfocuses_the_modal_search_but_backspace_does_not() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
@@ -1338,7 +1338,7 @@ fn escape_with_tray_cursor_active_is_not_two_stage() {
 fn enter_toggles_seed_with_tray_cursor_active() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
@@ -1370,7 +1370,7 @@ fn enter_toggles_seed_with_tray_cursor_active() {
 fn list_nav_keeps_the_tray_cursor() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    app.trawl.search_generation = 1;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(1);
     if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());

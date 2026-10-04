@@ -73,7 +73,7 @@ pub struct HarbourState {
     pub shelves_loading: bool,
     /// Bumped on every shelf (re)load; stale loader results whose captured
     /// generation no longer matches are dropped (Similar-view precedent).
-    pub shelves_generation: u64,
+    pub shelves_generation: super::StaleDropGen,
 
     // --- Whole-library search ---
     /// Current header search query (drives shelves-to-results swap).
@@ -84,7 +84,7 @@ pub struct HarbourState {
     /// A search fan-out is in flight.
     pub search_loading: bool,
     /// Bumped on every keystroke; stale search results are dropped.
-    pub search_generation: u64,
+    pub search_generation: super::StaleDropGen,
     /// Resolved album ids for each searched playlist's quad thumbnail, keyed by
     /// playlist id. Filled by a follow-up fan-out after search results land
     /// (search-result playlists are raw and carry no album ids); accumulates
@@ -178,12 +178,12 @@ impl HarbourState {
         self.random_genre = None;
         self.random_playlist = None;
         self.shelves_loading = false;
-        self.shelves_generation = self.shelves_generation.wrapping_add(1);
+        self.shelves_generation.bump();
         // The active search's results are scope-stale too; a bumped generation
         // drops any in-flight old-scope fan-out when it lands.
         self.search_results = None;
         self.search_loading = false;
-        self.search_generation = self.search_generation.wrapping_add(1);
+        self.search_generation.bump();
         self.search_playlist_album_ids.clear();
         self.search_genre_album_ids.clear();
     }

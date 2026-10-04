@@ -708,7 +708,7 @@ fn device_rate_probe_applies_when_engaged_and_rate_matches() {
     let mut app = test_app();
     app.playback.bit_perfect_engaged = true;
     app.playback.sample_rate = 96_000;
-    app.playback.bit_perfect_probe_generation = 3;
+    app.playback.bit_perfect_probe_generation = crate::state::StaleDropGen::at(3);
     app.playback.bit_perfect_status = BitPerfectStatus::Off;
 
     // Probe (current generation) came back with the device clocked at the track
@@ -769,7 +769,7 @@ fn unreadable_probe_holds_at_unknown_for_one_grace_probe_then_settles_unverifiab
     let mut app = test_app();
     app.playback.bit_perfect_engaged = true;
     app.playback.sample_rate = 96_000;
-    app.playback.bit_perfect_probe_generation = 5;
+    app.playback.bit_perfect_probe_generation = crate::state::StaleDropGen::at(5);
     // Fresh after a transition: hidden, grace streak reset.
     app.playback.bit_perfect_status = BitPerfectStatus::Unknown;
     app.playback.bit_perfect_unverifiable_streak = 0;
@@ -799,7 +799,7 @@ fn a_readable_probe_resets_the_unverifiable_grace_streak() {
     let mut app = test_app();
     app.playback.bit_perfect_engaged = true;
     app.playback.sample_rate = 96_000;
-    app.playback.bit_perfect_probe_generation = 7;
+    app.playback.bit_perfect_probe_generation = crate::state::StaleDropGen::at(7);
     app.playback.bit_perfect_status = BitPerfectStatus::Unknown;
 
     // One unreadable probe builds the streak partway.
@@ -884,7 +884,7 @@ fn stale_out_of_order_probe_does_not_clobber_a_fresher_result() {
     app.playback.sample_rate = 96_000;
     // The latest dispatched probe is generation 5; a fresher probe already set
     // Verified.
-    app.playback.bit_perfect_probe_generation = 5;
+    app.playback.bit_perfect_probe_generation = crate::state::StaleDropGen::at(5);
     app.playback.bit_perfect_status = BitPerfectStatus::Verified;
 
     // An OLDER probe (generation 4, caught the device mid-reclock → 48k) lands
@@ -1657,9 +1657,9 @@ fn seek_applied_publishes_the_landed_position() {
     let mut app = test_app();
     app.playback.position = 10;
     app.scrobble.last_position = 10.0;
-    let epoch = app.seek.epoch;
+    let epoch = app.seek.epoch.current();
 
-    let _ = app.handle_seek_applied(app.seek.epoch, Some(42.5));
+    let _ = app.handle_seek_applied(app.seek.epoch.current(), Some(42.5));
 
     assert_eq!(
         app.playback.position, 42,
@@ -1674,7 +1674,7 @@ fn seek_applied_publishes_the_landed_position() {
         "the landed seek is no longer in flight"
     );
     assert_eq!(
-        app.seek.epoch,
+        app.seek.epoch.current(),
         epoch.wrapping_add(1),
         "a landed seek bumps the epoch so a mid-seek tick can't overwrite it"
     );
@@ -1686,7 +1686,7 @@ fn seek_applied_error_clears_the_flag_without_moving_the_clock() {
     app.playback.position = 10;
     app.scrobble.last_position = 10.0;
 
-    let _ = app.handle_seek_applied(app.seek.epoch, None);
+    let _ = app.handle_seek_applied(app.seek.epoch.current(), None);
 
     assert_eq!(app.playback.position, 10, "a failed seek moves no clock");
     assert_eq!(app.scrobble.last_position, 10.0);
@@ -1710,8 +1710,8 @@ fn a_tick_from_an_older_seek_epoch_keeps_its_position_to_itself() {
     let mut update = make_playback_update();
     update.position = 90;
     update.song_id = Some("song_1".to_string());
-    update.seek_epoch = app.seek.epoch;
-    app.seek.epoch = app.seek.epoch.wrapping_add(1);
+    update.seek_epoch = app.seek.epoch.current();
+    app.seek.epoch.bump();
 
     let _ = app.handle_playback_state_updated(update);
 
@@ -1738,7 +1738,7 @@ fn a_tick_from_the_current_seek_epoch_applies() {
     let mut app = test_app();
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.playback.position = 42;
-    app.seek.epoch = 7;
+    app.seek.epoch = crate::state::StaleDropGen::at(7);
 
     let mut update = make_playback_update();
     update.position = 90;
@@ -1762,8 +1762,8 @@ fn a_small_backward_seek_credits_no_listening_time() {
 
     // A 5 s rewind from 1:40. `handle_seek` writes the target to the base.
     let _ = app.handle_seek(95.0);
-    let stale_epoch = app.seek.epoch;
-    app.seek.epoch = app.seek.epoch.wrapping_add(1);
+    let stale_epoch = app.seek.epoch.current();
+    app.seek.epoch.bump();
 
     // The pre-seek tick, still reporting 1:40, lands after the seek.
     let mut update = make_playback_update();
@@ -1796,7 +1796,7 @@ fn no_listening_time_is_credited_while_a_seek_is_in_flight() {
     let mut update = make_playback_update();
     update.position = 47;
     update.song_id = Some("song_1".to_string());
-    update.seek_epoch = app.seek.epoch;
+    update.seek_epoch = app.seek.epoch.current();
 
     let _ = app.handle_playback_state_updated(update);
 
@@ -1838,14 +1838,14 @@ fn reset_session_state_clears_an_outstanding_seek() {
         app.seek.request(crate::state::SeekRequest::Relative(5.0)),
         None
     );
-    let epoch = app.seek.epoch;
+    let epoch = app.seek.epoch.current();
 
     let _ = app.reset_session_state();
 
     assert!(!app.seek.in_flight());
     assert_eq!(app.seek.queued(), None);
     assert_eq!(
-        app.seek.epoch,
+        app.seek.epoch.current(),
         epoch.wrapping_add(1),
         "the epoch bump is what strands a logout-crossing SeekApplied"
     );
@@ -1859,7 +1859,7 @@ fn a_seek_result_from_a_cleared_session_is_ignored() {
     app.playback.position = 10;
     app.playback.playing = true;
     app.scrobble.last_position = 10.0;
-    let stale_epoch = app.seek.epoch;
+    let stale_epoch = app.seek.epoch.current();
     app.seek.reset_for_session();
 
     // A later session puts a real seek in flight.
@@ -1894,7 +1894,7 @@ fn a_landed_seek_stores_the_whole_second_floor_for_the_tick_heuristic() {
     app.playback.playing = true;
     app.last_mpris_position_us = 0;
 
-    let _ = app.handle_seek_applied(app.seek.epoch, Some(42.5));
+    let _ = app.handle_seek_applied(app.seek.epoch.current(), Some(42.5));
 
     assert_eq!(
         app.last_mpris_position_us, 42_000_000,

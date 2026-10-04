@@ -14,5 +14,5 @@ pub struct TrawlState {
     /// Stale-drop generation for the modal's search fan-outs. Kept here, NOT
     /// on `TrawlModalState`, so close/reopen can never re-mint a generation
     /// an in-flight fan-out already captured.
-    pub search_generation: u64,
+    pub search_generation: super::StaleDropGen,
 }

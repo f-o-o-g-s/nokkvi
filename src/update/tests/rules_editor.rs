@@ -603,7 +603,7 @@ fn blank_create_stays_draftless_and_preview_gated() {
 fn draft_preview_loaded_establishes_and_stale_drops() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_editor.preview_generation;
+    let generation = app.rules_editor.preview_generation.current();
     let written = serde_json::json!({ "all": [ { "is": { "loved": true } } ] });
 
     let _ = app.update(Message::RulesEditor(R::DraftPreviewLoaded {
@@ -648,7 +648,7 @@ fn draft_preview_loaded_establishes_and_stale_drops() {
 fn preview_failed_404_recreates_once() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_editor.preview_generation;
+    let generation = app.rules_editor.preview_generation.current();
     app.with_rules_session(|s| {
         s.draft = Some(nokkvi_data::types::rules_session::DraftInfo {
             id: "draft-1".into(),
@@ -668,7 +668,7 @@ fn preview_failed_404_recreates_once() {
     );
     assert!(s.draft_recreate_attempted, "the one-shot guard armed");
 
-    let generation = app.rules_editor.preview_generation;
+    let generation = app.rules_editor.preview_generation.current();
     let _ = app.update(Message::RulesEditor(R::PreviewFailed {
         generation,
         error: "API GET failed with status 404: gone".into(),
@@ -686,7 +686,7 @@ fn preview_failed_404_recreates_once() {
 fn draft_unavailable_sets_authoring_only() {
     let mut app = capable_app();
     open_create(&mut app);
-    let generation = app.rules_editor.preview_generation;
+    let generation = app.rules_editor.preview_generation.current();
     let _ = app.update(Message::RulesEditor(R::DraftUnavailable {
         generation,
         error: "connect refused".into(),
@@ -731,7 +731,7 @@ fn save_completed_with_draft_skips_observe() {
 fn preview_page_loaded_appends() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_editor.preview_generation;
+    let generation = app.rules_editor.preview_generation.current();
     app.with_rules_session(|s| {
         s.preview.page_loading = true;
         s.preview.total = Some(2);
@@ -1447,11 +1447,11 @@ fn modal_over_rules_session_owns_the_keyboard() {
 fn exiting_rules_mode_invalidates_preview_generation() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let before = app.rules_editor.preview_generation;
+    let before = app.rules_editor.preview_generation.current();
     let _ = app.handle_exit_playlist_edit_mode();
     assert!(app.playlist_editor.is_none(), "session torn down");
     assert!(
-        app.rules_editor.preview_generation > before,
+        app.rules_editor.preview_generation.current() > before,
         "close invalidates in-flight preview tasks (they can't seed the next session)"
     );
 }

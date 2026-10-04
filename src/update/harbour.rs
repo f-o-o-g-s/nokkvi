@@ -962,8 +962,7 @@ impl Nokkvi {
         // Bump every keystroke so an earlier in-flight fan-out is discarded when
         // it lands (even the "cleared" transitions bump, so a late result can't
         // repopulate an emptied query).
-        self.harbour.search_generation = self.harbour.search_generation.wrapping_add(1);
-        let generation = self.harbour.search_generation;
+        let generation = self.harbour.search_generation.bump();
 
         // Mirror the live query into the shared slot-list state and reset the
         // viewport to the top — the same two things every other view gets from
@@ -1043,8 +1042,7 @@ impl Nokkvi {
         if self.harbour.shelves_loading {
             return Task::none();
         }
-        self.harbour.shelves_generation = self.harbour.shelves_generation.wrapping_add(1);
-        let generation = self.harbour.shelves_generation;
+        let generation = self.harbour.shelves_generation.bump();
         self.harbour.shelves_loading = true;
 
         self.shell_task(
@@ -1277,7 +1275,7 @@ impl Nokkvi {
     pub(crate) fn handle_harbour_loader(&mut self, msg: HarbourLoaderMessage) -> Task<Message> {
         match msg {
             HarbourLoaderMessage::ShelvesLoaded { generation, result } => {
-                if generation != self.harbour.shelves_generation {
+                if !self.harbour.shelves_generation.accepts(generation) {
                     return Task::none();
                 }
                 self.harbour.shelves_loading = false;
@@ -1316,7 +1314,7 @@ impl Nokkvi {
                 generation,
                 results,
             } => {
-                if generation != self.harbour.shelves_generation {
+                if !self.harbour.shelves_generation.accepts(generation) {
                     return Task::none();
                 }
                 for (playlist_id, album_ids) in results {
@@ -1340,7 +1338,7 @@ impl Nokkvi {
                 generation,
                 results,
             } => {
-                if generation != self.harbour.shelves_generation {
+                if !self.harbour.shelves_generation.accepts(generation) {
                     return Task::none();
                 }
                 for (genre_name, album_ids) in results {
@@ -1365,14 +1363,14 @@ impl Nokkvi {
                 Task::batch([quads, center_warm])
             }
             HarbourLoaderMessage::SearchLoaded { generation, result } => {
-                if generation != self.harbour.search_generation {
+                if !self.harbour.search_generation.accepts(generation) {
                     return Task::none();
                 }
                 self.harbour.search_loading = false;
                 match result {
                     Ok(results) => {
                         self.harbour.search_results = Some(*results);
-                        let generation = self.harbour.search_generation;
+                        let generation = self.harbour.search_generation.current();
                         Task::batch([
                             self.warm_harbour_search_artwork(),
                             self.fan_out_search_collage_ids(generation),
@@ -1409,7 +1407,7 @@ impl Nokkvi {
                 for (id, album_ids) in results {
                     map.insert(id, album_ids);
                 }
-                if generation != self.harbour.search_generation {
+                if !self.harbour.search_generation.accepts(generation) {
                     return Task::none();
                 }
                 // Warm the quad tiles now resolvable for these rows.

@@ -749,9 +749,9 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.library
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
-    app.similar_songs_generation = 7;
+    app.similar_songs_generation = crate::state::StaleDropGen::at(7);
     app.harbour.search_query = "night".into();
-    app.harbour.shelves_generation = 3;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(3);
     app.harbour
         .recently_added
         .push(make_album("a1", "A", "Artist"));
@@ -775,7 +775,7 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         "A",
         "Artist",
     ));
-    app.trawl.search_generation = 9;
+    app.trawl.search_generation = crate::state::StaleDropGen::at(9);
 
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
     app.cross_pane_drag.selection_count = 5;
@@ -812,14 +812,16 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.library.artists.is_empty(), "library artists reset");
     assert!(app.similar_songs.is_none());
     assert_eq!(
-        app.similar_songs_generation, 8,
+        app.similar_songs_generation.current(),
+        8,
         "similar generation carries forward bumped (seeded 7) — zeroing it \
          would let a pre-logout in-flight fetch match a fresh post-login load"
     );
     assert!(app.harbour.shelves_empty(), "harbour shelves reset");
     assert!(app.harbour.search_query.is_empty(), "harbour query reset");
     assert_eq!(
-        app.harbour.shelves_generation, 4,
+        app.harbour.shelves_generation.current(),
+        4,
         "harbour generation carries forward bumped (seeded 3) — zeroing it \
          would let a pre-logout in-flight fetch match a fresh post-login load"
     );
@@ -829,7 +831,8 @@ fn reset_session_state_clears_all_session_bound_fields() {
         "trawl seeds reference the old server — cleared"
     );
     assert_eq!(
-        app.trawl.search_generation, 10,
+        app.trawl.search_generation.current(),
+        10,
         "trawl generation carries forward bumped (seeded 9), like harbour's"
     );
     assert!(app.active_playlist_info.is_none());

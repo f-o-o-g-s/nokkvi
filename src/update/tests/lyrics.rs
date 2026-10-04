@@ -108,7 +108,7 @@ fn song_change_cold_path_clears() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[1_000]));
     app.lyrics.active_index = Some(0);
-    let epoch_before = app.lyrics.load_epoch;
+    let epoch_before = app.lyrics.load_epoch.current();
 
     // No prefetch parked → the transition clears synchronously.
     let _ = app.handle_playback_state_updated(update_for("song_2", 0));
@@ -116,7 +116,8 @@ fn song_change_cold_path_clears() {
     assert_eq!(app.lyrics.active_index, None);
     assert_eq!(app.lyrics.matched_song_id, None);
     assert_ne!(
-        app.lyrics.load_epoch, epoch_before,
+        app.lyrics.load_epoch.current(),
+        epoch_before,
         "clear must bump the epoch"
     );
 }
@@ -146,7 +147,7 @@ fn loaded_applies_for_current() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(timed_doc(&[5_000, 10_000])),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
     assert_eq!(app.lyrics.doc.lines.len(), 2);
@@ -163,7 +164,7 @@ fn stale_load_rejected_wrong_song() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(timed_doc(&[5_000])),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert!(app.lyrics.doc.lines.is_empty());
     assert_eq!(app.lyrics.matched_song_id, None);
@@ -178,7 +179,7 @@ fn stale_load_rejected_wrong_epoch() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(timed_doc(&[5_000])),
-        epoch: app.lyrics.load_epoch.wrapping_add(1),
+        epoch: app.lyrics.load_epoch.current().wrapping_add(1),
     });
     assert!(app.lyrics.doc.lines.is_empty());
     assert_eq!(app.lyrics.matched_song_id, None);
@@ -194,7 +195,7 @@ fn plain_doc_is_kept_with_no_active_line() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(plain_doc(3)),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
     assert_eq!(app.lyrics.doc.lines.len(), 3, "plain lyrics are kept");
@@ -213,7 +214,7 @@ fn empty_doc_is_still_the_no_match() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(LrcDocument::default()),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     // Identity recorded (no re-fire loop), doc honestly empty.
     assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
@@ -328,15 +329,15 @@ fn dispatch_bumps_epoch_so_concurrent_resolves_cant_co_win() {
     let mut app = test_app();
     app.lyrics.enabled = true;
     app.scrobble.current_song_id = Some("song_1".to_string());
-    let before = app.lyrics.load_epoch;
+    let before = app.lyrics.load_epoch.current();
 
     // Each dispatch supersedes the last: the older epoch loses the stale guard.
     let _ = app.dispatch_lyrics_resolve("song_1".to_string());
-    let e1 = app.lyrics.load_epoch;
+    let e1 = app.lyrics.load_epoch.current();
     assert_eq!(e1, before.wrapping_add(1));
 
     let _ = app.dispatch_lyrics_resolve("song_1".to_string());
-    assert_eq!(app.lyrics.load_epoch, e1.wrapping_add(1));
+    assert_eq!(app.lyrics.load_epoch.current(), e1.wrapping_add(1));
 
     // A Loaded carrying the SUPERSEDED epoch is rejected (can't overwrite).
     app.lyrics.doc = timed_doc(&[1_000]);
@@ -361,13 +362,13 @@ fn index_ready_redrives_a_pre_index_no_match() {
     // A no-match landed before the index existed: matched == current, doc empty.
     app.lyrics.matched_song_id = Some("song_1".to_string());
     app.lyrics.doc = LrcDocument::default();
-    let before = app.lyrics.load_epoch;
+    let before = app.lyrics.load_epoch.current();
 
     // The index lands → re-drive fires despite matched_song_id == current
     // (the guard that used to defeat it), observable via the epoch bump.
     let _ = app.handle_lyrics_index_ready(Arc::new(LyricsIndex::default()));
     assert_eq!(
-        app.lyrics.load_epoch,
+        app.lyrics.load_epoch.current(),
         before.wrapping_add(1),
         "empty doc + index landing must re-dispatch"
     );
@@ -378,10 +379,11 @@ fn index_ready_redrives_a_pre_index_no_match() {
     app2.scrobble.current_song_id = Some("song_1".to_string());
     app2.lyrics.matched_song_id = Some("song_1".to_string());
     app2.lyrics.doc = timed_doc(&[1_000]);
-    let before2 = app2.lyrics.load_epoch;
+    let before2 = app2.lyrics.load_epoch.current();
     let _ = app2.handle_lyrics_index_ready(Arc::new(LyricsIndex::default()));
     assert_eq!(
-        app2.lyrics.load_epoch, before2,
+        app2.lyrics.load_epoch.current(),
+        before2,
         "a resolved doc must not be re-driven"
     );
 }
@@ -410,11 +412,11 @@ fn library_change_redrives_an_unresolved_track() {
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.lyrics.matched_song_id = Some("song_1".to_string());
     app.lyrics.doc = LrcDocument::default();
-    let before = app.lyrics.load_epoch;
+    let before = app.lyrics.load_epoch.current();
 
     let _ = app.handle_library_changed(wildcard());
     assert_eq!(
-        app.lyrics.load_epoch,
+        app.lyrics.load_epoch.current(),
         before.wrapping_add(1),
         "a wildcard change must re-drive a resolved no-match"
     );
@@ -429,14 +431,15 @@ fn library_change_redrives_an_unresolved_track() {
     annotated.scrobble.current_song_id = Some("song_1".to_string());
     annotated.lyrics.matched_song_id = Some("song_1".to_string());
     annotated.lyrics.doc = LrcDocument::default();
-    let before_annotated = annotated.lyrics.load_epoch;
+    let before_annotated = annotated.lyrics.load_epoch.current();
     let _ = annotated.handle_library_changed(LibraryChange {
         song_ids: vec!["song_1".to_string()],
         is_wildcard: false,
         ..wildcard()
     });
     assert_eq!(
-        annotated.lyrics.load_epoch, before_annotated,
+        annotated.lyrics.load_epoch.current(),
+        before_annotated,
         "an annotation write must not re-drive the lyrics chain"
     );
 
@@ -447,10 +450,11 @@ fn library_change_redrives_an_unresolved_track() {
     app2.scrobble.current_song_id = Some("song_1".to_string());
     app2.lyrics.matched_song_id = Some("song_1".to_string());
     app2.lyrics.doc = timed_doc(&[1_000]);
-    let before2 = app2.lyrics.load_epoch;
+    let before2 = app2.lyrics.load_epoch.current();
     let _ = app2.handle_library_changed(wildcard());
     assert_eq!(
-        app2.lyrics.load_epoch, before2,
+        app2.lyrics.load_epoch.current(),
+        before2,
         "a rendered sheet must not be re-driven"
     );
 }
@@ -464,7 +468,7 @@ fn extensions_probe_landing_redrives_an_unresolved_track() {
     // A no-match landed while the probe was pending (server channel skipped;
     // the incomplete miss was deliberately not cached backend-side).
     app.lyrics.matched_song_id = Some("song_1".to_string());
-    let before = app.lyrics.load_epoch;
+    let before = app.lyrics.load_epoch.current();
 
     // The probe responds advertising songLyrics → the current track gets its
     // second look (observable via the dispatch epoch bump).
@@ -473,7 +477,7 @@ fn extensions_probe_landing_redrives_an_unresolved_track() {
     ])));
     assert!(app.supports_song_lyrics(), "probe stored");
     assert_eq!(
-        app.lyrics.load_epoch,
+        app.lyrics.load_epoch.current(),
         before.wrapping_add(1),
         "probe landing must re-dispatch the unresolved track"
     );
@@ -482,9 +486,9 @@ fn extensions_probe_landing_redrives_an_unresolved_track() {
     let mut app2 = test_app();
     app2.lyrics.enabled = true;
     app2.scrobble.current_song_id = Some("song_1".to_string());
-    let before2 = app2.lyrics.load_epoch;
+    let before2 = app2.lyrics.load_epoch.current();
     let _ = app2.update(Message::OpenSubsonicExtensionsFetched(None));
-    assert_eq!(app2.lyrics.load_epoch, before2);
+    assert_eq!(app2.lyrics.load_epoch.current(), before2);
 }
 
 #[test]
@@ -504,7 +508,7 @@ fn clear_resets_position_so_cold_docs_scan_from_zero() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_2".to_string(),
         doc: Box::new(timed_doc(&[5_000, 200_000])),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.active_index, None, "cold doc starts at pre-roll");
 }
@@ -943,7 +947,7 @@ fn a_song_change_parks_the_column_so_the_next_dissolve_is_honest() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_2".to_string(),
         doc: Box::new(timed_doc(&[12_000, 14_000])),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.active_index, None, "still pre-roll");
     let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
@@ -978,7 +982,7 @@ fn a_sheet_resolved_mid_track_renders_in_place_on_its_first_frame() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(plain_doc(11)),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.position_ms, 100_000, "seeded from the transport");
     let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
@@ -993,7 +997,7 @@ fn a_sheet_resolved_mid_track_renders_in_place_on_its_first_frame() {
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
         doc: Box::new(plain_doc(11)),
-        epoch: app.lyrics.load_epoch,
+        epoch: app.lyrics.load_epoch.current(),
     });
     assert_eq!(app.lyrics.position_ms, 100_500);
 }

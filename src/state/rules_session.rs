@@ -298,7 +298,7 @@ pub struct RulesEditorState {
     pub caps_state: CapsState,
     /// Stale-drop counter for rules-preview loads. Kept here rather than on
     /// the session so close/reopen can't re-mint captured generations.
-    pub preview_generation: u64,
+    pub preview_generation: super::StaleDropGen,
     /// Columns shown in the rules preview/results pane. The rules session is
     /// ephemeral (rebuilt each open), so unlike the view pages this
     /// persistent copy is the source of truth — restored on

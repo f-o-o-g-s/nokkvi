@@ -66,7 +66,7 @@ pub struct LyricsState {
     /// result is applied only if the epoch still matches — so a newer resolve
     /// (or a song change) supersedes an older in-flight one. The other half of
     /// the guard alongside `matched_song_id`.
-    pub load_epoch: u64,
+    pub load_epoch: super::StaleDropGen,
     /// Last authoritative playback position (ms) the active line was computed
     /// at. Reset by `clear()` so a doc resolved after a song change is scanned
     /// from the new track's clock, not the previous track's last position.
@@ -103,7 +103,7 @@ impl LyricsState {
         self.position_ms = 0;
         self.drift_offset = 0.0;
         self.reset_scroll();
-        self.load_epoch = self.load_epoch.wrapping_add(1);
+        self.load_epoch.bump();
     }
 
     /// Park the column at line 0 with no glide in flight.
@@ -176,7 +176,7 @@ impl LyricsState {
                 // the user did to the one it replaces.
                 self.drift_offset = 0.0;
                 self.reset_scroll();
-                self.load_epoch = self.load_epoch.wrapping_add(1);
+                self.load_epoch.bump();
                 true
             }
             other => {
@@ -230,11 +230,11 @@ mod tests {
             ..Default::default()
         };
         state.matched_song_id = Some("s1".into());
-        let before = state.load_epoch;
+        let before = state.load_epoch.current();
         state.clear();
         assert_eq!(state.active_index, None);
         assert_eq!(state.matched_song_id, None);
-        assert_eq!(state.load_epoch, before.wrapping_add(1));
+        assert_eq!(state.load_epoch.current(), before.wrapping_add(1));
     }
 
     #[test]

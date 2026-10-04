@@ -402,7 +402,7 @@ impl Nokkvi {
                     let query = self.harbour.search_query.clone();
                     tasks.push(self.handle_harbour_search(query));
                 }
-                let generation = self.harbour.shelves_generation;
+                let generation = self.harbour.shelves_generation.current();
                 tasks.push(self.warm_harbour_artwork(generation));
                 tasks.push(self.warm_harbour_current_center());
                 Task::batch(tasks)

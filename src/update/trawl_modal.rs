@@ -3,7 +3,7 @@
 //! Mirrors the two proven shapes it sits between: the default-playlist
 //! picker's open/close/focus lifecycle and Harbour's whole-library search
 //! (immediate fire, [`SEARCH_MIN_CHARS`] gate, root-owned generation
-//! stale-drop — `trawl_search_generation` lives on `Nokkvi`, not the modal
+//! stale-drop — `trawl.search_generation` lives on `Nokkvi`, not the modal
 //! state, so close/reopen can never re-mint a generation an in-flight
 //! fan-out already captured). Play/enqueue route through
 //! `AppService::{play_trawl, add_trawl_to_queue}` with the same guard +
@@ -37,7 +37,7 @@ impl Nokkvi {
                 // Bump the generation so an in-flight fan-out from BEFORE a
                 // close can't land in this fresh modal (Close doesn't bump —
                 // the reopened state must not accept the old query's result).
-                self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
+                self.trawl.search_generation.bump();
                 self.trawl.modal = Some(TrawlModalState {
                     search_input_focused: true,
                     ..TrawlModalState::default()
@@ -50,7 +50,7 @@ impl Nokkvi {
             }
             TrawlModalMessage::SearchChanged(query) => self.handle_trawl_search(query),
             TrawlModalMessage::SearchLoaded { generation, result } => {
-                if generation != self.trawl.search_generation {
+                if !self.trawl.search_generation.accepts(generation) {
                     return Task::none();
                 }
                 // A 401 routes to session expiry even if the modal was closed
@@ -292,8 +292,7 @@ impl Nokkvi {
     /// Immediate search with the shared min-chars gate and per-keystroke
     /// generation bump (Harbour's stale-drop shape, root-owned counter).
     fn handle_trawl_search(&mut self, query: String) -> Task<Message> {
-        self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
-        let generation = self.trawl.search_generation;
+        let generation = self.trawl.search_generation.bump();
 
         let Some(state) = self.trawl.modal.as_mut() else {
             return Task::none();

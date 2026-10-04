@@ -133,8 +133,7 @@ impl Nokkvi {
         // stale-load guard instead of racing to overwrite. Without the bump
         // they share one epoch and whichever lands last wins — a slow no-match
         // could erase already-rendered lyrics mid-track.
-        self.lyrics.load_epoch = self.lyrics.load_epoch.wrapping_add(1);
-        let epoch = self.lyrics.load_epoch;
+        let epoch = self.lyrics.load_epoch.bump();
         let index = self.lyrics.index.clone();
         let opts = self.lyrics_resolve_opts();
         let sid = song_id.clone();
@@ -251,7 +250,7 @@ impl Nokkvi {
         match msg {
             LyricsLoaderMessage::DebounceElapsed { song_id, epoch } => {
                 if self.lyrics.enabled
-                    && epoch == self.lyrics.load_epoch
+                    && self.lyrics.load_epoch.accepts(epoch)
                     && self.scrobble.current_song_id.as_deref() == Some(song_id.as_str())
                 {
                     self.dispatch_lyrics_resolve(song_id)
@@ -266,7 +265,7 @@ impl Nokkvi {
             } => {
                 // Apply iff this resolve is still for the current track AND no
                 // clear/promote superseded it while it was in flight.
-                if epoch == self.lyrics.load_epoch
+                if self.lyrics.load_epoch.accepts(epoch)
                     && self.scrobble.current_song_id.as_deref() == Some(song_id.as_str())
                 {
                     // An EMPTY doc is the no-match: record the identity (so

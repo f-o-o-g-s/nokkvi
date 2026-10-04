@@ -264,7 +264,7 @@ impl Nokkvi {
         // Snapshot the seek epoch SYNCHRONOUSLY, before the async body reads
         // the engine. Whatever this tick is about to observe belongs to this
         // epoch; a seek landing in the gap bumps it and the update is dropped.
-        let seek_epoch = self.seek.epoch;
+        let seek_epoch = self.seek.epoch.current();
         let radio_station = self.active_playback.radio_station().cloned();
         let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
             state.icy_url.clone()
@@ -479,7 +479,7 @@ impl Nokkvi {
         // 80% gapless-prep trigger and the `gapless_preparing` latch reset
         // would never fire, turning every boundary crossed during the hold
         // into a hard cut.
-        let position_is_current = seek_epoch == self.seek.epoch;
+        let position_is_current = self.seek.epoch.accepts(seek_epoch);
 
         // Detect transition from playing to stopped (not paused)
         // This happens when the last track in the queue finishes naturally
@@ -600,9 +600,7 @@ impl Nokkvi {
             self.playback.bit_perfect_probe_ticks = BIT_PERFECT_PROBE_INTERVAL_TICKS;
             // Tag this probe so a stale, out-of-order result can't clobber a
             // fresher one (the blocking pool gives no completion ordering).
-            self.playback.bit_perfect_probe_generation =
-                self.playback.bit_perfect_probe_generation.wrapping_add(1);
-            let generation = self.playback.bit_perfect_probe_generation;
+            let generation = self.playback.bit_perfect_probe_generation.bump();
             let track_rate = sample_rate;
             // The expensive part is the resampled HOLDER walk (a fresh PipeWire
             // client + full graph enumeration). Re-derive it only when the device
@@ -809,7 +807,7 @@ impl Nokkvi {
                                 if self.lyrics_surface_visible() {
                                     tasks.push(Self::lyrics_debounce_task(
                                         new_id.to_string(),
-                                        self.lyrics.load_epoch,
+                                        self.lyrics.load_epoch.current(),
                                     ));
                                 }
                             }
@@ -1773,7 +1771,10 @@ impl Nokkvi {
         device_rate: Option<u32>,
         holder: Option<String>,
     ) -> Task<Message> {
-        if generation == self.playback.bit_perfect_probe_generation
+        if self
+            .playback
+            .bit_perfect_probe_generation
+            .accepts(generation)
             && self.playback.bit_perfect_engaged
             && self.playback.sample_rate == track_rate
         {
@@ -1949,7 +1950,7 @@ impl Nokkvi {
         let Some(req) = self.seek.request(req) else {
             return Task::none();
         };
-        self.seek.epoch = self.seek.epoch.wrapping_add(1);
+        self.seek.epoch.bump();
         self.send_seek(req)
     }
 
@@ -1960,7 +1961,7 @@ impl Nokkvi {
     /// with the epoch read here, and `handle_seek_applied` drops a result
     /// whose stamp no longer matches.
     fn send_seek(&self, req: crate::state::SeekRequest) -> Task<Message> {
-        let epoch = self.seek.epoch;
+        let epoch = self.seek.epoch.current();
         match req {
             crate::state::SeekRequest::Absolute(pos) => {
                 let pos = f64::from(pos);
@@ -1987,7 +1988,7 @@ impl Nokkvi {
         // must touch nothing: clearing `in_flight` here would release a gate a
         // LATER seek is holding (two concurrent seek tasks, and
         // `track_listening_time` crediting the ground that later seek skips).
-        if epoch != self.seek.epoch {
+        if !self.seek.epoch.accepts(epoch) {
             tracing::debug!("Dropping a seek result from a cleared session (epoch {epoch})");
             return Task::none();
         }
@@ -1996,7 +1997,7 @@ impl Nokkvi {
         // Bump before the writes below so a tick still in flight — one that
         // read the engine mid-seek — cannot overwrite them, and so the queued
         // request `send_seek` dispatches carries the new stamp.
-        self.seek.epoch = self.seek.epoch.wrapping_add(1);
+        self.seek.epoch.bump();
 
         if let Some(landed) = landed {
             let landed = landed.max(0.0);
@@ -2145,7 +2146,7 @@ impl Nokkvi {
             .station_left_for_play
             .as_ref()
             .is_some_and(|left| left.attempt == attempt);
-        if attempt == self.playback.play_attempt
+        if self.playback.play_attempt.accepts(attempt)
             && left_by_this_play
             && self.active_playback.is_queue()
             && let Some(left) = self.playback.station_left_for_play.take()

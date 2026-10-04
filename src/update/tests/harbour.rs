@@ -130,7 +130,7 @@ fn switch_view_to_harbour_sets_current_view() {
 fn load_harbour_arms_shelf_loading_and_bumps_generation() {
     let mut app = test_app();
     assert!(!app.harbour.shelves_loading);
-    let gen_before = app.harbour.shelves_generation;
+    let gen_before = app.harbour.shelves_generation.current();
 
     let _ = app.handle_load_harbour();
 
@@ -139,7 +139,7 @@ fn load_harbour_arms_shelf_loading_and_bumps_generation() {
         "LoadHarbour must set the loading flag before dispatching the fetch"
     );
     assert_eq!(
-        app.harbour.shelves_generation,
+        app.harbour.shelves_generation.current(),
         gen_before.wrapping_add(1),
         "each load bumps the stale-drop generation"
     );
@@ -191,7 +191,7 @@ fn switching_off_harbour_does_not_wedge_current_view() {
 fn shelves_loaded_populates_all_shelves_and_clears_loading() {
     let mut app = test_app();
     app.harbour.shelves_loading = true;
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
         generation,
@@ -227,7 +227,7 @@ fn shelves_loaded_with_stale_generation_is_dropped() {
     let mut app = test_app();
     // Simulate a newer load having bumped the generation after this result's
     // fetch was dispatched.
-    app.harbour.shelves_generation = 5;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(5);
     app.harbour.shelves_loading = true;
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
@@ -249,7 +249,7 @@ fn shelves_loaded_with_stale_generation_is_dropped() {
 fn shelves_load_error_clears_loading_and_toasts() {
     let mut app = test_app();
     app.harbour.shelves_loading = true;
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
     assert!(app.toast.toasts.is_empty());
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
@@ -266,7 +266,7 @@ fn shelves_load_error_clears_loading_and_toasts() {
 fn playlist_quad_ids_loaded_sets_ids_on_the_random_pick() {
     let mut app = test_app();
     app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::PlaylistQuadIdsLoaded {
         generation,
@@ -287,7 +287,7 @@ fn playlist_quad_ids_loaded_sets_ids_on_the_random_pick() {
 fn playlist_quad_ids_loaded_stale_generation_dropped() {
     let mut app = test_app();
     app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
-    app.harbour.shelves_generation = 9;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(9);
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::PlaylistQuadIdsLoaded {
         generation: 8, // stale
@@ -307,7 +307,7 @@ fn playlist_quad_ids_loaded_stale_generation_dropped() {
 fn genre_quad_ids_loaded_sets_artwork_album_ids() {
     let mut app = test_app();
     app.harbour.most_played_genres = vec![make_genre("Rock", "Rock")];
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
         generation,
@@ -327,7 +327,7 @@ fn genre_quad_ids_loaded_sets_artwork_album_ids() {
 fn genre_quad_ids_loaded_stale_generation_dropped() {
     let mut app = test_app();
     app.harbour.most_played_genres = vec![make_genre("Rock", "Rock")];
-    app.harbour.shelves_generation = 9;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(9);
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
         generation: 8, // stale
@@ -1140,10 +1140,11 @@ fn every_refresh_route_is_skipped_while_a_shelf_load_is_in_flight() {
     // Route 1: the header Refresh button.
     let mut app = test_app();
     app.harbour.shelves_loading = true;
-    let before = app.harbour.shelves_generation;
+    let before = app.harbour.shelves_generation.current();
     let _ = app.handle_harbour(button);
     assert_eq!(
-        app.harbour.shelves_generation, before,
+        app.harbour.shelves_generation.current(),
+        before,
         "header Refresh must not supersede an in-flight load"
     );
     app.harbour.shelves_loading = false;
@@ -1151,7 +1152,8 @@ fn every_refresh_route_is_skipped_while_a_shelf_load_is_in_flight() {
         SlotListPageMessage::RefreshViewData,
     ));
     assert_ne!(
-        app.harbour.shelves_generation, before,
+        app.harbour.shelves_generation.current(),
+        before,
         "an idle Harbour still refreshes on demand"
     );
 
@@ -1164,10 +1166,11 @@ fn every_refresh_route_is_skipped_while_a_shelf_load_is_in_flight() {
         .and_then(|p| p.reload_message())
         .expect("Harbour is reloadable");
     app.harbour.shelves_loading = true;
-    let before = app.harbour.shelves_generation;
+    let before = app.harbour.shelves_generation.current();
     let _ = app.update(reload);
     assert_eq!(
-        app.harbour.shelves_generation, before,
+        app.harbour.shelves_generation.current(),
+        before,
         "the reload_message route must share the in-flight guard — a held `r` \
          otherwise fires N overlapping fan-outs"
     );
@@ -1366,7 +1369,7 @@ fn expand_center_roundtrip_via_keyboard_center_toggles_both_ways() {
 fn search_below_threshold_clears_results_without_loading() {
     let mut app = test_app();
     app.harbour.search_results = Some(*search_results_with_genre());
-    let gen_before = app.harbour.search_generation;
+    let gen_before = app.harbour.search_generation.current();
 
     // One char is below the 2-char network threshold.
     let _ = app.handle_harbour(HarbourMessage::SearchChanged("a".into()));
@@ -1375,7 +1378,7 @@ fn search_below_threshold_clears_results_without_loading() {
     assert!(app.harbour.search_results.is_none(), "results cleared");
     assert!(!app.harbour.search_loading, "no load below threshold");
     assert_eq!(
-        app.harbour.search_generation,
+        app.harbour.search_generation.current(),
         gen_before.wrapping_add(1),
         "generation still bumps so a late in-flight result is dropped"
     );
@@ -1384,12 +1387,15 @@ fn search_below_threshold_clears_results_without_loading() {
 #[test]
 fn search_at_threshold_sets_loading_and_bumps_generation() {
     let mut app = test_app();
-    let gen_before = app.harbour.search_generation;
+    let gen_before = app.harbour.search_generation.current();
 
     let _ = app.handle_harbour(HarbourMessage::SearchChanged("ni".into()));
 
     assert!(app.harbour.search_loading, "≥2 chars arms the fan-out");
-    assert_eq!(app.harbour.search_generation, gen_before.wrapping_add(1));
+    assert_eq!(
+        app.harbour.search_generation.current(),
+        gen_before.wrapping_add(1)
+    );
 }
 
 #[test]
@@ -1397,7 +1403,7 @@ fn search_loaded_populates_results_and_clears_loading() {
     let mut app = test_app();
     // Mirror the state after a keystroke fired the fan-out.
     let _ = app.handle_harbour(HarbourMessage::SearchChanged("night".into()));
-    let generation = app.harbour.search_generation;
+    let generation = app.harbour.search_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::SearchLoaded {
         generation,
@@ -1414,7 +1420,7 @@ fn search_loaded_populates_results_and_clears_loading() {
 #[test]
 fn search_loaded_stale_generation_is_dropped() {
     let mut app = test_app();
-    app.harbour.search_generation = 7;
+    app.harbour.search_generation = crate::state::StaleDropGen::at(7);
     app.harbour.search_loading = true;
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::SearchLoaded {
@@ -1437,7 +1443,7 @@ fn search_error_toasts_clears_loading_and_drops_stale_results() {
     // query's fan-out fails — they must not keep rendering as if they
     // matched the new query.
     app.harbour.search_results = Some(*search_results_with_genre());
-    let generation = app.harbour.search_generation;
+    let generation = app.harbour.search_generation.current();
     assert!(app.toast.toasts.is_empty());
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::SearchLoaded {
@@ -1505,14 +1511,14 @@ fn invalidate_shelves_clears_data_and_bumps_generation() {
     app.harbour.most_played_genres = vec![make_genre("g1", "Ambient")];
     app.harbour.search_query = "night".into();
     app.harbour.search_results = Some(*search_results_with_genre());
-    let gen_before = app.harbour.shelves_generation;
-    let search_gen_before = app.harbour.search_generation;
+    let gen_before = app.harbour.shelves_generation.current();
+    let search_gen_before = app.harbour.search_generation.current();
 
     app.harbour.invalidate_shelves();
 
     assert!(app.harbour.shelves_empty());
     assert_eq!(
-        app.harbour.shelves_generation,
+        app.harbour.shelves_generation.current(),
         gen_before.wrapping_add(1),
         "invalidation bumps the generation so in-flight loads drop"
     );
@@ -1522,7 +1528,7 @@ fn invalidate_shelves_clears_data_and_bumps_generation() {
     );
     assert_eq!(app.harbour.search_query, "night", "the query survives");
     assert_eq!(
-        app.harbour.search_generation,
+        app.harbour.search_generation.current(),
         search_gen_before.wrapping_add(1),
         "an in-flight old-scope search fan-out is generation-dropped"
     );
@@ -1567,7 +1573,7 @@ fn genre_quad_ids_loaded_warms_the_centered_collection() {
     seed_most_played_genre(&mut app, Vec::new());
     let (idx, total) = section_row_index(&app, HarbourSectionId::MostPlayedGenres);
     app.harbour_page.common.slot_list.set_selected(idx, total);
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
         generation,
@@ -1589,7 +1595,7 @@ fn shelves_loaded_warms_the_centered_random_pick() {
     // keeps its shape across this load — the fixture's Most Played shelves
     // stay gated — so the centered index still names the same row after.)
     center_random_play_row(&mut app, crate::views::harbour::RandomKind::Artists);
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
         generation,
@@ -1642,7 +1648,7 @@ fn centering_the_random_genre_pick_warms_its_collage() {
 #[test]
 fn genre_quad_ids_land_on_the_pick_and_tally_by_name() {
     let mut app = test_app();
-    app.harbour.shelves_generation = 3;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(3);
     // The pick: real server genre (hash id). The tally twin: its stamp
     // missed (id == name). One NAME-keyed reply must fill both.
     app.harbour.random_genre = Some(make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock"));
@@ -1673,7 +1679,7 @@ fn genre_quad_ids_land_on_the_pick_and_tally_by_name() {
     // A reply keyed by the HASH must fill nothing — it would mean the fan-out
     // regressed to sending `Genre::id`, the drift this test exists to catch.
     let mut app = test_app();
-    app.harbour.shelves_generation = 3;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(3);
     app.harbour.random_genre = Some(make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock"));
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
         generation: 3,
@@ -1751,7 +1757,7 @@ fn entering_harbour_refires_an_active_search_with_no_results() {
     app.harbour.search_query = "night".into();
     app.harbour.search_results = None;
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
-    let gen_before = app.harbour.search_generation;
+    let gen_before = app.harbour.search_generation.current();
 
     let _ = app.handle_switch_view(View::Harbour);
 
@@ -1759,7 +1765,10 @@ fn entering_harbour_refires_an_active_search_with_no_results() {
         app.harbour.search_loading,
         "entering Harbour with an orphaned query re-fires the search"
     );
-    assert_eq!(app.harbour.search_generation, gen_before.wrapping_add(1));
+    assert_eq!(
+        app.harbour.search_generation.current(),
+        gen_before.wrapping_add(1)
+    );
 }
 
 #[test]
@@ -1800,19 +1809,20 @@ fn search_changed_mirrors_common_query_and_resets_viewport() {
 #[test]
 fn reset_session_state_preserves_harbour_generations() {
     let mut app = test_app();
-    app.harbour.shelves_generation = 5;
-    app.harbour.search_generation = 7;
+    app.harbour.shelves_generation = crate::state::StaleDropGen::at(5);
+    app.harbour.search_generation = crate::state::StaleDropGen::at(7);
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
 
     let _ = app.reset_session_state();
 
     assert!(app.harbour.shelves_empty(), "logout drops all shelf data");
     assert_eq!(
-        app.harbour.shelves_generation, 6,
+        app.harbour.shelves_generation.current(),
+        6,
         "the stale-drop generation carries forward bumped — zeroing it would \
          let a pre-logout in-flight fetch match a fresh post-login load"
     );
-    assert_eq!(app.harbour.search_generation, 8);
+    assert_eq!(app.harbour.search_generation.current(), 8);
 }
 
 // ============================================================================
@@ -2058,7 +2068,7 @@ fn search_collage_ids_loaded_fills_the_target_side_map() {
     use crate::app_message::CollageTarget;
 
     let mut app = test_app();
-    let generation = app.harbour.search_generation;
+    let generation = app.harbour.search_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::SearchCollageIdsLoaded {
         generation,
@@ -2078,7 +2088,7 @@ fn search_collage_ids_loaded_still_caches_under_stale_generation() {
     use crate::app_message::CollageTarget;
 
     let mut app = test_app();
-    app.harbour.search_generation = 5;
+    app.harbour.search_generation = crate::state::StaleDropGen::at(5);
 
     // A stale result (older keystroke) still populates the side-map: album ids
     // are query-independent, so caching them dedups the fan-out across
@@ -2433,7 +2443,7 @@ fn most_played_artist_row_keys_thumbnail_on_artist_id() {
 #[test]
 fn shelves_loaded_populates_most_played_shelves() {
     let mut app = test_app();
-    let generation = app.harbour.shelves_generation;
+    let generation = app.harbour.shelves_generation.current();
     let mut data = shelves_with_albums();
     data.most_played_songs = vec![played_song("s1", "Techno", 42)];
     data.most_played_albums = vec![make_album("a2", "Top Album", "Artist")];
@@ -3041,7 +3051,7 @@ fn entering_harbour_refreshes_shelves_even_when_populated() {
     let mut app = test_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     app.harbour.shelves_loading = false;
-    let gen_before = app.harbour.shelves_generation;
+    let gen_before = app.harbour.shelves_generation.current();
 
     let _ = app.handle_switch_view(View::Harbour);
 
@@ -3050,7 +3060,7 @@ fn entering_harbour_refreshes_shelves_even_when_populated() {
         "re-entry must refetch — shelves were stale"
     );
     assert_eq!(
-        app.harbour.shelves_generation,
+        app.harbour.shelves_generation.current(),
         gen_before.wrapping_add(1),
         "refetch goes through the stale-drop generation"
     );
@@ -3061,12 +3071,13 @@ fn entering_harbour_does_not_stack_fetches_while_one_is_in_flight() {
     let mut app = test_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     app.harbour.shelves_loading = true;
-    let gen_before = app.harbour.shelves_generation;
+    let gen_before = app.harbour.shelves_generation.current();
 
     let _ = app.handle_switch_view(View::Harbour);
 
     assert_eq!(
-        app.harbour.shelves_generation, gen_before,
+        app.harbour.shelves_generation.current(),
+        gen_before,
         "an in-flight load is not restarted by re-entry"
     );
 }

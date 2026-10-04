@@ -365,11 +365,11 @@ fn station_failure(app: &mut crate::Nokkvi, attempt: u64) {
 fn guard_remembers_the_station_it_leaves() {
     let mut app = test_app();
     seed_radio_playback(&mut app);
-    let before = app.playback.play_attempt;
+    let before = app.playback.play_attempt.current();
 
     app.guard_play_action();
 
-    assert_eq!(app.playback.play_attempt, before + 1);
+    assert_eq!(app.playback.play_attempt.current(), before + 1);
     assert_eq!(
         app.playback
             .station_left_for_play
@@ -389,7 +389,7 @@ fn failed_batch_play_on_a_live_station_restores_radio() {
         "setup: the play left radio mode"
     );
 
-    let attempt = app.playback.play_attempt;
+    let attempt = app.playback.play_attempt.current();
     station_failure(&mut app, attempt);
 
     assert!(
@@ -404,7 +404,7 @@ fn failed_play_restores_nothing_after_a_newer_play() {
     let mut app = test_app();
     seed_radio_playback(&mut app);
     let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
-    let failed_attempt = app.playback.play_attempt;
+    let failed_attempt = app.playback.play_attempt.current();
     app.guard_play_action();
 
     station_failure(&mut app, failed_attempt);
@@ -417,7 +417,7 @@ fn failed_play_keeps_a_station_started_since() {
     let mut app = test_app();
     seed_radio_playback(&mut app);
     let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
-    let attempt = app.playback.play_attempt;
+    let attempt = app.playback.play_attempt.current();
     let mut other = app
         .playback
         .station_left_for_play
@@ -445,7 +445,7 @@ fn failed_play_restores_nothing_when_an_older_play_left_the_station() {
     seed_radio_playback(&mut app);
     app.guard_play_action(); // play A
     let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
-    let play_b = app.playback.play_attempt;
+    let play_b = app.playback.play_attempt.current();
 
     station_failure(&mut app, play_b);
 
@@ -460,7 +460,7 @@ fn assert_the_play_itself_left_the_station(app: &crate::Nokkvi, path: &str) {
             .station_left_for_play
             .as_ref()
             .map(|left| left.attempt),
-        Some(app.playback.play_attempt),
+        Some(app.playback.play_attempt.current()),
         "{path}: the play's own guard must be the one that left the station"
     );
 }
@@ -522,7 +522,7 @@ fn logout_forgets_the_station_left_for_play() {
     let mut app = test_app();
     seed_radio_playback(&mut app);
     let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
-    let attempt = app.playback.play_attempt;
+    let attempt = app.playback.play_attempt.current();
 
     let _ = app.reset_session_state();
     station_failure(&mut app, attempt);

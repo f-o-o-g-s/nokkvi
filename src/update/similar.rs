@@ -155,8 +155,7 @@ impl Nokkvi {
         self.ensure_browsing_panel_on_similar();
 
         // Bump generation + set loading
-        self.similar_songs_generation = self.similar_songs_generation.wrapping_add(1);
-        let generation = self.similar_songs_generation;
+        let generation = self.similar_songs_generation.bump();
         self.similar_songs = Some(SimilarSongsState {
             songs: Vec::new(),
             source: source.clone(),
@@ -184,10 +183,11 @@ impl Nokkvi {
         source: SimilarSource,
     ) -> Task<Message> {
         // Reject stale responses
-        if generation != self.similar_songs_generation {
+        if !self.similar_songs_generation.accepts(generation) {
             debug!(
                 "🎵 Ignoring stale similar songs response (gen {} vs current {})",
-                generation, self.similar_songs_generation
+                generation,
+                self.similar_songs_generation.current()
             );
             return Task::none();
         }

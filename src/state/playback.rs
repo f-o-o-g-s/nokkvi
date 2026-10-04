@@ -129,7 +129,7 @@ pub struct PlaybackState {
     /// off-thread probe carries the id it was dispatched under; the result is
     /// applied only if it still matches, so an older probe that resolves out of
     /// order (the blocking pool gives no ordering) can't clobber a fresher one.
-    pub bit_perfect_probe_generation: u64,
+    pub bit_perfect_probe_generation: super::StaleDropGen,
     /// When resampled, the app holding the output device at a different rate
     /// (from the PipeWire graph probe), shown inline as `RESAMPLED→96k · Zen`.
     /// `None` when verified, on Bluetooth, or when the graph couldn't be read.
@@ -160,7 +160,7 @@ pub struct PlaybackState {
     pub volume_save_failing: bool,
     /// Bumped by every `guard_play_action`. A failed play hands radio mode
     /// back only while it is still the latest attempt.
-    pub play_attempt: u64,
+    pub play_attempt: super::StaleDropGen,
     /// The station `guard_play_action` last switched away from, and which
     /// attempt did it, so that play can hand radio mode back if it fails
     /// while the station is still the engine's source.
@@ -199,14 +199,14 @@ impl Default for PlaybackState {
             bit_perfect_status: BitPerfectStatus::Off,
             bit_perfect_engaged: false,
             bit_perfect_probe_ticks: 0,
-            bit_perfect_probe_generation: 0,
+            bit_perfect_probe_generation: super::StaleDropGen::default(),
             bit_perfect_holder: None,
             bit_perfect_unverifiable_streak: 0,
             bit_perfect_holder_reprobe_ticks: 0,
             bitrate: 0,
             volume_persist_throttle: None,
             volume_save_failing: false,
-            play_attempt: 0,
+            play_attempt: super::StaleDropGen::default(),
             station_left_for_play: None,
             pw_last_title: None,
             eq_state: nokkvi_data::audio::EqState::default(),

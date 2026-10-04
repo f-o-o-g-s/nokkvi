@@ -199,7 +199,7 @@ pub struct Nokkvi {
     /// Similar songs state — populated by getSimilarSongs2 / getTopSongs API calls
     pub similar_songs: Option<crate::state::SimilarSongsState>,
     /// Generation counter for stale response rejection
-    pub similar_songs_generation: u64,
+    pub similar_songs_generation: crate::state::StaleDropGen,
 
     /// Harbour home view state — discovery shelves + whole-library
     /// search results. Populated on first visit / library-filter change.
@@ -432,7 +432,7 @@ impl Default for Nokkvi {
             rules_editor: crate::state::RulesEditorState::default(),
             library: crate::state::LibraryData::default(),
             similar_songs: None,
-            similar_songs_generation: 0,
+            similar_songs_generation: crate::state::StaleDropGen::default(),
             harbour: crate::state::HarbourState::default(),
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every scalar

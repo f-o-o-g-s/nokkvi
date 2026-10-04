@@ -157,7 +157,7 @@ impl Nokkvi {
     pub(crate) fn guard_play_action(&mut self) {
         // Every call is a new play attempt: a failure of an older one must
         // not hand radio mode back over it.
-        self.playback.play_attempt = self.playback.play_attempt.wrapping_add(1);
+        self.playback.play_attempt.bump();
         // Never blocks: blocking would prevent ever resuming queue playback
         // while a radio stream is active. The engine stop is handled by the
         // play action that follows, which is why the station is remembered:
@@ -167,7 +167,7 @@ impl Nokkvi {
             std::mem::take(&mut self.active_playback)
         {
             self.playback.station_left_for_play = Some(crate::state::StationLeftForPlay {
-                attempt: self.playback.play_attempt,
+                attempt: self.playback.play_attempt.current(),
                 radio,
             });
         }
@@ -319,7 +319,7 @@ impl Nokkvi {
     {
         self.guard_play_action();
         self.enter_new_playback_context();
-        let attempt = self.playback.play_attempt;
+        let attempt = self.playback.play_attempt.current();
         // Only the play whose own guard left the station may bring it back:
         // if an earlier play left it, that play may still be resolving, and
         // its outcome decides.
@@ -1749,7 +1749,7 @@ impl Nokkvi {
         // (bumped) like the Harbour/Trawl counters — an in-flight preview
         // task holds a captured generation a zeroed counter would re-mint.
         self.rules_editor.caps_state = crate::state::CapsState::default();
-        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
+        self.rules_editor.preview_generation.bump();
         self.screen = crate::Screen::Login;
 
         // Clear transient login state so re-login starts from a clean slate:
@@ -1768,7 +1768,7 @@ impl Nokkvi {
         // A pre-logout play that fails afterwards must not hand back the
         // previous session's station.
         self.playback.station_left_for_play = None;
-        self.playback.play_attempt = self.playback.play_attempt.wrapping_add(1);
+        self.playback.play_attempt.bump();
         self.library = crate::state::LibraryData {
             progressive_queue_generation,
             ..Default::default()
@@ -1781,7 +1781,7 @@ impl Nokkvi {
         // Carried forward (bumped), never zeroed: a pre-logout Find Similar
         // still in flight holds a captured generation that a restarted
         // counter would re-mint on the next session's first request.
-        self.similar_songs_generation = self.similar_songs_generation.wrapping_add(1);
+        self.similar_songs_generation.bump();
         // Harbour shelves + search results are keyed on the prior server's IDs
         // — drop them, but carry the stale-drop generations FORWARD (bumped)
         // instead of zeroing them: iced Tasks aren't cancelled by logout, so a
@@ -1789,15 +1789,15 @@ impl Nokkvi {
         // zeroed-then-bumped counter would re-mint, letting server A's response
         // populate server B's shelves after re-login.
         self.harbour = crate::state::HarbourState {
-            shelves_generation: self.harbour.shelves_generation.wrapping_add(1),
-            search_generation: self.harbour.search_generation.wrapping_add(1),
+            shelves_generation: self.harbour.shelves_generation.carried_forward(),
+            search_generation: self.harbour.search_generation.carried_forward(),
             ..Default::default()
         };
         // Trawl: seeds + search results are keyed on the prior server's ids.
         // Same generation carry-forward rationale as Harbour above. (The
         // modal itself goes with the others below.)
         self.trawl.mix = nokkvi_data::types::trawl::TrawlCrate::default();
-        self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
+        self.trawl.search_generation.bump();
         // In memory only: the persisted context is restored with the queue
         // at the next login.
         self.drop_active_playlist_context();
