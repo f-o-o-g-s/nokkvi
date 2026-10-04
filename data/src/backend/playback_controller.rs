@@ -198,12 +198,14 @@ impl PlaybackController {
     }
 
     /// The controller's hard-load epilogue: [`StagedSong::load`] under the
-    /// held engine lock, discharge the queue mutation's reset with the lock
-    /// still held (even when `play()` failed: the queue changed either way),
-    /// release the lock, then name the song on the navigator so consume and
-    /// gapless prep follow it. The navigator is named only once the engine
-    /// took the song: a failed `play()` returns its error with the
-    /// navigator unchanged.
+    /// held engine lock, discharge the queue mutation's reset (even when
+    /// `play()` failed: the queue changed either way), then name the song on
+    /// the navigator so consume and gapless prep follow it. The navigator is
+    /// named only once the engine took the song (a failed `play()` returns
+    /// its error with the navigator unchanged), and while the engine lock is
+    /// still held, so a Next or click queued on that lock names its own song
+    /// after this one, never before. Engine before navigator is the lock
+    /// order everywhere (`next`, `previous`, the completion callback).
     async fn stage_and_name(
         &self,
         mut engine: tokio::sync::MutexGuard<'_, CustomAudioEngine>,
@@ -214,13 +216,13 @@ impl PlaybackController {
         if let Some(reset) = reset {
             reset.apply_locked(&mut engine).await;
         }
-        drop(engine);
         loaded?;
         self.queue_navigator
             .lock()
             .await
             .set_current_song_id(Some(staged.song_id.to_string()))
             .await;
+        drop(engine);
         Ok(())
     }
 
@@ -1092,7 +1094,7 @@ impl PlaybackController {
         //    discharged below where the engine lock is held.
         let mut qm = queue_manager.lock().await;
         let reposition_effect = qm.reposition_to_index(Some(queue_index));
-        crate::services::queue::warn_if_unsaved(qm.save_order(), "a queue click");
+        crate::services::queue::warn_if_unsaved(qm.save_order(), "playing a queued song");
         drop(qm);
 
         // 2. Sync the reactive current_index property with queue state
@@ -1165,9 +1167,11 @@ impl PlaybackController {
     /// Mirrors the engine-load body of [`Self::play_song_from_queue`] but skips
     /// the play-history append (the previous song is being deleted, not skipped).
     ///
-    /// Lock discipline: each lock is taken and dropped independently. We never
-    /// hold the engine and navigator locks simultaneously, and `qm` is only
-    /// held briefly to read the replay-gain.
+    /// Lock discipline: `qm` is only held briefly to read the new current's
+    /// metadata, never together with another lock. `LoadNewCurrent` names
+    /// the navigator inside [`Self::stage_and_name`]'s engine lock (engine
+    /// before navigator, the order everywhere); the other arms take one
+    /// lock at a time.
     pub async fn apply_removal_aftermath(&self, plan: RemovalAftermath) -> Result<()> {
         match plan {
             RemovalAftermath::NoCurrentChange => Ok(()),

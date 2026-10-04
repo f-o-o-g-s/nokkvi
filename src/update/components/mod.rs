@@ -1663,8 +1663,8 @@ impl Nokkvi {
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /
-        // credential write either finishes its synchronous redb commit or is
-        // aborted, and only THEN (3) clears the redb session. Sequencing
+        // credential write either finishes its synchronous redb commit or
+        // outlives the budget, and only THEN (3) clears the redb session. Sequencing
         // clear_session AFTER the awaited drain gives the happens-before edge a
         // straggler queue/credential writer would otherwise race past (N3/N14):
         // an in-flight save_session / save_jwt_token / queue-save task can no
@@ -1708,7 +1708,7 @@ impl Nokkvi {
                     tracing::debug!(" [SESSION-RESET] Audio engine stopped");
 
                     // (2) Drain tracked tasks within the established 500 ms
-                    // budget; stragglers past budget are aborted.
+                    // budget; past it, stragglers are no longer waited for.
                     let clean = task_manager
                         .shutdown_all(std::time::Duration::from_millis(500))
                         .await;

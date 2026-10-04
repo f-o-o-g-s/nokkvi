@@ -2006,16 +2006,16 @@ impl AppService {
     ///    The engine mutex is held only for the duration of this synchronous
     ///    call; no network I/O occurs here.
     /// 2. `TaskManager::shutdown_all` — fires the shared `CancellationToken` and
-    ///    awaits tracked `JoinHandle`s up to a 500 ms internal budget, aborting
-    ///    stragglers. The 500 ms sits inside the caller's 750 ms outer budget.
+    ///    waits for the tracked tasks up to a 500 ms internal budget, then stops
+    ///    waiting. The 500 ms sits inside the caller's 750 ms outer budget.
     ///
     /// The caller is responsible for wrapping this in a `tokio::time::timeout`
     /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
     /// blocking worker cannot defer window close beyond user patience.
     ///
     /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
-    /// is a no-op when already cancelled; `shutdown_all` on a drained `JoinSet`
-    /// returns 0 without panicking.
+    /// is a no-op when already cancelled; `shutdown_all` with nothing in flight
+    /// returns 0 at once.
     pub async fn request_shutdown(&self) {
         debug!(" [APP SERVICE] request_shutdown: locking audio engine");
         let engine_arc = self.audio_engine();

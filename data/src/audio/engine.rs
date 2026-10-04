@@ -116,7 +116,8 @@ enum BlendEnding {
 }
 
 /// A seek aimed at a planned skip's target while its decoder builds
-/// ([`CustomAudioEngine::apply_deferred_skip_seek`]).
+/// ([`CustomAudioEngine::apply_deferred_skip_seek`],
+/// [`CustomAudioEngine::take_deferred_skip_seek`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DeferredSkipSeek {
     /// The plan's generation: the `skip_fade_pending` latch value, which is
@@ -1389,15 +1390,16 @@ pub struct CustomAudioEngine {
     /// (`PlaybackController::cue_pulled_queue`) so the next Play resumes
     /// mid-song at the server-saved position — the decoder seeks BEFORE the
     /// renderer starts, so no position-0 audio is ever rendered. Also armed
-    /// by [`Self::apply_deferred_skip_seek`] when a skip lands its target by
-    /// a load instead of a blend. Cleared by `set_source` (any new load
-    /// intent invalidates a stale offset).
+    /// when a skip lands its target by a load instead of a blend, from
+    /// [`Self::take_deferred_skip_seek`]. Cleared by `set_source` (any new
+    /// load intent invalidates a stale offset).
     pending_start_ms: Option<u64>,
 
     /// A seek made while a planned skip's decoder was building (the
     /// `skip_fade_pending` window), aimed at the skip target. Recorded by
-    /// `seek`, which leaves the outgoing untouched, and applied by
-    /// [`Self::apply_deferred_skip_seek`] once the target lands. Keyed by the
+    /// `seek`, which leaves the outgoing untouched, and consumed once the
+    /// target lands: [`Self::apply_deferred_skip_seek`] after a fire,
+    /// [`Self::take_deferred_skip_seek`] for a fallback load. Keyed by the
     /// plan's generation, so a superseded or abandoned plan never applies it.
     deferred_skip_seek: Option<DeferredSkipSeek>,
 
