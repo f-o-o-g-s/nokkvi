@@ -32,15 +32,6 @@ impl LibrarySearchResults {
             && self.playlists.is_empty()
     }
 
-    /// Total rows across all five groups.
-    pub fn total_len(&self) -> usize {
-        self.artists.len()
-            + self.albums.len()
-            + self.songs.len()
-            + self.genres.len()
-            + self.playlists.len()
-    }
-
     /// Merge the five per-entity fan-out outcomes into one aggregate.
     ///
     /// Partial-tolerant: a failed entity degrades to an empty group with a
@@ -116,20 +107,18 @@ mod tests {
     }
 
     #[test]
-    fn default_is_empty_with_zero_total() {
+    fn default_is_empty() {
         let results = LibrarySearchResults::default();
         assert!(results.is_empty());
-        assert_eq!(results.total_len(), 0);
     }
 
     #[test]
-    fn total_len_sums_all_groups_and_is_empty_flips() {
+    fn any_non_empty_group_flips_is_empty() {
         let results = LibrarySearchResults {
             genres: vec![genre("Ambient"), genre("Doom")],
             ..Default::default()
         };
         assert!(!results.is_empty());
-        assert_eq!(results.total_len(), 2);
     }
 
     #[test]

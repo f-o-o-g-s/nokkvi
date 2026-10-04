@@ -47,13 +47,6 @@ impl Toast {
         }
     }
 
-    /// Create a keyed (sticky) toast that uses upsert semantics.
-    pub fn keyed(key: impl Into<String>, message: impl Into<String>, level: ToastLevel) -> Self {
-        let mut t = Self::new(message, level);
-        t.key = Some(key.into());
-        t
-    }
-
     /// Create a short-lived info toast (1.5s) — ideal for transient feedback
     /// like volume changes, mode toggles, etc.
     pub fn info_short(message: impl Into<String>) -> Self {

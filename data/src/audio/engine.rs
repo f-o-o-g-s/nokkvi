@@ -427,6 +427,7 @@ pub struct PreparedTransitionDirectives {
 
 impl PreparedTransitionDirectives {
     /// The M4-only shape: a policy suppress verdict with no M8 facets.
+    #[cfg(test)]
     pub fn from_suppress(suppress_crossfade: bool) -> Self {
         Self {
             suppress_crossfade,

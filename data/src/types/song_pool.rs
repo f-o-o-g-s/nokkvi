@@ -68,14 +68,6 @@ impl SongPool {
         self.songs.is_empty()
     }
 
-    /// Reconstruct an ordered `Vec<Song>` matching the given ID order.
-    /// IDs not found in the pool are silently skipped.
-    pub fn songs_in_order(&self, ids: &[String]) -> Vec<Song> {
-        ids.iter()
-            .filter_map(|id| self.songs.get(id).cloned())
-            .collect()
-    }
-
     /// Clear all songs from the pool.
     pub fn clear(&mut self) {
         self.songs.clear();
@@ -156,18 +148,6 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().title, "Song A");
         assert!(pool.is_empty());
-    }
-
-    #[test]
-    fn songs_in_order_respects_id_sequence() {
-        let mut pool = SongPool::new();
-        pool.insert(make_song("c", "Song C"));
-        pool.insert(make_song("a", "Song A"));
-        pool.insert(make_song("b", "Song B"));
-
-        let ordered = pool.songs_in_order(&["b".to_string(), "a".to_string(), "c".to_string()]);
-        let titles: Vec<&str> = ordered.iter().map(|s| s.title.as_str()).collect();
-        assert_eq!(titles, vec!["Song B", "Song A", "Song C"]);
     }
 
     #[test]

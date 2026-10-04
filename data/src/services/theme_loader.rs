@@ -287,30 +287,6 @@ pub fn builtin_theme_stems() -> Vec<&'static str> {
     BUILTIN_THEMES.iter().map(|t| t.stem).collect()
 }
 
-/// Restore a built-in theme by overwriting the user's copy with the original.
-///
-/// Returns `Err` if the theme is not a built-in. Routes through `write_atomic`,
-/// which records the write in the internal-write registry so the file watcher
-/// suppresses the reload event it would otherwise fire; a caller that wants the
-/// visual hot-reload must trigger it explicitly after the write. (No production
-/// caller today — the GUI theme-restore action was removed in favor of editing
-/// the theme TOML directly; retained as a tested utility.)
-pub fn restore_builtin(name: &str) -> Result<()> {
-    let registry = builtin_registry();
-    let content = registry
-        .get(name)
-        .ok_or_else(|| anyhow::anyhow!("'{name}' is not a built-in theme"))?;
-
-    let themes_dir = get_themes_dir()?;
-    let path = themes_dir.join(format!("{name}.toml"));
-
-    crate::utils::paths::write_atomic(&path, content)
-        .with_context(|| format!("Failed to restore theme: {}", path.display()))?;
-
-    info!(theme = name, "Restored built-in theme to defaults");
-    Ok(())
-}
-
 // ============================================================================
 // Config.toml helpers
 // ============================================================================
@@ -596,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_builtin_content() {
+    fn builtin_registry_holds_shipped_themes_only() {
         let registry = builtin_registry();
         assert!(registry.contains_key("gruvbox"));
         assert!(registry.contains_key("everforest"));
@@ -678,45 +654,5 @@ mod tests {
         assert!(on_disk.contains("# notes"));
         assert!(on_disk.contains("theme = \"cryo\""));
         assert!(on_disk.contains("username = \"bob\""));
-    }
-
-    /// Pins the HIGH-RISK suppress contract on the `restore_builtin` path.
-    ///
-    /// `restore_builtin` itself resolves the themes dir via `BaseDirs` and is
-    /// not test-overridable, but the load-bearing behavior is the
-    /// `write_atomic` call against the registered built-in content. Exercising
-    /// the same payload through the same helper against a temp path proves the
-    /// internal-write registry records the (path, content-hash) for theme
-    /// restores. If the helper is silently swapped for a non-suppressing
-    /// `std::fs::write`, this assertion catches it — any caller relying on the
-    /// suppression would otherwise race a spurious watcher event against its
-    /// own `reload_theme()` call.
-    #[test]
-    fn restore_builtin_payload_records_internal_write() {
-        let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
-
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("everforest.toml");
-
-        // Pull the production registry content — exactly what restore_builtin writes.
-        let registry = builtin_registry();
-        let content = registry.get("everforest").expect("everforest is built-in");
-
-        crate::utils::paths::write_atomic(&path, content).unwrap();
-
-        assert!(
-            crate::utils::paths::was_internal_write(
-                &path,
-                crate::utils::paths::hash_config_bytes(content.as_bytes())
-            ),
-            "restore_builtin must route through write_atomic so the watcher \
-             can identity-match its own write and the UI's reload_theme() call \
-             doesn't race a spurious ThemeConfigReloaded event"
-        );
-
-        // Sanity: the registered content round-trips as a valid ThemeFile.
-        let on_disk = std::fs::read_to_string(&path).unwrap();
-        let tf = ThemeFile::load(&on_disk).expect("restored theme must parse");
-        assert_eq!(tf.name, "Everforest");
     }
 }

@@ -294,13 +294,6 @@ impl BitPerfectMode {
         !matches!(self, Self::Off)
     }
 
-    /// Whether this mode permits a crossfade between tracks that share an audio
-    /// format (same sample rate + channel count). Only `Relaxed`. `Strict`
-    /// hard-cuts everything; `Off` defers to the normal crossfade path.
-    pub fn allows_relaxed_crossfade(self) -> bool {
-        matches!(self, Self::Relaxed)
-    }
-
     /// Cycle to the next mode for the player-bar button: Off → Strict →
     /// Relaxed → Off.
     pub fn next(self) -> Self {
@@ -539,13 +532,6 @@ mod tests {
         assert!(!BitPerfectMode::Off.builds_bit_perfect());
         assert!(BitPerfectMode::Strict.builds_bit_perfect());
         assert!(BitPerfectMode::Relaxed.builds_bit_perfect());
-    }
-
-    #[test]
-    fn bit_perfect_mode_allows_relaxed_crossfade_for_relaxed_only() {
-        assert!(!BitPerfectMode::Off.allows_relaxed_crossfade());
-        assert!(!BitPerfectMode::Strict.allows_relaxed_crossfade());
-        assert!(BitPerfectMode::Relaxed.allows_relaxed_crossfade());
     }
 
     #[test]

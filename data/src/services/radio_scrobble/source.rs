@@ -9,8 +9,9 @@
 //! 3. **redb** — legacy fallback for values entered before config.toml became
 //!    the store (migrated forward on launch).
 //!
-//! [`resolve`] / [`resolve_pair`] apply that precedence over already-read
-//! values so the choice logic stays pure and unit-testable. Only the
+//! [`resolve_with_source`] / [`resolve_pair_with_source`] apply that
+//! precedence over already-read values so the choice logic stays pure and
+//! unit-testable. Only the
 //! hand-configurable credentials participate (ListenBrainz token, Last.fm app
 //! key + secret). The Last.fm **session key** and username are browser-auth
 //! output, not something a user hand-types, so they stay redb-only and are not
@@ -168,7 +169,9 @@ fn non_blank(value: Option<String>) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// Like [`resolve`], but also reports which layer won (for the settings badges).
+/// Resolve a single credential by precedence: env > config.toml > redb, and
+/// report which layer won (for the settings badges). Each layer is trimmed
+/// and blank-filtered before it can win.
 pub fn resolve_with_source(
     env_value: Option<String>,
     toml_value: Option<&str>,
@@ -186,7 +189,12 @@ pub fn resolve_with_source(
     (None, CredSource::Unset)
 }
 
-/// Like [`resolve_pair`], but also reports which layer supplied the pair.
+/// Resolve the Last.fm `(api_key, api_secret)` pair **atomically** from the
+/// highest-priority layer that supplies *both*, and report which layer that
+/// was. Resolving the pair together (rather than each field independently)
+/// prevents a stale redb secret from pairing with a fresh env key — the two
+/// must belong to the same registered Last.fm app or every request's
+/// signature is wrong.
 pub fn resolve_pair_with_source(
     env_key: Option<String>,
     env_secret: Option<String>,
@@ -214,42 +222,6 @@ pub fn resolve_pair_with_source(
         }
     }
     (None, CredSource::Unset)
-}
-
-/// Resolve a single credential by precedence: env > config.toml > redb. Each
-/// layer is trimmed and blank-filtered before it can win.
-pub fn resolve(
-    env_value: Option<String>,
-    toml_value: Option<&str>,
-    redb_value: Option<String>,
-) -> Option<String> {
-    non_blank(env_value)
-        .or_else(|| non_blank(toml_value.map(str::to_string)))
-        .or_else(|| non_blank(redb_value))
-}
-
-/// Resolve the Last.fm `(api_key, api_secret)` pair **atomically** from the
-/// highest-priority layer that supplies *both*. Resolving the pair together
-/// (rather than each field independently) prevents a stale redb secret from
-/// pairing with a fresh env key — the two must belong to the same registered
-/// Last.fm app or every request's signature is wrong.
-pub fn resolve_pair(
-    env_key: Option<String>,
-    env_secret: Option<String>,
-    toml_key: Option<&str>,
-    toml_secret: Option<&str>,
-    redb_key: Option<String>,
-    redb_secret: Option<String>,
-) -> Option<(String, String)> {
-    let layers: [(Option<String>, Option<String>); 3] = [
-        (non_blank(env_key), non_blank(env_secret)),
-        (
-            non_blank(toml_key.map(str::to_string)),
-            non_blank(toml_secret.map(str::to_string)),
-        ),
-        (non_blank(redb_key), non_blank(redb_secret)),
-    ];
-    layers.into_iter().find_map(|(k, s)| Some((k?, s?)))
 }
 
 #[cfg(test)]
@@ -384,29 +356,29 @@ mod tests {
         );
     }
 
-    // ── resolve (single value) ──────────────────────────────────────────────
+    // ── resolve_with_source (single value) ──────────────────────────────────
 
     #[test]
     fn resolve_env_wins() {
         assert_eq!(
-            resolve(Some("env".into()), Some("cfg"), Some("redb".into())),
-            Some("env".into())
+            resolve_with_source(Some("env".into()), Some("cfg"), Some("redb".into())),
+            (Some("env".into()), CredSource::Env)
         );
     }
 
     #[test]
     fn resolve_config_over_redb() {
         assert_eq!(
-            resolve(None, Some("cfg"), Some("redb".into())),
-            Some("cfg".into())
+            resolve_with_source(None, Some("cfg"), Some("redb".into())),
+            (Some("cfg".into()), CredSource::Config)
         );
     }
 
     #[test]
     fn resolve_redb_fallback() {
         assert_eq!(
-            resolve(None, None, Some("redb".into())),
-            Some("redb".into())
+            resolve_with_source(None, None, Some("redb".into())),
+            (Some("redb".into()), CredSource::Redb)
         );
     }
 
@@ -414,30 +386,33 @@ mod tests {
     fn resolve_blank_layer_does_not_shadow() {
         // Blank env + blank config must fall through to redb, not win-as-empty.
         assert_eq!(
-            resolve(Some("   ".into()), Some(""), Some("redb".into())),
-            Some("redb".into())
+            resolve_with_source(Some("   ".into()), Some(""), Some("redb".into())),
+            (Some("redb".into()), CredSource::Redb)
         );
     }
 
     #[test]
     fn resolve_trims_winner() {
         assert_eq!(
-            resolve(Some("  spaced  ".into()), None, None),
-            Some("spaced".into())
+            resolve_with_source(Some("  spaced  ".into()), None, None),
+            (Some("spaced".into()), CredSource::Env)
         );
     }
 
     #[test]
     fn resolve_all_none() {
-        assert_eq!(resolve(None, None, None), None);
+        assert_eq!(
+            resolve_with_source(None, None, None),
+            (None, CredSource::Unset)
+        );
     }
 
-    // ── resolve_pair (atomic key+secret) ────────────────────────────────────
+    // ── resolve_pair_with_source (atomic key+secret) ────────────────────────
 
     #[test]
     fn resolve_pair_env_both() {
         assert_eq!(
-            resolve_pair(
+            resolve_pair_with_source(
                 Some("ek".into()),
                 Some("es".into()),
                 Some("ck"),
@@ -445,7 +420,7 @@ mod tests {
                 Some("rk".into()),
                 Some("rs".into()),
             ),
-            Some(("ek".into(), "es".into()))
+            (Some(("ek".into(), "es".into())), CredSource::Env)
         );
     }
 
@@ -454,7 +429,7 @@ mod tests {
         // env has only the key, not the secret → the env layer is incomplete,
         // so the whole pair comes from config (never env-key + config-secret).
         assert_eq!(
-            resolve_pair(
+            resolve_pair_with_source(
                 Some("ek".into()),
                 None,
                 Some("ck"),
@@ -462,15 +437,15 @@ mod tests {
                 Some("rk".into()),
                 Some("rs".into()),
             ),
-            Some(("ck".into(), "cs".into()))
+            (Some(("ck".into(), "cs".into())), CredSource::Config)
         );
     }
 
     #[test]
     fn resolve_pair_redb_fallback() {
         assert_eq!(
-            resolve_pair(None, None, None, None, Some("rk".into()), Some("rs".into())),
-            Some(("rk".into(), "rs".into()))
+            resolve_pair_with_source(None, None, None, None, Some("rk".into()), Some("rs".into())),
+            (Some(("rk".into(), "rs".into())), CredSource::Redb)
         );
     }
 
@@ -478,7 +453,7 @@ mod tests {
     fn resolve_pair_partial_everywhere_is_none() {
         // No single layer has both halves → unusable.
         assert_eq!(
-            resolve_pair(
+            resolve_pair_with_source(
                 Some("ek".into()),
                 None,
                 None,
@@ -486,7 +461,7 @@ mod tests {
                 Some("rk".into()),
                 None,
             ),
-            None
+            (None, CredSource::Unset)
         );
     }
 }

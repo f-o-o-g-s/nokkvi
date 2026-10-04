@@ -451,9 +451,10 @@ impl QueueNavigator {
     ///
     /// In ALL cases, the queue transition uses `PeekedQueue::transition()`.
     ///
-    /// This is a thin wrapper around [`decide_transition`] + [`execute_transition`].
+    /// Test-only composition of [`decide_transition`] + [`execute_transition`].
     /// The completion callback in `playback_controller.rs` calls those two halves
     /// directly so the outer `nav` mutex is dropped before engine I/O.
+    #[cfg(test)]
     pub async fn on_track_finished(
         &self,
         engine: &mut CustomAudioEngine,

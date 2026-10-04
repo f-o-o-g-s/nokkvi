@@ -46,21 +46,6 @@ pub fn read_toml_settings() -> Result<Option<TomlSettings>> {
     read_section::<TomlSettings>("settings")
 }
 
-/// Read the `[hotkeys]` section from config.toml.
-/// Returns `None` if the file or section doesn't exist.
-pub fn read_toml_hotkeys() -> Result<Option<HotkeyConfig>> {
-    Ok(
-        read_section::<std::collections::BTreeMap<String, String>>("hotkeys")?
-            .map(|map| HotkeyConfig::from_toml_map(&map)),
-    )
-}
-
-/// Read the `[views]` section from config.toml.
-/// Returns `None` if the file or section doesn't exist.
-pub fn read_toml_views() -> Result<Option<TomlViewPreferences>> {
-    read_section::<TomlViewPreferences>("views")
-}
-
 /// Read the `[visualizer]` section from config.toml, validated (range-clamped
 /// via `VisualizerConfig::validate`). Returns `None` if the file or section
 /// doesn't exist. The unmodeled color sub-tables are ignored by serde and

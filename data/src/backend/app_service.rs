@@ -1968,20 +1968,6 @@ impl AppService {
         now_active
     }
 
-    /// Replace the active library selection wholesale and persist it.
-    /// Used by the "select all" / "clear all" affordances and by the
-    /// pruning path inside [`refresh_libraries`]. Mirrors
-    /// [`toggle_library`]'s persistence policy (best-effort).
-    pub fn set_active_library_ids(&self, ids: HashSet<i32>) {
-        {
-            let mut guard = self.active_library_ids.write();
-            *guard = ids.clone();
-        }
-        if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &ids) {
-            warn!("[APP SERVICE] failed to persist active_library_ids set wholesale: {e}");
-        }
-    }
-
     /// Refresh the cached library list from the server and prune the
     /// active selection of any IDs no longer present.
     ///
@@ -2224,7 +2210,9 @@ mod tests {
             let app = AppService::new_with_storage(storage)
                 .await
                 .expect("boot1 app");
-            app.set_active_library_ids([1, 2, 3].into_iter().collect());
+            for id in [1, 2, 3] {
+                app.toggle_library(id);
+            }
 
             // Refresh with a server list that only contains IDs 1, 2 —
             // ID 3 (the "deleted" library) must be pruned.
@@ -2279,7 +2267,9 @@ mod tests {
     #[tokio::test]
     async fn apply_library_refresh_is_no_op_when_no_pruning_needed() {
         let (app, db_path) = test_app().await;
-        app.set_active_library_ids([1, 2].into_iter().collect());
+        for id in [1, 2] {
+            app.toggle_library(id);
+        }
 
         app.apply_library_refresh(vec![
             Library {
@@ -2361,54 +2351,6 @@ mod tests {
         assert_eq!(app.library_count(), 2);
 
         drop(app);
-        let _ = std::fs::remove_file(&db_path);
-    }
-
-    /// `set_active_library_ids` replaces the selection wholesale and
-    /// persists the new set immediately. Two consecutive calls must
-    /// honor the second call's contents — no leak from the first.
-    #[tokio::test]
-    async fn set_active_library_ids_replaces_wholesale_and_persists() {
-        let suffix = format!(
-            "test_app_libraries_set_{}_{}.redb",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let db_path = std::env::temp_dir().join(suffix);
-        let _ = std::fs::remove_file(&db_path);
-
-        // Boot 1: assign {1, 2, 3}, then wholesale-replace with {4, 5}.
-        {
-            let storage = StateStorage::new(db_path.clone()).expect("boot1 storage");
-            let app = AppService::new_with_storage(storage)
-                .await
-                .expect("boot1 app");
-            app.set_active_library_ids([1, 2, 3].into_iter().collect());
-            app.set_active_library_ids([4, 5].into_iter().collect());
-
-            let active = app.active_library_ids();
-            assert_eq!(active.len(), 2);
-            assert!(active.contains(&4));
-            assert!(active.contains(&5));
-            assert!(!active.contains(&1));
-            drop(app);
-        }
-
-        // Boot 2: confirms the wholesale-replace was the persisted shape.
-        {
-            let storage = StateStorage::new(db_path.clone()).expect("boot2 storage");
-            let app = AppService::new_with_storage(storage)
-                .await
-                .expect("boot2 app");
-            let restored = app.active_library_ids();
-            assert_eq!(restored.len(), 2);
-            assert!(restored.contains(&4));
-            assert!(restored.contains(&5));
-            drop(app);
-        }
-
         let _ = std::fs::remove_file(&db_path);
     }
 

@@ -216,12 +216,6 @@ pub fn fuzzy_match(haystack: &str, needle: &str) -> Option<FuzzyMatch> {
     })
 }
 
-/// Score-only convenience for fields that don't need highlight ranges
-/// (category, subtitle, synonyms). Same scoring as [`fuzzy_match`].
-pub fn fuzzy_score(haystack: &str, needle: &str) -> Option<i32> {
-    fuzzy_match(haystack, needle).map(|m| m.score)
-}
-
 /// A strength-gated match of a whole user *query* (one or more whitespace-
 /// separated tokens) against one field.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,6 +327,11 @@ pub fn is_strong(m: &FuzzyMatch, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Score-only view of [`fuzzy_match`] for the ranking tests.
+    fn fuzzy_score(haystack: &str, needle: &str) -> Option<i32> {
+        fuzzy_match(haystack, needle).map(|m| m.score)
+    }
 
     #[test]
     fn empty_needle_is_none() {

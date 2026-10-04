@@ -12,8 +12,6 @@
 //! use `#[tokio::test]` with a tempfile-backed `AppService` because the
 //! backend constructor is async.
 
-use std::collections::HashSet;
-
 use iced::Rectangle;
 use nokkvi_data::{
     backend::app_service::AppService, services::state_storage::StateStorage,
@@ -354,7 +352,9 @@ async fn loaded_prunes_deleted_library_ids() {
     let shell = app.app_service.as_ref().expect("shell").clone();
 
     // Seed: pretend the user had 1, 2, 3 active.
-    shell.set_active_library_ids(HashSet::from_iter([1, 2, 3]));
+    for id in [1, 2, 3] {
+        shell.toggle_library(id);
+    }
     assert_eq!(shell.active_library_ids().len(), 3);
 
     // Server reports only 1 and 2 — id 3 has been deleted.

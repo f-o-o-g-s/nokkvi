@@ -271,16 +271,6 @@ impl QueueManager {
         self.pool.get(id)
     }
 
-    /// Reconstruct an ordered `Vec<Song>` from the current queue ordering.
-    /// Used by `QueueService::refresh_from_queue()` to build UI data.
-    pub fn songs_in_order(&self) -> Vec<&Song> {
-        self.queue
-            .rows
-            .iter()
-            .filter_map(|row| self.pool.get(&row.song_id))
-            .collect()
-    }
-
     /// O(n) scan to find the index of a song ID in the queue.
     /// Centralized here so all callers use the same lookup.
     fn index_of(&self, song_id: &str) -> Option<usize> {
@@ -436,11 +426,10 @@ impl QueueManager {
         Ok(tx.commit_save_all())
     }
 
-    /// Remove every queue row matching a song_id.
-    ///
-    /// Useful for "drop this song everywhere it appears" semantics. For
-    /// per-row removal (right-click on a single duplicate) use
-    /// [`Self::remove_entry_by_id`] instead — that path is duplicate-aware.
+    /// Test helper: remove every queue row matching a song_id. Production
+    /// removal is per-row ([`Self::remove_entry_by_id`]), which is
+    /// duplicate-aware.
+    #[cfg(test)]
     pub fn remove_song_by_id(&mut self, id: &str) -> Result<NextTrackResetEffect> {
         while let Some(idx) = self.index_of(id) {
             let _ = self.remove_song(idx)?;
@@ -448,13 +437,14 @@ impl QueueManager {
         Ok(NextTrackResetEffect::new())
     }
 
-    /// Remove every queue row matching any of the given song_ids.
+    /// Test helper: remove every queue row matching any of the given
+    /// song_ids.
     ///
     /// Each ID is resolved freshly between removals so cascading shifts can't
     /// desync the targets. Unknown IDs are skipped silently. As with
-    /// [`Self::remove_song_by_id`], duplicate rows of a song all disappear —
-    /// callers that need single-row removal should use
-    /// [`Self::remove_entries_by_ids`].
+    /// [`Self::remove_song_by_id`], duplicate rows of a song all disappear;
+    /// production removal is per-row ([`Self::remove_entries_by_ids`]).
+    #[cfg(test)]
     pub fn remove_songs_by_ids(&mut self, ids: &[String]) -> Result<NextTrackResetEffect> {
         for id in ids {
             while let Some(idx) = self.index_of(id) {
@@ -2644,7 +2634,12 @@ pub(crate) mod tests {
             qm2.get_current_song().is_some(),
             "current song must resolve from the atomically-persisted pool",
         );
-        assert_eq!(qm2.songs_in_order().len(), 3);
+        let rows = &qm2.get_queue().rows;
+        assert_eq!(rows.len(), 3);
+        assert!(
+            rows.iter().all(|r| qm2.get_song(&r.song_id).is_some()),
+            "every persisted row must resolve from the persisted pool",
+        );
     }
 
     /// A failed save must not cost the engine its reset: the rows changed

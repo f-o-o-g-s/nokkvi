@@ -1079,16 +1079,6 @@ impl SmartRules {
         self.legacy_order = None;
     }
 
-    /// All `inPlaylist`/`notInPlaylist` ids referenced anywhere in the
-    /// tree (raw-JSON nesting included).
-    pub fn referenced_playlist_ids(&self) -> Vec<String> {
-        let mut ids = Vec::new();
-        if let Some(root) = &self.root {
-            collect_playlist_refs(&root.nodes, &mut ids);
-        }
-        ids
-    }
-
     /// Maximum nesting depth of the tree (0 = leaves only at root). The
     /// typed form renders depth ≤1 editable; deeper trees lock to
     /// read-only + edit-as-JSON.
@@ -1211,29 +1201,6 @@ fn serialize_nodes(nodes: &[CriteriaNode]) -> Value {
             })
             .collect(),
     )
-}
-
-fn collect_playlist_refs(nodes: &[CriteriaNode], out: &mut Vec<String>) {
-    for node in nodes {
-        match node {
-            CriteriaNode::Leaf(leaf)
-                if matches!(
-                    leaf.operator,
-                    RuleOperator::InPlaylist | RuleOperator::NotInPlaylist
-                ) =>
-            {
-                // The operand for playlist refs is `{"id": "<playlist-id>"}`
-                // (field == "id", value == the id string).
-                if leaf.field == "id"
-                    && let Some(id) = leaf.value.as_str()
-                {
-                    out.push(id.to_owned());
-                }
-            }
-            CriteriaNode::Group(group) => collect_playlist_refs(&group.nodes, out),
-            CriteriaNode::Leaf(_) | CriteriaNode::Unknown(_) => {}
-        }
-    }
 }
 
 // =========================================================================
