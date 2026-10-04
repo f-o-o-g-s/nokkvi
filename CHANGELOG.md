@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.22.0 — 2026-10-04
+
+### Added
+
 - The new Accent From Album Art setting in the Theme tab takes the accent color from the playing cover, adjusted to stay readable.
 - With Accent From Album Art on, rating stars and love hearts take the accent color too.
 - The new Visualizer From Album Art setting gives the bars, lines, scope and nokkvi's MilkDrop presets a gradient from the playing cover.
@@ -17,19 +27,35 @@ All notable changes to this project will be documented in this file.
 - The `nav-up`, `nav-down` and `enter` commands now do nothing while the EQ, About or Get Info window or a dialog is open, like the keys.
 - With Fade on Skip set to Boundary Fade, Next and Previous now cut straight out of a song the server is still transcoding.
 - Searching in the default playlist picker now keeps the highlighted playlist highlighted while it still matches, instead of jumping to the top.
-- On dark themes, Harbour's Trawl scene now glows with a streaked aurora, rays of light hanging into the water, drifting plankton and a lit seabed.
-- On dark themes, the Trawl scene's stars and moon now glow softly, with the aurora drifting in front of them.
+- On dark themes, Harbour's Trawl scene sky now holds a streaked, slowly folding aurora curtain.
+- On dark themes, the Trawl scene's aurora drifts in front of the moon and stars.
+- On dark themes, the Trawl scene's stars and moon now glow softly.
+- On dark themes, streaked rays of light now hang down into the Trawl scene's water.
+- On dark themes, glowing plankton now drifts through the Trawl scene's water.
+- On dark themes, a moving net of light now plays across the Trawl scene's seabed.
+- On dark themes, the Trawl scene's aurora rays now rise and fall with the music.
+- On dark themes, each kick now sends a surge of light sweeping across the Trawl scene's aurora.
+- On dark themes, the Trawl scene's stars now flare on the beat.
+- The Trawl scene's aurora and stars react to the music even with the visualizer off.
+- On dark themes, the Trawl scene's longship is now moonlit, keeping its own colors.
+- On dark themes, a lantern now hangs at the masthead of the Trawl scene's longship.
+- On dark themes, the edges of the Trawl scene's fish now catch the aurora's light.
+- On dark themes, the Trawl scene's kelp now carries softly blinking, glowing beads.
+- On dark themes, the Trawl scene's anchor now looks like moonlit metal.
+- On dark themes, the Trawl scene's anchor rope now shows a faint lit sheen.
+- On dark themes, the Trawl scene's sky notes now glow softly.
+- On light themes, the Trawl scene's sky now warms to a soft haze at the horizon.
+- On light themes, high cloud now drifts across the Trawl scene's sky.
+- On light themes, the Trawl scene's sun now glows in a soft bloom.
+- On light themes, sun shafts now slant down into the Trawl scene's water.
+- On light themes, ripples of sunlight now play across the Trawl scene's sand.
 - The Trawl scene's sea now sways in gentle, low folds instead of rolling hills.
-- On dark themes, the Trawl scene's longship is moonlit, keeping its colors, with a lantern at the masthead.
-- On dark themes, the Trawl scene's fish, rope and anchor now catch the aurora's light, and the kelp glows faintly.
-- The Trawl scene's rocks, starfish and kelp now sit in the sand with soft shadows, lit by the sea floor's own light.
+- The Trawl scene's rocks, starfish and kelp now cast soft shadows on the sand.
+- The Trawl scene's rocks, kelp and sunken shield now sink into drifted sand at their base.
 - The Trawl scene's sunken crate is now a half-buried viking shield painted like the longship's shields.
-- On dark themes, the Trawl scene's stars flare on the beat.
+- The Trawl scene's bubbles now look like glass.
 - The Trawl scene's fish now waggle their tails as they swim.
 - The Trawl scene's gulls now flap their wings in bursts between glides.
-- The Trawl scene's bubbles now look like glass, and on dark themes its sky notes glow softly.
-- On light themes, the Trawl scene is now sunlit: a soft sky with high cloud, a glowing sun, sun shafts and caustics on the sand.
-- On dark themes, the Trawl scene's aurora now follows the music, reaching with the spectrum and surging on each kick, even with the visualizer off.
 
 ### Fixed
 
@@ -54,7 +80,7 @@ All notable changes to this project will be documented in this file.
 - The Playlists create menu now closes when the window loses focus, like the other header menus.
 - `nokkvi --help` now lists `harbour` among the `switch-view` targets.
 - When the volume can't be saved, a warning now says so instead of the change silently not surviving a restart.
-- Playing something else while a long Songs list is still loading into the queue no longer appends the rest of that list to the new queue.
+- Playing something else while a long Songs list is still loading into the queue no longer appends the rest of it.
 - Pressing Enter in the split view's library pane now only adds to the queue, leaving a playing radio station and the playlist header alone.
 - Cancelling a roulette spin while a radio station plays now keeps the app in radio mode.
 - When playing a selection fails while a radio station plays, the app now stays in radio mode instead of switching to the queue.
@@ -100,86 +126,9 @@ All notable changes to this project will be documented in this file.
 - Genre rows no longer offer Get Info, which did nothing.
 - Artist rows no longer offer Show in File Manager, which did nothing.
 
-## v0.21.2 — 2026-10-02
-
-### Added
-
-- The Fractal Voyage MilkDrop preset journeys through four fractals in turn: a Julia set, the Burning Ship, the Mandelbrot set and the dragon curve.
-- The Fjord MilkDrop preset flies low down a winding Norwegian fjord between cliffs that rise straight out of the water.
-- Press m, or choose Choose Preset… from the panel menu, to browse every MilkDrop preset in a searchable list.
-- The MilkDrop preset list plays each preset live as you scroll, and Enter locks the one on screen.
-- Closing the MilkDrop preset list without choosing returns to the preset you started from.
-- In the MilkDrop preset list you can favorite or hide any preset, bring hidden ones back, or show only favorites.
-- The Starfield Nebula MilkDrop preset flies through liquid stars and a living nebula coloured by your theme.
-- The Pirate Signal MilkDrop preset shows nokkvi's pirate smiley as a broadcast on an LCD, over living sand and oil paint.
-
-### Changed
-
-- Julia Lace now morphs between different Julia sets and lies in a dark, glossy liquid.
-- Living Ink is rebuilt as a 3D tank: drops of ink shoot into dark water from every direction and linger as drifting, curling clouds.
-
-### Removed
-
-- The Chladni, Cover Kaleido and Cover Orb MilkDrop presets are gone.
-
-## v0.21.1 — 2026-09-26
-
-### Added
-
-- The Chladni MilkDrop preset pours theme-coloured sand onto a vibrating plate, redrawing its figure as the music retunes it.
-- The Julia Lace MilkDrop preset dives endlessly into a Julia set's spiral vortex, the camera swinging between steep dives and skimming glides.
-- The Coral City MilkDrop preset floats through an endless fractal coral reef that sways with the music and leaves light trails.
-- The Coral Dive MilkDrop preset dives endlessly into the coral reef, which repeats itself exactly every 26-fold zoom.
-- The Infinity MilkDrop preset flies down a spiralling corridor of neon-lit polygon frames standing in a dark, rippling liquid that reflects them.
-- Infinity flies faster as the music gets louder and lunges forward on kicks.
-- Each beat sends a wave of light down Infinity's neon inlays.
-- Switching MilkDrop presets now dissolves the old preset into the new one, in a pattern that changes each time.
-- A Preset Crossfade setting sets how long MilkDrop's dissolve lasts, up to 10 seconds.
-- A Preset Crossfade of 0 cuts straight to the next preset.
-
-## v0.21.0 — 2026-09-25
-
-### Added
-
-- Theater Mode (F11) fills the window with the playing track's cover, visualizer and lyrics, hiding the library, toolbar and nav.
-- Escape leaves Theater Mode; keys aimed at the hidden list leave it too, and view keys leave and then switch.
-- Right-clicking the Theater Mode cover offers Exit Theater Mode and Refresh Artwork.
-- In Theater Mode the player bar slides away after 2.5 idle seconds and slides back on any mouse or key activity.
-- In Theater Mode the mouse cursor hides after 2.5 idle seconds, like in a video player.
-- In Theater Mode the lyrics grow with the window, up to two and a half times their Queue size.
-- A Cover Art setting can swap the now-playing cover for a plain backdrop, everywhere or only in Theater Mode.
-- With the cover hidden in Theater Mode, the visualizer spans the whole window instead of a centered square.
-- Hovering the Queue cover reveals an expand icon that enters Theater Mode; its right-click menu gains Enter Theater Mode.
-- In Theater Mode an exit icon rides above the player bar.
-- A Theater Controls setting keeps Theater Mode's player bar auto-hiding, always shown, or always hidden.
-- A Theater Fills the Screen setting also makes the window fullscreen in Theater Mode and restores it on leaving.
-- `nokkvi theater` toggles Theater Mode from the command line.
-- `nokkvi status` now reports whether Theater Mode is on.
-- `nokkvi preset next` (or previous, lock, unlock, favorite, unfavorite, hide) controls MilkDrop presets from the command line.
-- `nokkvi status` now reports the visualizer mode and the MilkDrop preset on screen.
-- A MilkDrop visualizer mode plays MilkDrop presets in place of the Queue or Radios cover and fills Theater Mode.
-- The visualizer button and `v` now cycle Off, Bars, Lines, Scope and MilkDrop.
-- MilkDrop switches to another preset every 30 seconds and on each new track, showing the preset's name.
-- In MilkDrop mode, `n` jumps to another preset and `p` returns to the previous one.
-- In MilkDrop mode, Shift+M locks the current preset until pressed again.
-- Right-clicking the MilkDrop panel offers Next, Previous, Lock, Favorite and Never Show This Preset.
-- Never Show This Preset hides a preset for good and moves on at once.
-- Presets dropped into `~/.config/nokkvi/milkdrop/` join the rotation; the refresh key picks up new ones.
-- A MilkDrop settings section sets the preset interval, whether tracks change presets, favorites only, render quality and name toasts.
-- Fourteen nokkvi MilkDrop presets draw in your theme's colours; eight of them use the playing album's cover.
-- Two nokkvi presets remake the classic "dedicated to the sherwin maxawow" in your theme's colours or your cover's.
-- Two nokkvi presets remake Flexi's "black holes", whose bouncing holes swallow the picture, in your theme's colours or your cover's.
-- nokkvi's MilkDrop presets recolour on the spot when you change theme, and keep the theme's dark colours in light mode.
-- The MilkDrop Presets setting gains `nokkvi`, which plays only nokkvi's own presets.
-- Each MilkDrop preset starts from the previous preset's picture, as in MilkDrop, instead of from black.
-
-### Changed
-
-- Svalbard's visualizer peaks now step from dark to light teal instead of alternating two colors.
-- The Harbour moon and stars now glow in the lightest peak color, whatever order a theme lists its peaks in.
-
 ## Older releases
 
+- **v0.21.x** (2026-09-25 → 2026-10-02, v0.21.0–v0.21.2): [CHANGELOG-0.21.md](./changelog-archive/CHANGELOG-0.21.md)
 - **v0.20.x** (2026-09-23, v0.20.0): [CHANGELOG-0.20.md](./changelog-archive/CHANGELOG-0.20.md)
 - **v0.19.x** (2026-09-20 → 2026-09-21, v0.19.0–v0.19.1): [CHANGELOG-0.19.md](./changelog-archive/CHANGELOG-0.19.md)
 - **v0.18.x** (2026-07-19 → 2026-07-25, v0.18.0–v0.18.4): [CHANGELOG-0.18.md](./changelog-archive/CHANGELOG-0.18.md)
