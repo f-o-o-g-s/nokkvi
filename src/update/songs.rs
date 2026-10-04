@@ -3,7 +3,7 @@
 use iced::Task;
 use nokkvi_data::{
     backend::songs::SongUIViewData,
-    types::{ItemKind, OneShotShuffle},
+    types::{ItemKind, OneShotShuffle, library_query::LibraryQuery},
 };
 use tracing::{debug, error};
 
@@ -27,11 +27,7 @@ impl Nokkvi {
         let library_ids = shell.active_library_ids_vec();
         match songs_vm
             .load_raw_songs_page_with_libraries(
-                Some(params.view_str),
-                Some(params.sort_order),
-                params.search_query.as_deref(),
-                params.filter.as_ref(),
-                &library_ids,
+                &params.query(&library_ids),
                 params.offset,
                 params.page_size,
             )
@@ -306,11 +302,13 @@ impl Nokkvi {
                                         let all = shell
                                             .songs()
                                             .load_raw_songs_page_with_libraries(
-                                                Some(&sort_mode),
-                                                Some(&sort_order),
-                                                search_query.as_deref(),
-                                                filter.as_ref(),
-                                                &library_ids,
+                                                &LibraryQuery {
+                                                    sort_mode: &sort_mode,
+                                                    sort_order: &sort_order,
+                                                    search_query: search_query.as_deref(),
+                                                    filter: filter.as_ref(),
+                                                    library_ids: &library_ids,
+                                                },
                                                 0,
                                                 total_count,
                                             )

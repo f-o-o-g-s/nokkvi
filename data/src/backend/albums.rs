@@ -14,7 +14,7 @@ use tracing::{debug, trace};
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::albums::AlbumsApiService,
-    types::{album::Album, reactive::ReactiveInt},
+    types::{album::Album, library_query::LibraryQuery, reactive::ReactiveInt},
     utils::url_redaction::redact_subsonic_url,
 };
 
@@ -754,35 +754,15 @@ impl AlbumsService {
     /// the given `library_ids` via the orthogonal Native API filter. An
     /// empty slice omits the param entirely (Navidrome auto-scopes to
     /// libraries the user can access).
-    #[allow(clippy::too_many_arguments)]
     pub async fn load_raw_albums_page_with_libraries(
         &self,
-        sort_mode: Option<&str>,
-        sort_order: Option<&str>,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Album>> {
         let service = self.get_service().await?;
 
-        let sort_mode = sort_mode.unwrap_or("recentlyAdded");
-        let sort_order = sort_order.unwrap_or("DESC");
-        let search_opt = search_query.filter(|s| !s.is_empty());
-
-        match service
-            .load_albums(
-                sort_mode,
-                sort_order,
-                search_opt,
-                filter,
-                library_ids,
-                Some(offset),
-                Some(limit),
-            )
-            .await
-        {
+        match service.load_albums(query, Some(offset), Some(limit)).await {
             Ok((mut albums, total_count)) => {
                 // Populate display_artist_cached to eliminate repeated .to_string() allocations during scrolling
                 for album in &mut albums {

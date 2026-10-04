@@ -1,6 +1,7 @@
 //! Progressive queue append handler — chains paginated song fetches into the queue.
 
 use iced::Task;
+use nokkvi_data::types::library_query::LibraryQuery;
 use tracing::debug;
 
 use crate::{Nokkvi, app_message::Message};
@@ -52,11 +53,13 @@ impl Nokkvi {
                 let songs = shell
                     .songs()
                     .load_raw_songs_page_with_libraries(
-                        Some(&sort_m),
-                        Some(&sort_o),
-                        search_q.as_deref(),
-                        filter_c.as_ref(),
-                        &library_ids,
+                        &LibraryQuery {
+                            sort_mode: &sort_m,
+                            sort_order: &sort_o,
+                            search_query: search_q.as_deref(),
+                            filter: filter_c.as_ref(),
+                            library_ids: &library_ids,
+                        },
                         offset,
                         page_size,
                     )

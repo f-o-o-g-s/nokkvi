@@ -8191,7 +8191,9 @@ mod tests {
         use ringbuf::{HeapRb, traits::Split};
         use tokio::sync::Notify;
 
-        use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+        use crate::audio::streaming_source::{
+            SharedVisualizerCallback, StreamSettings, StreamingSource,
+        };
 
         let rb = HeapRb::<f32>::new(samples.max(1));
         let (mut producer, consumer) = rb.split();
@@ -8209,14 +8211,16 @@ mod tests {
             NonZero::new(2).unwrap(),
             NonZero::new(48000).unwrap(),
             viz,
-            1.0,
-            1.0,
-            None,
-            notify,
-            true,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            true,
-            false,
+            notify,
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         );
 
         if paused {

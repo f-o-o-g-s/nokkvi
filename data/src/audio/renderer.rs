@@ -22,7 +22,7 @@ use crate::{
         format::samples_for_duration,
         resolve_normalization,
         rodio_output::{ActiveStream, RodioOutput},
-        streaming_source::SharedVisualizerCallback,
+        streaming_source::{SharedVisualizerCallback, StreamSettings},
     },
     types::{
         player_settings::{BitPerfectMode, CrossfadeCurve, VolumeNormalizationMode},
@@ -942,14 +942,9 @@ impl AudioRenderer {
         let stream = output.create_stream(
             format.sample_rate(),
             format.channel_count() as u16,
-            self.stream_volume(),
-            1.0, // fresh stream — no fade in progress
             norm,
-            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
-            true,
-            self.smooth_track_starts,
-            self.bit_perfect_active(),
+            self.primary_stream_settings(),
         );
 
         if self.bit_perfect_active() {
@@ -1267,14 +1262,9 @@ impl AudioRenderer {
             let stream = output.create_stream(
                 self.format.sample_rate(),
                 self.format.channel_count() as u16,
-                self.stream_volume(),
-                1.0, // seek recreates a non-fading stream
                 norm,
-                Some(self.eq_state.clone()),
                 self.consumed_notify.clone(),
-                true,
-                self.smooth_track_starts,
-                self.bit_perfect_active(),
+                self.primary_stream_settings(), // a seek recreates a non-fading stream
             );
             self.primary_stream = Some(stream);
             // Seeking while paused must NOT resume audio. The stream we just
@@ -1689,6 +1679,21 @@ impl AudioRenderer {
         }
     }
 
+    /// Settings for a primary stream at the renderer's current volume, EQ,
+    /// onset and bit-perfect state: no fade in progress, feeding the
+    /// visualizer. The crossfade incoming stream overrides the fade and the
+    /// visualizer feed.
+    fn primary_stream_settings(&self) -> StreamSettings {
+        StreamSettings {
+            initial_volume: self.stream_volume(),
+            initial_fade: 1.0,
+            eq_state: Some(self.eq_state.clone()),
+            feeds_visualizer: true,
+            smooth_starts: self.smooth_track_starts,
+            bit_perfect: self.bit_perfect_active(),
+        }
+    }
+
     // =========================================================================
     // Crossfade API
     // =========================================================================
@@ -1819,14 +1824,15 @@ impl AudioRenderer {
         let cf_stream = output.create_stream(
             incoming_format.sample_rate(),
             incoming_format.channel_count() as u16,
-            self.stream_volume(), // correct user volume from the start
-            0.0,                  // incoming fades in via its fade_coeff, from true silence
             cf_norm,
-            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
-            false,
-            self.smooth_track_starts,
-            self.bit_perfect_active(),
+            StreamSettings {
+                // Incoming fades in via its fade_coeff, from true silence, at
+                // the correct user volume from the start.
+                initial_fade: 0.0,
+                feeds_visualizer: false,
+                ..self.primary_stream_settings()
+            },
         );
         // Belt-and-braces: the constructor already seeded both the atomic and
         // the smoother from `initial_fade = 0.0`, so they cannot disagree.
@@ -2221,14 +2227,16 @@ impl AudioRenderer {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            0.0,
-            0.0,
-            None,
-            Arc::new(Notify::new()),
-            false,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            true,
-            false,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 0.0,
+                initial_fade: 0.0,
+                eq_state: None,
+                feeds_visualizer: false,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         );
         let stream = crate::audio::ActiveStream::new(
             producer,
@@ -2781,14 +2789,16 @@ impl AudioRenderer {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            1.0,
-            1.0,
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            true,
-            false,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         );
         self.primary_stream = Some(crate::audio::ActiveStream::new(
             producer,
@@ -3171,7 +3181,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+    use crate::audio::streaming_source::{
+        SharedVisualizerCallback, StreamSettings, StreamingSource,
+    };
 
     /// `crossfade_blocked(current, incoming)` — the single gate both crossfade
     /// triggers share — encodes the three bit-perfect modes:
@@ -3622,14 +3634,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            0.0,
-            0.0,
-            None,
-            Arc::new(Notify::new()),
-            false,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            true,
-            false,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 0.0,
+                initial_fade: 0.0,
+                eq_state: None,
+                feeds_visualizer: false,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         );
         let stream = ActiveStream::new(
             producer,

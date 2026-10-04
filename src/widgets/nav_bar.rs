@@ -934,16 +934,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     );
                 }
             } else if merged_mode_active {
-                let merged = super::track_info_strip::merged_strip_string(
+                let merged = super::track_info_strip::MergedStripFields {
+                    title: &title,
+                    artist: &artist,
+                    album: &album,
                     show_title,
                     show_artist,
                     show_album,
                     show_labels,
-                    theme::strip_separator().as_join_str(),
-                    &title,
-                    &artist,
-                    &album,
-                );
+                    separator: theme::strip_separator().as_join_str(),
+                }
+                .merged();
                 if !merged.is_empty() {
                     info_row = info_row.push(
                         iced::widget::row![

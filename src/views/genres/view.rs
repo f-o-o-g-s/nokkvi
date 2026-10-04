@@ -416,17 +416,19 @@ impl GenresPage {
             ctx,
             sub_index_label,
             album_art.get(&album.id),
-            self.column_visibility.thumbnail,
-            stable_viewport,
             GenresMessage::SlotList,
-            true, // show artist since genre groups albums from different artists
-            Some(GenresMessage::ClickToggleStar(ctx.item_index)),
-            Some(navigate_msg.clone()),
-            Some(navigate_msg),
-            Some(GenresMessage::NavigateAndExpandArtist(
-                album.artist_id.clone(),
-            )),
-            1, // depth 1: child albums under genre
+            super::super::expansion::ChildAlbumRowOptions {
+                show_artwork: self.column_visibility.thumbnail,
+                show_artist: true, // a genre groups albums from different artists
+                stable_viewport,
+                depth: 1, // child albums under genre
+                on_star_click: Some(GenresMessage::ClickToggleStar(ctx.item_index)),
+                on_song_count_click: Some(navigate_msg.clone()),
+                on_album_click: Some(navigate_msg),
+                on_artist_click: Some(GenresMessage::NavigateAndExpandArtist(
+                    album.artist_id.clone(),
+                )),
+            },
         );
 
         use crate::widgets::context_menu::wrap_library_row;

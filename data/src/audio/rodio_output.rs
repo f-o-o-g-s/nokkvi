@@ -18,7 +18,8 @@ use tracing::{debug, info, warn};
 use super::{
     NormalizationConfig,
     streaming_source::{
-        GainSwitch, SharedVisualizerCallback, StreamHandle, StreamingSource, gain_switch_queue,
+        GainSwitch, SharedVisualizerCallback, StreamHandle, StreamSettings, StreamingSource,
+        gain_switch_queue,
     },
 };
 
@@ -248,37 +249,24 @@ impl RodioOutput {
     ///
     /// - `sample_rate`: Sample rate of the decoded audio.
     /// - `channels`: Channel count of the decoded audio.
-    /// - `initial_volume`: Starting volume (0.0–1.0).
-    /// - `initial_fade`: Starting fade multiplier (0.0–1.0). Pass `1.0` for
-    ///   fresh play/seek streams and `0.0` for a crossfade incoming stream
-    ///   (it fades in via its `fade_coeff`, from true silence).
     /// - `norm`: Resolved normalization decision for this stream
     ///   (off, AGC at target level, or static linear gain).
     /// - `consumed_notify`: Notify primitive fired every ~512 consumed samples.
     ///   The decode loop awaits this to avoid busy-sleeping when the ring is full.
-    /// - `feeds_visualizer`: whether this stream should push samples into the
-    ///   shared visualizer callback. Pass `true` for primary streams; pass
-    ///   `false` for a crossfade incoming stream, then call
-    ///   `ActiveStream::set_feeds_visualizer(true)` after promotion to primary.
-    /// - `smooth_starts`: whether the M2 de-click onset ramp applies (the
-    ///   "Smooth Track Starts" setting); inert for bit-perfect streams.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "thin pass-through to StreamingSource::new; same independent-config rationale applies"
-    )]
+    /// - `settings`: the per-stream choices, see [`StreamSettings`]. A
+    ///   crossfade incoming stream passes `feeds_visualizer: false`, then
+    ///   calls `ActiveStream::set_feeds_visualizer(true)` after promotion to
+    ///   primary.
     pub fn create_stream(
         &self,
         sample_rate: u32,
         channels: u16,
-        initial_volume: f32,
-        initial_fade: f32,
         norm: super::NormalizationConfig,
-        eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
-        feeds_visualizer: bool,
-        smooth_starts: bool,
-        bit_perfect: bool,
+        settings: StreamSettings,
     ) -> ActiveStream {
+        let bit_perfect = settings.bit_perfect;
+        let initial_volume = settings.initial_volume;
         // Create lock-free ring buffer
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
         let (producer, consumer) = rb.split();
@@ -293,14 +281,9 @@ impl RodioOutput {
             channels_nz,
             sample_rate_nz,
             self.visualizer_callback.clone(),
-            initial_volume,
-            initial_fade,
-            eq_state,
-            consumed_notify,
-            feeds_visualizer,
             self.viz_enabled.clone(),
-            smooth_starts,
-            bit_perfect,
+            consumed_notify,
+            settings,
         );
         // A static gain (ReplayGain / fallback dB; Off is unity) is applied
         // inside the source, where a gapless join can change it at the next
@@ -411,14 +394,16 @@ mod tests {
         output.create_stream(
             48_000,
             2,
-            1.0,
-            1.0,
             norm,
-            None,
             Arc::new(Notify::new()),
-            false,
-            false, // no onset ramp: the first sample is already at full level
-            false,
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state: None,
+                feeds_visualizer: false,
+                smooth_starts: false, // no onset ramp: the first sample is already at full level
+                bit_perfect: false,
+            },
         )
     }
 

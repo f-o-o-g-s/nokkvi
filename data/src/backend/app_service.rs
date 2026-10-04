@@ -37,8 +37,8 @@ use crate::{
         task_manager::TaskManager,
     },
     types::{
-        library::Library, one_shot_shuffle::OneShotShuffle, queue_sort_mode::QueueSortMode,
-        song_source::SongSource,
+        library::Library, library_query::LibraryQuery, one_shot_shuffle::OneShotShuffle,
+        queue_sort_mode::QueueSortMode, song_source::SongSource,
     },
 };
 
@@ -1507,11 +1507,13 @@ impl AppService {
         let albums_fut = async {
             let svc = self.albums_api().await?;
             svc.load_albums(
-                "name",
-                "ASC",
-                Some(q),
-                None,
-                library_ids,
+                &LibraryQuery {
+                    sort_mode: "name",
+                    sort_order: "ASC",
+                    search_query: Some(q),
+                    library_ids,
+                    ..Default::default()
+                },
                 Some(0),
                 Some(per_type_limit),
             )
@@ -1521,11 +1523,13 @@ impl AppService {
         let artists_fut = async {
             let svc = self.artists_api().await?;
             svc.load_artists(
-                "name",
-                "ASC",
-                Some(q),
-                None,
-                library_ids,
+                &LibraryQuery {
+                    sort_mode: "name",
+                    sort_order: "ASC",
+                    search_query: Some(q),
+                    library_ids,
+                    ..Default::default()
+                },
                 false,
                 Some(0),
                 Some(per_type_limit),
@@ -1536,11 +1540,13 @@ impl AppService {
         let songs_fut = async {
             let svc = self.songs_api().await?;
             svc.load_songs(
-                "title",
-                "ASC",
-                Some(q),
-                None,
-                library_ids,
+                &LibraryQuery {
+                    sort_mode: "title",
+                    sort_order: "ASC",
+                    search_query: Some(q),
+                    library_ids,
+                    ..Default::default()
+                },
                 Some(0),
                 Some(per_type_limit),
             )

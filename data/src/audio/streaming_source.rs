@@ -301,6 +301,34 @@ const CONSUMED_NOTIFY_STRIDE: u32 = 512;
 /// render tick at every supported rate, with one atomic store per window.
 const METER_WINDOW_SAMPLES: u32 = 1024;
 
+/// The per-stream choices a caller makes when building a stream, shared by
+/// [`StreamingSource::new`] and `RodioOutput::create_stream`. Named fields,
+/// so the two 0–1 starting levels and the three flags can't trade places at
+/// a call site.
+pub struct StreamSettings {
+    /// Starting user volume (0.0–1.0).
+    pub initial_volume: f32,
+    /// Starting fade multiplier (0.0–1.0). `1.0` for fresh play/seek streams;
+    /// `0.0` for a crossfade incoming stream, which fades in via its
+    /// `fade_coeff` from true silence.
+    pub initial_fade: f32,
+    /// Shared EQ gains; `None` builds the stream without an EQ stage.
+    pub eq_state: Option<super::eq::EqState>,
+    /// Whether this stream pushes samples to the shared visualizer callback.
+    /// The renderer passes `false` for a crossfade incoming stream so two
+    /// concurrent streams cannot thrash the visualizer's per-batch
+    /// sample-rate atomic, then flips it `true` after promotion in
+    /// `finalize_crossfade`.
+    pub feeds_visualizer: bool,
+    /// Whether the M2 de-click onset ramp seeds the user-volume smoother at 0
+    /// (the "Smooth Track Starts" setting, default on). `false` restores the
+    /// instant, honest onset. Never applies to bit-perfect streams (their arm
+    /// ignores `smoothed_volume` entirely).
+    pub smooth_starts: bool,
+    /// Build a bit-perfect stream: EQ and software volume bypassed.
+    pub bit_perfect: bool,
+}
+
 impl StreamingSource {
     /// Create a new streaming source.
     ///
@@ -308,37 +336,29 @@ impl StreamingSource {
     /// - `channels`: Number of audio channels.
     /// - `sample_rate`: Sample rate in Hz.
     /// - `visualizer`: Shared callback slot for tapping samples (can be set later).
+    /// - `viz_enabled`: shared master gate — when `false` the source skips the
+    ///   visualizer tap entirely (set when the user turns the visualizer off).
     /// - `consumed_notify`: Notify primitive fired every `CONSUMED_NOTIFY_STRIDE` samples.
     ///   The decode loop awaits this (with a timeout) instead of busy-sleeping when the
     ///   ring buffer is full — it wakes as soon as there is space to write.
-    /// - `feeds_visualizer`: whether this stream should push samples to the shared
-    ///   visualizer callback. The renderer passes `false` for a crossfade incoming
-    ///   stream so two concurrent streams cannot thrash the visualizer's per-batch
-    ///   sample-rate atomic, then flips it `true` after promotion in `finalize_crossfade`.
-    /// - `viz_enabled`: shared master gate — when `false` the source skips the
-    ///   visualizer tap entirely (set when the user turns the visualizer off).
-    /// - `smooth_starts`: whether the M2 de-click onset ramp seeds the
-    ///   user-volume smoother at 0 (the "Smooth Track Starts" setting, default
-    ///   on). `false` restores the instant, honest onset. Never applies to
-    ///   bit-perfect streams (their arm ignores `smoothed_volume` entirely).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "low-level stream constructor; each arg is independent decoder/output config — struct-bundling would just wrap them"
-    )]
+    /// - `settings`: the per-stream choices, see [`StreamSettings`].
     pub fn new(
         consumer: HeapCons<f32>,
         channels: NonZero<u16>,
         sample_rate: NonZero<u32>,
         visualizer: SharedVisualizerCallback,
-        initial_volume: f32,
-        initial_fade: f32,
-        eq_state: Option<super::eq::EqState>,
-        consumed_notify: Arc<Notify>,
-        feeds_visualizer: bool,
         viz_enabled: Arc<AtomicBool>,
-        smooth_starts: bool,
-        bit_perfect: bool,
+        consumed_notify: Arc<Notify>,
+        settings: StreamSettings,
     ) -> (Self, StreamHandle) {
+        let StreamSettings {
+            initial_volume,
+            initial_fade,
+            eq_state,
+            feeds_visualizer,
+            smooth_starts,
+            bit_perfect,
+        } = settings;
         let volume = initial_volume.clamp(0.0, 1.0);
         // Seed BOTH the atomic and the smoother from `initial_fade` so they
         // can never disagree at build time: a crossfade incoming stream starts
@@ -705,14 +725,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(sample_rate).expect("test sample rate is nonzero"),
             callback,
-            1.0,
-            1.0,
-            None,
-            Arc::new(Notify::new()),
-            feeds_visualizer,
             Arc::new(AtomicBool::new(viz_enabled)),
-            true,
-            false,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state: None,
+                feeds_visualizer,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         )
     }
 
@@ -926,14 +948,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("test sample rate is nonzero"),
             slot,
-            1.0,
-            1.0,
-            eq_state,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            false,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: false,
+            },
         );
         (source, observed)
     }
@@ -986,14 +1010,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(44_100).expect("44100 is nonzero"),
             viz,
-            1.0, // unity (the volume the renderer builds bit-perfect streams with)
-            1.0, // no fade in progress
-            Some(eq),
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            true, // bit_perfect
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0, // unity (the volume the renderer builds bit-perfect streams with)
+                initial_fade: 1.0,   // no fade in progress
+                eq_state: Some(eq),
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: true, // bit_perfect
+            },
         );
 
         let out = source.next().expect("a sample");
@@ -1023,14 +1049,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(44_100).expect("44100 is nonzero"),
             viz,
-            1.0, // stream_volume() under bit-perfect (pw-native volume) is 1.0
-            0.0, // silent fade start — exactly how the renderer builds a crossfade stream
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            true, // bit_perfect
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0, // stream_volume() under bit-perfect (pw-native volume) is 1.0
+                initial_fade: 0.0, // silent fade start — exactly how the renderer builds a crossfade stream
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: true, // bit_perfect
+            },
         );
 
         // Silent start: the fade is applied from true silence (smoother seeded
@@ -1116,14 +1144,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            initial_volume,
-            initial_fade,
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            false, // NOT bit-perfect — the default path the M1 fix exists for
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume,
+                initial_fade,
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: false, // NOT bit-perfect — the default path the M1 fix exists for
+            },
         )
     }
 
@@ -1145,14 +1175,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            1.0,
-            1.0,
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            false,
-            bit_perfect,
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0,
+                initial_fade: 1.0,
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: false,
+                bit_perfect,
+            },
         );
         (source.with_normalization(gain, switches_out), switches_in)
     }
@@ -1384,14 +1416,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            1.0, // full user volume
-            1.0, // no fade in progress — a plain play/seek stream
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            false, // NOT bit-perfect — the default path
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0, // full user volume
+                initial_fade: 1.0,   // no fade in progress — a plain play/seek stream
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: false, // NOT bit-perfect — the default path
+            },
         );
 
         // Starve: 2400 pulls (25 ms at 48 kHz stereo, ≫ the ~12 ms EMA
@@ -1442,14 +1476,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            1.0, // unity — the volume the renderer builds bit-perfect streams with
-            1.0, // no fade in progress
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            true,
-            true, // bit_perfect — the onset ramp must NOT apply
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0, // unity — the volume the renderer builds bit-perfect streams with
+                initial_fade: 1.0,   // no fade in progress
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: true,
+                bit_perfect: true, // bit_perfect — the onset ramp must NOT apply
+            },
         );
 
         let first = source.next().expect("a sample");
@@ -1477,14 +1513,16 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
-            1.0, // full user volume — perceptual(1.0) = 1.0
-            1.0, // no fade in progress
-            None,
-            Arc::new(Notify::new()),
-            true,
             Arc::new(AtomicBool::new(true)),
-            false, // smooth_starts OFF — the toggle under test
-            false, // NOT bit-perfect
+            Arc::new(Notify::new()),
+            StreamSettings {
+                initial_volume: 1.0, // full user volume — perceptual(1.0) = 1.0
+                initial_fade: 1.0,   // no fade in progress
+                eq_state: None,
+                feeds_visualizer: true,
+                smooth_starts: false, // smooth_starts OFF — the toggle under test
+                bit_perfect: false,   // NOT bit-perfect
+            },
         );
 
         let first = source.next().expect("a sample");

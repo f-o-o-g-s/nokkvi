@@ -10,7 +10,7 @@ use tracing::trace;
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::songs::SongsApiService,
-    types::{reactive::ReactiveInt, song::Song},
+    types::{library_query::LibraryQuery, reactive::ReactiveInt, song::Song},
 };
 
 /// UI-specific view data for songs
@@ -222,35 +222,15 @@ impl SongsService {
     ///
     /// Returns `Vec<Song>`; the total count is published to
     /// [`Self::total_count`] for `PagedBuffer` consumers.
-    #[allow(clippy::too_many_arguments)]
     pub async fn load_raw_songs_page_with_libraries(
         &self,
-        sort_mode: Option<&str>,
-        sort_order: Option<&str>,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Song>> {
         let service = self.get_service().await?;
 
-        let sort_mode = sort_mode.unwrap_or("recentlyAdded");
-        let sort_order = sort_order.unwrap_or("DESC");
-        let search_opt = search_query.filter(|s| !s.is_empty());
-
-        match service
-            .load_songs(
-                sort_mode,
-                sort_order,
-                search_opt,
-                filter,
-                library_ids,
-                Some(offset),
-                Some(limit),
-            )
-            .await
-        {
+        match service.load_songs(query, Some(offset), Some(limit)).await {
             Ok((songs, total_count)) => {
                 self.total_count.set(total_count as i32);
                 trace!(

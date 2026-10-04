@@ -618,15 +618,17 @@ impl ArtistsPage {
             ctx,
             sub_index_label,
             album_art.get(&album.id),
-            self.column_visibility.thumbnail,
-            stable_viewport,
             ArtistsMessage::SlotList,
-            false, // artist is already the parent row
-            Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
-            Some(navigate_msg.clone()),
-            Some(navigate_msg),
-            None, // artist click - artist is already the parent
-            1,    // depth 1: child albums under artist
+            super::super::expansion::ChildAlbumRowOptions {
+                show_artwork: self.column_visibility.thumbnail,
+                show_artist: false, // artist is already the parent row
+                stable_viewport,
+                depth: 1, // child albums under artist
+                on_star_click: Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
+                on_song_count_click: Some(navigate_msg.clone()),
+                on_album_click: Some(navigate_msg),
+                on_artist_click: None,
+            },
         );
 
         use crate::widgets::context_menu::wrap_library_row;

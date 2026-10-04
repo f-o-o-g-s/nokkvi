@@ -617,10 +617,29 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     child_slot_button(content, ctx, style, stable_viewport, wrap)
 }
 
+/// The per-tree switches and click messages for [`render_child_album_row`].
+/// Named fields, so the three flags and the four same-typed click messages
+/// can't trade places at a call site.
+pub(crate) struct ChildAlbumRowOptions<M> {
+    /// Prepend a thumbnail column (the view's thumbnail column toggle).
+    pub(crate) show_artwork: bool,
+    /// Add an artist column: Genres groups albums from different artists;
+    /// under Artists the parent row already names the artist.
+    pub(crate) show_artist: bool,
+    pub(crate) stable_viewport: bool,
+    /// Tree depth, for the leading indent and slot style.
+    pub(crate) depth: u8,
+    pub(crate) on_star_click: Option<M>,
+    pub(crate) on_song_count_click: Option<M>,
+    pub(crate) on_album_click: Option<M>,
+    /// Only used when `show_artist` is set.
+    pub(crate) on_artist_click: Option<M>,
+}
+
 /// Render a child **album** row (used by Artists → Albums and Genres → Albums).
 ///
-/// When `show_artist` is true (Genres view), includes an artist column.
-/// When `show_artwork` is true, prepends a thumbnail column sourced from
+/// When `opts.show_artist` is true (Genres view), includes an artist column.
+/// When `opts.show_artwork` is true, prepends a thumbnail column sourced from
 /// `artwork_handle` (typically `view_data.album_art.get(&album.id)`).
 /// Layout: `[indent] [artwork?] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
 ///
@@ -629,22 +648,24 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
 /// 4-arm modifier-aware click ladder lives in
 /// [`crate::widgets::slot_list::primary_slot_click_message`] — this renderer
 /// composes through it via [`child_slot_button`].
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
     ctx: &SlotListRowContext,
     sub_index_label: &str,
     artwork_handle: Option<&'a iced::widget::image::Handle>,
-    show_artwork: bool,
-    stable_viewport: bool,
     wrap: impl Fn(SlotListPageMessage) -> M,
-    show_artist: bool,
-    on_star_click: Option<M>,
-    on_song_count_click: Option<M>,
-    on_album_click: Option<M>,
-    on_artist_click: Option<M>,
-    depth: u8,
+    opts: ChildAlbumRowOptions<M>,
 ) -> Element<'a, M> {
+    let ChildAlbumRowOptions {
+        show_artwork,
+        show_artist,
+        stable_viewport,
+        depth,
+        on_star_click,
+        on_song_count_click,
+        on_album_click,
+        on_artist_click,
+    } = opts;
     let style = ctx.slot_style(false, false, depth);
 
     let title_size = ctx.metrics.title_size;

@@ -7,7 +7,7 @@ use crate::{
         pagination, parse,
         sort::{self, SortDomain},
     },
-    types::album::Album,
+    types::{album::Album, library_query::LibraryQuery},
 };
 
 #[derive(Clone)]
@@ -20,36 +20,18 @@ impl AlbumsApiService {
         Self { client }
     }
 
-    /// Load albums from the API
-    /// sort_mode: Sort mode (recentlyAdded, recentlyPlayed, mostPlayed, favorited, random, name, albumArtist, artist, year, songCount, duration, rating, genre)
-    /// sort_order: Sort order (ASC or DESC)
-    /// search_query: Optional search query
-    /// library_ids: When non-empty, restrict results to the given library
-    /// (music folder) IDs by appending repeatable `library_id` params. An
-    /// empty slice omits the param entirely — Navidrome's auto-scoping
-    /// already limits to libraries the user has access to.
-    #[allow(clippy::too_many_arguments)]
+    /// Load albums from the API.
+    ///
+    /// `query.sort_mode` is one of recentlyAdded, recentlyPlayed, mostPlayed,
+    /// favorited, random, name, albumArtist, artist, year, songCount,
+    /// duration, rating, genre.
     pub async fn load_albums(
         &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, u32)> {
-        let (albums, total_count_header) = self
-            .load_albums_raw(
-                sort_mode,
-                sort_order,
-                search_query,
-                filter,
-                library_ids,
-                offset,
-                limit,
-            )
-            .await?;
+        let (albums, total_count_header) = self.load_albums_raw(query, offset, limit).await?;
 
         // Get total count from X-Total-Count header, fallback to albums length
         let total_count = total_count_header.unwrap_or(albums.len() as u32);
@@ -72,17 +54,15 @@ impl AlbumsApiService {
     /// `Ok(None)` when the (library-scoped) album table is empty.
     pub async fn load_random_album(&self, library_ids: &[i32]) -> Result<Option<Album>> {
         let (sort_mode, order) = pagination::RANDOM_DRAW_SORT;
+        let query = LibraryQuery {
+            sort_mode,
+            sort_order: order,
+            library_ids,
+            ..Default::default()
+        };
         pagination::draw_random_row("random-album", |offset, limit| async move {
-            self.load_albums_raw(
-                sort_mode,
-                order,
-                None,
-                None,
-                library_ids,
-                Some(offset),
-                Some(limit),
-            )
-            .await
+            self.load_albums_raw(&query, Some(offset), Some(limit))
+                .await
         })
         .await
     }
@@ -92,20 +72,16 @@ impl AlbumsApiService {
     /// header and warn. The drawn row is the same either way (a coalesced total of
     /// `1` on a 1-row probe also resolves to the probe row); what the raw header
     /// buys is that a frozen draw is logged rather than mistaken for bad luck.
-    #[allow(clippy::too_many_arguments)]
     async fn load_albums_raw(
         &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, Option<u32>)> {
         // Map viewType to API sort parameter
-        let sort_param = sort::map_sort_mode(SortDomain::Albums, sort_mode);
-        let order_param = sort::resolve_order(SortDomain::Albums, sort_mode, sort_order);
+        let sort_param = sort::map_sort_mode(SortDomain::Albums, query.sort_mode);
+        let order_param =
+            sort::resolve_order(SortDomain::Albums, query.sort_mode, query.sort_order);
 
         // Pagination range (Navidrome uses _start and _end, not _offset and
         // _limit) and owned `library_id` strings — both owned alongside
@@ -115,15 +91,17 @@ impl AlbumsApiService {
         // filter slot (both express "scope by music folder", just from
         // different navigation surfaces).
         let range = pagination::paged_range(offset.unwrap_or(0) as u32, limit.map(|x| x as u32));
-        let library_id_strings =
-            crate::services::api::songs::collect_library_id_strings(library_ids, filter);
+        let library_id_strings = crate::services::api::songs::collect_library_id_strings(
+            query.library_ids,
+            query.filter,
+        );
 
         let params = Self::build_album_params(
             sort_param,
             order_param,
             &range,
-            search_query,
-            filter,
+            query.search_query,
+            query.filter,
             &library_id_strings,
         );
 

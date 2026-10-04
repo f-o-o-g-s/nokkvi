@@ -19,6 +19,7 @@ use nokkvi_data::{
     },
     types::{
         batch::{BatchItem, BatchPayload},
+        library_query::LibraryQuery,
         one_shot_shuffle::OneShotShuffle,
     },
 };
@@ -1065,11 +1066,12 @@ impl Nokkvi {
                 let recently_played_fut = async {
                     let api = shell.songs_api().await?;
                     api.load_songs(
-                        "recentlyPlayed",
-                        "DESC",
-                        None,
-                        None,
-                        &ids,
+                        &LibraryQuery {
+                            sort_mode: "recentlyPlayed",
+                            sort_order: "DESC",
+                            library_ids: &ids,
+                            ..Default::default()
+                        },
                         Some(0),
                         Some(HOT_PICKS_PER_SECTION),
                     )
@@ -1079,11 +1081,12 @@ impl Nokkvi {
                 let recently_added_fut = async {
                     let api = shell.albums_api().await?;
                     api.load_albums(
-                        "recentlyAdded",
-                        "DESC",
-                        None,
-                        None,
-                        &ids,
+                        &LibraryQuery {
+                            sort_mode: "recentlyAdded",
+                            sort_order: "DESC",
+                            library_ids: &ids,
+                            ..Default::default()
+                        },
                         Some(0),
                         Some(HOT_PICKS_PER_SECTION),
                     )
@@ -1098,11 +1101,12 @@ impl Nokkvi {
                 let most_played_songs_fut = async {
                     let api = shell.songs_api().await?;
                     api.load_songs(
-                        "mostPlayed",
-                        "DESC",
-                        None,
-                        None,
-                        &ids,
+                        &LibraryQuery {
+                            sort_mode: "mostPlayed",
+                            sort_order: "DESC",
+                            library_ids: &ids,
+                            ..Default::default()
+                        },
                         Some(0),
                         Some(MOST_PLAYED_TALLY_POOL),
                     )
@@ -1112,11 +1116,12 @@ impl Nokkvi {
                 let most_played_albums_fut = async {
                     let api = shell.albums_api().await?;
                     api.load_albums(
-                        "mostPlayed",
-                        "DESC",
-                        None,
-                        None,
-                        &ids,
+                        &LibraryQuery {
+                            sort_mode: "mostPlayed",
+                            sort_order: "DESC",
+                            library_ids: &ids,
+                            ..Default::default()
+                        },
                         Some(0),
                         Some(HOT_PICKS_PER_SECTION),
                     )
@@ -1128,11 +1133,12 @@ impl Nokkvi {
                 let most_played_artists_fut = async {
                     let api = shell.artists_api().await?;
                     api.load_artists(
-                        "mostPlayed",
-                        "DESC",
-                        None,
-                        None,
-                        &ids,
+                        &LibraryQuery {
+                            sort_mode: "mostPlayed",
+                            sort_order: "DESC",
+                            library_ids: &ids,
+                            ..Default::default()
+                        },
                         true,
                         Some(0),
                         Some(HOT_PICKS_PER_SECTION),

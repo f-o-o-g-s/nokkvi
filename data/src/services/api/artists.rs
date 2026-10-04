@@ -7,7 +7,7 @@ use crate::{
         pagination, parse,
         sort::{self, SortDomain},
     },
-    types::{album::Album, artist::Artist},
+    types::{album::Album, artist::Artist, library_query::LibraryQuery},
 };
 
 #[derive(Clone)]
@@ -20,37 +20,19 @@ impl ArtistsApiService {
         Self { client }
     }
 
-    /// Load artists from the API
-    /// sort_mode: Sort mode (name, favorited, albumCount, songCount, random)
-    /// sort_order: Sort order (ASC or DESC)
-    /// search_query: Optional search query
-    /// library_ids: When non-empty, restrict results to the given library
-    /// (music folder) IDs by appending repeatable `library_id` params. An
-    /// empty slice omits the param entirely — Navidrome's auto-scoping
-    /// already limits to libraries the user has access to.
-    #[allow(clippy::too_many_arguments)]
+    /// Load artists from the API.
+    ///
+    /// `query.sort_mode` is one of name, favorited, albumCount, songCount,
+    /// random. `album_artists_only` restricts to `role=albumartist`.
     pub async fn load_artists(
         &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         album_artists_only: bool,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Artist>, u32)> {
         let (artists, total_count_header) = self
-            .load_artists_raw(
-                sort_mode,
-                sort_order,
-                search_query,
-                filter,
-                library_ids,
-                album_artists_only,
-                offset,
-                limit,
-            )
+            .load_artists_raw(query, album_artists_only, offset, limit)
             .await?;
 
         // Get total count from X-Total-Count header, fallback to artists length
@@ -70,41 +52,39 @@ impl ArtistsApiService {
     /// `X-Total-Count` so [`pagination::draw_random_row`] can DETECT a missing
     /// header and warn (the drawn row is the same either way). See the
     /// [`crate::services::api::albums::AlbumsApiService`] twin.
-    #[allow(clippy::too_many_arguments)]
     async fn load_artists_raw(
         &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         album_artists_only: bool,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Artist>, Option<u32>)> {
         // For random view, we load by name and shuffle client-side
         // (Navidrome doesn't support random sorting for artists)
-        let (is_random, actual_sort_mode) = sort::resolve_random_sort_mode(sort_mode);
+        let (is_random, actual_sort_mode) = sort::resolve_random_sort_mode(query.sort_mode);
 
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Artists, actual_sort_mode);
-        let order_param = sort::resolve_order(SortDomain::Artists, actual_sort_mode, sort_order);
+        let order_param =
+            sort::resolve_order(SortDomain::Artists, actual_sort_mode, query.sort_order);
 
         // Pagination range and owned `library_id` strings — both owned
         // alongside `params` so the `&str` borrows built below outlive the
         // call to `get_with_headers`. See `albums.rs` for the companion
         // comment.
         let range = pagination::paged_range(offset.unwrap_or(0) as u32, limit.map(|x| x as u32));
-        let library_id_strings =
-            crate::services::api::songs::collect_library_id_strings(library_ids, filter);
+        let library_id_strings = crate::services::api::songs::collect_library_id_strings(
+            query.library_ids,
+            query.filter,
+        );
 
         let params = Self::build_artist_params(
             sort_param,
             order_param,
             &range,
             album_artists_only,
-            search_query,
-            filter,
+            query.search_query,
+            query.filter,
             &library_id_strings,
         );
 
@@ -143,18 +123,15 @@ impl ArtistsApiService {
         album_artists_only: bool,
     ) -> Result<Option<Artist>> {
         let (sort_mode, order) = pagination::RANDOM_DRAW_SORT;
+        let query = LibraryQuery {
+            sort_mode,
+            sort_order: order,
+            library_ids,
+            ..Default::default()
+        };
         pagination::draw_random_row("random-artist", |offset, limit| async move {
-            self.load_artists_raw(
-                sort_mode,
-                order,
-                None,
-                None,
-                library_ids,
-                album_artists_only,
-                Some(offset),
-                Some(limit),
-            )
-            .await
+            self.load_artists_raw(&query, album_artists_only, Some(offset), Some(limit))
+                .await
         })
         .await
     }

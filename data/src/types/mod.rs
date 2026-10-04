@@ -17,6 +17,7 @@ pub mod info_modal;
 pub mod item_kind;
 pub mod labeled_enum;
 pub mod library;
+pub mod library_query;
 pub mod library_search;
 pub mod lyrics;
 pub mod next_track_reset;

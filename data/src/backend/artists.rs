@@ -9,7 +9,7 @@ use tracing::trace;
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::artists::ArtistsApiService,
-    types::{album::Album, artist::Artist, reactive::ReactiveInt},
+    types::{album::Album, artist::Artist, library_query::LibraryQuery, reactive::ReactiveInt},
 };
 
 /// UI-specific view data for artists
@@ -140,35 +140,17 @@ impl ArtistsService {
     /// the given `library_ids` via the orthogonal Native API filter. An
     /// empty slice omits the param entirely (Navidrome auto-scopes to
     /// libraries the user can access).
-    #[allow(clippy::too_many_arguments)]
     pub async fn load_raw_artists_page_with_libraries(
         &self,
-        sort_mode: Option<&str>,
-        sort_order: Option<&str>,
-        search_query: Option<&str>,
-        filter: Option<&crate::types::filter::LibraryFilter>,
-        library_ids: &[i32],
+        query: &LibraryQuery<'_>,
         album_artists_only: bool,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Artist>> {
         let service = self.get_service().await?;
 
-        let sort_mode = sort_mode.unwrap_or("random");
-        let sort_order = sort_order.unwrap_or("ASC");
-        let search_opt = search_query.filter(|s| !s.is_empty());
-
         match service
-            .load_artists(
-                sort_mode,
-                sort_order,
-                search_opt,
-                filter,
-                library_ids,
-                album_artists_only,
-                Some(offset),
-                Some(limit),
-            )
+            .load_artists(query, album_artists_only, Some(offset), Some(limit))
             .await
         {
             Ok((artists, total_count)) => {

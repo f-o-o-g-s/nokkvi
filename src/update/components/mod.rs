@@ -116,6 +116,20 @@ impl PaginatedFetch {
             page_size,
         }
     }
+
+    /// The request shape for this fetch, scoped to `library_ids`.
+    pub(crate) fn query<'a>(
+        &'a self,
+        library_ids: &'a [i32],
+    ) -> nokkvi_data::types::library_query::LibraryQuery<'a> {
+        nokkvi_data::types::library_query::LibraryQuery {
+            sort_mode: self.view_str,
+            sort_order: self.sort_order,
+            search_query: self.search_query.as_deref(),
+            filter: self.filter.as_ref(),
+            library_ids,
+        }
+    }
 }
 
 /// Result type for the combined "resolve song IDs + fetch playlist list" async task.

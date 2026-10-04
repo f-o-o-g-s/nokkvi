@@ -44,11 +44,7 @@ impl Nokkvi {
         let library_ids = shell.active_library_ids_vec();
         match artists_vm
             .load_raw_artists_page_with_libraries(
-                Some(params.view_str),
-                Some(params.sort_order),
-                params.search_query.as_deref(),
-                params.filter.as_ref(),
-                &library_ids,
+                &params.query(&library_ids),
                 album_artists_only,
                 params.offset,
                 params.page_size,
