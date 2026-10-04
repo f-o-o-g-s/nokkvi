@@ -28,6 +28,9 @@ struct Scene {
     music: vec4<f32>,
     // the smoothed spectrum, bass first, 8 bands
     spectrum: array<vec4<f32>, 2>,
+    // 1 = the day scene (light themes; bg is then the light background and
+    // text the dark ink), unused x3
+    mode: vec4<f32>,
     bg: vec4<f32>,
     text: vec4<f32>,
     highlight: vec4<f32>,
@@ -233,6 +236,136 @@ fn current(px: f32, y: f32, mid: f32, env: f32, wisp: f32) -> vec2<f32> {
 
 // ── the scene ───────────────────────────────────────────────────────────
 
+// ── the day scene ───────────────────────────────────────────────────────
+// Light themes: the same scene by sunlight. A soft sky lifting to a warm
+// haze at the horizon, high cirrus streaks drifting (the curtain's grammar
+// laid on its side), the sun as a warm disc in a bloom with slow soft rays,
+// sunlit water with a glittering crest, sun shafts and a caustic net, and a
+// sandy floor under moving caustics. bg is the light background, text the
+// dark ink, warm the sun's gold; the ramp tints the water.
+fn day_scene(u: f32, y: f32, px: f32, aspect: f32, h: f32, t: f32) -> vec3<f32> {
+    let bg = scene.bg.rgb;
+    let ink = scene.text.rgb;
+    let warm = scene.warm.rgb;
+    let sea_tint = ramp(0.55);
+    let deep_tint = ramp(0.25);
+    let sunlight = mix(vec3<f32>(1.0), warm, 0.25);
+
+    let surf = front_at(u);
+    let backs = back_at(u);
+
+    // Sky: a little deeper overhead, lifting to a warm haze at the horizon.
+    var col = mix(mix(bg, sea_tint, 0.16) * 0.94, mix(bg, warm, 0.10), ss(0.95, 0.45, y));
+
+    // Cirrus: long horizontal streaks, patchy, drifting slowly, each with a
+    // faint shaded underside so it reads on a pale sky.
+    let cenv = ss(0.35, 0.75, vnoise(vec2<f32>(u * 2.2 + t * 0.008, 3.1)))
+        * ss(0.55, 0.7, y) * (1.0 - ss(0.93, 1.0, y));
+    let c1 = vnoise(vec2<f32>(u * 5.0 - t * 0.012, y * 38.0));
+    let c2 = vnoise(vec2<f32>(u * 14.0 - t * 0.02, y * 95.0 + 7.0));
+    let cloud = clamp((c1 * 0.7 + c2 * 0.5 - 0.45) * 1.8, 0.0, 1.0) * cenv;
+    let c1s = vnoise(vec2<f32>(u * 5.0 - t * 0.012, (y + 0.012) * 38.0));
+    let shade = clamp((c1s * 0.7 + c2 * 0.5 - 0.45) * 1.8, 0.0, 1.0) * cenv;
+    col = mix(col, col * 0.93, shade * 0.35);
+    col = mix(col, mix(sunlight, bg, 0.2), cloud * 0.6);
+
+    // The sun: a warm disc in a bloom, with twelve soft rays turning
+    // slowly (major and minor alternating, as the old vexel fan).
+    if (scene.moon.w > 0.0) {
+        let mr = scene.moon.z;
+        let mv = vec2<f32>((u - scene.moon.x) * aspect, y - scene.moon.y);
+        let dm = length(mv);
+        let ang = atan2(mv.y, mv.x) + t * 0.02;
+        let major = pow(max(cos(ang * 6.0), 0.0), 8.0);
+        let minor = pow(max(cos(ang * 6.0 + 3.14159), 0.0), 10.0) * 0.55;
+        let rays = (major + minor) * exp(-max(dm - mr, 0.0) / (mr * 1.6)) * ss(mr * 0.9, mr * 1.3, dm);
+        let bloom = exp(-max(dm - mr, 0.0) / (mr * 0.6)) * 0.35 + exp(-dm / (mr * 3.5)) * 0.18;
+        col = mix(col, mix(warm, sunlight, 0.5), clamp((bloom + rays * 0.3) * scene.moon.w, 0.0, 0.8));
+        let disc = ss(mr, mr - 1.5 / h, dm);
+        col = mix(col, mix(sunlight, warm, 0.25 + 0.2 * (dm / mr)), disc);
+    }
+
+    // The far swell: hazed distant water with a bright line of light.
+    let inback = ss(backs + 0.002, backs - 0.002, y);
+    if (inback > 0.0) {
+        let db = max(backs - y, 0.0);
+        var far = mix(mix(bg, sea_tint, 0.32), mix(bg, warm, 0.1), 0.25);
+        far = mix(far, mix(bg, deep_tint, 0.4), ss(0.0, 0.12, db));
+        let glint = ss(0.75, 0.95, vnoise(vec2<f32>(u * 120.0 + t * 0.3, y * h * 0.4)));
+        far = mix(far, sunlight, glint * exp(-db / 0.03) * 0.35);
+        far = mix(far, sunlight, exp(-db / 0.002) * 0.5);
+        col = mix(col, far, inback);
+    }
+
+    // The near water.
+    let d0 = surf - y;
+    let inw = ss(-0.002, 0.002, d0);
+    if (inw > 0.0) {
+        let d = max(d0, 0.0);
+        var water = mix(mix(bg, sea_tint, 0.5), mix(bg * 0.8, deep_tint, 0.6), ss(0.0, 0.42, d));
+        // Sun shafts, slanting away from the sun, fading with depth.
+        let lean = (u - scene.moon.x) * 0.25;
+        let su = u + d * (0.35 + lean) / aspect;
+        let b1 = vnoise(vec2<f32>(su * 60.0 + t * 0.08, 11.8));
+        let b2 = vnoise(vec2<f32>(su * 140.0 - t * 0.11, 26.6));
+        let beam = pow(ss(0.45, 0.9, b1), 2.0) + 0.5 * pow(ss(0.5, 0.92, b2), 2.0);
+        water = mix(water, sunlight, clamp(beam * exp(-d / 0.28) * 0.28, 0.0, 1.0));
+        // The caustic net, bright under the surface.
+        let ca = vnoise(vec2<f32>(u * 25.6 + t * 0.128, y * 16.0 + t * 0.19));
+        let cb = vnoise(vec2<f32>(u * 24.0 - t * 0.16, y * 17.6 - t * 0.128) + 16.0);
+        let cl = pow(clamp(1.0 - abs(ca - cb) * 5.0, 0.0, 1.0), 3.0);
+        water = mix(water, sunlight, cl * exp(-d / 0.05) * 0.45);
+        // The seabed: sand under a moving net of light.
+        let bt = 0.17 + 0.018 * vnoise(vec2<f32>(u * 19.2, 3.5)) + 0.01 * sin(px * 4.0 + 1.0);
+        let onbed = ss(-0.003, 0.025, bt - y);
+        if (onbed > 0.0) {
+            let fz = max(bt - y, 0.0);
+            let per = 0.03 + fz * 3.0;
+            let fq = vec2<f32>(px / per, 1.0 / per) * 0.05;
+            let fa = vnoise(vec2<f32>((fq.x * 1.6 + t * 0.005) * 32.0, (fq.y * 0.9 + t * 0.004) * 32.0));
+            let fb = vnoise(vec2<f32>((fq.x * 1.5 - t * 0.004) * 32.0, (fq.y - t * 0.005) * 32.0) + 9.6);
+            let fc = pow(clamp(1.0 - abs(fa - fb) * 6.0, 0.0, 1.0), 5.0);
+            let fnz = vnoise(fq * 19.2 + 22.4);
+            let rip = 0.5 + 0.5 * sin(fq.y * 260.0 + fnz * 9.0 + fq.x * 6.0);
+            let near = ss(0.0, 0.16, fz);
+            var sand = mix(mix(bg * 0.82, warm, 0.18), mix(bg * 0.9, warm, 0.22), near);
+            sand *= 0.96 + 0.05 * rip * ss(0.04, 0.14, fz);
+            sand = mix(sand, sunlight, fc * (0.2 + 0.3 * near));
+            sand = mix(sand, water, (1.0 - near) * 0.5);
+            water = mix(water, sand, onbed);
+        }
+        col = mix(col, water, inw);
+    }
+    // The crest: a bright line of sunlight with glitter riding it.
+    let glit = ss(0.82, 0.97, vnoise(vec2<f32>(u * 160.0 + t * 0.6, t * 0.9)));
+    col = mix(col, sunlight, clamp(exp(-abs(d0) / 0.0025) * (0.45 + 0.5 * glit), 0.0, 1.0));
+    col = mix(col, sunlight, glit * exp(-max(d0, 0.0) / 0.012) * inw * 0.35);
+    return col;
+}
+
+// Bubbles by day: the same glassy spheres, lit by the sun.
+fn day_overlays(u: f32, y: f32, aspect: f32, h: f32, base: vec3<f32>) -> vec3<f32> {
+    var col = base;
+    let sunlight = mix(vec3<f32>(1.0), scene.warm.rgb, 0.25);
+    let nb = min(u32(scene.sky.z), 32u);
+    for (var i = 0u; i < nb; i++) {
+        let b = scene.bubbles[i];
+        let bv = vec2<f32>((u - b.x) * aspect, y - b.y);
+        let r = b.z;
+        if (max(abs(bv.x), abs(bv.y)) > r * 2.5) {
+            continue;
+        }
+        let bd = length(bv);
+        let edge = 1.5 / h;
+        let inside = ss(r + edge, r - edge, bd);
+        let rim = ss(r * 0.55, r, bd) * inside;
+        let hp = bv - vec2<f32>(-0.35, 0.35) * r;
+        let spec = exp(-dot(hp, hp) / (r * r * 0.06));
+        col = mix(col, sunlight, clamp((rim * 0.55 + spec * 0.8) * b.w * 1.6, 0.0, 1.0));
+    }
+    return col;
+}
+
 @fragment
 fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let w = scene.frame.x;
@@ -244,6 +377,14 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let px = (u - 0.5) * aspect;
     let q1 = t * 0.30;
     let q2 = t * 0.03;
+    if (scene.mode.x > 0.5) {
+        var dcol = day_scene(u, y, px, aspect, h, t);
+        dcol = day_overlays(u, y, aspect, h, dcol);
+        if (scene.frame.w > 0.5) {
+            dcol = pow(dcol, vec3<f32>(2.2));
+        }
+        return vec4<f32>(clamp(dcol, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    }
 
     let bg = scene.bg.rgb;
     let text = scene.text.rgb;

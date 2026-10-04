@@ -66,6 +66,8 @@ pub(crate) struct SeaLight {
     pub bubble_count: usize,
     /// The music the light follows this frame.
     pub music: HarbourMusic,
+    /// The day scene (light themes) instead of the night.
+    pub day: bool,
 }
 
 /// How the night scene follows the music: the aurora's rays reach with a
@@ -197,6 +199,8 @@ struct SceneUniform {
     music: [f32; 4],
     /// The smoothed spectrum, bass first.
     spectrum: [[f32; 4]; SCENE_BANDS / 4],
+    /// 1 = the day scene, unused ×3.
+    mode: [f32; 4],
     bg: [f32; 4],
     text: [f32; 4],
     highlight: [f32; 4],
@@ -216,7 +220,7 @@ unsafe impl bytemuck::Zeroable for SceneUniform {}
 
 const _: () = assert!(
     std::mem::size_of::<SceneUniform>()
-        == 16 * (9 + SCENE_BANDS / 4 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
+        == 16 * (10 + SCENE_BANDS / 4 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
 );
 
 const WGSL: &str = include_str!("harbour_light.wgsl");
@@ -240,11 +244,31 @@ fn pack(line: &[f32; LINE_SAMPLES]) -> [[f32; 4]; LINE_VEC4S] {
 pub(crate) fn light_backdrop<'a, M: 'a>(light: SeaLight, w: f32, h: f32) -> Element<'a, M> {
     iced::widget::shader(LightProgram {
         light,
-        palette: PresetPalette::theme_own(),
+        palette: if light.day {
+            day_palette()
+        } else {
+            PresetPalette::theme_own()
+        },
     })
     .width(Length::Fixed(w))
     .height(Length::Fixed(h))
     .into()
+}
+
+/// The day scene's palette: the active (light) background and ink, the
+/// accent, the logo's gold for the sun, and the theme's own ramp for the
+/// water's hues.
+fn day_palette() -> PresetPalette {
+    use crate::theme;
+    let rgb = |c: iced::Color| [c.r, c.g, c.b];
+    PresetPalette {
+        bg: rgb(theme::bg0_hard()),
+        text: rgb(theme::fg0()),
+        highlight: rgb(theme::accent()),
+        warm: rgb(theme::logo_wood()),
+        light: true,
+        ..PresetPalette::theme_own()
+    }
 }
 
 struct LightProgram {
@@ -295,6 +319,7 @@ impl<Message> shader::Program<Message> for LightProgram {
                 spectrum: std::array::from_fn(|i| {
                     std::array::from_fn(|j| self.light.music.reach[4 * i + j])
                 }),
+                mode: [if self.light.day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
                 bg: rgba(p.bg),
                 text: rgba(p.text),
                 highlight: rgba(p.highlight),
@@ -478,6 +503,7 @@ mod tests {
                 "sky",
                 "music",
                 "spectrum",
+                "mode",
                 "bg",
                 "text",
                 "highlight",

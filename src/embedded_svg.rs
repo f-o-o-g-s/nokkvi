@@ -369,13 +369,12 @@ pub(crate) fn themed_moon_face_veiled(veil: [u8; 4]) -> String {
     out
 }
 
-/// The moon document the harbour scene shows for `veil`. In the lit
-/// (night) scene the disc itself is the shader's (`harbour_light` draws a
-/// luminous moon behind the aurora), so the document keeps only the face's
-/// marks: the disc's fill and outline go transparent.
-pub(crate) fn themed_moon_for_scene(veil: [u8; 4], lit: bool) -> String {
-    let doc = themed_moon_face_veiled(veil);
-    if lit { moon_marks_only(&doc) } else { doc }
+/// The moon document the harbour scene shows for `veil`: only the face's
+/// marks, the disc's fill and outline transparent, because the disc itself
+/// is the shader's (`harbour_light` draws the moon behind the aurora by
+/// night and the sun's disc by day).
+pub(crate) fn themed_moon_for_scene(veil: [u8; 4]) -> String {
+    moon_marks_only(&themed_moon_face_veiled(veil))
 }
 
 /// `doc` with the moon disc (`id="path8"`) made invisible, leaving the
@@ -1394,12 +1393,12 @@ mod tests {
         );
     }
 
-    /// The lit scene's moon document keeps the face's marks and drops the
+    /// The scene's moon document keeps the face's marks and drops the
     /// disc (the shader draws it).
     #[test]
     fn lit_moon_document_hides_only_the_disc() {
         let _guard = crate::theme::THEME_MODE_LOCK.lock();
-        let lit = themed_moon_for_scene(MOON_VEIL_OPAQUE, true);
+        let lit = themed_moon_for_scene(MOON_VEIL_OPAQUE);
         let disc_style = |doc: &str| {
             let id_at = doc.find("id=\"path8\"").expect("disc");
             let style_at = doc[..id_at].rfind("style=\"").expect("disc style");
@@ -1413,11 +1412,6 @@ mod tests {
                 "{id} stays"
             );
         }
-        assert_eq!(
-            themed_moon_for_scene(MOON_VEIL_OPAQUE, false),
-            themed_moon_face_svg(),
-            "the day scene keeps the whole face"
-        );
     }
 
     /// The resting (bare) veil hides every mark — the disc the moon

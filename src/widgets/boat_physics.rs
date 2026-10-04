@@ -718,11 +718,8 @@ impl BoatState {
         if let Some(h) = &self.moon_handle {
             return h.clone();
         }
-        let bytes = crate::embedded_svg::themed_moon_for_scene(
-            crate::embedded_svg::MOON_VEIL_BARE,
-            crate::widgets::harbour_sea::scene_is_lit(),
-        )
-        .into_bytes();
+        let bytes = crate::embedded_svg::themed_moon_for_scene(crate::embedded_svg::MOON_VEIL_BARE)
+            .into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.moon_handle = Some(h.clone());
         h
@@ -758,11 +755,7 @@ impl BoatState {
         if self.moon_veil_handles.len() >= 512 {
             self.moon_veil_handles.clear();
         }
-        let bytes = crate::embedded_svg::themed_moon_for_scene(
-            veil,
-            crate::widgets::harbour_sea::scene_is_lit(),
-        )
-        .into_bytes();
+        let bytes = crate::embedded_svg::themed_moon_for_scene(veil).into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.moon_veil_handles.insert(veil, h.clone());
         h
