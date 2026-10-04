@@ -14,6 +14,27 @@ use crate::{
 const LRCLIB_URL: &str = "https://lrclib.net/api/get";
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// What one lyrics lookup found. A `Miss` is an answer about the song; a
+/// `Failed` lookup (a timeout, a network or server error, an unreadable file)
+/// is not, so the session cache never records one and the next play asks
+/// again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LyricsLookup<T> {
+    Hit(T),
+    Miss,
+    Failed,
+}
+
+impl<T> LyricsLookup<T> {
+    /// The hit, if there was one.
+    pub fn hit(self) -> Option<T> {
+        match self {
+            LyricsLookup::Hit(found) => Some(found),
+            LyricsLookup::Miss | LyricsLookup::Failed => None,
+        }
+    }
+}
+
 /// Options that gate the resolve chain's optional channels.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolveOpts {
@@ -59,18 +80,20 @@ struct LrclibResponse {
 }
 
 /// Fetch synced lyrics from LRCLIB's **exact** `/api/get` (never the fuzzy
-/// `/api/search`), so a hit is never-wrong by construction. Returns the parsed
-/// document **and** the raw `syncedLyrics` text (already valid LRC) so the cache
-/// can persist it verbatim — no serializer needed. `None` on miss, instrumental,
-/// timeout, or an unsynced result.
+/// `/api/search`), so a hit is never-wrong by construction. A hit carries the
+/// parsed document **and** the raw `syncedLyrics` text (already valid LRC) so
+/// the cache can persist it verbatim — no serializer needed. `Miss` on a 404,
+/// an instrumental, or an unsynced result; `Failed` on a timeout, a transport
+/// error, any other HTTP status, or an unreadable body.
 pub async fn fetch_lrclib(
     artist: &str,
     title: &str,
     album: &str,
     duration_secs: u32,
-) -> Option<(LrcDocument, String)> {
+) -> LyricsLookup<(LrcDocument, String)> {
+    // A static check of a constant URL: it never changes, so it is a miss.
     if external_host_is_blocked(LRCLIB_URL) {
-        return None;
+        return LyricsLookup::Miss;
     }
 
     let duration = duration_secs.to_string();
@@ -94,33 +117,45 @@ pub async fn fetch_lrclib(
         Ok(Ok(response)) => response,
         Ok(Err(e)) => {
             tracing::debug!(error = %e.without_url(), "lrclib fetch failed");
-            return None;
+            return LyricsLookup::Failed;
         }
         Err(_) => {
             tracing::debug!("lrclib fetch timed out");
-            return None;
+            return LyricsLookup::Failed;
         }
     };
 
     // A 404 is the normal "no match" answer — not an error worth logging.
-    if !response.status().is_success() {
-        return None;
+    // Anything else (a 5xx, a rate limit) says nothing about the song.
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return LyricsLookup::Miss;
+    }
+    if !status.is_success() {
+        tracing::debug!(%status, "lrclib fetch refused");
+        return LyricsLookup::Failed;
     }
 
     let body: LrclibResponse = match response.json().await {
         Ok(body) => body,
         Err(e) => {
             tracing::debug!(error = %e.without_url(), "lrclib response parse failed");
-            return None;
+            return LyricsLookup::Failed;
         }
     };
 
     if body.instrumental {
-        return None;
+        return LyricsLookup::Miss;
     }
-    let synced = body.synced_lyrics?;
+    let Some(synced) = body.synced_lyrics else {
+        return LyricsLookup::Miss;
+    };
     let doc = crate::types::lyrics::parse(&synced);
-    doc.synced.then_some((doc, synced))
+    if doc.synced {
+        LyricsLookup::Hit((doc, synced))
+    } else {
+        LyricsLookup::Miss
+    }
 }
 
 /// Persist a fetched LRCLIB result into the store so the next play resolves it
@@ -263,38 +298,70 @@ impl LyricsChannel {
 /// the lyrics embedded in the track's tags) is the user's own library talking,
 /// and it wins even when it is plain untimed text. Probes are lazy, so a store
 /// hit never touches the disk cache or the network.
+///
+/// The first hit wins. With no hit, the chain is `Failed` if any channel it
+/// asked failed (that channel might have held the lyrics), else a `Miss`.
 pub async fn resolve_from<StoreFut, ApiFut, CacheFut, LrclibFut>(
     store: impl FnOnce() -> StoreFut,
     api: impl FnOnce() -> ApiFut,
     cached: impl FnOnce() -> CacheFut,
     lrclib: impl FnOnce() -> LrclibFut,
     opts: ResolveOpts,
-) -> Option<(LyricsChannel, LrcDocument)>
+) -> LyricsLookup<(LyricsChannel, LrcDocument)>
 where
-    StoreFut: std::future::Future<Output = Option<LrcDocument>>,
-    ApiFut: std::future::Future<Output = Option<LrcDocument>>,
-    CacheFut: std::future::Future<Output = Option<LrcDocument>>,
-    LrclibFut: std::future::Future<Output = Option<LrcDocument>>,
+    StoreFut: std::future::Future<Output = LyricsLookup<LrcDocument>>,
+    ApiFut: std::future::Future<Output = LyricsLookup<LrcDocument>>,
+    CacheFut: std::future::Future<Output = LyricsLookup<LrcDocument>>,
+    LrclibFut: std::future::Future<Output = LyricsLookup<LrcDocument>>,
 {
-    if let Some(doc) = store().await {
-        return Some((LyricsChannel::Store, doc));
+    let mut failed = false;
+    let mut settle = |lookup: LyricsLookup<LrcDocument>, channel: LyricsChannel| match lookup {
+        LyricsLookup::Hit(doc) => Some((channel, doc)),
+        LyricsLookup::Miss => None,
+        LyricsLookup::Failed => {
+            failed = true;
+            None
+        }
+    };
+
+    if let Some(won) = settle(store().await, LyricsChannel::Store) {
+        return LyricsLookup::Hit(won);
     }
     if opts.songlyrics_ext
-        && let Some(doc) = api().await
+        && let Some(won) = settle(api().await, LyricsChannel::Server)
     {
-        return Some((LyricsChannel::Server, doc));
+        return LyricsLookup::Hit(won);
     }
     // The disk cache is local: it answers even with the direct third-party
     // fetch switched off (the download already happened, under consent).
-    if let Some(doc) = cached().await {
-        return Some((LyricsChannel::Cache, doc));
+    if let Some(won) = settle(cached().await, LyricsChannel::Cache) {
+        return LyricsLookup::Hit(won);
     }
     if opts.fetch_online
-        && let Some(doc) = lrclib().await
+        && let Some(won) = settle(lrclib().await, LyricsChannel::Lrclib)
     {
-        return Some((LyricsChannel::Lrclib, doc));
+        return LyricsLookup::Hit(won);
     }
-    None
+    if failed {
+        LyricsLookup::Failed
+    } else {
+        LyricsLookup::Miss
+    }
+}
+
+/// What the session cache should record for a resolve, if anything: a hit
+/// always, a miss only when `complete` (no channel that could answer was
+/// skipped for want of the index, the online-fetch consent, or the server's
+/// extension probe), a failure never.
+pub fn session_verdict(
+    lookup: &LyricsLookup<(LyricsChannel, LrcDocument)>,
+    complete: bool,
+) -> Option<Option<LrcDocument>> {
+    match lookup {
+        LyricsLookup::Hit((_, doc)) => Some(Some(doc.clone())),
+        LyricsLookup::Miss => complete.then_some(None),
+        LyricsLookup::Failed => None,
+    }
 }
 
 /// Mutex-protected half of [`LyricsSessionCache`]: the entries and the
@@ -346,8 +413,9 @@ impl LyricsSessionCache {
         self.inner.lock().generation
     }
 
-    /// Record a verdict (a hit or a complete miss) iff no drop has happened
-    /// since `generation` was taken. Returns whether it was stored.
+    /// Record a verdict (a hit or a complete miss, see [`session_verdict`]) iff
+    /// no drop has happened since `generation` was taken. Returns whether it
+    /// was stored.
     pub fn put_if_current(
         &self,
         generation: u64,
@@ -460,7 +528,7 @@ mod tests {
         // Real network: a widely-available track should return synced lyrics.
         let hit = fetch_lrclib("Radiohead", "Creep", "Pablo Honey", 238).await;
         match hit {
-            Some((doc, raw)) => {
+            LyricsLookup::Hit((doc, raw)) => {
                 eprintln!(
                     "lrclib hit: {} lines, {} raw bytes",
                     doc.lines.len(),
@@ -469,14 +537,15 @@ mod tests {
                 assert!(doc.synced && !doc.lines.is_empty());
                 assert!(raw.contains('['));
             }
-            None => eprintln!("lrclib returned no match (acceptable if offline / not in db)"),
+            LyricsLookup::Miss => eprintln!("lrclib returned no match (acceptable if not in db)"),
+            LyricsLookup::Failed => eprintln!("lrclib fetch failed (acceptable if offline)"),
         }
     }
 
     /// `(channel token, first line's text)` — the two things every precedence
     /// test asserts.
-    fn won(result: Option<(LyricsChannel, LrcDocument)>) -> (&'static str, String) {
-        let (channel, doc) = result.expect("a channel must answer");
+    fn won(result: LyricsLookup<(LyricsChannel, LrcDocument)>) -> (&'static str, String) {
+        let (channel, doc) = result.hit().expect("a channel must answer");
         (channel.as_str(), doc.lines[0].text.clone())
     }
 
@@ -484,7 +553,7 @@ mod tests {
     async fn store_hit_wins() {
         // The user's own file ends the chain: nothing later even runs.
         let result = resolve_from(
-            || async { Some(doc("store")) },
+            || async { LyricsLookup::Hit(doc("store")) },
             || async { panic!("the server must not run after a store hit") },
             || async { panic!("the cache must not run after a store hit") },
             || async { panic!("lrclib must not run after a store hit") },
@@ -499,8 +568,8 @@ mod tests {
         // The owner's rule: a Navidrome answer outranks LRCLIB, including a
         // copy already sitting in `.cache/`. A server hit runs neither.
         let result = resolve_from(
-            || async { None },
-            || async { Some(doc("api")) },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Hit(doc("api")) },
             || async { panic!("the cache must not run after a server hit") },
             || async { panic!("lrclib must not run after a server hit") },
             BOTH_ON,
@@ -512,9 +581,9 @@ mod tests {
     #[tokio::test]
     async fn cached_download_beats_the_network() {
         let result = resolve_from(
-            || async { None },
-            || async { None },
-            || async { Some(doc("cache")) },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Hit(doc("cache")) },
             || async { panic!("lrclib must not run after a cache hit") },
             BOTH_ON,
         )
@@ -525,10 +594,10 @@ mod tests {
     #[tokio::test]
     async fn lrclib_runs_last() {
         let result = resolve_from(
-            || async { None },
-            || async { None },
-            || async { None },
-            || async { Some(doc("lrclib")) },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Hit(doc("lrclib")) },
             BOTH_ON,
         )
         .await;
@@ -543,9 +612,9 @@ mod tests {
             fetch_online: true,
         };
         let result = resolve_from(
-            || async { None },
+            || async { LyricsLookup::Miss },
             || async { panic!("api must not run without the songLyrics ext") },
-            || async { Some(doc("cache")) },
+            || async { LyricsLookup::Hit(doc("cache")) },
             || async { panic!("lrclib must not run after a cache hit") },
             opts,
         )
@@ -563,9 +632,9 @@ mod tests {
             fetch_online: false,
         };
         let result = resolve_from(
-            || async { None },
-            || async { None },
-            || async { Some(doc("cache")) },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Hit(doc("cache")) },
             || async { panic!("lrclib must not run when fetch_online is off") },
             opts,
         )
@@ -573,14 +642,76 @@ mod tests {
         assert_eq!(won(result), ("cache", "cache".to_string()));
 
         let miss = resolve_from(
-            || async { None },
-            || async { None },
-            || async { None },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
             || async { panic!("lrclib must not run when fetch_online is off") },
             opts,
         )
         .await;
-        assert!(miss.is_none());
+        assert_eq!(miss, LyricsLookup::Miss);
+    }
+
+    #[tokio::test]
+    async fn a_failed_channel_makes_the_miss_a_failure() {
+        // The server timed out: it might hold the lyrics, so the chain's
+        // empty-handed end says nothing about the song.
+        let result = resolve_from(
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Failed },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            BOTH_ON,
+        )
+        .await;
+        assert_eq!(result, LyricsLookup::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_later_hit_wins_over_an_earlier_failure() {
+        let result = resolve_from(
+            || async { LyricsLookup::Failed },
+            || async { LyricsLookup::Failed },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Hit(doc("lrclib")) },
+            BOTH_ON,
+        )
+        .await;
+        assert_eq!(won(result), ("lrclib", "lrclib".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_skipped_channel_cannot_fail_the_chain() {
+        // Only channels the chain asks count: lrclib is off, so its failure
+        // never runs and the miss stands.
+        let opts = ResolveOpts {
+            fetch_online: false,
+            ..BOTH_ON
+        };
+        let result = resolve_from(
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Miss },
+            || async { LyricsLookup::Failed },
+            opts,
+        )
+        .await;
+        assert_eq!(result, LyricsLookup::Miss);
+    }
+
+    #[test]
+    fn the_session_records_hits_and_complete_misses_only() {
+        let hit = LyricsLookup::Hit((LyricsChannel::Server, doc("api")));
+        for complete in [true, false] {
+            assert_eq!(session_verdict(&hit, complete), Some(Some(doc("api"))));
+            assert_eq!(
+                session_verdict(&LyricsLookup::Failed, complete),
+                None,
+                "a failed lookup is never remembered as no lyrics"
+            );
+        }
+        assert_eq!(session_verdict(&LyricsLookup::Miss, true), Some(None));
+        assert_eq!(session_verdict(&LyricsLookup::Miss, false), None);
     }
 
     #[test]

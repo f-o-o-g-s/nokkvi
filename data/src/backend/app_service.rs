@@ -1017,8 +1017,8 @@ impl AppService {
 
     /// Resolve lyrics for a song through the four-channel chain — the user's own
     /// `.lrc` files, then `getLyricsBySongId`, then LRCLIB downloads already
-    /// cached on disk, then the LRCLIB network fetch — caching the result
-    /// including a negative. The server outranks both LRCLIB channels: its
+    /// cached on disk, then the LRCLIB network fetch — caching a hit, and a
+    /// miss when the chain was complete (never a failed lookup). The server outranks both LRCLIB channels: its
     /// answer is the user's own library (a sidecar file or the lyrics embedded
     /// in the track's tags), and it wins even when it is plain untimed text.
     /// Iced-free; the UI's `shell_task` drives it with the current index and the
@@ -1029,7 +1029,10 @@ impl AppService {
         index: Option<std::sync::Arc<crate::types::lyrics::LyricsIndex>>,
         opts: crate::services::lyrics_source::ResolveOpts,
     ) -> Option<crate::types::lyrics::LrcDocument> {
-        use crate::types::lyrics::{LrcDocument, parse};
+        use crate::{
+            services::lyrics_source::LyricsLookup,
+            types::lyrics::{LrcDocument, parse},
+        };
 
         if let Some(cached) = self.lyrics_cache.get(&song.id) {
             return cached;
@@ -1043,78 +1046,110 @@ impl AppService {
         let length_ms = Some(song.duration.saturating_mul(1000));
         // Both disk channels read a real `.lrc`, so both keep the timestamp
         // requirement spelled out: plain lyrics come from the server only.
-        let read_lrc = async |path: std::path::PathBuf| -> Option<LrcDocument> {
-            let text = tokio::fs::read_to_string(&path).await.ok()?;
+        let read_lrc = async |path: std::path::PathBuf| -> LyricsLookup<LrcDocument> {
+            let text = match tokio::fs::read_to_string(&path).await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::debug!(error = %e, "lyrics file read failed");
+                    return LyricsLookup::Failed;
+                }
+            };
             let doc = parse(&text);
-            (doc.synced && doc.is_renderable()).then_some(doc)
+            if doc.synced && doc.is_renderable() {
+                LyricsLookup::Hit(doc)
+            } else {
+                LyricsLookup::Miss
+            }
         };
 
         let store = || async {
-            let path = index
-                .as_ref()?
-                .find_user(&song.artist, &song.title, album, length_ms)?
-                .path
-                .clone();
-            read_lrc(path).await
+            let Some(entry) = index
+                .as_ref()
+                .and_then(|index| index.find_user(&song.artist, &song.title, album, length_ms))
+            else {
+                return LyricsLookup::Miss;
+            };
+            read_lrc(entry.path.clone()).await
         };
         let cached = || async {
-            let path = index
-                .as_ref()?
-                .find_cached(&song.artist, &song.title, album, length_ms)?
-                .path
-                .clone();
-            read_lrc(path).await
+            let Some(entry) = index
+                .as_ref()
+                .and_then(|index| index.find_cached(&song.artist, &song.title, album, length_ms))
+            else {
+                return LyricsLookup::Miss;
+            };
+            read_lrc(entry.path.clone()).await
         };
         let api = || async {
-            let service = self.lyrics_api().await.ok()?;
-            let list = service.get_lyrics_by_song_id(&song.id, true).await.ok()?;
+            let list = match self.lyrics_api().await {
+                Ok(service) => service.get_lyrics_by_song_id(&song.id, true).await,
+                Err(e) => Err(e),
+            };
+            let list = match list {
+                Ok(list) => list,
+                Err(e) => {
+                    tracing::debug!(error = %e, "server lyrics fetch failed");
+                    return LyricsLookup::Failed;
+                }
+            };
             // Kind-selection is a pure function beside the converter (which
             // takes one entry) — the server's list is never de-duplicated.
-            let chosen = crate::types::lyrics::pick_structured(&list)?;
-            let doc = LrcDocument::from_structured(chosen);
-            doc.is_renderable().then_some(doc)
+            match crate::types::lyrics::pick_structured(&list).map(LrcDocument::from_structured) {
+                Some(doc) if doc.is_renderable() => LyricsLookup::Hit(doc),
+                Some(_) | None => LyricsLookup::Miss,
+            }
         };
         let lrclib = || async {
-            let (doc, raw) = crate::services::lyrics_source::fetch_lrclib(
+            match crate::services::lyrics_source::fetch_lrclib(
                 &song.artist,
                 &song.title,
                 &song.album,
                 song.duration,
             )
-            .await?;
-            crate::services::lyrics_source::cache_to_store(&raw, song).await;
-            Some(doc)
+            .await
+            {
+                LyricsLookup::Hit((doc, raw)) => {
+                    crate::services::lyrics_source::cache_to_store(&raw, song).await;
+                    LyricsLookup::Hit(doc)
+                }
+                LyricsLookup::Miss => LyricsLookup::Miss,
+                LyricsLookup::Failed => LyricsLookup::Failed,
+            }
         };
 
-        let won =
+        let lookup =
             crate::services::lyrics_source::resolve_from(store, api, cached, lrclib, opts).await;
         // The boundary that finally handles: one line naming the winning
         // channel, so a live order question is answered from the log rather
         // than by re-reading this chain.
+        let won = match &lookup {
+            LyricsLookup::Hit(won) => Some(won),
+            LyricsLookup::Miss | LyricsLookup::Failed => None,
+        };
         tracing::debug!(
             song_id = %song.id,
-            channel = won.as_ref().map_or("none", |(c, _)| c.as_str()),
-            synced = won.as_ref().is_some_and(|(_, d)| d.synced),
-            lines = won.as_ref().map_or(0, |(_, d)| d.lines.len()),
+            channel = won.map_or("none", |(c, _)| c.as_str()),
+            failed = lookup == LyricsLookup::Failed,
+            synced = won.is_some_and(|(_, d)| d.synced),
+            lines = won.map_or(0, |(_, d)| d.lines.len()),
             "lyrics resolved"
         );
-        let result = won.map(|(_, doc)| doc);
-        // Cache a hit always; cache a MISS only when the resolution was
-        // complete — the store index was present, online fetch was allowed,
-        // AND the server-extension probe had responded (before it lands the
-        // api channel is skipped-but-unknown, so a capable server's lyrics
-        // were never consulted). A miss recorded with any channel still
+        // A miss is complete when the store index was present, online fetch
+        // was allowed, AND the server-extension probe had responded (before it
+        // lands the api channel is skipped-but-unknown, so a capable server's
+        // lyrics were never consulted). A miss recorded with any channel still
         // pending isn't authoritative: caching it would make the track show
         // "no lyrics" for the rest of the session even after the index lands,
-        // the probe responds, or the user enables fetch. Incomplete misses
-        // stay uncached so a later replay / re-drive retries the full chain.
+        // the probe responds, or the user enables fetch. Incomplete misses and
+        // failures stay uncached so a later replay / re-drive retries the
+        // full chain.
         let complete =
             index.is_some() && opts.fetch_online && (opts.songlyrics_ext || opts.ext_probe_landed);
-        if result.is_some() || complete {
+        if let Some(verdict) = crate::services::lyrics_source::session_verdict(&lookup, complete) {
             self.lyrics_cache
-                .put_if_current(generation, song.id.clone(), result.clone());
+                .put_if_current(generation, song.id.clone(), verdict);
         }
-        result
+        lookup.hit().map(|(_, doc)| doc)
     }
 }
 

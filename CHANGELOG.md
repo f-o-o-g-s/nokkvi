@@ -74,6 +74,7 @@ All notable changes to this project will be documented in this file.
 - A Find Similar still loading at logout can no longer replace the results of one started after logging back in.
 - After logging back in, the playing playlist's header no longer falls back to a single cover when its first albums left the queue.
 - Rows selected before logging out are no longer still selected after logging back in, where Enter could play different items.
+- When a lyrics lookup fails, for example offline, the song no longer shows no lyrics for the rest of the session.
 
 ### Removed
 
