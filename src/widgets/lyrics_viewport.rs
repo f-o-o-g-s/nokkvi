@@ -647,9 +647,9 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 slot_h,
                 center_pos,
                 incoming_factor,
-                // A plain sheet never accents a line — belt and braces beside
-                // the state-side guarantee that its `active_index` is `None`.
-                self.data.active_index.filter(|_| self.data.synced),
+                // `None` for a plain sheet, which never accents a line
+                // (`LrcDocument::active_line_at` names no line of it).
+                self.data.active_index,
                 self.data.synced,
                 accent,
                 base,

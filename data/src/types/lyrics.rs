@@ -31,8 +31,8 @@ pub struct LrcLine {
 
 /// A parsed lyrics document. `synced` is false when the source carried no
 /// timestamps at all (plain lyrics) — every `time_ms` is then 0 and the sheet
-/// drifts with playback progress instead of following a line cursor. A plain
-/// doc must never reach `active_line_at`, which would name its LAST line.
+/// drifts with playback progress instead of following a line cursor, so
+/// [`LrcDocument::active_line_at`] never names a line of it.
 ///
 /// Plain docs come from the SERVER only: `parse()` still keeps timed lines
 /// alone, so the store and cached-LRCLIB channels stay synced-only.
@@ -53,6 +53,20 @@ impl LrcDocument {
     /// it (`doc.synced && doc.is_renderable()`) rather than folded in here.
     pub fn is_renderable(&self) -> bool {
         !self.lines.is_empty()
+    }
+
+    /// Index of the line playing at `position_ms`: the last line whose
+    /// timestamp is `<= position_ms`. `None` before the first timestamp
+    /// (pre-roll — no line is active yet) and ALWAYS for a plain doc: every
+    /// line of one carries `time_ms == 0`, so the search would name its LAST
+    /// line from the first tick. O(log n); relies on `parse()` and
+    /// `from_structured` having sorted a synced doc's lines by time.
+    pub fn active_line_at(&self, position_ms: u32) -> Option<usize> {
+        if !self.synced {
+            return None;
+        }
+        let reached = self.lines.partition_point(|l| l.time_ms <= position_ms);
+        (reached > 0).then(|| reached - 1)
     }
 }
 
@@ -915,6 +929,40 @@ mod tests {
 
     fn ms(line: &LrcLine) -> u32 {
         line.time_ms
+    }
+
+    fn doc_at(times_ms: &[u32], synced: bool) -> LrcDocument {
+        LrcDocument {
+            lines: times_ms
+                .iter()
+                .map(|&time_ms| LrcLine {
+                    time_ms,
+                    ..Default::default()
+                })
+                .collect(),
+            synced,
+        }
+    }
+
+    // --- active line ---
+
+    #[test]
+    fn active_line_pre_roll_is_none() {
+        let doc = doc_at(&[5_000, 10_000], true);
+        assert_eq!(doc.active_line_at(0), None);
+        assert_eq!(doc.active_line_at(4_999), None);
+        assert_eq!(doc.active_line_at(5_000), Some(0));
+        assert_eq!(doc.active_line_at(9_999), Some(0));
+        assert_eq!(doc.active_line_at(10_000), Some(1));
+    }
+
+    #[test]
+    fn a_plain_doc_has_no_active_line() {
+        // Every stamp is 0, so a time search would name the LAST line.
+        let doc = doc_at(&[0, 0, 0], false);
+        for position_ms in [0, 1, 60_000, u32::MAX] {
+            assert_eq!(doc.active_line_at(position_ms), None);
+        }
     }
 
     // --- parser conformance ---

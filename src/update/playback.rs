@@ -844,36 +844,32 @@ impl Nokkvi {
                 // is the only writer of `position_ms`.
                 self.lyrics.position_ms = position_ms;
 
-                // The line cursor belongs to SYNCED sheets alone. Every line of
-                // a plain sheet carries `time_ms == 0`, so `active_line_at`
-                // would name its LAST line from the first tick and highlight it
-                // for the whole track — its `active_index` stays `None`.
-                if self.lyrics.doc.synced {
-                    let new_active =
-                        crate::state::active_line_at(&self.lyrics.doc.lines, position_ms);
-                    if new_active != self.lyrics.active_index {
-                        // Retarget the glide: snap on seek-sized jumps (or when
-                        // entering/leaving pre-roll), else ease over an adaptive
-                        // duration capped below the gap to the next line.
-                        let snap = match (self.lyrics.active_index, new_active) {
-                            (Some(prev), Some(next)) => {
-                                prev.abs_diff(next) > crate::update::lyrics::LYRICS_SNAP_INDEX_DELTA
-                            }
-                            _ => true,
-                        };
-                        self.lyrics.active_index = new_active;
-                        if let Some(next) = new_active {
-                            let duration = if snap {
-                                0
-                            } else {
-                                crate::update::lyrics::lyrics_glide_duration(
-                                    &self.lyrics.doc.lines,
-                                    next,
-                                )
-                            };
-                            let current = crate::widgets::lyrics_viewport::lyrics_center_pos();
-                            self.lyrics.retarget_scroll(next, current, duration);
+                // The line cursor belongs to SYNCED sheets alone: a plain
+                // sheet's `active_line_at` is always `None`, so its
+                // `active_index` stays `None` and nothing retargets.
+                let new_active = self.lyrics.doc.active_line_at(position_ms);
+                if new_active != self.lyrics.active_index {
+                    // Retarget the glide: snap on seek-sized jumps (or when
+                    // entering/leaving pre-roll), else ease over an adaptive
+                    // duration capped below the gap to the next line.
+                    let snap = match (self.lyrics.active_index, new_active) {
+                        (Some(prev), Some(next)) => {
+                            prev.abs_diff(next) > crate::update::lyrics::LYRICS_SNAP_INDEX_DELTA
                         }
+                        _ => true,
+                    };
+                    self.lyrics.active_index = new_active;
+                    if let Some(next) = new_active {
+                        let duration = if snap {
+                            0
+                        } else {
+                            crate::update::lyrics::lyrics_glide_duration(
+                                &self.lyrics.doc.lines,
+                                next,
+                            )
+                        };
+                        let current = crate::widgets::lyrics_viewport::lyrics_center_pos();
+                        self.lyrics.retarget_scroll(next, current, duration);
                     }
                 }
             }

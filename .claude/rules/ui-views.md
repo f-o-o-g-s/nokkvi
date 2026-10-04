@@ -116,7 +116,7 @@ A lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`,
 
 **Two kinds of sheet**, told apart by `LrcDocument.synced` and carried to the view as `LyricsPanelData.synced`:
 - **Synced** — the active line is accented and the column glides between lines (`eased_center`), snapping on seek-sized jumps (`LYRICS_SNAP_INDEX_DELTA`).
-- **Plain** — untimed lyrics from the server (a sidecar file or the lyrics embedded in the track's tags). **No line is ever accented**, and its `active_index` stays `None` for its whole life: every stamp is 0, so `active_line_at` would name the LAST line (see gotchas.md). A flat `PLAIN_BAND_LINES` band carries the eye instead, then the same falloff curve. Its center is `drift_center(position, duration, line_count, drift_offset)` — a pure function, so a seek and a wheel notch both jump.
+- **Plain** — untimed lyrics from the server (a sidecar file or the lyrics embedded in the track's tags). **No line is ever accented**, and its `active_index` stays `None` for its whole life: every stamp is 0, so `LrcDocument::active_line_at` returns `None` for it rather than name the LAST line (see gotchas.md). A flat `PLAIN_BAND_LINES` band carries the eye instead, then the same falloff curve. Its center is `drift_center(position, duration, line_count, drift_offset)` — a pure function, so a seek and a wheel notch both jump.
 
 The per-frame boat tick (`update/boat.rs`) is the SINGLE publisher of the column center for both kinds; `clear()` / `promote_next()` park the glide so a new sheet's pre-roll can't keep republishing the previous track's line into the next dissolve.
 

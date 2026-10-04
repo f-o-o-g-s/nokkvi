@@ -200,8 +200,8 @@ fn plain_doc_is_kept_with_no_active_line() {
     assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
     assert_eq!(app.lyrics.doc.lines.len(), 3, "plain lyrics are kept");
     assert!(!app.lyrics.doc.synced);
-    // No line of an untimed sheet is known to be current. Running
-    // `active_line_at` over all-zero stamps would name the LAST line.
+    // No line of an untimed sheet is known to be current. A time search over
+    // its all-zero stamps would name the LAST line.
     assert_eq!(app.lyrics.active_index, None);
 }
 
@@ -224,8 +224,8 @@ fn empty_doc_is_still_the_no_match() {
 
 #[test]
 fn a_plain_sheet_never_gains_an_active_line_on_a_tick() {
-    // The trap: every stamp is 0, so `active_line_at` would return the LAST
-    // line from the first tick and highlight it for the whole track.
+    // The trap: every stamp is 0, so a time search would return the LAST line
+    // from the first tick and highlight it for the whole track.
     let mut app = test_app();
     seed_matched(&mut app, "song_1", plain_doc(5));
 

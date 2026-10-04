@@ -289,20 +289,10 @@ impl Nokkvi {
                     if self.lyrics.position_ms == 0 {
                         self.lyrics.position_ms = self.playback.position.saturating_mul(1000);
                     }
-                    // Only a synced sheet has a current line. Over a plain
-                    // sheet's all-zero stamps `active_line_at` would name the
-                    // LAST line, so it never runs.
-                    self.lyrics.active_index = self
-                        .lyrics
-                        .doc
-                        .synced
-                        .then(|| {
-                            crate::state::active_line_at(
-                                &self.lyrics.doc.lines,
-                                self.lyrics.position_ms,
-                            )
-                        })
-                        .flatten();
+                    // Only a synced sheet has a current line (a plain one
+                    // gets `None`).
+                    self.lyrics.active_index =
+                        self.lyrics.doc.active_line_at(self.lyrics.position_ms);
                     // A doc landing mid-track snaps straight to its line — the
                     // user hasn't watched the column move yet, so there is
                     // nothing to glide from.

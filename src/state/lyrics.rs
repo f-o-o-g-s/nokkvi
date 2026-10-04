@@ -4,13 +4,13 @@
 //!
 //! Two kinds of sheet share these fields. A SYNCED doc drives `active_index`
 //! and glides between lines. A PLAIN doc (untimed lyrics from the server) has
-//! every `time_ms == 0`, so it must never reach `active_line_at` — which would
-//! name its LAST line from the first tick. Its `active_index` stays `None` for
-//! its whole life and its column center comes from `drift_center` instead.
+//! every `time_ms == 0`; `LrcDocument::active_line_at` names no line of it, so
+//! its `active_index` stays `None` for its whole life and its column center
+//! comes from `drift_center` instead.
 
 use std::sync::Arc;
 
-use nokkvi_data::types::lyrics::{LrcDocument, LrcLine, LyricsIndex};
+use nokkvi_data::types::lyrics::{LrcDocument, LyricsIndex};
 
 /// The previous track's lyric sheet, dissolving out across a transition while
 /// the incoming sheet fades in — the UI-timed companion to the audio
@@ -185,20 +185,10 @@ impl LyricsState {
     }
 }
 
-/// Index of the last line whose timestamp is `<= position_ms`, or `None` before
-/// the first timestamp (pre-roll — no line is active yet). O(log n); relies on
-/// `parse()` having sorted the lines by time.
-///
-/// SYNCED sheets only. Every line of a plain sheet carries `time_ms == 0`, so
-/// every line passes the partition and this would name the LAST one from the
-/// first tick — a plain sheet must never reach here.
-pub(crate) fn active_line_at(lines: &[LrcLine], position_ms: u32) -> Option<usize> {
-    let reached = lines.partition_point(|l| l.time_ms <= position_ms);
-    (reached > 0).then(|| reached - 1)
-}
-
 #[cfg(test)]
 mod tests {
+    use nokkvi_data::types::lyrics::LrcLine;
+
     use super::*;
 
     fn line(time_ms: u32) -> LrcLine {
@@ -207,16 +197,6 @@ mod tests {
             text: String::new(),
             words: vec![],
         }
-    }
-
-    #[test]
-    fn active_line_pre_roll_is_none() {
-        let lines = [line(5_000), line(10_000)];
-        assert_eq!(active_line_at(&lines, 0), None);
-        assert_eq!(active_line_at(&lines, 4_999), None);
-        assert_eq!(active_line_at(&lines, 5_000), Some(0));
-        assert_eq!(active_line_at(&lines, 9_999), Some(0));
-        assert_eq!(active_line_at(&lines, 10_000), Some(1));
     }
 
     #[test]
