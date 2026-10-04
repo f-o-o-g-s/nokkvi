@@ -1682,9 +1682,9 @@ impl Nokkvi {
             // The gapless prep latch; the engine it latched for is stopped.
             engine: _,
             // ---- Kept: independent of the server ----
-            // The view pages keep sort, search, scroll and columns; only
-            // their toolbar reveal locks, stranded drags and the queue's
-            // playlist-strip expansion are cleared.
+            // The view pages keep sort, search, scroll and columns. Cleared:
+            // expanded rows, multi-selections, toolbar reveal locks,
+            // stranded drags and the queue's playlist-strip expansion.
             albums_page: _,
             artists_page: _,
             genres_page: _,
@@ -1861,6 +1861,17 @@ impl Nokkvi {
         // on_exit can't fire to clear the flag.
         self.clear_all_toolbar_reveal_locks();
         self.clear_stranded_within_list_drag();
+        // The pages' expansions and selections point into the library buffers
+        // reset above: an expanded row's children came from the old server,
+        // and a kept selection would name whatever rows reload at those
+        // indices (Enter would play them).
+        self.albums_page.expansion.clear();
+        self.artists_page.expansion.clear();
+        self.genres_page.expansion.clear();
+        self.playlists_page.expansion.clear();
+        for common in self.all_slot_list_commons_mut() {
+            common.clear_selection_for_refresh();
+        }
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
         self.pending_mode_commits = 0;

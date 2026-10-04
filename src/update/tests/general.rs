@@ -797,6 +797,14 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.start_view_applied = true;
     app.suppress_next_auto_center = true;
     app.engine.gapless_preparing = true;
+
+    // View-page state that points into the library buffers.
+    app.albums_page.expansion.expanded_id = Some("a1".into());
+    app.albums_page.expansion.children = vec![make_song("s1", "Song", "Artist")];
+    app.artists_page.expansion.expanded_id = Some("ar1".into());
+    app.albums_page.common.slot_list.selected_indices = [0, 2].into_iter().collect();
+    app.albums_page.common.slot_list.anchor_index = Some(0);
+    app.songs_page.common.slot_list.selected_indices = [1].into_iter().collect();
 }
 
 #[test]
@@ -919,6 +927,17 @@ fn reset_session_state_clears_all_session_bound_fields() {
         !app.engine.gapless_preparing,
         "the gapless latch belongs to the stopped engine"
     );
+    assert!(
+        !app.albums_page.expansion.is_expanded() && app.albums_page.expansion.children.is_empty(),
+        "an expanded row's children came from the old server"
+    );
+    assert!(!app.artists_page.expansion.is_expanded());
+    assert!(
+        app.albums_page.common.slot_list.selected_indices.is_empty()
+            && app.albums_page.common.slot_list.anchor_index.is_none(),
+        "a kept selection would name whatever rows reload at those indices"
+    );
+    assert!(app.songs_page.common.slot_list.selected_indices.is_empty());
 }
 
 #[test]

@@ -73,6 +73,7 @@ All notable changes to this project will be documented in this file.
 - Below an expanded playlist, the artwork panel now loads the collage of the playlist in focus instead of another playlist's.
 - A Find Similar still loading at logout can no longer replace the results of one started after logging back in.
 - After logging back in, the playing playlist's header no longer falls back to a single cover when its first albums left the queue.
+- Rows selected before logging out are no longer still selected after logging back in, where Enter could play different items.
 
 ### Removed
 
