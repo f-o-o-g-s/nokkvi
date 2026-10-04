@@ -324,8 +324,13 @@ pub(super) fn apply(seed: AccentSeed, theme: &mut ResolvedDualTheme) {
 const MAX_SAMPLES: u32 = 4096;
 /// Hue histogram resolution (10° per bin).
 const HUE_BINS: usize = 36;
-/// A pixel below this chroma is grey and carries no hue.
+/// A pixel below this chroma carries no hue for the main pass.
 const MIN_PIXEL_CHROMA: f32 = 0.04;
+/// A pixel below this chroma carries no hue at all. Between it and
+/// [`MIN_PIXEL_CHROMA`] sit faint tints (cream paper, a sepia photo, a dusty
+/// mauve wash), which the faint pass reads: the cover's colors when the main
+/// pass finds none, and the large muted areas beside a vivid one.
+const FAINT_PIXEL_CHROMA: f32 = 0.02;
 /// A pixel outside this lightness range is too close to black or white for its
 /// hue to be seen.
 const MIN_PIXEL_LIGHTNESS: f32 = 0.2;
@@ -333,14 +338,34 @@ const MAX_PIXEL_LIGHTNESS: f32 = 0.96;
 /// Share of the sampled pixels that must carry a hue at all; below it the
 /// cover is black-and-white and yields a neutral palette.
 const MIN_CHROMATIC_SHARE: f32 = 0.03;
-/// Mean chroma the cover's strongest hue needs to count as a color. Below it
-/// the "color" is the tint of a monochrome print — a sepia or cool-toned
-/// scan sits around 0.025–0.045, a genuinely brown cover at 0.06 — and the
-/// cover yields a neutral palette.
+/// Mean chroma a main-pass hue inside [`PRINT_TINT_HUES`] needs. Warm hues
+/// are where muted backgrounds live (a sepia photo or cream paper sits around
+/// 0.042–0.055, a genuinely brown cover at 0.06), and a muted background must
+/// not out-score the vivid subject on it (a red violin on beige). A cover
+/// whose only hues fall short is not grey: the faint pass reads its tint.
 const ACHROMATIC_CHROMA: f32 = 0.055;
+/// The warm hues of sepia, gold toning and yellowed or cream paper, in Oklch
+/// degrees. A library survey found every blue above [`MIN_PIXEL_CHROMA`]
+/// visibly blue (fog, snow, night skies), so blue takes the lower
+/// [`MUTED_COLOR_CHROMA`].
+const PRINT_TINT_HUES: std::ops::RangeInclusive<f32> = 50.0..=115.0;
+/// Mean chroma a main-pass hue outside [`PRINT_TINT_HUES`] needs (a dark
+/// green cloth binding sits at 0.052, a steel-blue sky at 0.048).
+const MUTED_COLOR_CHROMA: f32 = 0.045;
+/// Mean chroma a faint-pass hue needs, just above [`FAINT_PIXEL_CHROMA`]: a
+/// tint, not scanner noise.
+const FAINT_COLOR_CHROMA: f32 = 0.025;
 /// Share of the sampled pixels a hue needs before it can win, so a sticker or
 /// a barcode cannot color the whole app.
 const MIN_HUE_SHARE: f32 = 0.015;
+/// Share of the colored pixels that also lets a hue win: on a black cover
+/// with a thin rainbow (Pink Floyd's "The Dark Side of the Moon") every
+/// stripe is tiny against the whole cover but is the cover's color.
+const MIN_HUE_SHARE_OF_COLOR: f32 = 0.10;
+/// Share of the faint pass's colored pixels a muted hue needs to join the
+/// palette beside a vivid one it cannot out-score (Thievery Corporation's
+/// dark olive beside its red disc).
+const MUTED_AREA_SHARE: f32 = 0.25;
 /// Most hues taken from one cover (the visualizer gradient's anchors).
 const MAX_COVER_HUES: usize = 4;
 /// Closest two picked hues may sit, in bins (40°): nearer than that they are
@@ -408,6 +433,15 @@ impl CoverPalette {
     }
 }
 
+/// The mean chroma a main-pass candidate of `hue` (Oklch radians) needs.
+fn achromatic_floor(hue: f32) -> f32 {
+    if PRINT_TINT_HUES.contains(&hue.to_degrees().rem_euclid(360.0)) {
+        ACHROMATIC_CHROMA
+    } else {
+        MUTED_COLOR_CHROMA
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct HueBin {
     count: u32,
@@ -419,10 +453,123 @@ struct HueBin {
     lightness: f32,
 }
 
+/// The hue histogram of one pass: the pixels at or above its chroma floor.
+struct Histogram {
+    bins: [HueBin; HUE_BINS],
+    chromatic: u32,
+}
+
+impl Histogram {
+    fn new() -> Self {
+        Self {
+            bins: [HueBin::default(); HUE_BINS],
+            chromatic: 0,
+        }
+    }
+
+    fn add(&mut self, l: f32, c: f32, hue: f32) {
+        self.chromatic += 1;
+        let turn = (hue + std::f32::consts::PI) / std::f32::consts::TAU;
+        let bin = &mut self.bins[((turn * HUE_BINS as f32) as usize).min(HUE_BINS - 1)];
+        let weight = c * c;
+        bin.count += 1;
+        bin.score += weight;
+        bin.sin += weight * hue.sin();
+        bin.cos += weight * hue.cos();
+        bin.chroma += weight * c;
+        bin.lightness += weight * l;
+    }
+
+    /// A hue's support is its bin plus both neighbors: a color sitting on a
+    /// bin edge must not lose to a narrower one that happens to be centered.
+    fn around(&self, i: usize) -> [HueBin; 3] {
+        [
+            self.bins[(i + HUE_BINS - 1) % HUE_BINS],
+            self.bins[i],
+            self.bins[(i + 1) % HUE_BINS],
+        ]
+    }
+
+    fn score(&self, i: usize) -> f32 {
+        let [prev, mid, next] = self.around(i);
+        0.5 * prev.score + mid.score + 0.5 * next.score
+    }
+
+    fn count(&self, i: usize) -> u32 {
+        self.around(i).iter().map(|b| b.count).sum()
+    }
+
+    /// The mean color over hue `i`'s support.
+    fn seed(&self, i: usize) -> Option<AccentSeed> {
+        let (mut score, mut sin, mut cos, mut chroma, mut lightness) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for bin in self.around(i) {
+            score += bin.score;
+            sin += bin.sin;
+            cos += bin.cos;
+            chroma += bin.chroma;
+            lightness += bin.lightness;
+        }
+        (score > 0.0).then(|| AccentSeed {
+            lightness: lightness / score,
+            chroma: chroma / score,
+            hue: sin.atan2(cos),
+        })
+    }
+
+    /// The hues that can enter the palette, strongest first: enough support
+    /// ([`MIN_HUE_SHARE`] of the cover or [`MIN_HUE_SHARE_OF_COLOR`] of its
+    /// colored pixels) and a mean chroma of at least `floor(hue)`. A barely
+    /// tinted candidate is dropped BEFORE the primary is chosen, so it cannot
+    /// out-score a vivid hue that clears the population floor.
+    fn candidates(&self, sampled: u32, floor: impl Fn(f32) -> f32) -> Vec<(usize, AccentSeed)> {
+        let supported = |i: usize| {
+            let count = self.count(i) as f32;
+            count >= sampled as f32 * MIN_HUE_SHARE
+                || count >= self.chromatic as f32 * MIN_HUE_SHARE_OF_COLOR
+        };
+        let mut ranked: Vec<usize> = (0..HUE_BINS).filter(|&i| supported(i)).collect();
+        ranked.sort_by(|&a, &b| self.score(b).total_cmp(&self.score(a)));
+        ranked
+            .into_iter()
+            .filter_map(|i| self.seed(i).map(|seed| (i, seed)))
+            .filter(|(_, seed)| seed.chroma >= floor(seed.hue))
+            .collect()
+    }
+
+    /// Up to [`MAX_COVER_HUES`] distinct `candidates`, the strongest first;
+    /// a secondary needs [`MIN_SECONDARY_SCORE`] of the primary's score.
+    fn pick(&self, candidates: Vec<(usize, AccentSeed)>) -> Vec<(usize, AccentSeed)> {
+        let mut picked: Vec<(usize, AccentSeed)> = Vec::with_capacity(MAX_COVER_HUES);
+        for (i, seed) in candidates {
+            if picked.len() == MAX_COVER_HUES {
+                break;
+            }
+            let strong_enough = picked
+                .first()
+                .is_none_or(|&(first, _)| self.score(i) >= self.score(first) * MIN_SECONDARY_SCORE);
+            if strong_enough && distinct_from(i, &picked) {
+                picked.push((i, seed));
+            }
+        }
+        picked
+    }
+}
+
+/// Whether hue bin `i` sits at least [`MIN_HUE_SEPARATION_BINS`] from every
+/// `picked` hue.
+fn distinct_from(i: usize, picked: &[(usize, AccentSeed)]) -> bool {
+    picked.iter().all(|&(p, _)| {
+        let d = i.abs_diff(p);
+        d.min(HUE_BINS - d) >= MIN_HUE_SEPARATION_BINS
+    })
+}
+
 /// Pick the palette of an RGBA8 image: up to [`MAX_COVER_HUES`] prominent
-/// vivid hues, the strongest first, or one neutral grey for a black-and-white
-/// image (see [`ACHROMATIC_CHROMA`]). `None` only for an empty or transparent
-/// image.
+/// hues, the strongest first, or one neutral grey for a black-and-white image.
+/// The main pass reads the clearly colored pixels; when it finds no color the
+/// faint pass reads the cover's tint, and either way large muted areas join
+/// beside the hues picked (see [`FAINT_PIXEL_CHROMA`]). `None` only for an
+/// empty or transparent image.
 pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CoverPalette> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
@@ -430,9 +577,9 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
     }
     let stride = (((w * h) as f32 / MAX_SAMPLES as f32).sqrt().ceil() as usize).max(1);
 
-    let mut bins = [HueBin::default(); HUE_BINS];
+    let mut main = Histogram::new();
+    let mut faint = Histogram::new();
     let mut sampled = 0u32;
-    let mut chromatic = 0u32;
     let mut lightness_sum = 0.0_f32;
     for y in (0..h).step_by(stride) {
         for x in (0..w).step_by(stride) {
@@ -446,105 +593,50 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
             sampled += 1;
             let Oklch { l, c, h: hue, .. } = Color::from_rgb8(r, g, b).into_oklch();
             lightness_sum += l;
-            if c < MIN_PIXEL_CHROMA || !(MIN_PIXEL_LIGHTNESS..=MAX_PIXEL_LIGHTNESS).contains(&l) {
+            if c < FAINT_PIXEL_CHROMA || !(MIN_PIXEL_LIGHTNESS..=MAX_PIXEL_LIGHTNESS).contains(&l) {
                 continue;
             }
-            chromatic += 1;
-            let turn = (hue + std::f32::consts::PI) / std::f32::consts::TAU;
-            let bin = &mut bins[((turn * HUE_BINS as f32) as usize).min(HUE_BINS - 1)];
-            let weight = c * c;
-            bin.count += 1;
-            bin.score += weight;
-            bin.sin += weight * hue.sin();
-            bin.cos += weight * hue.cos();
-            bin.chroma += weight * c;
-            bin.lightness += weight * l;
+            faint.add(l, c, hue);
+            if c >= MIN_PIXEL_CHROMA {
+                main.add(l, c, hue);
+            }
         }
     }
     if sampled == 0 {
         return None;
     }
-    // A monochrome cover: a grey at the print's own average lightness.
-    let neutral = || {
-        CoverPalette::neutral(AccentSeed {
-            lightness: lightness_sum / sampled as f32,
+    let backdrop_lightness = lightness_sum / sampled as f32;
+    let colored = |pass: &Histogram| pass.chromatic as f32 >= sampled as f32 * MIN_CHROMATIC_SHARE;
+
+    let faint_floor = |_: f32| FAINT_COLOR_CHROMA;
+    let mut picked = if colored(&main) {
+        main.pick(main.candidates(sampled, achromatic_floor))
+    } else {
+        Vec::new()
+    };
+    if picked.is_empty() && colored(&faint) {
+        picked = faint.pick(faint.candidates(sampled, faint_floor));
+    }
+    if picked.is_empty() {
+        // A monochrome cover: a grey at the print's own average lightness.
+        return Some(CoverPalette::neutral(AccentSeed {
+            lightness: backdrop_lightness,
             chroma: 0.0,
             hue: 0.0,
-        })
-    };
-    if (chromatic as f32) < sampled as f32 * MIN_CHROMATIC_SHARE {
-        return Some(neutral());
+        }));
     }
-
-    // A hue's support is its bin plus both neighbors: a color sitting on a bin
-    // edge must not lose to a narrower one that happens to be centered.
-    let around = |i: usize| {
-        [
-            bins[(i + HUE_BINS - 1) % HUE_BINS],
-            bins[i],
-            bins[(i + 1) % HUE_BINS],
-        ]
-    };
-    let score = |i: usize| {
-        let [prev, mid, next] = around(i);
-        0.5 * prev.score + mid.score + 0.5 * next.score
-    };
-    let min_count = sampled as f32 * MIN_HUE_SHARE;
-    let mut ranked: Vec<usize> = (0..HUE_BINS)
-        .filter(|&i| around(i).iter().map(|b| b.count).sum::<u32>() as f32 >= min_count)
-        .collect();
-    ranked.sort_by(|&a, &b| score(b).total_cmp(&score(a)));
-
-    // Each candidate hue's mean color over its support. A barely tinted
-    // candidate (paper, a sepia wash) is not a color at all: it is dropped
-    // BEFORE the primary is chosen, so it can neither become a grey gradient
-    // stop nor out-score a vivid hue that clears the population floor.
-    let seed_of = |i: usize| {
-        let (mut score, mut sin, mut cos, mut chroma, mut lightness) = (0.0, 0.0, 0.0, 0.0, 0.0);
-        for bin in around(i) {
-            score += bin.score;
-            sin += bin.sin;
-            cos += bin.cos;
-            chroma += bin.chroma;
-            lightness += bin.lightness;
-        }
-        (score > 0.0).then(|| AccentSeed {
-            lightness: lightness / score,
-            chroma: chroma / score,
-            hue: sin.atan2(cos),
-        })
-    };
-    let colorful: Vec<(usize, AccentSeed)> = ranked
-        .into_iter()
-        .filter_map(|i| seed_of(i).map(|seed| (i, seed)))
-        .filter(|(_, seed)| seed.chroma >= ACHROMATIC_CHROMA)
-        .collect();
-
-    let bin_distance = |a: usize, b: usize| {
-        let d = a.abs_diff(b);
-        d.min(HUE_BINS - d)
-    };
-    let mut picked: Vec<(usize, AccentSeed)> = Vec::with_capacity(MAX_COVER_HUES);
-    for (i, seed) in colorful {
+    let min_area = faint.chromatic as f32 * MUTED_AREA_SHARE;
+    for (i, seed) in faint.candidates(sampled, faint_floor) {
         if picked.len() == MAX_COVER_HUES {
             break;
         }
-        let strong_enough = picked
-            .first()
-            .is_none_or(|&(first, _)| score(i) >= score(first) * MIN_SECONDARY_SCORE);
-        let distinct = picked
-            .iter()
-            .all(|&(p, _)| bin_distance(i, p) >= MIN_HUE_SEPARATION_BINS);
-        if strong_enough && distinct {
+        if faint.count(i) as f32 >= min_area && distinct_from(i, &picked) {
             picked.push((i, seed));
         }
     }
-    if picked.is_empty() {
-        return Some(neutral());
-    }
     Some(CoverPalette {
         colors: picked.into_iter().map(|(_, seed)| seed).collect(),
-        backdrop_lightness: lightness_sum / sampled as f32,
+        backdrop_lightness,
     })
 }
 
@@ -1012,18 +1104,123 @@ mod tests {
         assert_neutral(palette_from_rgba(w, h, &px), "a mix of greys");
     }
 
-    /// A sepia or cool-toned print is a monochrome cover with a tint, not a
-    /// colored one; it must not come out brown or blue.
+    /// A sepia or cool-toned print, cream paper or a dusty mauve wash keeps
+    /// its faint tint rather than going grey (the owner's call: Panda Dub's
+    /// cream sleeve, Halftribe's mauve wing, The Doors' sepia photo). It
+    /// stays faint: nothing boosts it.
     #[test]
-    fn a_tinted_monochrome_print_is_neutral() {
-        let (w, h, px) = image_of(&[
+    fn a_faintly_tinted_cover_keeps_its_faint_tint() {
+        let sepia = [
             ([0x5a, 0x4c, 0x38], 340),
             ([0x8a, 0x78, 0x5c], 340),
             ([0xc8, 0xb8, 0x9a], 344),
+        ];
+        let cream = [([217, 210, 178], 900), ([0x10; 3], 124)];
+        let mauve = [([135, 113, 114], 600), ([0xe6; 3], 424)];
+        let cool = [([0x6e, 0x80, 0x94], 1024)];
+        for (what, blocks, rgb) in [
+            ("sepia", &sepia[..], [0x8a, 0x78, 0x5c]),
+            ("cream", &cream[..], [217, 210, 178]),
+            ("mauve", &mauve[..], [135, 113, 114]),
+            ("cool tint", &cool[..], [0x6e, 0x80, 0x94]),
+        ] {
+            let (w, h, px) = image_of(blocks);
+            let seed = palette_from_rgba(w, h, &px).expect("palette").primary();
+            assert!(
+                seed.chroma > 0.0 && seed.chroma < 0.06,
+                "{what}: a faint tint, got {seed:?}"
+            );
+            assert!(
+                hue_distance(seed.hue, hue_of(rgb[0], rgb[1], rgb[2])) < 0.2,
+                "{what}: expected its own hue, got {seed:?}"
+            );
+        }
+    }
+
+    /// A rainbow on black (Pink Floyd's "The Dark Side of the Moon"): six thin
+    /// stripes, each too small to count against the whole cover, are the
+    /// cover's only color, so they count against the colored pixels.
+    #[test]
+    fn thin_stripes_on_a_black_cover_are_its_colors() {
+        let (w, h, px) = image_of(&[
+            ([0x05; 3], 988),
+            ([0xe8, 0x30, 0x30], 6),
+            ([0xf0, 0x90, 0x20], 6),
+            ([0xf0, 0xe0, 0x30], 6),
+            ([0x40, 0xb0, 0x50], 6),
+            ([0x30, 0x70, 0xd0], 6),
+            ([0x80, 0x40, 0xb0], 6),
         ]);
-        assert_neutral(palette_from_rgba(w, h, &px), "sepia");
-        let (w, h, px) = image_of(&[([0x7a, 0x84, 0x92], 1024)]);
-        assert_neutral(palette_from_rgba(w, h, &px), "cool tint");
+        let palette = palette_from_rgba(w, h, &px).expect("palette");
+        assert!(palette.colors().len() >= 2, "{:?}", palette.colors());
+        assert!(palette.primary().chroma > 0.1, "{:?}", palette.primary());
+    }
+
+    /// A large muted area beside a small vivid one (Thievery Corporation's
+    /// "The Richest Man in Babylon": a red disc on dark olive) is part of the
+    /// cover's colors even though the vivid hue far outscores it. The vivid
+    /// hue stays the accent.
+    #[test]
+    fn a_large_muted_area_joins_a_vivid_accent() {
+        let red = [0xd8, 0x30, 0x28];
+        let olive = [46, 48, 27];
+        let (w, h, px) = image_of(&[(olive, 700), (red, 200), ([0xf4; 3], 124)]);
+        let palette = palette_from_rgba(w, h, &px).expect("palette");
+        assert!(
+            hue_distance(palette.primary().hue, hue_of(red[0], red[1], red[2])) < 0.1,
+            "the red stays the accent: {:?}",
+            palette.colors()
+        );
+        assert!(
+            palette
+                .colors()
+                .iter()
+                .any(|s| hue_distance(s.hue, hue_of(olive[0], olive[1], olive[2])) < 0.2),
+            "the olive joins the gradient: {:?}",
+            palette.colors()
+        );
+    }
+
+    /// A vivid subject on a muted warm background (a red violin on beige)
+    /// keeps the subject as the accent: the faint pass only fills in.
+    #[test]
+    fn a_vivid_subject_beats_a_muted_warm_background() {
+        let red = [0x8a, 0x20, 0x1c];
+        let (w, h, px) = image_of(&[([0xc8, 0xc0, 0x98], 850), (red, 174)]);
+        let palette = palette_from_rgba(w, h, &px).expect("palette");
+        assert!(
+            hue_distance(palette.primary().hue, hue_of(red[0], red[1], red[2])) < 0.1,
+            "{:?}",
+            palette.colors()
+        );
+    }
+
+    /// A muted cover in a hue no print is toned (a dark green cloth binding,
+    /// a dusty plum, a faded red, a steel-blue sky) is a color, even as faint
+    /// as a sepia wash: múm's "Finally We Are No One" (green cloth, chroma
+    /// ~0.052) and the Westworld soundtrack (steel blue, ~0.048) came out grey.
+    #[test]
+    fn a_muted_cover_outside_the_tint_hues_keeps_its_color() {
+        for (what, rgb) in [
+            ("green cloth", [47, 68, 41]),
+            ("plum", [97, 77, 102]),
+            ("faded red", [110, 75, 74]),
+            ("steel blue", [76, 115, 127]),
+            ("slate blue", [78, 102, 126]),
+        ] {
+            let (w, h, px) = image_of(&[(rgb, 900), ([0xf0, 0xf0, 0xf0], 100), ([0x10; 3], 24)]);
+            let palette = palette_from_rgba(w, h, &px).expect("palette");
+            assert!(
+                hue_distance(palette.primary().hue, hue_of(rgb[0], rgb[1], rgb[2])) < 0.1,
+                "{what}: expected its own hue, got {:?}",
+                palette.primary()
+            );
+            assert!(
+                palette.primary().chroma > 0.0,
+                "{what}: {:?}",
+                palette.primary()
+            );
+        }
     }
 
     /// The neutral grey sits at the print's own average lightness.
@@ -1155,14 +1352,18 @@ mod tests {
         assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
     }
 
-    /// A vivid red logo on beige paper: the paper is a tint, not a second
-    /// hue, so it never becomes a grey gradient stop.
+    /// A vivid red logo on beige paper: the red is the accent. The paper,
+    /// most of the cover, may follow it as a later gradient stop (see
+    /// `a_large_muted_area_joins_a_vivid_accent`), never ahead of it.
     #[test]
-    fn a_tinted_paper_is_not_a_second_hue() {
+    fn a_tinted_paper_never_leads_a_vivid_logo() {
         let (w, h, px) = image_of(&[([0xc8, 0xb8, 0x9a], 820), ([0xe0, 0x20, 0x30], 204)]);
         let palette = palette_from_rgba(w, h, &px).expect("has color");
-        assert_eq!(palette.colors().len(), 1, "{:?}", palette.colors());
-        assert!(hue_distance(palette.primary().hue, hue_of(0xe0, 0x20, 0x30)) < 0.1);
+        assert!(
+            hue_distance(palette.primary().hue, hue_of(0xe0, 0x20, 0x30)) < 0.1,
+            "{:?}",
+            palette.colors()
+        );
     }
 
     /// Sepia paper over most of the cover plus a small vivid red block: the
