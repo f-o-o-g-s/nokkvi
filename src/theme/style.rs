@@ -189,9 +189,9 @@ pub(crate) const MODAL_BACKDROP_ALPHA: f32 = 0.6;
 /// Shared `container::Style` for overlay modal panels — flat `bg0_hard()`
 /// fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners.
 ///
-/// Seven overlay modals (`about`, `info`, `eq`, `text_input_dialog`,
-/// `default_playlist_picker`, `milkdrop_picker`, `trawl_modal`) route through
-/// this block. Routing them
+/// Every overlay modal panel (the root modals via their widgets and
+/// `picker_modal`, plus the rules-editor overlays) routes through this
+/// block. Routing them
 /// through one function means a future per-theme tweak to the modal frame
 /// (e.g. swapping the outline onto `border()` for the chrome-quiet variant)
 /// only touches this body — and the radius / fill / border are all

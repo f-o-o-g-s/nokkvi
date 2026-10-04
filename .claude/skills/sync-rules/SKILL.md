@@ -54,10 +54,11 @@ For each stale file:
   sys.exit(0 if ok else 1)
   EOF
   ```
-- **Anchor integrity** — source comments cite `gotchas.md` by SECTION NAME, never by line number. Every cited section/bullet must still exist verbatim:
+- **Anchor integrity** — source comments cite `gotchas.md` (and CLAUDE.md) by SECTION or bullet NAME, never by line number. Every cited name must still exist verbatim in the file it names:
   ```bash
-  grep -rn "gotchas.md" src/ data/ | grep -o '"[^"]*"' | sort -u
-  # assert each quoted name appears in .claude/rules/gotchas.md
+  grep -rn -A1 "gotchas.md" src/ data/ | grep -o '"[^"]*"' | sort -u
+  # assert each quoted name appears in .claude/rules/gotchas.md or CLAUDE.md
+  # (-A1 catches citations that wrap onto the next comment line; skim the rest by hand)
   ```
 - **No stale paths** — `git grep -nE '\.agent/|\.claude/commands' -- ':!.claude/skills/sync-rules/' ':!CHANGELOG.md' ':!changelog-archive/'` must return nothing. Both directories are gone: rules live in `.claude/rules/`, and procedures (the old commands + workflows) live as skills in `.claude/skills/`. The exclusions skip this procedure's own text and the immutable release history.
 
@@ -87,4 +88,4 @@ Hard rule: **do not expand CLAUDE.md.** New detail goes in a rule file; CLAUDE.m
 git add .claude/rules .claude/skills CLAUDE.md && git commit -m "chore(rules): sync agent rules and skills with current codebase"
 ```
 
-Stage only the audited paths — never `git add .claude/` wholesale (it would catch `settings.local.json`). Omit untouched paths from the `git add`. End the commit message at the subject. If nothing changed, skip the commit and say so.
+Stage only the audited paths — never `git add .claude/` wholesale (it would catch the tracked `.claude/settings.json`). Omit untouched paths from the `git add`. End the commit message at the subject. If nothing changed, skip the commit and say so.

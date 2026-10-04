@@ -29,7 +29,8 @@ pub(crate) fn all_theme_files() -> Vec<(ThemeInfo, nokkvi_data::types::theme_fil
 
 /// Apply a theme by writing `theme = "{stem}"` to config.toml.
 ///
-/// The config watcher picks up the change and triggers `ThemeConfigReloaded`.
+/// The watcher ignores this write (it is ours), so the caller reloads the
+/// theme itself with `theme::reload_theme()`.
 pub(crate) fn apply_theme(stem: &str) -> Result<()> {
     theme_loader::write_theme_name_to_config(stem)?;
     debug!(" [PRESETS] Applied theme: {stem}");

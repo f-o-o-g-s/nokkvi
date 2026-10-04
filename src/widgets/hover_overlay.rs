@@ -50,7 +50,7 @@ pub(crate) struct HoverOverlay<'a, Message, Theme = iced::Theme, Renderer = iced
     /// External flash timestamp from `SlotListView::flash_center_at`.
     /// When within `FLASH_DURATION`, the widget shows the press animation.
     flash_at: Option<time::Instant>,
-    /// `true` when the wrapped surface is already filled with `accent_bright()`
+    /// `true` when the wrapped surface is already filled with `accent_fill()`
     /// (active nav tab, active player mode toggle). Such surfaces use a
     /// contrasting neutral hover pigment instead of the accent wash, which
     /// over an accent fill would be a near-no-op.
@@ -90,7 +90,7 @@ where
         self
     }
 
-    /// Mark the wrapped surface as already `accent_bright()`-filled when `yes`
+    /// Mark the wrapped surface as already `accent_fill()`-filled when `yes`
     /// is `true` (pass the surface's own active flag). Such surfaces deposit a
     /// contrasting neutral pigment (`theme::hover_tint_on_accent()`) instead of
     /// the accent wash, which over an accent fill would barely register.
@@ -261,7 +261,7 @@ where
         // Draw overlay on top: stronger for press, subtle for hover.
         // The pigment is the theme accent wash (`hover_tint`) so hover reads
         // as the same family as the playlist-header wash across all themes —
-        // except over an already-`accent_bright()`-filled surface, where a
+        // except over an already-`accent_fill()`-filled surface, where a
         // contrasting neutral pigment (`hover_tint_on_accent`) is used so
         // accent-over-accent doesn't vanish. The overlay's own alpha makes the
         // live composite equal `lerp(surface, pigment, alpha)`.

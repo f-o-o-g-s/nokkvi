@@ -190,9 +190,9 @@ fn skip_fade_duration_ms(
 /// instead of as free functions reaching across `CustomAudioEngine`'s fields.
 ///
 /// `bit_perfect_mode` is the engine-side mirror of the renderer's bit-perfect
-/// mode — its SOLE engine reader is `crossfade_eligible` (Relaxed self-arms a
-/// same-rate crossfade even with the Crossfade toggle off), so it lives here
-/// with the predicate that consumes it. `set_bit_perfect` keeps it in sync.
+/// mode — read by `crossfade_eligible` (Relaxed self-arms a same-rate
+/// crossfade even with the Crossfade toggle off) and by `transition_prep_cfg`
+/// (the silence-trim stand-down), so it lives here with the predicate. `set_bit_perfect` keeps it in sync.
 ///
 /// This struct does NOT own the renderer-side `CrossfadeState` machine — the
 /// engine `CrossfadePhase` and renderer `CrossfadeState` are deliberately split

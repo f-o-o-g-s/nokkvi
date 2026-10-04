@@ -112,8 +112,11 @@ Fix anything that fails before continuing.
 
 ## 5. Commit and push
 
+Confirm `git branch --show-current` prints the release branch, then stage by name (parallel sessions share the tree, so never `git add -A`):
+
 ```bash
-git add -A && git commit -m "chore: bump version to X.Y.Z, update changelog and readme"
+git add Cargo.toml Cargo.lock CHANGELOG.md README.md   # + changelog-archive/CHANGELOG-X.Y.md on a minor bump, + logo assets if regenerated
+git commit -m "chore: bump version to X.Y.Z, update changelog and readme"
 ```
 
 ```bash
@@ -152,7 +155,9 @@ The tag push fires `.github/workflows/release.yml`, which validates the bump pol
 Watch the run until it succeeds:
 
 ```bash
-gh run watch --exit-status
+sleep 5   # let the tag's run register
+run_id=$(gh run list --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')
+gh run watch "$run_id" --exit-status   # bare `gh run watch` needs an interactive terminal
 ```
 
 Open the draft release and review:
@@ -171,7 +176,7 @@ gh release edit "vX.Y.Z" --draft=false
 
 After the GitHub release is published, propagate the new version to both AUR packages.
 
-**`nokkvi-bin`** — bump `pkgver`, refresh sha256 from the just-published `.sha256` artifact, regenerate `.SRCINFO`, push:
+**`nokkvi-bin`** — bump `pkgver`, refresh sha256sums (`updpkgsums` hashes the just-published tarball), regenerate `.SRCINFO`, push:
 
 ```bash
 if [ -d ~/aur/nokkvi-bin/.git ]; then

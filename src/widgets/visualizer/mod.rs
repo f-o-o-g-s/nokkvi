@@ -71,8 +71,8 @@ impl VisualizationMode {
 }
 
 /// Which render slot the active visualizer occupies. The bottom band (above the
-/// player bar, visible on every view) and the over-cover overlay (the Queue
-/// now-playing panel) are mutually exclusive: at most one field is `Some`, and
+/// player bar, visible on every view) and the over-cover overlay (the panel
+/// cover in the Queue, Radios and Theater) are mutually exclusive: at most one field is `Some`, and
 /// both are `None` when the visualizer is `Off`. Each field carries the widget
 /// mode to draw in that slot.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +88,7 @@ pub(crate) struct VisualizerSlots {
 ///
 /// `Scope` always draws over the cover (it has no bottom-band form). `Bars` and
 /// `Lines` follow their own [`VisualizerPlacement`](crate::visualizer_config::VisualizerPlacement)
-/// (`BottomBand` by default, or `OverCover`). `Off` draws nothing. This is the
+/// (`OverCover` by default, or `BottomBand`). `Off` draws nothing. This is the
 /// single source of truth for the render fork in `app_view`, so the two render
 /// sites can never disagree (drawing the same mode twice, or nowhere).
 pub(crate) fn resolve_placement(

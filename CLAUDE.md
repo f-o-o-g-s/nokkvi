@@ -24,7 +24,7 @@ CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build
 
 System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake`. The audio engine links against `libpipewire-0.3` at build time; `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
 
-Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration in `AppService::new()` moves the legacy in-config `app.redb` to the state dir on first run.
+Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
 
 ## Workspace layout
 
@@ -55,7 +55,7 @@ fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  
 `view()` is pure and receives a `{Name}ViewData` struct that **borrows** app state (`&'a` references, not clones). The root `Nokkvi::update` dispatches `Message::Albums(msg)` to the page, then handles the returned `AlbumsAction` for side effects (toasts, AppService calls, navigation).
 
 Key shared infrastructure:
-- `ViewPage` trait (`views/mod.rs`) — explicit `impl` per view, no macro. Has pane-aware `current_view_page{,_mut}()` (delegates to browsing panel in split-view) and direct `view_page{,_mut}(View)`.
+- `ViewPage` trait (`views/mod.rs`) — explicit `impl` per view, no macro. `Nokkvi` exposes pane-aware `current_view_page{,_mut}()` (delegates to browsing panel in split-view) and direct `view_page{,_mut}(View)` (`update/hotkeys/mod.rs`).
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components/`.
 - `impl_expansion_update!` macro — owns the expansion views' shared `update()` arms (every `SlotList` message, sort/search, expand/collapse), with per-view closures.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
@@ -70,7 +70,7 @@ AppService (orchestrator)
 ├── PlaybackController       — audio engine + queue navigator + transport + mode toggles
 │                              (random/repeat/consume) + reset_next_track()
 ├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
-│                              (each lazy-inits its API client via tokio OnceCell)
+│                              (Albums/Artists/Songs lazy-init their API client via LazyAuthedService)
 ├── API factory methods      — songs_api(), albums_api(), artists_api(), tags_api() (native)
 │                              + genres_api(), libraries_api(), playlists_api(), radios_api(),
 │                              random_api(), similar_api(), lyrics_api(), play_queue_api()
@@ -94,9 +94,8 @@ Native PipeWire output via a shared `rodio::Mixer`:
 CustomAudioEngine
 ├── AudioDecoder (Symphonia) — Standard: HTTP w/ RangeHttpReader (256KB chunks, 16-chunk LRU, prefetch)
 │                              Radio: AsyncNetworkBuffer (tokio→bounded mpsc→sync Read) + auto-reconnect
-├── AudioRenderer (ring buffers) → visualizer callback from StreamingSource
-│   └── RodioOutput (shared Mixer) → ActiveStream per track
-│       └── StreamingSource (rodio::Source) → EqProcessor → lock-free ring buffer → pipewire callback
+├── AudioRenderer → RodioOutput (shared Mixer) → ActiveStream per track
+│   └── decoder → ActiveStream ring → StreamingSource (EQ · volume · fade · gain; visualizer tap) → limiter → Mixer → PipeWire
 ├── CrossfadePhase: Idle → Active → OutgoingFinished
 └── EqState — shared atomic gains, biquad filter bank per stream
 ```
@@ -104,7 +103,7 @@ CustomAudioEngine
 Critical invariants:
 - **Track changes and the engine lock**: transition decoders are built and initialized with **no** engine lock held, then installed under a brief lock: gapless prep (`prepare_next_for_gapless`) and the skip/click crossfade build (`complete_skip_fade`). A new path that builds a decoder follows that pattern. Hard loads are the one exception: `load_track_with_rg` + `play()` run under the caller's engine lock, and `play()` calls `decoder.init()` (HTTP HEAD + Range probe) inside it, so a slow server stalls the UI tick, MPRIS and mode toggles for the length of the probe. Moving that init out of the lock (a252f910) was reverted in 3737ed09 because the now-playing UI stopped matching the playing track, so redoing it needs a design that keeps the two in step.
 - **Visualizer FFT thread uses `try_lock()` only**; only the main render thread may use `lock()`.
-- **`SourceGeneration`** (typed newtype around `AtomicU64`, `audio/generation.rs`) — engine bumps via `bump_for_user_action()` on user-driven source changes (and `bump_for_gapless()` on gapless prep / `accept_internal_swap()` on completion-driven swaps). Renderer snapshots `current()` before releasing the engine lock and discards stale callbacks. Prevents consume+shuffle from replaying the just-consumed track.
+- **`SourceGeneration`** (typed newtype around `AtomicU64`, `audio/generation.rs`) — engine bumps via `bump_for_user_action()` on user-driven source changes (and `bump_for_gapless()` at the decode loop's inline gapless swap / `accept_internal_swap()` on completion-driven swaps). Renderer snapshots `current()` before releasing the engine lock and discards stale callbacks. Prevents consume+shuffle from replaying the just-consumed track.
 - **Crossfade trigger must be synchronous**: `render_tick` swaps `crossfade_state` from `Armed` to `Active` via `mem::replace` in the same tick as the position check, then signals the engine async. Otherwise EOF fires first → hard cut.
 - **Mode toggles** (shuffle/repeat/consume) must call `reset_next_track()` to clear the prepared decoder and disarm crossfade.
 - **Visualizer samples are pre-volume**, scaled to S16 range — FFT is volume-independent.
@@ -116,7 +115,7 @@ Critical invariants:
 - **Cloning**: prefer references / `Cow<>` over `.clone()`. Search filter helpers return `Cow::Borrowed` when no query is active (zero-cost).
 - **Threading**: prefer `Arc` + atomics over `Mutex<T>` for simple shared state.
 - **Search**: always immediate — never debounce.
-- **Dependencies**: rely on the existing workspace crates; discuss before adding new ones. Runtime: `iced`, `tokio` (+ `tokio-util`), `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia`, `icy-metadata`, `md-5`, `thiserror`, `zbus`, `libc`, `interprocess`, `rfd`, `pipewire`, `ksni` (last two linux-only), `particle-milkdrop` + `particle-audio` (git, pinned; MilkDrop engine + analysis; root crate only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`, `serial_test`.
+- **Dependencies**: rely on the existing workspace crates; discuss before adding new ones. Runtime: `iced`, `tokio` (+ `tokio-util`), `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `md-5`, `thiserror`, `zbus`, `libc`, `interprocess`, `rfd`, `pipewire` (linux-only), `ksni`, `particle-milkdrop` + `particle-audio` (git, pinned; MilkDrop engine + analysis; root crate only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`, `serial_test`.
 - **Render output**: keep a view's root widget type stable across renders (e.g., always `Column`) — changing it destroys `text_input` focus. Use `base_slot_list_empty_state` for empty/loaded parity.
 - **Border radii**: use the role-appropriate scale helpers `ui_radius_xs/sm/md/lg/pill` (`src/theme/radius.rs`, mode-gated via `UI_MODE.rounded_mode`), not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
 - **Manual UI verification (overrides default Claude Code guidance)**: nokkvi is a native Rust/Iced desktop app — there is no browser, no dev server, no `npm run dev`. Ignore any default instruction to "start the dev server" or "test in a browser". When the human owner asks for a UI change, deliver code that compiles cleanly (`cargo build`), passes tests/clippy/fmt, and stop there. The human runs `cargo run` (or a release build) and tests the running window themselves; their feedback is the verification loop. If a change has UI implications you cannot validate from code alone (visual layout, focus, marquee timing, etc.), say so explicitly in the handoff so the owner knows what to look at.
@@ -142,7 +141,7 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 - **Queue navigation**: use `peek_next_song()` → `PeekedQueue::transition()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
 - **`HoverOverlay`**: canonical pattern is `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells. Wrapping a native `button` works in some places (after `HoverOverlay::update` started issuing `request_redraw`), but reach for the canonical `mouse_area + container` pattern first.
 - **`guard_play_action()` runs before every play** — it transitions radio playback back to queue mode so the upcoming queue play leaves the app in queue mode. The play-task builders (`play_batch_task`, `play_batch_in_place_task`, `play_entity_task`, all through `queue_play_task`) run it plus `enter_new_playback_context()` themselves, and hand radio mode back when the play fails while the station still streams; a handler that plays through anything else calls the guard before it plays (after any browsing-panel add-to-queue redirect, which is an add, not a play).
-- **Config-watcher feedback loops**: the file watcher suppresses its own write reflections via a `(path, content-hash)` registry (`was_internal_write` in `data/src/utils/paths.rs`), but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
+- **Config-watcher feedback loops**: the file watcher suppresses its own write reflections via a `(path, content-hash)` registry (`was_internal_write` in `data/src/utils/paths.rs`), so a GUI write applies its own change in-process: theme writes call `theme::reload_theme()` after writing; `visualizer.*` writes update memory first and persist only on success.
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
 - **`CenterOnPlaying` (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path instead.
 

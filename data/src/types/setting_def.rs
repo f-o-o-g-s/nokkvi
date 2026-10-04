@@ -12,9 +12,8 @@
 //!   `Some(Ok(SettingsSideEffect::<variant>(...)))` when the setting also
 //!   declared an `on_dispatch:` hook (e.g. emit a toast, kick a follow-up
 //!   load); `Some(Err(_))` on type mismatch or setter failure. Caller chains
-//!   all three tab dispatchers; a `None` from every tab means the key is
-//!   still owned by the legacy hand-written `match key.as_str()` arm in the
-//!   UI crate. The manager type is parametric — call sites pass `mgr_type:`
+//!   all three tab dispatchers; a `None` from every tab means no table
+//!   claims the key, and the UI logs it as unhandled. The manager type is parametric — call sites pass `mgr_type:`
 //!   explicitly so the macro doesn't hardcode `SettingsManager`.
 //! - `pub fn apply_toml_<tab>_tab(ts, p)` — runs the per-setting
 //!   `toml_apply` closures. Called from `apply_toml_settings_to_internal`.
@@ -42,8 +41,6 @@ pub enum Tab {
     General,
     Interface,
     Playback,
-    /// Dormant until the M3 visualizer table lands — no
-    /// `settings_tables/visualizer.rs` invocation references it yet.
     Visualizer,
 }
 

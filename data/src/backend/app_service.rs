@@ -109,9 +109,9 @@ impl std::fmt::Debug for AppService {
 
 impl AppService {
     pub async fn new() -> Result<Self> {
-        // `get_app_db_path` runs the legacy → XDG-state-dir migration on
-        // first call (gated by an internal OnceLock in `paths`), so the
-        // open below always lands on the correct location.
+        // `main()` runs the legacy → XDG-state-dir migration
+        // (`paths::migrate_to_state_dir`) before this, so the open below
+        // always lands on the correct location.
         let db_path = crate::utils::paths::get_app_db_path()?;
         let storage = crate::services::state_storage::StateStorage::new(db_path)?;
         Self::new_with_storage(storage).await
@@ -366,7 +366,8 @@ impl AppService {
     // Intent-Based Orchestration Methods
     //
     // Every public entity-verb wrapper (play_* / add_* / insert_* /
-    // play_next_*) is a one-line delegation to `dispatch` below.
+    // play_next_*) delegates to `dispatch` below, or to `dispatch_shuffled`
+    // (one-shot shuffle) / `dispatch_anchor_first_from_track` (`*_from_track`).
     // Handlers should call the wrappers instead of defining workflows inline.
     // =========================================================================
 
