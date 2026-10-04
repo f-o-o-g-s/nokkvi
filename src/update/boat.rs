@@ -245,13 +245,13 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
 
 /// Per-frame step for the Harbour Trawl panel's trawling-longship scene.
 ///
-/// A SEPARATE `BoatState` (`app.harbour_boat`) from the Lines boat, stepped
+/// A SEPARATE `BoatState` (`app.harbour_scene.boat`) from the Lines boat, stepped
 /// against a procedural sea instead of the FFT buffer:
 /// - **Gate**: runs only on the Home screen with the Harbour view active and
 ///   an empty header search (during a search the Trawl row leaves the row
 ///   list entirely). Off-gate the boat hides and drops its dt baseline,
 ///   position preserved — the Lines boat's hide contract.
-/// - **Sea**: `harbour_sea_phase` advances at `SEA_DRIFT_HZ` (wrapped with
+/// - **Sea**: `harbour_scene.sea_phase` advances at `SEA_DRIFT_HZ` (wrapped with
 ///   `rem_euclid` so long sessions can't decay f32 sin precision), then ONE
 ///   `sea_bars` array is built, stepped against, and stored for the view —
 ///   the coherence contract that keeps the hull on the drawn water.
@@ -268,16 +268,16 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
         && app.current_view == crate::View::Harbour
         && app.harbour.search_query.trim().is_empty();
     if !on_harbour {
-        app.harbour_boat.visible = false;
-        app.harbour_boat.last_tick = None;
+        app.harbour_scene.boat.visible = false;
+        app.harbour_scene.boat.last_tick = None;
         return;
     }
 
-    let dt = match app.harbour_boat.last_tick {
+    let dt = match app.harbour_scene.boat.last_tick {
         Some(prev) => now.saturating_duration_since(prev),
         None => std::time::Duration::ZERO,
     };
-    app.harbour_boat.last_tick = Some(now);
+    app.harbour_scene.boat.last_tick = Some(now);
 
     // Advance the travelling sea and build the ONE bars array this frame's
     // physics and render both consume. Full cycles crossed bump the counter
@@ -287,23 +287,23 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     // cycle inside one large dt, e.g. after a compositor-occluded stall,
     // and replay the previous cycle's events verbatim).
     let advanced =
-        app.harbour_sea_phase + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ;
-    app.harbour_sea_phase = advanced.rem_euclid(1.0);
+        app.harbour_scene.sea_phase + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ;
+    app.harbour_scene.sea_phase = advanced.rem_euclid(1.0);
     // `advanced` is non-negative, so the cast floors: its whole part is the
     // number of full cycles crossed this tick (0 on an ordinary frame).
-    app.harbour_sea_cycle = app.harbour_sea_cycle.wrapping_add(advanced as u32);
-    let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_sea_phase);
+    app.harbour_scene.sea_cycle = app.harbour_scene.sea_cycle.wrapping_add(advanced as u32);
+    let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_scene.sea_phase);
 
     // Suppress the drop-anchor state machine BEFORE the step (see docs),
     // and keep the rope's wave-driven sway alive while sailing — the trawl
     // rope renders continuously, so it bellies with the swell instead of
     // decaying rigid the way the Lines boat's between-anchors rope does.
-    app.harbour_boat.anchor_remaining_secs = 0.0;
-    app.harbour_boat.secs_until_next_anchor = boat::ANCHOR_INTERVAL_MAX_SECS;
-    app.harbour_boat.trawl_sway = true;
+    app.harbour_scene.boat.anchor_remaining_secs = 0.0;
+    app.harbour_scene.boat.secs_until_next_anchor = boat::ANCHOR_INTERVAL_MAX_SECS;
+    app.harbour_scene.boat.trawl_sway = true;
     // The panel is ~square, so the same panel-size-independent wrap margin
     // the over-cover boat uses applies (the sprite sizes off min(w, h)).
-    app.harbour_boat.x_wrap_margin = boat::OVER_COVER_WRAP_MARGIN;
+    app.harbour_scene.boat.x_wrap_margin = boat::OVER_COVER_WRAP_MARGIN;
 
     let music = MusicSignals {
         bpm: None,
@@ -313,29 +313,29 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
         // the sea's mean; see HARBOUR_CRUISE_BAR_ENERGY docs).
         bar_energy: crate::widgets::harbour_sea::HARBOUR_CRUISE_BAR_ENERGY,
     };
-    boat::step(&mut app.harbour_boat, dt, &bars, false, music);
+    boat::step(&mut app.harbour_scene.boat, dt, &bars, false, music);
     // `step()` toggles `inverted` on every wrap for mirrored Lines mode; the
     // harbour scene never mirrors, so clear it (same as the Lines handler's
     // non-mirror path) to keep the render-cache key stable.
-    app.harbour_boat.inverted = false;
+    app.harbour_scene.boat.inverted = false;
 
     // Warm the SVG caches so the pure view path is a cheap handle clone.
     // Unlike the Lines path, the anchor handle is warmed EVERY tick — the
     // trawl draws the anchor unconditionally.
-    let tilt = app.harbour_boat.tilt;
-    let facing = app.harbour_boat.facing;
-    let _ = app.harbour_boat.cache_handle_for(tilt, facing, false);
-    let _ = app.harbour_boat.cache_anchor_handle();
+    let tilt = app.harbour_scene.boat.tilt;
+    let facing = app.harbour_scene.boat.facing;
+    let _ = app.harbour_scene.boat.cache_handle_for(tilt, facing, false);
+    let _ = app.harbour_scene.boat.cache_anchor_handle();
     // The moon warms through the veil key: the resting BARE key (every
     // ordinary frame) delegates to the plain bare-disc handle; during a
     // moon dream this bakes the frame's veiled document so the pure view
     // path stays a cheap handle clone.
     let veil = crate::widgets::harbour_sea::moon_dream_veil_key(
-        app.harbour_sea_phase,
-        app.harbour_sea_cycle,
+        app.harbour_scene.sea_phase,
+        app.harbour_scene.sea_cycle,
     );
-    let _ = app.harbour_boat.cache_moon_veil_handle(veil);
+    let _ = app.harbour_scene.boat.cache_moon_veil_handle(veil);
 
-    app.harbour_sea_bars = bars;
-    app.harbour_boat.visible = true;
+    app.harbour_scene.sea_bars = bars;
+    app.harbour_scene.boat.visible = true;
 }

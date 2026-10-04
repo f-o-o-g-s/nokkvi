@@ -326,8 +326,8 @@ fn focus_mirror_refreshes_on_same_index_entry_id_swap() {
     // restored queue's reseeded id). A fresh queue swap (PlayGenre at index 0
     // when the prior queue was also at index 0) keeps the index unchanged but
     // allocates a new entry_id at that row.
-    app.last_queue_current_index = Some(0);
-    app.last_queue_current_entry_id = Some(99);
+    app.queue_current.index = Some(0);
+    app.queue_current.entry_id = Some(99);
     app.scrobble.current_song_id = Some("song_1".to_string());
 
     let mut update = make_playback_update();
@@ -341,7 +341,7 @@ fn focus_mirror_refreshes_on_same_index_entry_id_swap() {
     // the fresh row, not the stale prior value — otherwise the queue view's
     // `is_current` (entry_id AND song_id) fails and the now-playing row never
     // arms its glow + sheen until a real index change.
-    assert_eq!(app.last_queue_current_entry_id, Some(7));
+    assert_eq!(app.queue_current.entry_id, Some(7));
 }
 
 #[test]

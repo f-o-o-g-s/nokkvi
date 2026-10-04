@@ -451,7 +451,7 @@ impl Nokkvi {
         // reveal-lock on it (same class as the tray branches' first-statement
         // rule in handle_cycle_sort_mode / handle_settings_category_motion).
         if self.modal_is_top(ActiveModal::Trawl)
-            && let Some(state) = self.trawl_modal.as_mut()
+            && let Some(state) = self.trawl.modal.as_mut()
         {
             state.search_input_focused = true;
             state.tray_cursor = None;

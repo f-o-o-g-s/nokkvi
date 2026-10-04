@@ -4,7 +4,7 @@
 //! (`trawl_crate`): a whole-library seed search on top (Harbour's search
 //! machinery: immediate fire, [`SEARCH_MIN_CHARS`] gate, generation
 //! stale-drop) and the crate tray below (chips, blend, min-length, CTAs).
-//! Opened from the Harbour "Trawl" row; `Some` on `Nokkvi.trawl_modal` =
+//! Opened from the Harbour "Trawl" row; `Some` on `Nokkvi.trawl.modal` =
 //! open. The view lives in this module too (mounted by
 //! `wrap_with_global_overlays`, modeled on `default_playlist_picker`).
 //!
@@ -79,9 +79,9 @@ pub(crate) fn cycle_tray_cursor(
     if next == 0 { None } else { Some(all[next - 1]) }
 }
 
-/// Modal editor state. The crate itself lives on `Nokkvi.trawl_crate` and
+/// Modal editor state. The crate itself lives on `Nokkvi.trawl.mix` and
 /// survives closing the modal; only search + viewport state lives here. The
-/// search stale-drop generation lives on `Nokkvi.trawl_search_generation`
+/// search stale-drop generation lives on `Nokkvi.trawl.search_generation`
 /// (root-owned so it survives close/reopen — a fresh modal must not re-mint
 /// a generation an in-flight fan-out already captured).
 #[derive(Debug, Default)]

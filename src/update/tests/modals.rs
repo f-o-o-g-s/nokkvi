@@ -34,7 +34,7 @@ pub(super) fn open_modal(app: &mut Nokkvi, modal: ActiveModal) {
             ));
         }
         ActiveModal::Trawl => {
-            app.trawl_modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
+            app.trawl.modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
         }
     }
 }
@@ -98,7 +98,7 @@ fn the_highest_open_modal_is_top() {
             ActiveModal::Info => app.info_modal.visible = false,
             ActiveModal::DefaultPlaylistPicker => app.default_playlist_picker = None,
             ActiveModal::MilkdropPicker => app.milkdrop.picker = None,
-            ActiveModal::Trawl => app.trawl_modal = None,
+            ActiveModal::Trawl => app.trawl.modal = None,
         }
     }
     assert_eq!(app.top_modal(), None);
@@ -195,7 +195,7 @@ fn escape_closes_a_modal_before_the_roulette_spin_under_it() {
     escape(&mut app);
 
     assert!(
-        app.trawl_modal.is_none(),
+        app.trawl.modal.is_none(),
         "the modal on screen closes first"
     );
     assert!(
@@ -348,7 +348,7 @@ fn discarding_the_trawl_save_dialog_leaves_trawl_closed() {
     app.discard_modal(ActiveModal::TextInputDialog);
 
     assert!(!app.text_input_dialog.visible);
-    assert!(app.trawl_modal.is_none(), "no Trawl reopened at logout");
+    assert!(app.trawl.modal.is_none(), "no Trawl reopened at logout");
 }
 
 #[test]
@@ -462,14 +462,14 @@ fn trawl_routes_leave_a_hidden_trawl_alone() {
 
     let _ = app.handle_focus_search();
     assert_eq!(
-        app.trawl_modal.as_ref().map(|t| t.search_input_focused),
+        app.trawl.modal.as_ref().map(|t| t.search_input_focused),
         Some(false),
         "`/` focuses no hidden search"
     );
 
     let _ = app.handle_settings_category_motion(true);
     assert_eq!(
-        app.trawl_modal.as_ref().map(|t| t.tray_cursor),
+        app.trawl.modal.as_ref().map(|t| t.tray_cursor),
         Some(None),
         "no hidden tray ring moves"
     );

@@ -369,11 +369,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::widgets::{SlotListPageAction, SlotListPageMessage};
 
-        let rows = build_harbour_rows(
-            &self.harbour,
-            &self.harbour_page.collapsed,
-            &self.trawl_crate,
-        );
+        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
         let total = rows.len();
         // NavigateUp/Down/SetOffset move the center — warm the new center's art.
         let needs_art = matches!(
@@ -479,11 +475,7 @@ impl Nokkvi {
     /// them. Returns the owned rows (the row enum isn't `Clone`) so each caller
     /// resolves the center via `center.and_then(|i| rows.get(i))`.
     pub(crate) fn harbour_centered_rows(&self) -> (Vec<HarbourRow>, Option<usize>) {
-        let rows = build_harbour_rows(
-            &self.harbour,
-            &self.harbour_page.collapsed,
-            &self.trawl_crate,
-        );
+        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
         let center = self.harbour_page.common.get_center_item_index(rows.len());
         (rows, center)
     }
@@ -719,11 +711,7 @@ impl Nokkvi {
     /// `(&harbour, &collapsed)` inputs the view renders, so the centered index
     /// resolves to the row the user sees.
     fn handle_harbour_expand_center(&mut self) -> Task<Message> {
-        let rows = build_harbour_rows(
-            &self.harbour,
-            &self.harbour_page.collapsed,
-            &self.trawl_crate,
-        );
+        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
         let total = rows.len();
         if self.toggle_centered_harbour_section(&rows, total, true) {
             // Rows shifted under the stationary center — re-warm it.
@@ -778,7 +766,7 @@ impl Nokkvi {
                 let new_total = build_harbour_rows(
                     &self.harbour,
                     &self.harbour_page.collapsed,
-                    &self.trawl_crate,
+                    &self.trawl.mix,
                 )
                 .len();
                 self.harbour_page
@@ -984,12 +972,8 @@ impl Nokkvi {
         // `common.search_query` made every Escape reload-and-re-roll the random
         // shelves); the offset reset stops a deep shelf scroll from stranding
         // the viewport past the end of a short result list.
-        let total = build_harbour_rows(
-            &self.harbour,
-            &self.harbour_page.collapsed,
-            &self.trawl_crate,
-        )
-        .len();
+        let total =
+            build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix).len();
         self.harbour_page
             .common
             .handle_search_query_changed(self.harbour.search_query.clone(), total);

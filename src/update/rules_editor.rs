@@ -78,7 +78,7 @@ impl Nokkvi {
             self.toast_warn("Finish or discard the current playlist edit first");
             return Task::none();
         }
-        if !self.caps_state.smart_available() {
+        if !self.rules_editor.caps_state.smart_available() {
             // Defensive backstop — the entry points are caps-gated; reaching
             // here means a stale surface or a rebind race.
             self.toast_warn(
@@ -87,7 +87,7 @@ impl Nokkvi {
             return Task::none();
         }
 
-        let caps = self.caps_state.caps();
+        let caps = self.rules_editor.caps_state.caps();
         let (edit_state, session) = match &target {
             RulesEntryTarget::Create => {
                 // One-screen create: placeholder name, private, focus seeded
@@ -160,7 +160,7 @@ impl Nokkvi {
     /// list. Ownership/caps are re-checked here (single seeding point
     /// discipline).
     pub(crate) fn enter_rules_mode_from_meta(&mut self, meta: &Playlist) -> Task<Message> {
-        if !self.caps_state.smart_available() {
+        if !self.rules_editor.caps_state.smart_available() {
             self.toast_warn(
                 "Smart playlists need Navidrome 0.61+ (or the server version is unknown)",
             );
@@ -189,7 +189,7 @@ impl Nokkvi {
                 loaded_updated_at: meta.updated_at.clone(),
             },
             SmartRules::parse(raw_rules),
-            self.caps_state.caps(),
+            self.rules_editor.caps_state.caps(),
         );
         session.preview.evaluated_at = meta.evaluated_at.clone();
         info!(" Entering rules session (JIT meta for {})", meta.id);
@@ -799,7 +799,7 @@ impl Nokkvi {
                 total,
                 evaluated_at,
             } => {
-                if generation != self.rules_preview_generation {
+                if generation != self.rules_editor.preview_generation {
                     // A newer request superseded this write — the server
                     // object it minted must not leak: delete it unless it
                     // IS the session's current draft.
@@ -821,7 +821,7 @@ impl Nokkvi {
                 self.handle_preview_loaded(generation, source_id, rows, total, evaluated_at)
             }
             RulesEditorMessage::DraftUnavailable { generation, error } => {
-                if generation == self.rules_preview_generation {
+                if generation == self.rules_editor.preview_generation {
                     warn!("draft create failed: {error}");
                     self.with_rules_session(|s| {
                         // Authoring-only mode: the form stays fully usable
@@ -832,7 +832,7 @@ impl Nokkvi {
                 Task::none()
             }
             RulesEditorMessage::PreviewPageLoaded { generation, rows } => {
-                if generation != self.rules_preview_generation {
+                if generation != self.rules_editor.preview_generation {
                     return Task::none();
                 }
                 self.with_rules_session(|s| {
@@ -874,7 +874,7 @@ impl Nokkvi {
                 )
             }
             RulesEditorMessage::PreviewFailed { generation, error } => {
-                if generation != self.rules_preview_generation {
+                if generation != self.rules_editor.preview_generation {
                     return Task::none();
                 }
                 // Draft 404 mid-session (sweep race / external cleanup):
@@ -1017,7 +1017,7 @@ impl Nokkvi {
                 // Optimistic flip on the persistent copy (survives editor
                 // close/reopen within a session); persist through the same
                 // generic path every library view's columns cog uses.
-                let new_value = self.preview_column_visibility.toggle(col);
+                let new_value = self.rules_editor.preview_column_visibility.toggle(col);
                 self.persist_column_visibility(col, new_value)
             }
         }
@@ -1084,7 +1084,7 @@ impl Nokkvi {
             return Task::none();
         };
         self.with_rules_session(|s| s.preview.page_loading = true);
-        let generation = self.rules_preview_generation;
+        let generation = self.rules_editor.preview_generation;
         self.shell_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
@@ -1832,8 +1832,8 @@ impl Nokkvi {
         }) else {
             return Task::none();
         };
-        self.rules_preview_generation = self.rules_preview_generation.wrapping_add(1);
-        let generation = self.rules_preview_generation;
+        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
+        let generation = self.rules_editor.preview_generation;
         self.with_rules_session(|s| {
             s.captured_generation = generation;
             s.preview.phase = Some(PreviewPhase::Evaluating);
@@ -1915,8 +1915,8 @@ impl Nokkvi {
             return self.dispatch_re_evaluate();
         }
 
-        self.rules_preview_generation = self.rules_preview_generation.wrapping_add(1);
-        let generation = self.rules_preview_generation;
+        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
+        let generation = self.rules_editor.preview_generation;
         self.with_rules_session(|s| {
             s.captured_generation = generation;
             s.preview.phase = Some(PreviewPhase::Evaluating);
@@ -2167,7 +2167,7 @@ impl Nokkvi {
         total: Option<u32>,
         evaluated_at: Option<String>,
     ) -> Task<Message> {
-        if generation != self.rules_preview_generation {
+        if generation != self.rules_editor.preview_generation {
             debug!("dropping stale rules evaluation (gen {generation})");
             return Task::none();
         }
@@ -2340,7 +2340,8 @@ impl Nokkvi {
                 // overwrite these rules on the next scan. 0.62+ only (the
                 // PUT ignores `sync` on 0.61 — verified).
                 let sync_detach =
-                    (*file_backed && *sync && self.caps_state.caps().sync_via_put).then_some(false);
+                    (*file_backed && *sync && self.rules_editor.caps_state.caps().sync_via_put)
+                        .then_some(false);
                 let toast_name = name.clone();
                 let detached = sync_detach.is_some();
                 let id_for_msg = playlist_id.clone();

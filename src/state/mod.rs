@@ -58,6 +58,7 @@ mod similar;
 mod snapshotted_lru;
 mod theater;
 mod toast;
+mod trawl;
 mod window;
 
 pub(crate) use artwork::*;
@@ -79,4 +80,5 @@ pub(crate) use session::*;
 pub(crate) use similar::*;
 pub(crate) use theater::*;
 pub(crate) use toast::*;
+pub(crate) use trawl::*;
 pub(crate) use window::*;

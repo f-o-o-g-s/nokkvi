@@ -23,7 +23,7 @@ fn seed(id: &str) -> TrawlSeed {
 
 fn open_modal(app: &mut crate::Nokkvi) {
     let _ = app.handle_trawl_modal(TrawlModalMessage::Open);
-    assert!(app.trawl_modal.is_some(), "modal must open");
+    assert!(app.trawl.modal.is_some(), "modal must open");
 }
 
 fn results_with_genre() -> Box<LibrarySearchResults> {
@@ -57,32 +57,32 @@ fn send_raw_key(
 #[test]
 fn open_initializes_state_and_close_clears_it() {
     let mut app = test_app();
-    assert!(app.trawl_modal.is_none());
+    assert!(app.trawl.modal.is_none());
 
     open_modal(&mut app);
-    let state = app.trawl_modal.as_ref().expect("open");
+    let state = app.trawl.modal.as_ref().expect("open");
     assert!(state.search_query.is_empty());
     assert!(state.search_results.is_none());
     assert!(!state.search_loading);
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::Close);
-    assert!(app.trawl_modal.is_none(), "close clears the modal");
+    assert!(app.trawl.modal.is_none(), "close clears the modal");
 }
 
 #[test]
 fn crate_survives_close_and_reopen() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
-    app.trawl_crate.blend = TrawlBlend::Weighted;
-    app.trawl_crate.min_length = TrawlMinLength::S120;
+    app.trawl.mix.add(seed("al1"));
+    app.trawl.mix.blend = TrawlBlend::Weighted;
+    app.trawl.mix.min_length = TrawlMinLength::S120;
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::Close);
     open_modal(&mut app);
 
-    assert_eq!(app.trawl_crate.len(), 1, "seeds survive close");
-    assert_eq!(app.trawl_crate.blend, TrawlBlend::Weighted);
-    assert_eq!(app.trawl_crate.min_length, TrawlMinLength::S120);
+    assert_eq!(app.trawl.mix.len(), 1, "seeds survive close");
+    assert_eq!(app.trawl.mix.blend, TrawlBlend::Weighted);
+    assert_eq!(app.trawl.mix.min_length, TrawlMinLength::S120);
 }
 
 // ---- search machinery --------------------------------------------------------
@@ -91,17 +91,17 @@ fn crate_survives_close_and_reopen() {
 fn search_bumps_generation_every_keystroke_even_clears() {
     let mut app = test_app();
     open_modal(&mut app);
-    let g0 = app.trawl_search_generation;
+    let g0 = app.trawl.search_generation;
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("bu".into()));
-    assert_eq!(app.trawl_search_generation, g0.wrapping_add(1));
-    assert!(app.trawl_modal.as_ref().is_some_and(|s| s.search_loading));
+    assert_eq!(app.trawl.search_generation, g0.wrapping_add(1));
+    assert!(app.trawl.modal.as_ref().is_some_and(|s| s.search_loading));
 
     // Clearing below the threshold ALSO bumps — a late in-flight result must
     // not repopulate an emptied query.
     let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("b".into()));
-    assert_eq!(app.trawl_search_generation, g0.wrapping_add(2));
-    let state = app.trawl_modal.as_ref().expect("open");
+    assert_eq!(app.trawl.search_generation, g0.wrapping_add(2));
+    let state = app.trawl.modal.as_ref().expect("open");
     assert!(state.search_results.is_none());
     assert!(!state.search_loading, "sub-threshold clears loading");
 }
@@ -110,8 +110,8 @@ fn search_bumps_generation_every_keystroke_even_clears() {
 fn search_loaded_stale_generation_is_dropped() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_search_generation = 7;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 7;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_loading = true;
     }
 
@@ -120,7 +120,7 @@ fn search_loaded_stale_generation_is_dropped() {
         result: Ok(results_with_genre()),
     });
 
-    let state = app.trawl_modal.as_ref().expect("open");
+    let state = app.trawl.modal.as_ref().expect("open");
     assert!(state.search_results.is_none(), "stale result dropped");
     assert!(state.search_loading, "newer search's loading untouched");
 }
@@ -129,8 +129,8 @@ fn search_loaded_stale_generation_is_dropped() {
 fn search_loaded_current_generation_stores_results() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_search_generation = 4;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 4;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_loading = true;
     }
@@ -140,7 +140,7 @@ fn search_loaded_current_generation_stores_results() {
         result: Ok(results_with_genre()),
     });
 
-    let state = app.trawl_modal.as_ref().expect("open");
+    let state = app.trawl.modal.as_ref().expect("open");
     assert!(!state.search_loading);
     assert!(
         state
@@ -154,8 +154,8 @@ fn search_loaded_current_generation_stores_results() {
 fn search_loaded_error_clears_results_and_toasts() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_search_generation = 2;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 2;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_results = Some(*results_with_genre());
         state.search_loading = true;
     }
@@ -165,7 +165,7 @@ fn search_loaded_error_clears_results_and_toasts() {
         result: Err("boom".into()),
     });
 
-    let state = app.trawl_modal.as_ref().expect("modal stays open");
+    let state = app.trawl.modal.as_ref().expect("modal stays open");
     assert!(state.search_results.is_none(), "stale rows must not linger");
     assert!(!state.search_loading);
     assert!(!app.toast.toasts.is_empty(), "search failure toasts");
@@ -177,8 +177,8 @@ fn search_loaded_error_clears_results_and_toasts() {
 fn click_result_row_toggles_seed_in_and_out() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
     }
@@ -186,62 +186,63 @@ fn click_result_row_toggles_seed_in_and_out() {
     // Row 0 = "Genres" header, row 1 = the Phonk result.
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClickRow(1));
     assert!(
-        app.trawl_crate
+        app.trawl
+            .mix
             .contains(&BatchItem::Genre("Phonk".to_string())),
         "click adds the seed"
     );
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClickRow(1));
-    assert!(app.trawl_crate.is_empty(), "second click removes it");
+    assert!(app.trawl.mix.is_empty(), "second click removes it");
 }
 
 #[test]
 fn activating_a_header_row_is_a_noop() {
     let mut app = test_app();
     open_modal(&mut app);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
     }
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClickRow(0)); // header
-    assert!(app.trawl_crate.is_empty(), "headers add nothing");
+    assert!(app.trawl.mix.is_empty(), "headers add nothing");
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClickRow(99)); // out of range
-    assert!(app.trawl_crate.is_empty());
+    assert!(app.trawl.mix.is_empty());
 }
 
 #[test]
 fn remove_seed_and_clear_crate() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
-    app.trawl_crate.add(seed("al2"));
+    app.trawl.mix.add(seed("al1"));
+    app.trawl.mix.add(seed("al2"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::RemoveSeed(0));
-    assert_eq!(app.trawl_crate.len(), 1);
-    assert!(app.trawl_crate.contains(&BatchItem::Album("al2".into())));
+    assert_eq!(app.trawl.mix.len(), 1);
+    assert!(app.trawl.mix.contains(&BatchItem::Album("al2".into())));
 
-    app.trawl_crate.add(seed("al3"));
+    app.trawl.mix.add(seed("al3"));
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClearCrate);
-    assert!(app.trawl_crate.is_empty());
+    assert!(app.trawl.mix.is_empty());
 }
 
 #[test]
 fn weight_steppers_clamp_to_bounds() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::DecWeight(0));
-    assert_eq!(app.trawl_crate.seeds[0].weight, 1, "floor is 1");
+    assert_eq!(app.trawl.mix.seeds[0].weight, 1, "floor is 1");
 
     for _ in 0..9 {
         let _ = app.handle_trawl_modal(TrawlModalMessage::IncWeight(0));
     }
-    assert_eq!(app.trawl_crate.seeds[0].weight, 5, "cap is 5");
+    assert_eq!(app.trawl.mix.seeds[0].weight, 5, "cap is 5");
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::DecWeight(0));
-    assert_eq!(app.trawl_crate.seeds[0].weight, 4);
+    assert_eq!(app.trawl.mix.seeds[0].weight, 4);
 }
 
 #[test]
@@ -250,16 +251,16 @@ fn set_blend_and_min_length_write_to_the_crate() {
     open_modal(&mut app);
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SetBlend(TrawlBlend::ShuffleAll));
-    assert_eq!(app.trawl_crate.blend, TrawlBlend::ShuffleAll);
+    assert_eq!(app.trawl.mix.blend, TrawlBlend::ShuffleAll);
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SetMinLength(TrawlMinLength::Off));
-    assert_eq!(app.trawl_crate.min_length, TrawlMinLength::Off);
+    assert_eq!(app.trawl.mix.min_length, TrawlMinLength::Off);
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SetMaxLength(
         nokkvi_data::types::trawl::TrawlMaxLength::S480,
     ));
     assert_eq!(
-        app.trawl_crate.max_length,
+        app.trawl.mix.max_length,
         nokkvi_data::types::trawl::TrawlMaxLength::S480
     );
 
@@ -267,7 +268,7 @@ fn set_blend_and_min_length_write_to_the_crate() {
         nokkvi_data::types::trawl::TrawlRatingFilter::R4,
     ));
     assert_eq!(
-        app.trawl_crate.rating,
+        app.trawl.mix.rating,
         nokkvi_data::types::trawl::TrawlRatingFilter::R4
     );
 
@@ -275,7 +276,7 @@ fn set_blend_and_min_length_write_to_the_crate() {
         nokkvi_data::types::trawl::TrawlMaxTracks::T50,
     ));
     assert_eq!(
-        app.trawl_crate.max_tracks,
+        app.trawl.mix.max_tracks,
         nokkvi_data::types::trawl::TrawlMaxTracks::T50
     );
 }
@@ -286,7 +287,7 @@ fn set_blend_and_min_length_write_to_the_crate() {
 fn play_mix_transitions_radio_to_queue() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
     seed_radio_playback(&mut app);
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMix);
@@ -295,7 +296,7 @@ fn play_mix_transitions_radio_to_queue() {
         "guard_play_action must transition radio → queue"
     );
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "modal stays open until the resolve completes"
     );
 }
@@ -317,12 +318,12 @@ fn play_mix_with_empty_crate_is_a_noop() {
 fn play_mix_completed_ok_closes_the_modal() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMixCompleted(Ok(())));
-    assert!(app.trawl_modal.is_none(), "success closes the modal");
+    assert!(app.trawl.modal.is_none(), "success closes the modal");
     assert!(
-        !app.trawl_crate.is_empty(),
+        !app.trawl.mix.is_empty(),
         "the crate survives playing — tweak and replay is the workflow"
     );
 }
@@ -331,13 +332,13 @@ fn play_mix_completed_ok_closes_the_modal() {
 fn play_mix_completed_err_keeps_modal_open_and_toasts() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMixCompleted(Err(
         "Mix is empty — every song was under 1:00. Lower the minimum length.".into(),
     )));
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "failure keeps the modal open so the user can adjust"
     );
     assert!(!app.toast.toasts.is_empty(), "failure toasts");
@@ -347,10 +348,10 @@ fn play_mix_completed_err_keeps_modal_open_and_toasts() {
 fn add_mix_completed_ok_toasts_the_count_and_stays_open() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::AddMixCompleted(Ok(42)));
-    assert!(app.trawl_modal.is_some(), "enqueue keeps the modal open");
+    assert!(app.trawl.modal.is_some(), "enqueue keeps the modal open");
     assert!(
         app.toast
             .toasts
@@ -382,7 +383,7 @@ fn bare_key_suppressed_while_trawl_modal_open() {
     let mut app = test_app();
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
-    app.trawl_modal = Some(TrawlModalState::default());
+    app.trawl.modal = Some(TrawlModalState::default());
     assert!(!app.modes.random);
 
     let _ = send_raw_key(
@@ -403,13 +404,14 @@ fn nav_key_passes_through_to_trawl_modal() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
     }
     let before = app
-        .trawl_modal
+        .trawl
+        .modal
         .as_ref()
         .map(|s| s.slot_list.viewport_offset);
 
@@ -420,7 +422,8 @@ fn nav_key_passes_through_to_trawl_modal() {
     );
 
     let after = app
-        .trawl_modal
+        .trawl
+        .modal
         .as_ref()
         .map(|s| s.slot_list.viewport_offset);
     assert_ne!(
@@ -435,7 +438,7 @@ fn ctrl_enter_in_modal_plays_the_mix() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
     seed_radio_playback(&mut app);
 
     // Ctrl+Enter resolves to ShufflePlay → ActivateCenterShuffled; inside the
@@ -458,8 +461,8 @@ fn enter_in_modal_toggles_centered_seed_not_play() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
         // Center the result row (index 1; header is 0).
@@ -473,7 +476,8 @@ fn enter_in_modal_toggles_centered_seed_not_play() {
     );
 
     assert!(
-        app.trawl_crate
+        app.trawl
+            .mix
             .contains(&BatchItem::Genre("Phonk".to_string())),
         "Enter toggles the centered result into the crate"
     );
@@ -485,7 +489,7 @@ fn escape_closes_the_trawl_modal_and_the_crate_survives() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = send_raw_key(
         &mut app,
@@ -493,8 +497,8 @@ fn escape_closes_the_trawl_modal_and_the_crate_survives() {
         iced::keyboard::Modifiers::empty(),
     );
 
-    assert!(app.trawl_modal.is_none(), "Escape closes the editor");
-    assert_eq!(app.trawl_crate.len(), 1, "the crate persists");
+    assert!(app.trawl.modal.is_none(), "Escape closes the editor");
+    assert_eq!(app.trawl.mix.len(), 1, "the crate persists");
 }
 
 #[test]
@@ -512,7 +516,7 @@ fn escape_tier_prefers_the_picker_on_a_double_open() {
     let _ = app.handle_clear_search();
     assert!(app.default_playlist_picker.is_none(), "the picker closes");
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "picker tier fires first; trawl modal survives this Escape"
     );
 }
@@ -520,12 +524,12 @@ fn escape_tier_prefers_the_picker_on_a_double_open() {
 #[test]
 fn queue_header_anchor_button_opens_the_modal() {
     let mut app = test_app();
-    assert!(app.trawl_modal.is_none());
+    assert!(app.trawl.modal.is_none());
 
     let _ = app.handle_queue(crate::views::QueueMessage::OpenTrawl);
 
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "the queue header's anchor button opens the trawl modal"
     );
 }
@@ -544,7 +548,7 @@ fn t_hotkey_opens_the_trawl_modal_from_a_library_view() {
         iced::keyboard::Modifiers::empty(),
     );
 
-    assert!(app.trawl_modal.is_some(), "bare t opens the trawl modal");
+    assert!(app.trawl.modal.is_some(), "bare t opens the trawl modal");
 }
 
 #[test]
@@ -560,7 +564,7 @@ fn t_hotkey_is_inert_in_settings() {
     );
 
     assert!(
-        app.trawl_modal.is_none(),
+        app.trawl.modal.is_none(),
         "the mix builder does not open over Settings"
     );
 }
@@ -579,7 +583,7 @@ fn t_hotkey_is_swallowed_while_another_modal_is_open() {
     );
 
     assert!(
-        app.trawl_modal.is_none(),
+        app.trawl.modal.is_none(),
         "the modal-open gate swallows the trawl hotkey"
     );
 }
@@ -591,18 +595,20 @@ fn open_and_typing_mark_the_search_focused() {
     let mut app = test_app();
     open_modal(&mut app);
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "Open focuses the search field"
     );
 
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
     let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("bu".into()));
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "typing proves focus"
@@ -615,8 +621,8 @@ fn tab_unfocuses_the_modal_search_but_backspace_does_not() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
     }
@@ -628,14 +634,15 @@ fn tab_unfocuses_the_modal_search_but_backspace_does_not() {
         iced::keyboard::Modifiers::empty(),
     );
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| !s.search_input_focused),
         "Tab exits the search field"
     );
 
     // Backspace (SlotListUp) must keep focus — it deletes text.
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = true;
     }
     let _ = send_raw_key(
@@ -644,7 +651,8 @@ fn tab_unfocuses_the_modal_search_but_backspace_does_not() {
         iced::keyboard::Modifiers::empty(),
     );
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "Backspace keeps the search focused for deletion"
@@ -657,7 +665,7 @@ fn slash_refocuses_the_modal_search() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
 
@@ -668,7 +676,8 @@ fn slash_refocuses_the_modal_search() {
     );
 
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "/ refocuses the modal's search from the list"
@@ -729,7 +738,7 @@ fn arrow_with(app: &mut crate::Nokkvi, right: bool, modifiers: iced::keyboard::M
 }
 
 fn tray_cursor(app: &crate::Nokkvi) -> Option<TrawlTrayControl> {
-    app.trawl_modal.as_ref().and_then(|s| s.tray_cursor)
+    app.trawl.modal.as_ref().and_then(|s| s.tray_cursor)
 }
 
 fn open_modal_over(app: &mut crate::Nokkvi, view: crate::View) {
@@ -743,7 +752,8 @@ fn shift_tab_enters_the_tray_and_unfocuses_search() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "Open focuses the search field"
@@ -763,7 +773,8 @@ fn shift_tab_enters_the_tray_and_unfocuses_search() {
         "Shift+Tab enters the tray at the first control"
     );
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| !s.search_input_focused),
         "entering the tray unfocuses the search field so arrows go live"
@@ -797,7 +808,7 @@ fn shift_tab_cycles_the_ring_and_wraps_through_none() {
 fn shift_backspace_reverse_cycles_the_ring() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
 
@@ -814,7 +825,8 @@ fn shift_backspace_while_search_focused_leaves_the_tray_alone() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused)
     );
@@ -830,7 +842,8 @@ fn shift_backspace_while_search_focused_leaves_the_tray_alone() {
 
     assert_eq!(tray_cursor(&app), None, "the ring must not move mid-typing");
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "the search field keeps focus for further deletion"
@@ -865,7 +878,8 @@ fn captured_keys_never_drive_the_tray_even_when_rebound() {
         "a captured press never moves the ring, whatever it resolves to"
     );
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "the search field keeps focus mid-typing"
@@ -882,7 +896,8 @@ fn shift_backspace_with_stale_focus_flag_still_enters_the_ring() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "precondition: the flag reads focused (stale)"
@@ -901,15 +916,15 @@ fn shift_backspace_with_stale_focus_flag_still_enters_the_ring() {
 fn left_right_cycle_the_focused_value_with_wrap() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
-    assert_eq!(app.trawl_crate.blend, TrawlBlend::ALL[0]);
+    assert_eq!(app.trawl.mix.blend, TrawlBlend::ALL[0]);
 
     arrow(&mut app, true);
     assert_eq!(
-        app.trawl_crate.blend,
+        app.trawl.mix.blend,
         TrawlBlend::ALL[1],
         "Right steps the focused control forward"
     );
@@ -917,7 +932,7 @@ fn left_right_cycle_the_focused_value_with_wrap() {
     arrow(&mut app, false);
     arrow(&mut app, false);
     assert_eq!(
-        app.trawl_crate.blend,
+        app.trawl.mix.blend,
         TrawlBlend::ALL[TrawlBlend::ALL.len() - 1],
         "Left from the first value wraps to the last"
     );
@@ -931,7 +946,7 @@ fn all_five_controls_cycle_their_own_value() {
 
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
 
@@ -948,12 +963,12 @@ fn all_five_controls_cycle_their_own_value() {
     // One Right press per control: exactly that control's crate field steps
     // to its ALL-neighbor — pins the per-variant field wiring.
     for control in TrawlTrayControl::ALL {
-        if let Some(state) = app.trawl_modal.as_mut() {
+        if let Some(state) = app.trawl.modal.as_mut() {
             state.tray_cursor = Some(control);
         }
-        let before = app.trawl_crate.clone();
+        let before = app.trawl.mix.clone();
         arrow(&mut app, true);
-        let after = &app.trawl_crate;
+        let after = &app.trawl.mix;
 
         let stepped = |name: &str, changed: bool| {
             assert_eq!(
@@ -1009,7 +1024,7 @@ fn all_five_controls_cycle_their_own_value() {
         // Left returns to the starting value — catches a hardcoded direction
         // in any per-control arm (Right-then-Left must round-trip).
         arrow(&mut app, false);
-        let reverted = &app.trawl_crate;
+        let reverted = &app.trawl.mix;
         assert_eq!(reverted.blend, before.blend, "{control:?}: Left reverts");
         assert_eq!(reverted.min_length, before.min_length);
         assert_eq!(reverted.max_length, before.max_length);
@@ -1022,27 +1037,27 @@ fn all_five_controls_cycle_their_own_value() {
 fn arrows_with_no_tray_cursor_are_inert() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
-    let before = app.trawl_crate.clone();
+    let before = app.trawl.mix.clone();
 
     arrow(&mut app, true);
     arrow(&mut app, false);
 
     assert_eq!(tray_cursor(&app), None, "no auto-enter on bare arrows");
-    assert_eq!(app.trawl_crate.blend, before.blend);
-    assert_eq!(app.trawl_crate.min_length, before.min_length);
-    assert_eq!(app.trawl_crate.max_length, before.max_length);
-    assert_eq!(app.trawl_crate.rating, before.rating);
-    assert_eq!(app.trawl_crate.max_tracks, before.max_tracks);
+    assert_eq!(app.trawl.mix.blend, before.blend);
+    assert_eq!(app.trawl.mix.min_length, before.min_length);
+    assert_eq!(app.trawl.mix.max_length, before.max_length);
+    assert_eq!(app.trawl.mix.rating, before.rating);
+    assert_eq!(app.trawl.mix.max_tracks, before.max_tracks);
 }
 
 #[test]
 fn tray_keys_do_not_touch_the_background_view() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Songs);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
@@ -1077,7 +1092,7 @@ fn tray_keys_do_not_touch_the_background_view() {
 fn tray_keys_do_not_cycle_queue_sort() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::MinLength);
     }
@@ -1205,7 +1220,7 @@ fn settings_category_motion_without_modal_still_moves_sidebar() {
 fn slash_clears_the_tray_cursor_when_refocusing_search() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Rating);
     }
@@ -1222,7 +1237,8 @@ fn slash_clears_the_tray_cursor_when_refocusing_search() {
         "the ring must never show while the search field owns the arrows"
     );
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused)
     );
@@ -1235,7 +1251,7 @@ fn slash_inside_modal_does_not_reveal_background_toolbar() {
     // view — its target is the modal's own always-rendered search field.
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Songs);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
     }
 
@@ -1246,7 +1262,8 @@ fn slash_inside_modal_does_not_reveal_background_toolbar() {
     );
 
     assert!(
-        app.trawl_modal
+        app.trawl
+            .modal
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "/ still refocuses the modal search"
@@ -1261,7 +1278,7 @@ fn slash_inside_modal_does_not_reveal_background_toolbar() {
 fn typing_in_search_clears_the_tray_cursor() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.tray_cursor = Some(TrawlTrayControl::MaxTracks);
     }
 
@@ -1278,7 +1295,7 @@ fn typing_in_search_clears_the_tray_cursor() {
 fn reopen_resets_the_tray_cursor() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.tray_cursor = Some(TrawlTrayControl::MaxLength);
     }
 
@@ -1296,8 +1313,8 @@ fn reopen_resets_the_tray_cursor() {
 fn escape_with_tray_cursor_active_is_not_two_stage() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    app.trawl_crate.add(seed("al1"));
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.mix.add(seed("al1"));
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
@@ -1311,18 +1328,18 @@ fn escape_with_tray_cursor_active_is_not_two_stage() {
         iced::keyboard::Modifiers::empty(),
     );
     assert!(
-        app.trawl_modal.is_none(),
+        app.trawl.modal.is_none(),
         "the first Escape closes the modal, not just the ring"
     );
-    assert_eq!(app.trawl_crate.len(), 1, "the crate persists");
+    assert_eq!(app.trawl.mix.len(), 1, "the crate persists");
 }
 
 #[test]
 fn enter_toggles_seed_with_tray_cursor_active() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
         state.slot_list.set_selected(1, 2);
@@ -1337,7 +1354,8 @@ fn enter_toggles_seed_with_tray_cursor_active() {
     );
 
     assert!(
-        app.trawl_crate
+        app.trawl
+            .mix
             .contains(&BatchItem::Genre("Phonk".to_string())),
         "Enter keeps seeding the centered row — the tray ring never captures it"
     );
@@ -1352,8 +1370,8 @@ fn enter_toggles_seed_with_tray_cursor_active() {
 fn list_nav_keeps_the_tray_cursor() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    app.trawl_search_generation = 1;
-    if let Some(state) = app.trawl_modal.as_mut() {
+    app.trawl.search_generation = 1;
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
         state.search_input_focused = false;
@@ -1408,7 +1426,7 @@ fn add_to_queue_hotkey_routes_to_the_mix_not_the_obscured_view() {
     app.current_view = crate::View::Queue;
     app.screen = crate::Screen::Home;
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_add_to_queue();
 
@@ -1457,14 +1475,14 @@ fn save_as_playlist_with_empty_crate_warns() {
     let _ = app.handle_trawl_modal(TrawlModalMessage::SaveAsPlaylist);
     let toast = app.toast.toasts.back().expect("empty-crate warn");
     assert!(toast.message.contains("crate is empty"));
-    assert!(app.trawl_modal.is_some(), "modal stays open");
+    assert!(app.trawl.modal.is_some(), "modal stays open");
 }
 
 #[test]
 fn save_resolve_ok_closes_modal_and_opens_name_dialog() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Ok(vec![
         "s1".into(),
@@ -1472,7 +1490,7 @@ fn save_resolve_ok_closes_modal_and_opens_name_dialog() {
         "s3".into(),
     ])));
 
-    assert!(app.trawl_modal.is_none(), "modal hands off to the dialog");
+    assert!(app.trawl.modal.is_none(), "modal hands off to the dialog");
     assert!(app.text_input_dialog.visible);
     assert_eq!(app.text_input_dialog.title, "Save Mix as Playlist");
     match &app.text_input_dialog.action {
@@ -1492,14 +1510,14 @@ fn save_resolve_ok_closes_modal_and_opens_name_dialog() {
 fn save_resolve_err_keeps_modal_and_toasts() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Err(
         "every song was filtered out".into(),
     )));
 
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "failure is actionable in the modal"
     );
     assert!(!app.text_input_dialog.visible);
@@ -1511,11 +1529,11 @@ fn save_resolve_err_keeps_modal_and_toasts() {
 fn name_dialog_cancel_reopens_trawl_modal() {
     let mut app = test_app();
     open_modal(&mut app);
-    app.trawl_crate.add(seed("al1"));
+    app.trawl.mix.add(seed("al1"));
     let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Ok(vec![
         "s1".into(),
     ])));
-    assert!(app.trawl_modal.is_none());
+    assert!(app.trawl.modal.is_none());
 
     let _ = app.update(crate::Message::TextInputDialog(
         crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
@@ -1523,10 +1541,10 @@ fn name_dialog_cancel_reopens_trawl_modal() {
 
     assert!(!app.text_input_dialog.visible);
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "cancel backs out of NAMING, not out of the mix"
     );
-    assert_eq!(app.trawl_crate.len(), 1, "crate untouched");
+    assert_eq!(app.trawl.mix.len(), 1, "crate untouched");
 }
 
 #[test]
@@ -1588,15 +1606,15 @@ fn captured_shift_p_mid_typing_does_not_double_fire() {
 fn shift_left_right_cycle_the_focused_value_with_wrap() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Queue);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
-    assert_eq!(app.trawl_crate.blend, TrawlBlend::ALL[0]);
+    assert_eq!(app.trawl.mix.blend, TrawlBlend::ALL[0]);
 
     shift_arrow(&mut app, true);
     assert_eq!(
-        app.trawl_crate.blend,
+        app.trawl.mix.blend,
         TrawlBlend::ALL[1],
         "Shift+Right steps the focused control forward"
     );
@@ -1604,7 +1622,7 @@ fn shift_left_right_cycle_the_focused_value_with_wrap() {
     shift_arrow(&mut app, false);
     shift_arrow(&mut app, false);
     assert_eq!(
-        app.trawl_crate.blend,
+        app.trawl.mix.blend,
         TrawlBlend::ALL[TrawlBlend::ALL.len() - 1],
         "Shift+Left from the first value wraps to the last"
     );
@@ -1614,7 +1632,7 @@ fn shift_left_right_cycle_the_focused_value_with_wrap() {
 fn shift_tray_keys_do_not_touch_the_background_view() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Songs);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
@@ -1642,7 +1660,7 @@ fn shift_tray_keys_do_not_touch_the_background_view() {
 fn a_bare_arrow_over_the_trawl_modal_cycles_the_tray_and_never_seeks() {
     let mut app = test_app();
     open_modal_over(&mut app, crate::View::Songs);
-    if let Some(state) = app.trawl_modal.as_mut() {
+    if let Some(state) = app.trawl.modal.as_mut() {
         state.search_input_focused = false;
         state.tray_cursor = Some(TrawlTrayControl::Blend);
     }
@@ -1650,7 +1668,7 @@ fn a_bare_arrow_over_the_trawl_modal_cycles_the_tray_and_never_seeks() {
     arrow(&mut app, true);
 
     assert_eq!(
-        app.trawl_crate.blend,
+        app.trawl.mix.blend,
         TrawlBlend::ALL[1],
         "the seek key yields to the tray while the modal is open"
     );

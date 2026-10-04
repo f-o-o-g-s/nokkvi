@@ -53,7 +53,7 @@ fn smart_row(
 fn capable_app() -> crate::Nokkvi {
     let mut app = test_app();
     app.screen = crate::Screen::Home;
-    app.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
+    app.rules_editor.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
     app.session_user_id = "user-9".into();
     app
 }
@@ -121,7 +121,7 @@ fn enter_edit_seeds_cursor_on_match_row() {
 }
 
 /// The preview columns cog flips a column's visibility on the PERSISTENT
-/// `Nokkvi.preview_column_visibility` (survives editor close/reopen, unlike
+/// `Nokkvi.rules_editor.preview_column_visibility` (survives editor close/reopen, unlike
 /// the ephemeral session), per-column independent. All five default ON, so the
 /// first toggle turns one OFF; a second restores it.
 #[test]
@@ -129,13 +129,16 @@ fn toggle_preview_column_flips_persistent_visibility() {
     use crate::state::PreviewColumn;
     let mut app = capable_app();
     open_create(&mut app);
-    assert!(app.preview_column_visibility.stars, "stars default on");
+    assert!(
+        app.rules_editor.preview_column_visibility.stars,
+        "stars default on"
+    );
 
     let _ = app.update(Message::RulesEditor(R::ToggleColumnVisible(
         PreviewColumn::Stars,
     )));
     assert!(
-        !app.preview_column_visibility.stars,
+        !app.rules_editor.preview_column_visibility.stars,
         "first toggle turns off"
     );
 
@@ -143,7 +146,7 @@ fn toggle_preview_column_flips_persistent_visibility() {
         PreviewColumn::Stars,
     )));
     assert!(
-        app.preview_column_visibility.stars,
+        app.rules_editor.preview_column_visibility.stars,
         "second toggle restores"
     );
 
@@ -151,8 +154,14 @@ fn toggle_preview_column_flips_persistent_visibility() {
     let _ = app.update(Message::RulesEditor(R::ToggleColumnVisible(
         PreviewColumn::Genre,
     )));
-    assert!(!app.preview_column_visibility.genre, "genre toggled off");
-    assert!(app.preview_column_visibility.stars, "stars unaffected");
+    assert!(
+        !app.rules_editor.preview_column_visibility.genre,
+        "genre toggled off"
+    );
+    assert!(
+        app.rules_editor.preview_column_visibility.stars,
+        "stars unaffected"
+    );
 }
 
 /// The caps gate: with the capability unknown, no session mounts and the
@@ -253,7 +262,7 @@ fn editing_mode_commit_and_revert() {
 /// `capable_app` on a 0.64 server, where the Refresh row renders.
 fn capable_app_064() -> crate::Nokkvi {
     let mut app = capable_app();
-    app.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.64.0"));
+    app.rules_editor.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.64.0"));
     app
 }
 
@@ -495,7 +504,7 @@ fn sub_picker_swallows_non_nav_hotkeys() {
     );
 
     assert!(
-        app.trawl_modal.is_none(),
+        app.trawl.modal.is_none(),
         "t must not open Trawl under the rules sub-picker"
     );
     assert!(
@@ -594,7 +603,7 @@ fn blank_create_stays_draftless_and_preview_gated() {
 fn draft_preview_loaded_establishes_and_stale_drops() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_preview_generation;
+    let generation = app.rules_editor.preview_generation;
     let written = serde_json::json!({ "all": [ { "is": { "loved": true } } ] });
 
     let _ = app.update(Message::RulesEditor(R::DraftPreviewLoaded {
@@ -639,7 +648,7 @@ fn draft_preview_loaded_establishes_and_stale_drops() {
 fn preview_failed_404_recreates_once() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_preview_generation;
+    let generation = app.rules_editor.preview_generation;
     app.with_rules_session(|s| {
         s.draft = Some(nokkvi_data::types::rules_session::DraftInfo {
             id: "draft-1".into(),
@@ -659,7 +668,7 @@ fn preview_failed_404_recreates_once() {
     );
     assert!(s.draft_recreate_attempted, "the one-shot guard armed");
 
-    let generation = app.rules_preview_generation;
+    let generation = app.rules_editor.preview_generation;
     let _ = app.update(Message::RulesEditor(R::PreviewFailed {
         generation,
         error: "API GET failed with status 404: gone".into(),
@@ -677,7 +686,7 @@ fn preview_failed_404_recreates_once() {
 fn draft_unavailable_sets_authoring_only() {
     let mut app = capable_app();
     open_create(&mut app);
-    let generation = app.rules_preview_generation;
+    let generation = app.rules_editor.preview_generation;
     let _ = app.update(Message::RulesEditor(R::DraftUnavailable {
         generation,
         error: "connect refused".into(),
@@ -722,7 +731,7 @@ fn save_completed_with_draft_skips_observe() {
 fn preview_page_loaded_appends() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let generation = app.rules_preview_generation;
+    let generation = app.rules_editor.preview_generation;
     app.with_rules_session(|s| {
         s.preview.page_loading = true;
         s.preview.total = Some(2);
@@ -1206,7 +1215,7 @@ fn nsp_import_detach_sync_gated_on_caps() {
     // Same row on 0.61 caps: no sync PUT — detach stays off, and the note
     // states the scan re-sync instead.
     let mut app61 = capable_app();
-    app61.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.61.0"));
+    app61.rules_editor.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.61.0"));
     app61.library.playlists.append_page(vec![row], 1);
     let _ = app61.update(Message::NspImportPicked(nsp_payload("Loved")));
     assert!(matches!(
@@ -1418,7 +1427,7 @@ fn modal_over_rules_session_owns_the_keyboard() {
     open_edit(&mut app);
     app.with_rules_session(|s| s.dirty = true);
     // Trawl builder opens on top (the `t` hotkey is view-agnostic).
-    app.trawl_modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
+    app.trawl.modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
@@ -1432,17 +1441,17 @@ fn modal_over_rules_session_owns_the_keyboard() {
     );
 }
 
-/// Exiting the editor bumps `rules_preview_generation` so an in-flight
+/// Exiting the editor bumps `rules_editor.preview_generation` so an in-flight
 /// preview task can't be adopted by the NEXT session (finding 6).
 #[test]
 fn exiting_rules_mode_invalidates_preview_generation() {
     let mut app = capable_app();
     open_edit(&mut app);
-    let before = app.rules_preview_generation;
+    let before = app.rules_editor.preview_generation;
     let _ = app.handle_exit_playlist_edit_mode();
     assert!(app.playlist_editor.is_none(), "session torn down");
     assert!(
-        app.rules_preview_generation > before,
+        app.rules_editor.preview_generation > before,
         "close invalidates in-flight preview tasks (they can't seed the next session)"
     );
 }

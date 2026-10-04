@@ -1272,7 +1272,7 @@ impl Nokkvi {
         }
         let mut added = 0usize;
         for seed in seeds {
-            if self.trawl_crate.add(seed) {
+            if self.trawl.mix.add(seed) {
                 added += 1;
             }
         }
@@ -1625,10 +1625,10 @@ impl Nokkvi {
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs (+similar_songs_generation carried forward bumped),
     ///   active_playlist_info, playlist_editor,
-    ///   server_version, last_queue_current_index (+entry id),
+    ///   server_version, queue_current (index + entry id),
     ///   strip_quad_album_ids (with the playlist context),
     ///   pending_expand (whole `PendingExpandState`), roulette,
-    ///   trawl_crate (+trawl_search_generation carried forward bumped —
+    ///   trawl.mix (+trawl.search_generation carried forward bumped —
     ///   seeds and search results reference the old server's ids).
     /// - **Transient UI work tied to the prior session**: every root modal
     ///   (`ActiveModal::STACK`, through `discard_modal`), open_menu,
@@ -1748,8 +1748,8 @@ impl Nokkvi {
         // Capability gate is per-server; the generation carries FORWARD
         // (bumped) like the Harbour/Trawl counters — an in-flight preview
         // task holds a captured generation a zeroed counter would re-mint.
-        self.caps_state = crate::state::CapsState::default();
-        self.rules_preview_generation = self.rules_preview_generation.wrapping_add(1);
+        self.rules_editor.caps_state = crate::state::CapsState::default();
+        self.rules_editor.preview_generation = self.rules_editor.preview_generation.wrapping_add(1);
         self.screen = crate::Screen::Login;
 
         // Clear transient login state so re-login starts from a clean slate:
@@ -1796,8 +1796,8 @@ impl Nokkvi {
         // Trawl: seeds + search results are keyed on the prior server's ids.
         // Same generation carry-forward rationale as Harbour above. (The
         // modal itself goes with the others below.)
-        self.trawl_crate = nokkvi_data::types::trawl::TrawlCrate::default();
-        self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
+        self.trawl.mix = nokkvi_data::types::trawl::TrawlCrate::default();
+        self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
         // In memory only: the persisted context is restored with the queue
         // at the next login.
         self.drop_active_playlist_context();
@@ -1810,8 +1810,8 @@ impl Nokkvi {
         self.playlist_editor = None;
         self.server_version = None;
         self.open_subsonic_extensions = None;
-        self.last_queue_current_index = None;
-        self.last_queue_current_entry_id = None;
+        self.queue_current.index = None;
+        self.queue_current.entry_id = None;
         self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;
 

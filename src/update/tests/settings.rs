@@ -679,7 +679,7 @@ fn player_settings_loaded_restores_all_column_visibility() {
             similar_show_album: false,
             similar_show_duration: true,
             similar_show_love: false,
-            // Preview — restored into Nokkvi.preview_column_visibility by this
+            // Preview — restored into Nokkvi.rules_editor.preview_column_visibility by this
             // same event (no persistent page; asserted below like the 7 views)
             preview_show_stars: true,
             preview_show_love: false,
@@ -766,7 +766,7 @@ fn player_settings_loaded_restores_all_column_visibility() {
     // Preview — the persistent field on Nokkvi (no page), restored by the same
     // handler. Alternating T/F above so an `@ token` field-swap in the preview
     // `define_view_columns!` macro is caught here like the seven views.
-    let pv = app.preview_column_visibility;
+    let pv = app.rules_editor.preview_column_visibility;
     assert_eq!(pv.stars, settings.view_columns.preview_show_stars);
     assert_eq!(pv.love, settings.view_columns.preview_show_love);
     assert_eq!(pv.plays, settings.view_columns.preview_show_plays);

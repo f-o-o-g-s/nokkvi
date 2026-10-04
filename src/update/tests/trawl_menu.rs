@@ -16,7 +16,8 @@ use crate::{
 };
 
 fn crate_keys(app: &crate::Nokkvi) -> Vec<(TrawlSeedKind, String)> {
-    app.trawl_crate
+    app.trawl
+        .mix
         .seeds
         .iter()
         .map(|s| {
@@ -40,8 +41,8 @@ fn albums_menu_add_to_mix_seeds_the_crate() {
         vec![(TrawlSeedKind::Album, "al1".to_string())],
         "album parent row seeds the crate"
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Loveless");
-    assert_eq!(app.trawl_crate.seeds[0].sublabel, "MBV");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Loveless");
+    assert_eq!(app.trawl.mix.seeds[0].sublabel, "MBV");
     assert!(
         app.toast
             .toasts
@@ -64,8 +65,8 @@ fn artists_menu_add_to_mix_seeds_the_crate() {
         crate_keys(&app),
         vec![(TrawlSeedKind::Artist, "ar1".to_string())]
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Burial");
-    assert_eq!(app.trawl_crate.seeds[0].sublabel, "Artist");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Burial");
+    assert_eq!(app.trawl.mix.seeds[0].sublabel, "Artist");
 }
 
 #[test]
@@ -82,7 +83,7 @@ fn genres_menu_add_to_mix_seeds_the_crate() {
         vec![(TrawlSeedKind::Genre, "Phonk".to_string())],
         "genre seeds key on the NAME (batch pipeline contract)"
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Phonk");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Phonk");
 }
 
 #[test]
@@ -121,8 +122,8 @@ fn playlists_menu_add_to_mix_seeds_the_crate() {
         crate_keys(&app),
         vec![(TrawlSeedKind::Playlist, "p1".to_string())]
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Night Drive");
-    assert_eq!(app.trawl_crate.seeds[0].sublabel, "42 songs");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Night Drive");
+    assert_eq!(app.trawl.mix.seeds[0].sublabel, "42 songs");
 }
 
 #[test]
@@ -138,8 +139,8 @@ fn songs_menu_add_to_mix_seeds_the_crate() {
         crate_keys(&app),
         vec![(TrawlSeedKind::Song, "s1".to_string())]
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Archangel");
-    assert_eq!(app.trawl_crate.seeds[0].sublabel, "Burial");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Archangel");
+    assert_eq!(app.trawl.mix.seeds[0].sublabel, "Burial");
 }
 
 #[test]
@@ -161,10 +162,10 @@ fn queue_menu_add_to_mix_seeds_the_crate() {
         crate_keys(&app),
         vec![(TrawlSeedKind::Song, "q1".to_string())]
     );
-    assert_eq!(app.trawl_crate.seeds[0].label, "Nightcrawler");
+    assert_eq!(app.trawl.mix.seeds[0].label, "Nightcrawler");
     // The rebuilt Song must be playable: streaming keys on the id, and the
     // resolve path passes the embedded Song through untouched.
-    match &app.trawl_crate.seeds[0].item {
+    match &app.trawl.mix.seeds[0].item {
         BatchItem::Song(song) => {
             assert_eq!(song.id, "q1");
             assert_eq!(song.artist, "Soudiere");
@@ -186,7 +187,7 @@ fn duplicate_menu_add_toasts_already_in_the_mix() {
         crate::views::AlbumsMessage::ContextMenuAction(0, LibraryContextEntry::AddToMix),
     ));
 
-    assert_eq!(app.trawl_crate.len(), 1, "identity dedupe holds");
+    assert_eq!(app.trawl.mix.len(), 1, "identity dedupe holds");
     assert!(
         app.toast
             .toasts

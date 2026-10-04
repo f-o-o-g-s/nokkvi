@@ -1426,10 +1426,10 @@ impl Nokkvi {
                 )
                 .map(Message::MilkdropPicker)
             }),
-            ActiveModal::Trawl => self.trawl_modal.as_ref().map(|trawl_state| {
+            ActiveModal::Trawl => self.trawl.modal.as_ref().map(|trawl_state| {
                 crate::widgets::trawl_modal::trawl_modal_overlay(
                     trawl_state,
-                    &self.trawl_crate,
+                    &self.trawl.mix,
                     self.window.height,
                     &self.artwork.album_art.snapshot,
                 )
@@ -1956,7 +1956,7 @@ impl Nokkvi {
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             current_playing_song_id: self.scrobble.current_song_id.clone(),
-            current_playing_entry_id: self.last_queue_current_entry_id,
+            current_playing_entry_id: self.queue_current.entry_id,
             is_playing: self.playback.playing && !self.playback.paused,
             milkdrop_on: self.engine.visualization_mode
                 == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop,
@@ -2198,7 +2198,7 @@ impl Nokkvi {
                 custom_cover,
                 cover_album_ids,
                 cover_editable,
-                column_visibility: self.preview_column_visibility,
+                column_visibility: self.rules_editor.preview_column_visibility,
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
             };
@@ -2446,8 +2446,8 @@ impl Nokkvi {
                     elevated,
                     default_playlist_name: &self.settings.default_playlist_name,
                     session_user_id: &self.session_user_id,
-                    smart_available: self.caps_state.smart_available(),
-                    caps_fetch_failed: self.caps_state.fetch_failed(),
+                    smart_available: self.rules_editor.caps_state.smart_available(),
+                    caps_fetch_failed: self.rules_editor.caps_state.fetch_failed(),
                     overlay: views::OverlayMenuViewData {
                         column_dropdown_open,
                         column_dropdown_trigger_bounds,
@@ -2465,7 +2465,7 @@ impl Nokkvi {
                 self.harbour_page
                     .view(views::HarbourViewData {
                         harbour: &self.harbour,
-                        trawl_crate: &self.trawl_crate,
+                        trawl_crate: &self.trawl.mix,
                         album_art: &self.artwork.album_art.snapshot,
                         large_artwork: &self.artwork.large_artwork.snapshot,
                         playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
@@ -2478,10 +2478,10 @@ impl Nokkvi {
                         modifiers: self.window.keyboard_modifiers,
                         elevated,
                         stable_viewport: self.settings.stable_viewport,
-                        harbour_boat: &self.harbour_boat,
-                        harbour_sea_bars: &self.harbour_sea_bars,
-                        harbour_sea_phase: self.harbour_sea_phase,
-                        harbour_sea_cycle: self.harbour_sea_cycle,
+                        harbour_boat: &self.harbour_scene.boat,
+                        harbour_sea_bars: &self.harbour_scene.sea_bars,
+                        harbour_sea_phase: self.harbour_scene.sea_phase,
+                        harbour_sea_cycle: self.harbour_scene.sea_cycle,
                     })
                     .map(Message::Harbour)
             }

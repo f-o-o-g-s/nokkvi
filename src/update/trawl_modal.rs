@@ -37,20 +37,20 @@ impl Nokkvi {
                 // Bump the generation so an in-flight fan-out from BEFORE a
                 // close can't land in this fresh modal (Close doesn't bump —
                 // the reopened state must not accept the old query's result).
-                self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
-                self.trawl_modal = Some(TrawlModalState {
+                self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
+                self.trawl.modal = Some(TrawlModalState {
                     search_input_focused: true,
                     ..TrawlModalState::default()
                 });
                 iced::widget::operation::focus(TRAWL_SEARCH_INPUT_ID)
             }
             TrawlModalMessage::Close => {
-                self.trawl_modal = None;
+                self.trawl.modal = None;
                 Task::none()
             }
             TrawlModalMessage::SearchChanged(query) => self.handle_trawl_search(query),
             TrawlModalMessage::SearchLoaded { generation, result } => {
-                if generation != self.trawl_search_generation {
+                if generation != self.trawl.search_generation {
                     return Task::none();
                 }
                 // A 401 routes to session expiry even if the modal was closed
@@ -62,7 +62,7 @@ impl Nokkvi {
                 {
                     return self.handle_session_expired();
                 }
-                let Some(state) = self.trawl_modal.as_mut() else {
+                let Some(state) = self.trawl.modal.as_mut() else {
                     return Task::none();
                 };
                 state.search_loading = false;
@@ -83,21 +83,21 @@ impl Nokkvi {
             }
             TrawlModalMessage::SlotListUp => {
                 let total = self.trawl_row_count();
-                if let Some(state) = self.trawl_modal.as_mut() {
+                if let Some(state) = self.trawl.modal.as_mut() {
                     state.slot_list.move_up(total);
                 }
                 Task::none()
             }
             TrawlModalMessage::SlotListDown => {
                 let total = self.trawl_row_count();
-                if let Some(state) = self.trawl_modal.as_mut() {
+                if let Some(state) = self.trawl.modal.as_mut() {
                     state.slot_list.move_down(total);
                 }
                 Task::none()
             }
             TrawlModalMessage::SlotListSetOffset(offset) => {
                 let total = self.trawl_row_count();
-                if let Some(state) = self.trawl_modal.as_mut() {
+                if let Some(state) = self.trawl.modal.as_mut() {
                     state.slot_list.set_offset(offset, total);
                 }
                 Task::none()
@@ -107,7 +107,7 @@ impl Nokkvi {
                 Task::none()
             }
             TrawlModalMessage::ActivateCenter => {
-                let center = self.trawl_modal.as_ref().and_then(|state| {
+                let center = self.trawl.modal.as_ref().and_then(|state| {
                     state
                         .slot_list
                         .get_effective_center_index(self.trawl_row_count_for(state))
@@ -118,18 +118,18 @@ impl Nokkvi {
                 Task::none()
             }
             TrawlModalMessage::RemoveSeed(index) => {
-                self.trawl_crate.remove_at(index);
+                self.trawl.mix.remove_at(index);
                 Task::none()
             }
             TrawlModalMessage::IncWeight(index) => {
-                if let Some(seed) = self.trawl_crate.seeds.get_mut(index) {
+                if let Some(seed) = self.trawl.mix.seeds.get_mut(index) {
                     seed.weight =
                         (seed.weight + 1).min(nokkvi_data::types::trawl::TRAWL_WEIGHT_MAX);
                 }
                 Task::none()
             }
             TrawlModalMessage::DecWeight(index) => {
-                if let Some(seed) = self.trawl_crate.seeds.get_mut(index) {
+                if let Some(seed) = self.trawl.mix.seeds.get_mut(index) {
                     seed.weight = seed
                         .weight
                         .saturating_sub(1)
@@ -138,31 +138,31 @@ impl Nokkvi {
                 Task::none()
             }
             TrawlModalMessage::SetBlend(blend) => {
-                self.trawl_crate.blend = blend;
+                self.trawl.mix.blend = blend;
                 Task::none()
             }
             TrawlModalMessage::SetMinLength(min) => {
-                self.trawl_crate.min_length = min;
+                self.trawl.mix.min_length = min;
                 Task::none()
             }
             TrawlModalMessage::SetMaxLength(max) => {
-                self.trawl_crate.max_length = max;
+                self.trawl.mix.max_length = max;
                 Task::none()
             }
             TrawlModalMessage::SetRating(filter) => {
-                self.trawl_crate.rating = filter;
+                self.trawl.mix.rating = filter;
                 Task::none()
             }
             TrawlModalMessage::SetMaxTracks(max) => {
-                self.trawl_crate.max_tracks = max;
+                self.trawl.mix.max_tracks = max;
                 Task::none()
             }
             TrawlModalMessage::ClearCrate => {
-                self.trawl_crate.clear_seeds();
+                self.trawl.mix.clear_seeds();
                 Task::none()
             }
             TrawlModalMessage::PlayMix => {
-                if self.trawl_crate.is_empty() {
+                if self.trawl.mix.is_empty() {
                     // Reachable via Ctrl+Enter with nothing seeded — say why
                     // nothing happened instead of silently ignoring the press.
                     self.toast_warn("The crate is empty — add seeds first");
@@ -173,7 +173,7 @@ impl Nokkvi {
                 // (loading target + active playlist).
                 self.guard_play_action();
                 self.enter_new_playback_context();
-                let mix = self.trawl_crate.clone();
+                let mix = self.trawl.mix.clone();
                 self.shell_task(
                     move |shell| async move { shell.play_trawl(&mix).await },
                     |result| {
@@ -185,7 +185,7 @@ impl Nokkvi {
             }
             TrawlModalMessage::PlayMixCompleted(result) => match result {
                 Ok(()) => {
-                    self.trawl_modal = None;
+                    self.trawl.modal = None;
                     Task::done(Message::Navigation(
                         crate::app_message::NavigationMessage::SwitchView(crate::View::Queue),
                     ))
@@ -202,13 +202,13 @@ impl Nokkvi {
                 }
             },
             TrawlModalMessage::AddMixToQueue => {
-                if self.trawl_crate.is_empty() {
+                if self.trawl.mix.is_empty() {
                     // Reachable via Shift+A with nothing seeded — same warn as
                     // PlayMix so both keyboard CTAs explain the no-op.
                     self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
-                let mix = self.trawl_crate.clone();
+                let mix = self.trawl.mix.clone();
                 self.shell_task(
                     move |shell| async move { shell.add_trawl_to_queue(&mix).await },
                     |result| {
@@ -234,13 +234,13 @@ impl Nokkvi {
                 }
             },
             TrawlModalMessage::SaveAsPlaylist => {
-                if self.trawl_crate.is_empty() {
+                if self.trawl.mix.is_empty() {
                     // Reachable via Shift+P with nothing seeded — same warn as
                     // the other keyboard CTAs so the no-op explains itself.
                     self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
-                let mix = self.trawl_crate.clone();
+                let mix = self.trawl.mix.clone();
                 self.shell_task(
                     move |shell| async move { shell.resolve_trawl_song_ids(&mix).await },
                     |result| {
@@ -255,7 +255,7 @@ impl Nokkvi {
                     // Close the modal and hand off to the name dialog; Cancel
                     // reopens the modal (the crate itself lives on root state,
                     // untouched either way).
-                    self.trawl_modal = None;
+                    self.trawl.modal = None;
                     let count = song_ids.len();
                     let noun = if count == 1 { "song" } else { "songs" };
                     self.text_input_dialog.open(
@@ -292,10 +292,10 @@ impl Nokkvi {
     /// Immediate search with the shared min-chars gate and per-keystroke
     /// generation bump (Harbour's stale-drop shape, root-owned counter).
     fn handle_trawl_search(&mut self, query: String) -> Task<Message> {
-        self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
-        let generation = self.trawl_search_generation;
+        self.trawl.search_generation = self.trawl.search_generation.wrapping_add(1);
+        let generation = self.trawl.search_generation;
 
-        let Some(state) = self.trawl_modal.as_mut() else {
+        let Some(state) = self.trawl.modal.as_mut() else {
             return Task::none();
         };
         state.search_query = query;
@@ -345,7 +345,7 @@ impl Nokkvi {
     /// gate (status-keyed — see `handle_raw_key_event`): by the time this
     /// runs, a backward step is always intentional.
     pub(crate) fn handle_trawl_tray_focus_move(&mut self, forward: bool) -> Task<Message> {
-        let Some(state) = self.trawl_modal.as_mut() else {
+        let Some(state) = self.trawl.modal.as_mut() else {
             return Task::none();
         };
         state.tray_cursor = cycle_tray_cursor(state.tray_cursor, forward);
@@ -374,33 +374,33 @@ impl Nokkvi {
             utils::cycle::cycle_wrapping,
         };
 
-        let Some(control) = self.trawl_modal.as_ref().and_then(|s| s.tray_cursor) else {
+        let Some(control) = self.trawl.modal.as_ref().and_then(|s| s.tray_cursor) else {
             return Task::none();
         };
         let msg = match control {
             TrawlTrayControl::Blend => TrawlModalMessage::SetBlend(cycle_wrapping(
                 &TrawlBlend::ALL,
-                self.trawl_crate.blend,
+                self.trawl.mix.blend,
                 forward,
             )),
             TrawlTrayControl::MinLength => TrawlModalMessage::SetMinLength(cycle_wrapping(
                 &TrawlMinLength::ALL,
-                self.trawl_crate.min_length,
+                self.trawl.mix.min_length,
                 forward,
             )),
             TrawlTrayControl::MaxLength => TrawlModalMessage::SetMaxLength(cycle_wrapping(
                 &TrawlMaxLength::ALL,
-                self.trawl_crate.max_length,
+                self.trawl.mix.max_length,
                 forward,
             )),
             TrawlTrayControl::Rating => TrawlModalMessage::SetRating(cycle_wrapping(
                 &TrawlRatingFilter::ALL,
-                self.trawl_crate.rating,
+                self.trawl.mix.rating,
                 forward,
             )),
             TrawlTrayControl::MaxTracks => TrawlModalMessage::SetMaxTracks(cycle_wrapping(
                 &TrawlMaxTracks::ALL,
-                self.trawl_crate.max_tracks,
+                self.trawl.mix.max_tracks,
                 forward,
             )),
         };
@@ -410,24 +410,25 @@ impl Nokkvi {
     /// Toggle the seed carried by row `index` in/out of the crate. Headers,
     /// hints, and out-of-range indices no-op.
     fn toggle_trawl_row(&mut self, index: usize) {
-        let Some(state) = self.trawl_modal.as_ref() else {
+        let Some(state) = self.trawl.modal.as_ref() else {
             return;
         };
-        let rows = build_trawl_rows(state, &self.trawl_crate);
+        let rows = build_trawl_rows(state, &self.trawl.mix);
         if let Some(TrawlRow::Result { seed, .. }) = rows.into_iter().nth(index) {
-            self.trawl_crate.toggle(seed);
+            self.trawl.mix.toggle(seed);
         }
     }
 
     /// Row count through the single row-order source (render parity).
     fn trawl_row_count(&self) -> usize {
-        self.trawl_modal
+        self.trawl
+            .modal
             .as_ref()
             .map_or(0, |state| self.trawl_row_count_for(state))
     }
 
     fn trawl_row_count_for(&self, state: &TrawlModalState) -> usize {
-        build_trawl_rows(state, &self.trawl_crate).len()
+        build_trawl_rows(state, &self.trawl.mix).len()
     }
 
     /// Warm 80px minis for the modal's search results: album covers for
@@ -442,7 +443,7 @@ impl Nokkvi {
 
         let mut id_slices: Vec<Vec<String>> = Vec::new();
         let mut artist_ids: Vec<String> = Vec::new();
-        if let Some(state) = &self.trawl_modal
+        if let Some(state) = &self.trawl.modal
             && let Some(r) = &state.search_results
         {
             for a in r.albums.iter().filter(|a| !a.image.image_absent) {

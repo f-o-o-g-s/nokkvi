@@ -188,3 +188,49 @@ impl HarbourState {
         self.search_genre_album_ids.clear();
     }
 }
+
+/// The Harbour Trawl panel's procedural scene: the trawling longship and the
+/// sea it sails on. Not server data, so it survives logout.
+#[derive(Debug)]
+pub struct HarbourScene {
+    /// The trawling longship — a SEPARATE `BoatState` from the
+    /// Lines-visualizer `Nokkvi.boat`, driven by the same per-frame
+    /// `Message::BoatTick` but stepped against a procedural sea
+    /// (`widgets::harbour_sea::sea_bars`) so it sails with no audio playing.
+    /// Ticks only while the Harbour view is showing with an empty search
+    /// (`update::boat::step_harbour_scene`); hidden otherwise with position
+    /// preserved, mirroring the Lines boat's hide contract.
+    pub boat: crate::widgets::boat::BoatState,
+    /// Travelling phase of the procedural sea, in `[0, 1)`. Advanced by the
+    /// boat tick at `harbour_sea::SEA_DRIFT_HZ`; wrap-safe because every
+    /// layer's phase multiplier is an integer (see
+    /// `widgets::harbour_sea::sea_bars`).
+    pub sea_phase: f32,
+    /// Completed phase cycles of the sea — incremented each time
+    /// `sea_phase` wraps. Rare scene events (shooting star, leaping fish)
+    /// hash THIS to vary their timing and trajectory per ~20 s cycle, which
+    /// is what keeps a pure-phase animation from replaying an identical event
+    /// loop forever.
+    pub sea_cycle: u32,
+    /// The sea heights the boat was stepped against this frame — stored so
+    /// the view draws the SAME array the physics sampled (the coherence
+    /// guarantee that keeps the hull sitting ON the drawn water).
+    pub sea_bars: Vec<f64>,
+}
+
+impl Default for HarbourScene {
+    fn default() -> Self {
+        Self {
+            boat: crate::widgets::boat::BoatState {
+                // Start mid-panel so the first Harbour open doesn't watch the
+                // boat surface from a corner; every other field lazily seeds
+                // in `boat_physics::step()` (facing, rng, timers).
+                x_ratio: 0.5,
+                ..Default::default()
+            },
+            sea_phase: 0.0,
+            sea_cycle: 0,
+            sea_bars: Vec::new(),
+        }
+    }
+}

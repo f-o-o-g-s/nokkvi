@@ -389,22 +389,22 @@ mod harbour_scene_tests {
         let mut app = test_app();
         app.screen = Screen::Home;
         app.current_view = View::Queue;
-        app.harbour_boat.visible = true;
-        app.harbour_boat.last_tick = Some(Instant::now());
-        app.harbour_boat.x_ratio = 0.37;
+        app.harbour_scene.boat.visible = true;
+        app.harbour_scene.boat.last_tick = Some(Instant::now());
+        app.harbour_scene.boat.x_ratio = 0.37;
 
         let _ = app.update(Message::BoatTick(Instant::now()));
 
         assert!(
-            !app.harbour_boat.visible,
+            !app.harbour_scene.boat.visible,
             "harbour boat must hide when the current view is not Harbour"
         );
         assert!(
-            app.harbour_boat.last_tick.is_none(),
+            app.harbour_scene.boat.last_tick.is_none(),
             "last_tick must clear while hidden so re-show starts with dt=0"
         );
         assert_eq!(
-            app.harbour_boat.x_ratio, 0.37,
+            app.harbour_scene.boat.x_ratio, 0.37,
             "position must be preserved while hidden"
         );
     }
@@ -424,16 +424,16 @@ mod harbour_scene_tests {
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert!(
-            app.harbour_boat.visible,
+            app.harbour_scene.boat.visible,
             "harbour boat must be visible on the Harbour view"
         );
         assert!(
-            app.harbour_boat.x_velocity != 0.0,
+            app.harbour_scene.boat.x_velocity != 0.0,
             "the procedural sea must propel the boat in silence \
              (x_velocity stayed 0)"
         );
         assert!(
-            !app.harbour_sea_bars.is_empty(),
+            !app.harbour_scene.sea_bars.is_empty(),
             "the stepped sea bars must be stored for the view to draw"
         );
     }
@@ -445,16 +445,16 @@ mod harbour_scene_tests {
         // scene must keep animating through an audio pause.
         let mut app = app_on_harbour();
         app.playback.paused = true;
-        app.harbour_boat.x_velocity = 0.05;
-        app.harbour_boat.facing = 1.0;
+        app.harbour_scene.boat.x_velocity = 0.05;
+        app.harbour_scene.boat.facing = 1.0;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
-        let x0 = app.harbour_boat.x_ratio;
+        let x0 = app.harbour_scene.boat.x_ratio;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert_ne!(
-            app.harbour_boat.x_ratio, x0,
+            app.harbour_scene.boat.x_ratio, x0,
             "harbour boat must keep sailing while audio is paused"
         );
     }
@@ -466,24 +466,24 @@ mod harbour_scene_tests {
         // anchor event can never fire, even with the countdown about to
         // expire in the firing safe zone.
         let mut app = app_on_harbour();
-        app.harbour_boat.x_ratio = 0.5; // inside [ANCHOR_SAFE_LO, ANCHOR_SAFE_HI]
-        app.harbour_boat.secs_until_next_anchor = 0.001;
+        app.harbour_scene.boat.x_ratio = 0.5; // inside [ANCHOR_SAFE_LO, ANCHOR_SAFE_HI]
+        app.harbour_scene.boat.secs_until_next_anchor = 0.001;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert_eq!(
-            app.harbour_boat.anchor_remaining_secs, 0.0,
+            app.harbour_scene.boat.anchor_remaining_secs, 0.0,
             "the built-in drop-anchor must never fire while trawling"
         );
         // Pinned BEFORE the step, which then decrements it by dt — so the
         // observable value sits just under MAX and can never approach zero.
         assert!(
-            app.harbour_boat.secs_until_next_anchor
+            app.harbour_scene.boat.secs_until_next_anchor
                 > crate::widgets::boat::ANCHOR_INTERVAL_MAX_SECS - 1.0,
             "the anchor countdown must be re-pinned every tick, got {}",
-            app.harbour_boat.secs_until_next_anchor
+            app.harbour_scene.boat.secs_until_next_anchor
         );
     }
 
@@ -500,7 +500,7 @@ mod harbour_scene_tests {
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
 
         assert!(
-            app.harbour_boat.anchor_sway != 0.0,
+            app.harbour_scene.boat.anchor_sway != 0.0,
             "the wave-driven sway must move the trawl rope \
              (anchor_sway stayed 0)"
         );
@@ -515,22 +515,22 @@ mod harbour_scene_tests {
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
-        assert!(app.harbour_boat.visible);
-        let x = app.harbour_boat.x_ratio;
+        assert!(app.harbour_scene.boat.visible);
+        let x = app.harbour_scene.boat.x_ratio;
 
         app.harbour.search_query = "abba".to_string();
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert!(
-            !app.harbour_boat.visible,
+            !app.harbour_scene.boat.visible,
             "harbour boat must hide while a search is active"
         );
         assert!(
-            app.harbour_boat.last_tick.is_none(),
+            app.harbour_scene.boat.last_tick.is_none(),
             "last_tick must clear while hidden"
         );
         assert_eq!(
-            app.harbour_boat.x_ratio, x,
+            app.harbour_scene.boat.x_ratio, x,
             "position must be preserved across the search hide"
         );
     }
@@ -540,22 +540,22 @@ mod harbour_scene_tests {
         // The cycle counter is the dice the rare scene events (shooting
         // star, fish) roll — it must bump exactly when the phase wraps.
         let mut app = app_on_harbour();
-        app.harbour_sea_phase = 0.999;
+        app.harbour_scene.sea_phase = 0.999;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
         assert_eq!(
-            app.harbour_sea_cycle, 0,
+            app.harbour_scene.sea_cycle, 0,
             "no wrap yet — first tick has dt=0"
         );
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
         assert_eq!(
-            app.harbour_sea_cycle, 1,
+            app.harbour_scene.sea_cycle, 1,
             "the 0.999 → wrap crossing must bump the cycle counter"
         );
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
         assert_eq!(
-            app.harbour_sea_cycle, 1,
+            app.harbour_scene.sea_cycle, 1,
             "an ordinary in-cycle tick must NOT bump the counter"
         );
     }
@@ -573,13 +573,13 @@ mod harbour_scene_tests {
         // 45 s at SEA_DRIFT_HZ 0.05 = 2.25 cycles.
         let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(45)));
         assert_eq!(
-            app.harbour_sea_cycle, 2,
+            app.harbour_scene.sea_cycle, 2,
             "a 2.25-cycle dt must bump the counter exactly twice"
         );
         assert!(
-            (0.0..1.0).contains(&app.harbour_sea_phase),
+            (0.0..1.0).contains(&app.harbour_scene.sea_phase),
             "phase must land wrapped, got {}",
-            app.harbour_sea_phase
+            app.harbour_scene.sea_phase
         );
     }
 
@@ -589,17 +589,17 @@ mod harbour_scene_tests {
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
-        let p0 = app.harbour_sea_phase;
+        let p0 = app.harbour_scene.sea_phase;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
 
         assert_ne!(
-            app.harbour_sea_phase, p0,
+            app.harbour_scene.sea_phase, p0,
             "the sea's travelling phase must advance between ticks"
         );
         assert!(
-            (0.0..1.0).contains(&app.harbour_sea_phase),
+            (0.0..1.0).contains(&app.harbour_scene.sea_phase),
             "phase must stay wrapped into [0, 1), got {}",
-            app.harbour_sea_phase
+            app.harbour_scene.sea_phase
         );
     }
 
@@ -617,7 +617,7 @@ mod harbour_scene_tests {
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert!(
-            app.harbour_boat.visible,
+            app.harbour_scene.boat.visible,
             "harbour boat must tick with the visualizer fully off"
         );
         assert!(

@@ -141,7 +141,7 @@ impl Nokkvi {
                 // post-reload re-stamp.
                 if self.settings.auto_follow_playing
                     && self.current_view == View::Queue
-                    && let Some(entry_id) = self.last_queue_current_entry_id
+                    && let Some(entry_id) = self.queue_current.entry_id
                 {
                     tasks.push(Task::done(Message::Queue(
                         views::QueueMessage::FocusCurrentPlaying(entry_id, false),
@@ -553,7 +553,7 @@ impl Nokkvi {
             QueueAction::RemoveDuplicates => {
                 // Not optimistic: which copy of the playing song stays hangs
                 // on the live play cursor, and the UI's mirror of it
-                // (`last_queue_current_entry_id`) lags a track change. The
+                // (`queue_current.entry_id`) lags a track change. The
                 // backend decides under the queue lock and reports the rows
                 // it dropped (`handle_queue_duplicates_removed`).
                 return self.shell_task(

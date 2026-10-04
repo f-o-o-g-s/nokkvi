@@ -153,11 +153,6 @@ pub struct Nokkvi {
     pub settings_page: views::SettingsPage,
     pub similar_page: views::SimilarPage,
     pub harbour_page: views::HarbourPage,
-    /// Columns shown in the smart-playlist rules preview/results pane. The
-    /// rules session is ephemeral (rebuilt each open), so unlike the 7 view
-    /// pages this persistent copy is the source of truth — restored on
-    /// `PlayerSettingsLoaded`, toggled optimistically, and read by the view.
-    pub preview_column_visibility: crate::state::PreviewColumnVisibility,
 
     // -------------------------------------------------------------------------
     // Core Services
@@ -191,13 +186,10 @@ pub struct Nokkvi {
     /// against owner names (Navidrome logins are case-insensitive, so a
     /// "Foogs" login vs a "foogs" owner_name would silently fail).
     pub session_user_id: String,
-    /// Smart-playlist capability gate, fetched once post-auth (all-false
-    /// until `Fetched`; `FetchFailed` renders the dimmed retry entry).
-    pub caps_state: crate::state::CapsState,
-    /// Root-owned stale-drop counter for rules-preview loads (the Trawl
-    /// `trawl_search_generation` pattern — root-owned so session
-    /// close/reopen can't re-mint captured generations).
-    pub rules_preview_generation: u64,
+    /// Smart-playlist rules-editor state that outlives a rules session:
+    /// the capability gate, the preview stale-drop counter and the preview
+    /// columns.
+    pub rules_editor: crate::state::RulesEditorState,
 
     // -------------------------------------------------------------------------
     // Library Data (consolidated data vectors + counts)
@@ -261,17 +253,9 @@ pub struct Nokkvi {
     /// Default-playlist picker overlay state. `Some` = picker is open.
     pub default_playlist_picker:
         Option<crate::widgets::default_playlist_picker::DefaultPlaylistPickerState>,
-    /// Trawl mix-builder modal overlay state. `Some` = modal is open. The
-    /// crate being edited lives on `trawl_crate` and survives closing.
-    pub trawl_modal: Option<crate::widgets::trawl_modal::TrawlModalState>,
-    /// The persistent Trawl crate: seeds + blend + the tray filters.
-    /// Root-owned so the Harbour row and context menus can accrue seeds while
-    /// the modal is closed; cleared on logout (seeds reference server ids).
-    pub trawl_crate: nokkvi_data::types::trawl::TrawlCrate,
-    /// Stale-drop generation for the modal's search fan-outs. Root-owned
-    /// (NOT on `TrawlModalState`) so close/reopen can never re-mint a
-    /// generation an in-flight fan-out already captured.
-    pub trawl_search_generation: u64,
+    /// Trawl mix builder: the modal, the persistent crate and the search
+    /// stale-drop generation.
+    pub trawl: crate::state::TrawlState,
 
     /// The single overlay menu currently open, if any. Mutated only by
     /// `Message::SetOpenMenu` so opening a new menu implicitly closes any
@@ -281,13 +265,8 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     // Misc State
     // -------------------------------------------------------------------------
-    pub last_queue_current_index: Option<usize>,
-    /// Drift-immune mirror of `last_queue_current_index`. Stamped from
-    /// `PlaybackStateUpdate::current_entry_id` (read under the same qm
-    /// lock as `current_index`) so producers of `FocusCurrentPlaying`
-    /// can dispatch a per-row handle that survives the optimistic-
-    /// mutation window.
-    pub last_queue_current_entry_id: Option<u64>,
+    /// The queue's current row (index + entry id), mirrored from the engine.
+    pub queue_current: crate::state::QueueCurrent,
 
     // -------------------------------------------------------------------------
     // Playlist Edit Mode (split-view)
@@ -322,29 +301,8 @@ pub struct Nokkvi {
     /// `Message::BoatTick`; visibility derived from
     /// `engine.visualization_mode == Lines && config.enabled && config.lines.boat`.
     pub boat: crate::widgets::boat::BoatState,
-    /// Trawling-longship state for the Harbour Trawl panel — a SEPARATE
-    /// `BoatState` from the Lines-visualizer `boat` above, driven by the same
-    /// per-frame `Message::BoatTick` but stepped against a procedural sea
-    /// (`widgets::harbour_sea::sea_bars`) so it sails with no audio playing.
-    /// Ticks only while the Harbour view is showing with an empty search
-    /// (`update::boat::step_harbour_scene`); hidden otherwise with position
-    /// preserved, mirroring the Lines boat's hide contract.
-    pub harbour_boat: crate::widgets::boat::BoatState,
-    /// Travelling phase of the Harbour panel's procedural sea, in `[0, 1)`.
-    /// Advanced by the boat tick at `harbour_sea::SEA_DRIFT_HZ`; wrap-safe
-    /// because every layer's phase multiplier is an integer (see
-    /// `widgets::harbour_sea::sea_bars`).
-    pub harbour_sea_phase: f32,
-    /// Completed phase cycles of the harbour sea — incremented each time
-    /// `harbour_sea_phase` wraps. Rare scene events (shooting star, leaping
-    /// fish) hash THIS to vary their timing and trajectory per ~20 s cycle,
-    /// which is what keeps a pure-phase animation from replaying an
-    /// identical event loop forever.
-    pub harbour_sea_cycle: u32,
-    /// The sea heights the harbour boat was stepped against this frame —
-    /// stored so the view draws the SAME array the physics sampled (the
-    /// coherence guarantee that keeps the hull sitting ON the drawn water).
-    pub harbour_sea_bars: Vec<f64>,
+    /// The Harbour Trawl panel's longship + procedural sea.
+    pub harbour_scene: crate::state::HarbourScene,
 
     // -------------------------------------------------------------------------
     // MPRIS D-Bus Integration
@@ -461,7 +419,6 @@ impl Default for Nokkvi {
             settings_page: views::SettingsPage::new(),
             similar_page: views::SimilarPage::new(),
             harbour_page: views::HarbourPage::new(),
-            preview_column_visibility: crate::state::PreviewColumnVisibility::default(),
             app_service: None,
             cached_storage: None,
             sfx_engine: nokkvi_data::audio::SfxEngine::default(),
@@ -472,8 +429,7 @@ impl Default for Nokkvi {
             should_auto_login,
             stored_session,
             session_user_id: String::new(),
-            caps_state: crate::state::CapsState::default(),
-            rules_preview_generation: 0,
+            rules_editor: crate::state::RulesEditorState::default(),
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: 0,
@@ -521,8 +477,7 @@ impl Default for Nokkvi {
             milkdrop: crate::state::MilkdropState::default(),
             dynamic_accent: crate::state::DynamicAccentState::default(),
             // Misc state
-            last_queue_current_index: None,
-            last_queue_current_entry_id: None,
+            queue_current: crate::state::QueueCurrent::default(),
             playlist_editor: None,
             active_playlist_info: None,
             strip_quad_album_ids: Vec::new(),
@@ -532,16 +487,7 @@ impl Default for Nokkvi {
             visualizer: None,
             visualizer_config: crate::visualizer_config::create_shared_config(),
             boat: crate::widgets::boat::BoatState::default(),
-            harbour_boat: crate::widgets::boat::BoatState {
-                // Start mid-panel so the first Harbour open doesn't watch the
-                // boat surface from a corner; every other field lazily seeds
-                // in `boat_physics::step()` (facing, rng, timers).
-                x_ratio: 0.5,
-                ..Default::default()
-            },
-            harbour_sea_phase: 0.0,
-            harbour_sea_cycle: 0,
-            harbour_sea_bars: Vec::new(),
+            harbour_scene: crate::state::HarbourScene::default(),
             mpris_connection: None,
             last_mpris_position_us: 0,
             notification_connection: None,
@@ -556,9 +502,7 @@ impl Default for Nokkvi {
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
             eq_modal: crate::widgets::eq_modal::EqModalState::default(),
             default_playlist_picker: None,
-            trawl_modal: None,
-            trawl_crate: nokkvi_data::types::trawl::TrawlCrate::default(),
-            trawl_search_generation: 0,
+            trawl: crate::state::TrawlState::default(),
             open_menu: None,
             roulette: None,
         }

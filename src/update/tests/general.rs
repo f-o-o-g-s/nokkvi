@@ -764,19 +764,18 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.open_subsonic_extensions = Some(std::iter::once("indexBasedQueue".to_string()).collect());
     app.strip_quad_album_ids = vec!["a1".into(), "a2".into()];
     app.queue_page.playlist_strip_expanded = true;
-    app.last_queue_current_index = Some(3);
-    app.last_queue_current_entry_id = Some(42);
+    app.queue_current.index = Some(3);
+    app.queue_current.entry_id = Some(42);
     app.pending_expand.target = Some(pending_album("a1"));
     app.pending_expand.center_only = true;
 
-    app.trawl_modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
-    app.trawl_crate
-        .add(nokkvi_data::types::trawl::TrawlSeed::new(
-            nokkvi_data::types::batch::BatchItem::Album("al1".into()),
-            "A",
-            "Artist",
-        ));
-    app.trawl_search_generation = 9;
+    app.trawl.modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
+    app.trawl.mix.add(nokkvi_data::types::trawl::TrawlSeed::new(
+        nokkvi_data::types::batch::BatchItem::Album("al1".into()),
+        "A",
+        "Artist",
+    ));
+    app.trawl.search_generation = 9;
 
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
     app.cross_pane_drag.selection_count = 5;
@@ -824,13 +823,13 @@ fn reset_session_state_clears_all_session_bound_fields() {
         "harbour generation carries forward bumped (seeded 3) — zeroing it \
          would let a pre-logout in-flight fetch match a fresh post-login load"
     );
-    assert!(app.trawl_modal.is_none(), "trawl modal reset");
+    assert!(app.trawl.modal.is_none(), "trawl modal reset");
     assert!(
-        app.trawl_crate.is_empty(),
+        app.trawl.mix.is_empty(),
         "trawl seeds reference the old server — cleared"
     );
     assert_eq!(
-        app.trawl_search_generation, 10,
+        app.trawl.search_generation, 10,
         "trawl generation carries forward bumped (seeded 9), like harbour's"
     );
     assert!(app.active_playlist_info.is_none());
@@ -846,9 +845,9 @@ fn reset_session_state_clears_all_session_bound_fields() {
         app.open_subsonic_extensions.is_none(),
         "capability set references the old server — cleared"
     );
-    assert!(app.last_queue_current_index.is_none());
+    assert!(app.queue_current.index.is_none());
     assert!(
-        app.last_queue_current_entry_id.is_none(),
+        app.queue_current.entry_id.is_none(),
         "the playing-row id goes with its index"
     );
     assert!(app.pending_expand.target.is_none());
@@ -964,8 +963,7 @@ fn logout_and_session_expired_reach_identical_state() {
         similar_songs_generation,
         server_version,
         open_subsonic_extensions,
-        last_queue_current_index,
-        last_queue_current_entry_id,
+        queue_current,
         strip_quad_album_ids,
     );
     assert_eq!(

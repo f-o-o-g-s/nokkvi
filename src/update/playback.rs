@@ -1082,8 +1082,8 @@ impl Nokkvi {
         current_entry_id: Option<u64>,
         tasks: &mut Vec<Task<Message>>,
     ) {
-        let index_changed = self.last_queue_current_index != current_index;
-        let prev_index = self.last_queue_current_index;
+        let index_changed = self.queue_current.index != current_index;
+        let prev_index = self.queue_current.index;
 
         // Refresh the now-playing identity mirror on EVERY call, before the
         // index-change early-return. `current_entry_id` is the authoritative
@@ -1091,13 +1091,13 @@ impl Nokkvi {
         // same-index queue swap — e.g. playing a genre at index 0 while the
         // prior queue was also parked at index 0 — leaves the index unchanged
         // but stamps a fresh, never-reused entry_id at that row. Gating the
-        // mirror on index change alone left `last_queue_current_entry_id`
+        // mirror on index change alone left `queue_current.entry_id`
         // stale, failing the entry_id half of the queue view's `is_current`
         // test, so the now-playing row's breathing glow + sheen never armed
         // until the next real index change. The focus + gapless side effects
         // below still run only on a true index transition.
-        self.last_queue_current_index = current_index;
-        self.last_queue_current_entry_id = current_entry_id;
+        self.queue_current.index = current_index;
+        self.queue_current.entry_id = current_entry_id;
 
         if !index_changed {
             return;
@@ -2376,7 +2376,7 @@ impl Nokkvi {
         self.similar_page.column_visibility =
             views::similar::SimilarColumnVisibility::restore_from(&settings);
         // The rules preview has no persistent page; its column state lives here.
-        self.preview_column_visibility =
+        self.rules_editor.preview_column_visibility =
             crate::state::PreviewColumnVisibility::restore_from(&settings);
 
         // Restore active playlist context from persisted settings. The full

@@ -352,7 +352,7 @@ fn shelves_mode_builds_sections_then_random_block_in_nav_order() {
     app.harbour.recently_played = vec![make_recent_song("s3", "Recent", "Artist", "al3")];
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
 
     // Section rows for every ungated shelf, top to bottom.
     let sections: Vec<(HarbourSectionId, bool)> = rows
@@ -430,7 +430,7 @@ fn shelves_mode_caps_each_section_at_hot_picks() {
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let item_count = rows
         .iter()
         .filter(|r| matches!(r, HarbourRow::Item { .. }))
@@ -450,7 +450,7 @@ fn toggling_collapsed_flips_a_sections_expanded() {
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::RecentlyAdded);
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let recently_added_expanded = rows.iter().any(|r| {
         matches!(
             r,
@@ -473,7 +473,7 @@ fn search_query_builds_search_sections_expanded_with_see_all() {
     app.harbour.search_query = "amb".into();
     app.harbour.search_results = Some(*search_results_with_genre());
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
 
     // A single non-empty group (genres) → one Section (expanded, See-all) + item.
     assert!(matches!(
@@ -496,7 +496,7 @@ fn short_query_builds_a_single_hint_row() {
     let mut app = test_app();
     app.harbour.search_query = "a".into();
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert_eq!(rows.len(), 1);
     assert!(matches!(rows.first(), Some(HarbourRow::Hint(_))));
 }
@@ -505,7 +505,7 @@ fn short_query_builds_a_single_hint_row() {
 
 /// The subtitle of the single item under an expanded shelf section.
 fn item_subtitle(app: &crate::Nokkvi, id: HarbourSectionId) -> String {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     // Find the section, then the first following Item row.
     let sec = rows
         .iter()
@@ -822,8 +822,7 @@ fn activate_center_on_section_row_toggles_it() {
     let mut app = test_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
 
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     // Row 0 is the RecentlyPlayed section header — focus it.
     app.harbour_page.common.slot_list.set_selected(1, total);
 
@@ -849,8 +848,7 @@ fn activate_center_on_item_row_transitions_radio_to_queue() {
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
 
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     // Row 1 is the album item under the expanded RecentlyPlayed section.
     app.harbour_page.common.slot_list.set_selected(2, total);
 
@@ -882,7 +880,7 @@ fn activate_center_on_genre_item_transitions_radio_to_queue() {
         .collapsed
         .remove(&HarbourSectionId::MostPlayedGenres);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(|r| {
@@ -912,7 +910,7 @@ fn activate_center_on_genre_item_transitions_radio_to_queue() {
 
 /// Center the RandomPlay row of `kind` (always present in shelves mode).
 fn center_random_play_row(app: &mut crate::Nokkvi, kind: crate::views::harbour::RandomKind) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::RandomPlay { kind: k } if *k == kind))
@@ -1183,7 +1181,7 @@ fn expand_center_on_collapsed_section_expands_it() {
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
     // Locate the (default-collapsed) Recently Added header row and center it.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let total = rows.len();
     let idx = rows
         .iter()
@@ -1225,7 +1223,7 @@ fn expand_center_on_expanded_section_header_collapses_it() {
 
     // Center the expanded header via the keyboard path (viewport_offset, no
     // click-to-focus marker) — the flow the hotkey uses.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(|r| {
@@ -1263,8 +1261,7 @@ fn expand_center_on_item_row_collapses_owning_section() {
 
     // Center the SECOND item under the header (row 3: Trawl, header, s1, s2)
     // via click-to-focus — the state after expanding and browsing downward.
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page.common.slot_list.set_selected(3, total);
 
     let _ = app.handle_harbour(HarbourMessage::ExpandCenter);
@@ -1278,7 +1275,7 @@ fn expand_center_on_item_row_collapses_owning_section() {
     );
     // The center must land back on the collapsed header so the highlight
     // doesn't strand on a vanished row and a second Shift+Enter re-expands.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let center = app
         .harbour_page
         .common
@@ -1304,8 +1301,7 @@ fn expand_center_on_search_item_row_collapses_its_search_group() {
     // nearest-Section-above scan.
     app.harbour.search_query = "amb".into();
     app.harbour.search_results = Some(*search_results_with_genre());
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page.common.slot_list.set_selected(1, total);
 
     let _ = app.handle_harbour(HarbourMessage::ExpandCenter);
@@ -1316,7 +1312,7 @@ fn expand_center_on_search_item_row_collapses_its_search_group() {
             .contains(&HarbourSectionId::SearchGenres),
         "Shift+Enter centered on a search-result item collapses its group"
     );
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let center = app
         .harbour_page
         .common
@@ -1542,7 +1538,7 @@ fn invalidate_shelves_clears_data_and_bumps_generation() {
 /// resolved dynamically so shelf reorderings don't silently retarget these
 /// stationary-center tests.
 fn section_row_index(app: &crate::Nokkvi, id: HarbourSectionId) -> (usize, usize) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::Section { id: sid, .. } if *sid == id))
@@ -1705,7 +1701,7 @@ fn toggle_section_warms_the_row_newly_centered() {
     seed_most_played_genre(&mut app, vec!["al1".into()]);
     // All collapsed — center the first RandomPlay row (the row directly below
     // the Most Played Genres header).
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::RandomPlay { kind } if *kind == RandomKind::Albums))
@@ -1779,8 +1775,7 @@ fn search_changed_mirrors_common_query_and_resets_viewport() {
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page
         .common
         .slot_list
@@ -1827,7 +1822,7 @@ fn reset_session_state_preserves_harbour_generations() {
 /// Center the first row matching `pred` and warm its artwork, returning nothing
 /// — assertions read `app.artwork.{playlist,genre}.pending` afterwards.
 fn warm_center_matching(app: &mut crate::Nokkvi, pred: impl Fn(&HarbourRow) -> bool) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let idx = rows
         .iter()
         .position(pred)
@@ -2019,7 +2014,7 @@ fn artist_search_row_resolves_its_image_from_the_artist_id() {
         ..Default::default()
     });
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     // The artist Item row (subtitle "Artist") must key its thumbnail on the
     // artist id — artist images live in album_art keyed by artist id.
     let art = rows
@@ -2045,7 +2040,7 @@ fn genre_search_row_reads_resolved_album_ids_from_the_side_map() {
         .search_genre_album_ids
         .insert("Ambient".into(), vec!["al1".into(), "al2".into()]);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let ids = rows
         .iter()
         .find_map(|r| match r {
@@ -2363,7 +2358,7 @@ fn most_played_tracks_shelf_shows_play_count_subtitle() {
         .collapsed
         .remove(&HarbourSectionId::MostPlayedTracks);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         rows.iter().any(|r| matches!(
             r,
@@ -2393,7 +2388,7 @@ fn most_played_shelf_hidden_when_top_item_has_zero_plays() {
     // A fresh/low-play library: the top "most played" track has no plays.
     app.harbour.most_played_songs = vec![played_song("s1", "Techno", 0)];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         !rows.iter().any(|r| matches!(
             r,
@@ -2416,7 +2411,7 @@ fn most_played_artist_row_keys_thumbnail_on_artist_id() {
         .collapsed
         .remove(&HarbourSectionId::MostPlayedArtists);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     let art = rows
         .iter()
         .find_map(|r| match r {
@@ -2465,7 +2460,7 @@ fn most_played_genres_hidden_when_tally_is_empty() {
     app.harbour.most_played_songs = vec![played_song("s1", "Techno", 42)];
     app.harbour.most_played_genres = Vec::new();
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         !rows.iter().any(|r| matches!(
             r,
@@ -2479,7 +2474,7 @@ fn most_played_genres_hidden_when_tally_is_empty() {
 
     // With a tallied genre present, it renders.
     app.harbour.most_played_genres = vec![make_genre("Techno", "Techno")];
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         rows.iter().any(|r| matches!(
             r,
@@ -2499,7 +2494,7 @@ fn most_played_genres_hidden_when_tally_is_empty() {
 #[test]
 fn trawl_row_is_first_in_shelves_mode() {
     let app = test_app();
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         matches!(rows.first(), Some(HarbourRow::Trawl { .. })),
         "the Trawl door leads the shelves index"
@@ -2512,7 +2507,7 @@ fn trawl_row_absent_in_search_mode() {
     app.harbour.search_query = "night".into();
     app.harbour.search_results =
         Some(nokkvi_data::types::library_search::LibrarySearchResults::default());
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         !rows.iter().any(|r| matches!(r, HarbourRow::Trawl { .. })),
         "search mode shows results only"
@@ -2522,14 +2517,13 @@ fn trawl_row_absent_in_search_mode() {
 #[test]
 fn trawl_row_carries_crate_count_and_blend() {
     let mut app = test_app();
-    app.trawl_crate
-        .add(nokkvi_data::types::trawl::TrawlSeed::new(
-            nokkvi_data::types::batch::BatchItem::Album("al1".into()),
-            "A",
-            "Artist",
-        ));
-    app.trawl_crate.blend = nokkvi_data::types::trawl::TrawlBlend::Weighted;
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    app.trawl.mix.add(nokkvi_data::types::trawl::TrawlSeed::new(
+        nokkvi_data::types::batch::BatchItem::Album("al1".into()),
+        "A",
+        "Artist",
+    ));
+    app.trawl.mix.blend = nokkvi_data::types::trawl::TrawlBlend::Weighted;
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     assert!(
         matches!(
             rows.first(),
@@ -2564,17 +2558,16 @@ fn trawl_subtitle_copy() {
 #[test]
 fn activate_center_on_trawl_row_opens_the_modal() {
     let mut app = test_app();
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page.common.slot_list.set_selected(0, total);
-    assert!(app.trawl_modal.is_none());
+    assert!(app.trawl.modal.is_none());
 
     let _ = app.handle_harbour(HarbourMessage::SlotList(
         SlotListPageMessage::ActivateCenter(false),
     ));
 
     assert!(
-        app.trawl_modal.is_some(),
+        app.trawl.modal.is_some(),
         "activating the Trawl row opens the modal"
     );
     assert_eq!(
@@ -2587,8 +2580,7 @@ fn activate_center_on_trawl_row_opens_the_modal() {
 #[test]
 fn add_center_to_queue_on_trawl_row_is_noop() {
     let mut app = test_app();
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page.common.slot_list.set_selected(0, total);
 
     let _ = app.handle_harbour(HarbourMessage::SlotList(
@@ -2596,14 +2588,13 @@ fn add_center_to_queue_on_trawl_row_is_noop() {
     ));
 
     assert!(app.toast.toasts.is_empty(), "nothing to enqueue, no toast");
-    assert!(app.trawl_modal.is_none(), "and no modal either");
+    assert!(app.trawl.modal.is_none(), "and no modal either");
 }
 
 #[test]
 fn expand_center_on_trawl_row_is_noop() {
     let mut app = test_app();
-    let total =
-        build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate).len();
+    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
     app.harbour_page.common.slot_list.set_selected(0, total);
     let collapsed_before = app.harbour_page.collapsed.clone();
 
@@ -2627,7 +2618,7 @@ fn header_teaser(
     app: &crate::Nokkvi,
     id: HarbourSectionId,
 ) -> Option<(String, Option<String>, Vec<String>, Option<String>)> {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     rows.iter()
         .find_map(|r| match r {
             HarbourRow::Section {
@@ -2732,7 +2723,7 @@ fn every_section_header_carries_its_section_icon_glyph() {
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl_crate);
+    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
     for row in &rows {
         if let HarbourRow::Section { id, glyph, .. } = row {
             assert_eq!(

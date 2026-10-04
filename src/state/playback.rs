@@ -85,6 +85,18 @@ impl ActivePlayback {
     }
 }
 
+/// The UI's mirror of the queue's current row, stamped from each
+/// `PlaybackStateUpdate`. Index and entry id are read under the same queue
+/// lock, so they are always written (and cleared) together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QueueCurrent {
+    pub index: Option<usize>,
+    /// Drift-immune partner of `index`: the per-row id of the playing track,
+    /// so producers of `FocusCurrentPlaying` can dispatch a handle that
+    /// survives the optimistic-mutation window.
+    pub entry_id: Option<u64>,
+}
+
 /// Playback-related state for the player bar
 #[derive(Debug, Clone)]
 pub struct PlaybackState {

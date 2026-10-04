@@ -10,7 +10,7 @@
 //!
 //! Coherence contract: [`sea_bars`] produces ONE array per tick
 //! (`update::boat::step_harbour_scene`), which is BOTH fed to
-//! `boat_physics::step()` and stored on `Nokkvi.harbour_sea_bars` for
+//! `boat_physics::step()` and stored on `Nokkvi.harbour_scene.sea_bars` for
 //! [`SeaCanvas`] to draw through the same [`sample_line_height`] sampler the
 //! physics used. A phase or sampler mismatch would desync the hull from the
 //! drawn water invisibly to tests/clippy — always route both sides through

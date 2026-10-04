@@ -289,6 +289,23 @@ crate::views::define_view_columns! {
     }
 }
 
+/// Rules-editor state that outlives a single rules session (the session
+/// itself lives on `Nokkvi.playlist_editor`).
+#[derive(Debug, Default)]
+pub struct RulesEditorState {
+    /// Smart-playlist capability gate, fetched once post-auth (all-false
+    /// until `Fetched`; `FetchFailed` renders the dimmed retry entry).
+    pub caps_state: CapsState,
+    /// Stale-drop counter for rules-preview loads. Kept here rather than on
+    /// the session so close/reopen can't re-mint captured generations.
+    pub preview_generation: u64,
+    /// Columns shown in the rules preview/results pane. The rules session is
+    /// ephemeral (rebuilt each open), so unlike the view pages this
+    /// persistent copy is the source of truth — restored on
+    /// `PlayerSettingsLoaded`, toggled optimistically, and read by the view.
+    pub preview_column_visibility: PreviewColumnVisibility,
+}
+
 /// The whole rules-editor session (UI half — the domain half lives in
 /// `nokkvi_data::types::{smart_criteria, rules_session}`).
 #[derive(Debug)]
@@ -320,7 +337,7 @@ pub struct RulesSessionUi {
     pub session_playlists: Vec<(String, String)>,
     pub preview: PreviewState,
     /// The generation captured by in-flight preview tasks (the root owns
-    /// the live counter — `rules_preview_generation` on `Nokkvi` — so
+    /// the live counter — `RulesEditorState::preview_generation` — so
     /// close/reopen can't re-mint captured generations).
     pub captured_generation: u64,
     pub caps: ServerCaps,

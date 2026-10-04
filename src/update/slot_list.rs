@@ -129,7 +129,7 @@ impl Nokkvi {
                         // Tab doubles as "exit search", mirroring the regular
                         // views: drop focus so bare-key hotkeys stop landing
                         // in the input, and navigate in the same keypress.
-                        let unfocus = if let Some(state) = self.trawl_modal.as_mut()
+                        let unfocus = if let Some(state) = self.trawl.modal.as_mut()
                             && state.search_input_focused
                         {
                             state.search_input_focused = false;

@@ -2284,7 +2284,8 @@ fn editor_remove_duplicates_is_inert_in_a_rules_session() {
     use nokkvi_data::types::smart_criteria::ServerCaps;
 
     let mut app = test_app();
-    app.caps_state = crate::state::CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
+    app.rules_editor.caps_state =
+        crate::state::CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
     app.session_user_id = "user-9".into();
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterRulesMode {
         target: crate::app_message::RulesEntryTarget::Create,

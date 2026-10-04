@@ -107,7 +107,7 @@ pub(crate) async fn pick_nsp_file() -> NspPickResult {
 impl Nokkvi {
     /// Header-dropdown entry point: caps-gate, then run the async pick.
     pub(crate) fn handle_import_nsp(&mut self) -> Task<Message> {
-        if !self.caps_state.smart_available() {
+        if !self.rules_editor.caps_state.smart_available() {
             // Defensive backstop — the dropdown entry is caps-gated; reaching
             // here means a stale surface or a rebind race.
             self.toast_warn(
@@ -155,7 +155,8 @@ impl Nokkvi {
                  Create new makes a separate playlist.",
                 row.name
             );
-            let detach_sync = row.is_file_backed && row.sync && self.caps_state.caps().sync_via_put;
+            let detach_sync =
+                row.is_file_backed && row.sync && self.rules_editor.caps_state.caps().sync_via_put;
             if detach_sync {
                 note.push_str(" Updating detaches it from its server-side file.");
             } else if row.is_file_backed && row.sync {

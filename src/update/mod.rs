@@ -197,7 +197,7 @@ impl Nokkvi {
                         // Derive the smart-playlist capability set from the
                         // same post-auth fetch (all-false on unparseable —
                         // conservative: feature-hidden).
-                        self.caps_state = crate::state::CapsState::Fetched(
+                        self.rules_editor.caps_state = crate::state::CapsState::Fetched(
                             nokkvi_data::types::smart_criteria::ServerCaps::from_version_str(
                                 version,
                             ),
@@ -209,8 +209,11 @@ impl Nokkvi {
                         // feature all session — FetchFailed renders the
                         // dimmed retry entry. Never downgrade an
                         // already-Fetched state (About-modal re-fetches).
-                        if matches!(self.caps_state, crate::state::CapsState::Unfetched) {
-                            self.caps_state = crate::state::CapsState::FetchFailed;
+                        if matches!(
+                            self.rules_editor.caps_state,
+                            crate::state::CapsState::Unfetched
+                        ) {
+                            self.rules_editor.caps_state = crate::state::CapsState::FetchFailed;
                         }
                     }
                 }

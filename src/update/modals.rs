@@ -72,7 +72,7 @@ impl Nokkvi {
             ActiveModal::Info => self.info_modal.visible,
             ActiveModal::DefaultPlaylistPicker => self.default_playlist_picker.is_some(),
             ActiveModal::MilkdropPicker => self.milkdrop.picker.is_some(),
-            ActiveModal::Trawl => self.trawl_modal.is_some(),
+            ActiveModal::Trawl => self.trawl.modal.is_some(),
         }
     }
 
@@ -133,7 +133,7 @@ impl Nokkvi {
             }
             ActiveModal::DefaultPlaylistPicker => self.default_playlist_picker = None,
             ActiveModal::MilkdropPicker => self.milkdrop_picker_discard(),
-            ActiveModal::Trawl => self.trawl_modal = None,
+            ActiveModal::Trawl => self.trawl.modal = None,
         }
     }
 }

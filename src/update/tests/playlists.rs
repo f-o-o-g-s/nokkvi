@@ -84,7 +84,7 @@ fn edit_playlist_on_smart_row_routes_to_rules() {
 
     // Caps fetched + owned: the RULES session mounts (never Tracks).
     let mut app = test_app();
-    app.caps_state = crate::state::CapsState::Fetched(
+    app.rules_editor.caps_state = crate::state::CapsState::Fetched(
         nokkvi_data::types::smart_criteria::ServerCaps::from_version_str("0.63.2"),
     );
     app.session_user_id = "user-9".into();
@@ -164,7 +164,7 @@ fn enter_edit_mode_backstop_refuses_smart_id() {
 #[test]
 fn banner_pencil_on_known_smart_routes_to_rules() {
     let mut app = test_app();
-    app.caps_state = crate::state::CapsState::Fetched(
+    app.rules_editor.caps_state = crate::state::CapsState::Fetched(
         nokkvi_data::types::smart_criteria::ServerCaps::from_version_str("0.63.2"),
     );
     app.session_user_id = "user-9".into();
@@ -466,7 +466,8 @@ fn child_add_to_mix_seeds_crate() {
     ));
 
     let keys: Vec<_> = app
-        .trawl_crate
+        .trawl
+        .mix
         .seeds
         .iter()
         .map(|s| s.key().1.to_string())
