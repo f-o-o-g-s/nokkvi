@@ -314,7 +314,7 @@ fn over_cover_viz_coexists_with_lyrics() {
         app.visualizer_config.clone(),
         std::sync::Arc::default(),
     ));
-    app.engine.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Scope;
+    app.settings.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Scope;
     seed_matched(&mut app, "song_1", timed_doc(&[1_000]));
 
     let (viz, _boat) = app.over_cover_overlays();
@@ -642,7 +642,7 @@ fn glide_advances_on_boat_tick_regardless_of_visualizer_mode() {
     // `visible` early-return fires, so this proves the lyrics glide runs
     // BEFORE the boat's mode early-outs rather than riding on them.
     assert_ne!(
-        app.engine.visualization_mode,
+        app.settings.visualization_mode,
         nokkvi_data::types::player_settings::VisualizationMode::Lines
     );
 
@@ -929,8 +929,8 @@ fn a_song_change_parks_the_column_so_the_next_dissolve_is_honest() {
     // parked at line 40 culls every line and the dissolve shows nothing.
     let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
-    app.engine.crossfade_enabled = true;
-    app.engine.crossfade_duration_secs = 7;
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
 
     // Track A runs deep into a long sheet.
     seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000, 3_000]));
@@ -1028,8 +1028,8 @@ fn toggling_lyrics_off_drops_a_dissolve_in_flight() {
 fn crossfade_transition_parks_a_plain_sheet_too() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", plain_doc(6));
-    app.engine.crossfade_enabled = true;
-    app.engine.crossfade_duration_secs = 7;
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
 
     let _ = app.handle_playback_state_updated(update_for("song_2", 0));
     let outgoing = app
@@ -1049,8 +1049,8 @@ fn crossfade_transition_parks_a_plain_sheet_too() {
 fn crossfade_transition_parks_outgoing_sheet() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
-    app.engine.crossfade_enabled = true;
-    app.engine.crossfade_duration_secs = 7;
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
 
     let _ = app.handle_playback_state_updated(update_for("song_2", 0));
     let outgoing = app
@@ -1068,7 +1068,7 @@ fn crossfade_transition_parks_outgoing_sheet() {
 fn no_dissolve_when_crossfade_off() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[1_000]));
-    app.engine.crossfade_enabled = false;
+    app.settings.crossfade_enabled = false;
 
     let _ = app.handle_playback_state_updated(update_for("song_2", 0));
     assert!(
@@ -1178,10 +1178,10 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
     // MilkDrop replaces the cover: nothing to frost.
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
     assert!(app.lyrics_blurred_cover_for_view().is_some());
-    app.engine.visualization_mode =
+    app.settings.visualization_mode =
         nokkvi_data::types::player_settings::VisualizationMode::Milkdrop;
     assert!(app.lyrics_blurred_cover_for_view().is_none());
-    app.engine.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Bars;
+    app.settings.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Bars;
 
     // Lyrics toggled off: the cover goes back to sharp.
     app.lyrics.enabled = false;

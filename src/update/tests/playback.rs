@@ -594,19 +594,19 @@ fn sfx_volume_changed_clamps_above_one() {
 fn crossfade_toggle_flips_state() {
     let mut app = test_app();
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "crossfade should default to false"
     );
 
     let _ = app.handle_toggle_crossfade();
     assert!(
-        app.engine.crossfade_enabled,
+        app.settings.crossfade_enabled,
         "first toggle should enable crossfade"
     );
 
     let _ = app.handle_toggle_crossfade();
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "second toggle should disable crossfade"
     );
 }
@@ -614,11 +614,11 @@ fn crossfade_toggle_flips_state() {
 #[test]
 fn crossfade_toggle_from_enabled() {
     let mut app = test_app();
-    app.engine.crossfade_enabled = true;
+    app.settings.crossfade_enabled = true;
 
     let _ = app.handle_toggle_crossfade();
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "toggle from enabled should disable"
     );
 }
@@ -628,16 +628,16 @@ fn enabling_crossfade_clears_bit_perfect() {
     use nokkvi_data::types::player_settings::BitPerfectMode;
     let mut app = test_app();
     // Mutually exclusive modes: enabling crossfade forces bit-perfect Off.
-    app.engine.bit_perfect_mode = BitPerfectMode::Relaxed;
-    app.engine.crossfade_enabled = false;
+    app.settings.bit_perfect = BitPerfectMode::Relaxed;
+    app.settings.crossfade_enabled = false;
 
     let _ = app.handle_toggle_crossfade();
     assert!(
-        app.engine.crossfade_enabled,
+        app.settings.crossfade_enabled,
         "toggle should enable crossfade"
     );
     assert_eq!(
-        app.engine.bit_perfect_mode,
+        app.settings.bit_perfect,
         BitPerfectMode::Off,
         "enabling crossfade must turn bit-perfect off (exclusive modes)"
     );
@@ -645,26 +645,26 @@ fn enabling_crossfade_clears_bit_perfect() {
     // Disabling crossfade leaves bit-perfect alone (stays Off here).
     let _ = app.handle_toggle_crossfade();
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "toggle should disable crossfade"
     );
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Off);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Off);
 }
 
 #[test]
 fn cycling_bit_perfect_walks_off_strict_relaxed_off() {
     use nokkvi_data::types::player_settings::BitPerfectMode;
     let mut app = test_app();
-    app.engine.bit_perfect_mode = BitPerfectMode::Off;
+    app.settings.bit_perfect = BitPerfectMode::Off;
 
     let _ = app.handle_toggle_bit_perfect();
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Strict);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Strict);
 
     let _ = app.handle_toggle_bit_perfect();
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Relaxed);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Relaxed);
 
     let _ = app.handle_toggle_bit_perfect();
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Off);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Off);
 }
 
 #[test]
@@ -673,31 +673,31 @@ fn cycling_bit_perfect_to_non_off_clears_crossfade() {
     let mut app = test_app();
     // Crossfade on; cycling bit-perfect to a non-Off mode must turn it off
     // (exclusive modes). Relaxed then runs its own same-rate crossfade.
-    app.engine.crossfade_enabled = true;
-    app.engine.bit_perfect_mode = BitPerfectMode::Off;
+    app.settings.crossfade_enabled = true;
+    app.settings.bit_perfect = BitPerfectMode::Off;
 
     // Off -> Strict clears crossfade.
     let _ = app.handle_toggle_bit_perfect();
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Strict);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Strict);
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "switching to a non-Off bit-perfect mode must turn crossfade off"
     );
 
     // Strict -> Relaxed: crossfade stays off (already cleared).
     let _ = app.handle_toggle_bit_perfect();
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Relaxed);
-    assert!(!app.engine.crossfade_enabled);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Relaxed);
+    assert!(!app.settings.crossfade_enabled);
 
     // Relaxed -> Off: bit-perfect off; crossfade is NOT auto-re-enabled.
     let _ = app.handle_toggle_bit_perfect();
     assert_eq!(
-        app.engine.bit_perfect_mode,
+        app.settings.bit_perfect,
         BitPerfectMode::Off,
         "three cycles return to Off"
     );
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "cycling back to Off must not auto-re-enable crossfade"
     );
 }
@@ -833,10 +833,10 @@ fn settings_load_keeps_crossfade_when_bit_perfect_off() {
         ..Default::default()
     });
     assert!(
-        app.engine.crossfade_enabled,
+        app.settings.crossfade_enabled,
         "a crossfade-only config must survive a settings load untouched"
     );
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Off);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Off);
 }
 
 #[test]
@@ -852,11 +852,11 @@ fn settings_load_reconciles_both_on_bit_perfect_wins() {
         ..Default::default()
     });
     assert!(
-        !app.engine.crossfade_enabled,
+        !app.settings.crossfade_enabled,
         "a both-on config must reconcile crossfade off"
     );
     assert_eq!(
-        app.engine.bit_perfect_mode,
+        app.settings.bit_perfect,
         BitPerfectMode::Relaxed,
         "bit-perfect wins the reconciliation"
     );
@@ -872,8 +872,8 @@ fn settings_load_keeps_crossfade_when_bit_perfect_off_after_migration() {
         bit_perfect: BitPerfectMode::Off,
         ..Default::default()
     });
-    assert!(app.engine.crossfade_enabled);
-    assert_eq!(app.engine.bit_perfect_mode, BitPerfectMode::Off);
+    assert!(app.settings.crossfade_enabled);
+    assert_eq!(app.settings.bit_perfect, BitPerfectMode::Off);
 }
 
 #[test]

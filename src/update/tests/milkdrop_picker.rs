@@ -89,7 +89,7 @@ fn the_m_key_opens_the_picker() {
 #[test]
 fn does_not_open_outside_milkdrop_mode() {
     let mut app = md_app();
-    app.engine.visualization_mode = VisualizationMode::Bars;
+    app.settings.visualization_mode = VisualizationMode::Bars;
     let toasts = app.toast.toasts.len();
     open(&mut app);
     assert!(app.milkdrop.picker.is_none());
@@ -311,7 +311,7 @@ fn leaving_milkdrop_mode_closes_the_picker() {
     let _ = app.update(Message::Playback(
         crate::app_message::PlaybackMessage::CycleVisualization,
     ));
-    assert_ne!(app.engine.visualization_mode, VisualizationMode::Milkdrop);
+    assert_ne!(app.settings.visualization_mode, VisualizationMode::Milkdrop);
     assert!(app.milkdrop.picker.is_none());
     assert!(!app.milkdrop.locked, "the picker's hold is let go");
 }

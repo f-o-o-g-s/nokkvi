@@ -1679,6 +1679,8 @@ impl Nokkvi {
             pending_mode_commits: _,
             // Dropped so its FFT thread joins now.
             visualizer: _,
+            // The gapless prep latch; the engine it latched for is stopped.
+            engine: _,
             // ---- Kept: independent of the server ----
             // The view pages keep sort, search, scroll and columns; only
             // their toolbar reveal locks, stranded drags and the queue's
@@ -1703,9 +1705,6 @@ impl Nokkvi {
             modes: _,
             sfx: _,
             sfx_engine: _,
-            // Settings mirror; the gapless latch re-arms on the first queue
-            // update after login (`queue_current` is reset).
-            engine: _,
             window: _,
             player_bar_layout: _,
             visualizer_config: _,
@@ -1876,6 +1875,7 @@ impl Nokkvi {
         // logout and re-login (or forever, if the user never re-logs).
         // Drop joins the thread within one `TICK_INTERVAL` (~16.67 ms).
         self.visualizer = None;
+        self.engine = crate::state::EngineState::default();
 
         // Drop the static SSE connection registration so the event loop
         // stops retrying against the prior server with stale credentials.

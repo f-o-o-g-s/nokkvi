@@ -99,7 +99,7 @@ pub(crate) enum AdvanceReason {
 
 impl Nokkvi {
     pub(super) fn milkdrop_mode_active(&self) -> bool {
-        self.engine.visualization_mode == VisualizationMode::Milkdrop
+        self.settings.visualization_mode == VisualizationMode::Milkdrop
     }
 
     /// A MilkDrop panel is on screen: the window is open, the view is one that
@@ -115,7 +115,7 @@ impl Nokkvi {
     /// Whether MilkDrop should animate right now (see [`milkdrop_running`]).
     pub(crate) fn milkdrop_is_running(&self) -> bool {
         milkdrop_running(
-            self.engine.visualization_mode,
+            self.settings.visualization_mode,
             self.playback.playing,
             self.playback.paused,
             self.screen,

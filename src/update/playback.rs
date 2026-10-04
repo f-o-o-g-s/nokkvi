@@ -686,7 +686,7 @@ impl Nokkvi {
         }
         // Stopped: MilkDrop gives the panel back to the cover.
         if playback_stopped
-            && self.engine.visualization_mode
+            && self.settings.visualization_mode
                 == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
         {
             self.milkdrop_release();
@@ -795,9 +795,10 @@ impl Nokkvi {
                     // UI-timed off the crossfade duration (the engine's blend
                     // phase isn't surfaced to the UI); a hard swap when
                     // crossfade is off.
-                    if self.engine.crossfade_enabled {
+                    if self.settings.crossfade_enabled {
                         let center = crate::widgets::lyrics_viewport::lyrics_center_pos();
-                        let duration_ms = self.engine.crossfade_duration_secs.saturating_mul(1000);
+                        let duration_ms =
+                            self.settings.crossfade_duration_secs.saturating_mul(1000);
                         self.lyrics.park_outgoing(center, duration_ms);
                     }
                     match song_id.as_deref() {
@@ -1371,7 +1372,7 @@ impl Nokkvi {
         if let Some(ref viz) = self.visualizer {
             viz.reset();
         }
-        if self.engine.visualization_mode
+        if self.settings.visualization_mode
             == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
         {
             self.milkdrop_release();
@@ -1726,10 +1727,10 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_cycle_visualization(&mut self) -> Task<Message> {
-        let prev = self.engine.visualization_mode;
-        self.engine.visualization_mode = prev.next();
+        let prev = self.settings.visualization_mode;
+        self.settings.visualization_mode = prev.next();
 
-        let mode = self.engine.visualization_mode;
+        let mode = self.settings.visualization_mode;
         self.milkdrop_mode_edge(prev, mode);
         let active = mode != nokkvi_data::types::player_settings::VisualizationMode::Off;
 
@@ -1823,12 +1824,12 @@ impl Nokkvi {
     pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
         use nokkvi_data::types::player_settings::BitPerfectMode;
 
-        self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
-        let enabled = self.engine.crossfade_enabled;
+        self.settings.crossfade_enabled = !self.settings.crossfade_enabled;
+        let enabled = self.settings.crossfade_enabled;
         // Enabling crossfade turns bit-perfect off (a blend can't be bit-perfect).
-        let cleared_bit_perfect = enabled && self.engine.bit_perfect_mode != BitPerfectMode::Off;
+        let cleared_bit_perfect = enabled && self.settings.bit_perfect != BitPerfectMode::Off;
         if cleared_bit_perfect {
-            self.engine.bit_perfect_mode = BitPerfectMode::Off;
+            self.settings.bit_perfect = BitPerfectMode::Off;
         }
         self.toast_info(if cleared_bit_perfect {
             "Crossfade on, Bit-Perfect off"
@@ -1837,7 +1838,7 @@ impl Nokkvi {
         } else {
             "Crossfade: Off"
         });
-        let bit_perfect = self.engine.bit_perfect_mode;
+        let bit_perfect = self.settings.bit_perfect;
         self.shell_spawn("persist_crossfade_toggle", move |shell| async move {
             shell.settings().set_crossfade_enabled(enabled).await?;
             let engine_arc = shell.audio_engine();
@@ -1849,9 +1850,9 @@ impl Nokkvi {
             }
             Ok(())
         });
-        // The Playback tab's Crossfade + Bit-Perfect rows mirror these engine
-        // values — reachable from the player-bar mode menu while Settings is
-        // open, so refresh the cached entries (no-op off-Settings).
+        // The Playback tab's Crossfade + Bit-Perfect rows read these
+        // settings — reachable from the player-bar mode menu while Settings
+        // is open, so refresh the cached entries (no-op off-Settings).
         self.settings_page.config_dirty = true;
         self.refresh_settings_entries_if_dirty();
         Task::none()
@@ -1870,12 +1871,12 @@ impl Nokkvi {
     pub(crate) fn handle_toggle_bit_perfect(&mut self) -> Task<Message> {
         use nokkvi_data::types::player_settings::BitPerfectMode;
 
-        let mode = self.engine.bit_perfect_mode.next();
-        self.engine.bit_perfect_mode = mode;
+        let mode = self.settings.bit_perfect.next();
+        self.settings.bit_perfect = mode;
         // A non-Off mode turns crossfade off (they're exclusive modes).
-        let cleared_crossfade = mode != BitPerfectMode::Off && self.engine.crossfade_enabled;
+        let cleared_crossfade = mode != BitPerfectMode::Off && self.settings.crossfade_enabled;
         if cleared_crossfade {
-            self.engine.crossfade_enabled = false;
+            self.settings.crossfade_enabled = false;
         }
         let label = match mode {
             BitPerfectMode::Off => "Bit-Perfect: Off",
@@ -1887,7 +1888,7 @@ impl Nokkvi {
         } else {
             self.toast_info(label);
         }
-        let crossfade = self.engine.crossfade_enabled;
+        let crossfade = self.settings.crossfade_enabled;
         self.shell_spawn("persist_bit_perfect_cycle", move |shell| async move {
             shell.settings().set_bit_perfect(mode).await?;
             let engine_arc = shell.audio_engine();
@@ -2204,9 +2205,11 @@ impl Nokkvi {
         self.sfx.volume = settings.sfx_volume;
         self.sfx.enabled = settings.sound_effects_enabled;
         // Also runs on every config hot reload: the edge compares against the
-        // previous mode, so re-delivering the same one fires nothing.
-        let prev_mode = self.engine.visualization_mode;
-        self.engine.visualization_mode = settings.visualization_mode;
+        // previous mode, so re-delivering the same one fires nothing. The mode
+        // is written ahead of the wholesale `self.settings` replacement below
+        // so the edge's MilkDrop teardown already reads the new mode.
+        let prev_mode = self.settings.visualization_mode;
+        self.settings.visualization_mode = settings.visualization_mode;
         self.milkdrop_mode_edge(prev_mode, settings.visualization_mode);
         // Sync the visualizer feed gate to the loaded mode so a persisted "Off"
         // doesn't leave the FFT worker + audio tap running after login. The
@@ -2238,9 +2241,6 @@ impl Nokkvi {
                 Ok(())
             });
         }
-        self.engine.crossfade_enabled = settings.crossfade_enabled;
-        self.engine.bit_perfect_mode = settings.bit_perfect;
-        self.engine.crossfade_duration_secs = settings.crossfade_duration_secs;
         // The seek keys read the step from the seek cluster, not from
         // `self.settings`, so mirror it here — this runs on the initial load
         // AND after every settings edit (`handle_settings_general` feeds the
@@ -2251,14 +2251,6 @@ impl Nokkvi {
         // toggle flips this mirror synchronously and persists behind it, so a
         // subsequent settings load round-trips the same value.
         self.lyrics.enabled = settings.lyrics_enabled;
-
-        // Volume normalization settings
-        self.engine.volume_normalization = settings.volume_normalization;
-        self.engine.normalization_level = settings.normalization_level;
-        self.engine.replay_gain_preamp_db = settings.replay_gain_preamp_db;
-        self.engine.replay_gain_fallback_db = settings.replay_gain_fallback_db;
-        self.engine.replay_gain_fallback_to_agc = settings.replay_gain_fallback_to_agc;
-        self.engine.replay_gain_prevent_clipping = settings.replay_gain_prevent_clipping;
 
         // Apply EQ settings
         self.playback.eq_state.set_enabled(settings.eq_enabled);
@@ -2542,7 +2534,7 @@ impl Nokkvi {
         });
 
         // Settings-visible state changed wholesale above (self.settings, the
-        // engine mirrors, the theme atomics) — refresh the cached entries
+        // live mirrors, the theme atomics) — refresh the cached entries
         // when the Settings view is showing. This also fixes the
         // settings-TOML reload chain ordering: HotkeyConfigUpdated used to
         // refresh BEFORE this handler mutated the state it renders. One

@@ -750,7 +750,7 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "repeat": repeat_str(&app.modes),
         "consume": app.modes.consume,
         "theater": app.theater.active,
-        "visualizer": app.engine.visualization_mode.to_string(),
+        "visualizer": app.settings.visualization_mode.to_string(),
         "preset": app.milkdrop.on_screen,
     })
 }

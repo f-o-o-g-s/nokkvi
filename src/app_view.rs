@@ -623,10 +623,10 @@ impl Nokkvi {
             eq_enabled: self.playback.eq_state.is_enabled(),
             sound_effects_enabled: self.sfx.enabled,
             sfx_volume: self.sfx.volume,
-            crossfade_enabled: self.engine.crossfade_enabled,
+            crossfade_enabled: self.settings.crossfade_enabled,
             lyrics_enabled: self.lyrics.enabled,
-            bit_perfect_mode: self.engine.bit_perfect_mode,
-            visualization_mode: self.engine.visualization_mode,
+            bit_perfect_mode: self.settings.bit_perfect,
+            visualization_mode: self.settings.visualization_mode,
             window_width: self.window.width,
             // MiniPlayer remaps per the width-driven regime: the wide
             // three-section layout passes the mode-cull count through (modes
@@ -1072,7 +1072,7 @@ impl Nokkvi {
                 crate::app_message::ArtworkMessage::RefreshAlbumArtwork(album_id.to_string()),
             )));
         }
-        if self.engine.visualization_mode
+        if self.settings.visualization_mode
             == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
         {
             entries.extend(crate::widgets::context_menu::milkdrop_panel_entries(
@@ -1129,7 +1129,7 @@ impl Nokkvi {
         let bottom_band_mode = {
             let cfg = self.visualizer_config.read();
             widgets::visualizer::resolve_placement(
-                self.engine.visualization_mode,
+                self.settings.visualization_mode,
                 cfg.bars.placement,
                 cfg.lines.placement,
             )
@@ -1673,7 +1673,7 @@ impl Nokkvi {
             return None;
         }
         // MilkDrop replaces the cover, so there is no cover to frost.
-        if self.engine.visualization_mode
+        if self.settings.visualization_mode
             == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
         {
             return None;
@@ -1713,7 +1713,7 @@ impl Nokkvi {
         let (over_art_mode, height_percent, opacity, mirror) = {
             let cfg = self.visualizer_config.read();
             let mode = widgets::visualizer::resolve_placement(
-                self.engine.visualization_mode,
+                self.settings.visualization_mode,
                 cfg.bars.placement,
                 cfg.lines.placement,
             )
@@ -1958,7 +1958,7 @@ impl Nokkvi {
             current_playing_song_id: self.scrobble.current_song_id.clone(),
             current_playing_entry_id: self.queue_current.entry_id,
             is_playing: self.playback.playing && !self.playback.paused,
-            milkdrop_on: self.engine.visualization_mode
+            milkdrop_on: self.settings.visualization_mode
                 == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop,
             milkdrop_locked: self.milkdrop.locked,
             milkdrop_favorite: self

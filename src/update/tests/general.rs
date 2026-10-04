@@ -796,6 +796,7 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.cross_pane_drag.pending_queue_insert_position = Some(2);
     app.start_view_applied = true;
     app.suppress_next_auto_center = true;
+    app.engine.gapless_preparing = true;
 }
 
 #[test]
@@ -914,6 +915,10 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.cross_pane_drag.pending_queue_insert_position.is_none());
     assert!(!app.start_view_applied);
     assert!(!app.suppress_next_auto_center);
+    assert!(
+        !app.engine.gapless_preparing,
+        "the gapless latch belongs to the stopped engine"
+    );
 }
 
 #[test]

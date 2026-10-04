@@ -22,7 +22,7 @@ mod boat_tests {
         enable_boat_in_config(&app, true);
 
         // Default mode is Bars — boat should stay hidden even with toggle on.
-        app.engine.visualization_mode = VisualizationMode::Bars;
+        app.settings.visualization_mode = VisualizationMode::Bars;
         let _ = app.update(Message::BoatTick(Instant::now()));
         assert!(
             !app.boat.visible,
@@ -30,7 +30,7 @@ mod boat_tests {
         );
 
         // Switch to Lines — boat should now be visible.
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
         let _ = app.update(Message::BoatTick(Instant::now()));
         assert!(
             app.boat.visible,
@@ -44,7 +44,7 @@ mod boat_tests {
         enable_boat_in_config(&app, true);
         // VisualizationMode::Off is what mounts the visualizer at all (see
         // app_view.rs). When Off, the boat must also be hidden.
-        app.engine.visualization_mode = VisualizationMode::Off;
+        app.settings.visualization_mode = VisualizationMode::Off;
         let _ = app.update(Message::BoatTick(Instant::now()));
         assert!(
             !app.boat.visible,
@@ -59,7 +59,7 @@ mod boat_tests {
         // Set it rather than leaning on the shipped default (which is on) so
         // the test stays hermetic against config.debug.toml and default flips.
         enable_boat_in_config(&app, false);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
         let _ = app.update(Message::BoatTick(Instant::now()));
         assert!(
             !app.boat.visible,
@@ -79,7 +79,7 @@ mod boat_tests {
 
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
 
         // Lines in the bottom band (the non-default placement — the shipped
         // default is OverCover) → the boat surfs the band, with the
@@ -132,7 +132,7 @@ mod boat_tests {
     fn boat_advances_x_ratio_on_tick() {
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
 
         // The boat is purely propelled by music in the new model and
         // `test_app()` has no visualizer / no BPM — so we seed a
@@ -161,7 +161,7 @@ mod boat_tests {
     fn boat_state_resumes_after_mode_round_trip() {
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
 
         // Tick a couple of times to seat `last_tick`, advance physics,
         // and let the tack countdown decrement.
@@ -177,7 +177,7 @@ mod boat_tests {
         );
 
         // Switch to Bars — boat hides, physics fields preserved.
-        app.engine.visualization_mode = VisualizationMode::Bars;
+        app.settings.visualization_mode = VisualizationMode::Bars;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
         assert!(!app.boat.visible);
         assert_eq!(
@@ -195,7 +195,7 @@ mod boat_tests {
 
         // Back to Lines — state resumes from where it left off (the
         // first re-show tick has dt=0 because last_tick was cleared).
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(150)));
         assert!(app.boat.visible);
         assert_eq!(
@@ -214,13 +214,13 @@ mod boat_tests {
         // first frame back doesn't see a stale multi-second gap.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
         assert!(app.boat.last_tick.is_some());
 
-        app.engine.visualization_mode = VisualizationMode::Off;
+        app.settings.visualization_mode = VisualizationMode::Off;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(5)));
         assert!(
             app.boat.last_tick.is_none(),
@@ -236,7 +236,7 @@ mod boat_tests {
         // Every dynamic physics field must hold while `playback.paused`.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
 
         // Seed non-default values so an accidental "field stayed at 0
         // because it was already 0" pass can't sneak through.
@@ -302,7 +302,7 @@ mod boat_tests {
         // skipped the velocity would persist verbatim.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
         app.playback.playing = false;
         app.playback.paused = false;
 
@@ -340,7 +340,7 @@ mod boat_tests {
         // music signals, and verify x_ratio mutates after unpause.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
-        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.settings.visualization_mode = VisualizationMode::Lines;
         app.boat.facing = 1.0;
         app.boat.x_velocity = 0.08;
 
@@ -610,7 +610,7 @@ mod harbour_scene_tests {
         use nokkvi_data::types::player_settings::VisualizationMode;
 
         let mut app = app_on_harbour();
-        app.engine.visualization_mode = VisualizationMode::Off;
+        app.settings.visualization_mode = VisualizationMode::Off;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));

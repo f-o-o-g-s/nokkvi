@@ -115,14 +115,13 @@ impl Nokkvi {
             });
 
         let playback = PlaybackSettingsData {
-            crossfade_enabled: self.engine.crossfade_enabled,
-            // The live mirror (flipped synchronously by the player-bar toggle),
-            // same pattern as the crossfade engine mirror above.
+            crossfade_enabled: self.settings.crossfade_enabled,
+            // The live mirror (flipped synchronously by the player-bar toggle).
             lyrics_enabled: self.lyrics.enabled,
             lyrics_fetch_online: self.settings.lyrics_fetch_online,
             lyrics_backdrop_blur: self.settings.lyrics_backdrop_blur.as_label().into(),
-            bit_perfect: self.engine.bit_perfect_mode.as_label().into(),
-            crossfade_duration_secs: i64::from(self.engine.crossfade_duration_secs),
+            bit_perfect: self.settings.bit_perfect.as_label().into(),
+            crossfade_duration_secs: i64::from(self.settings.crossfade_duration_secs),
             crossfade_curve: self.settings.crossfade_curve.as_label().into(),
             crossfade_min_track_secs: i64::from(self.settings.crossfade_min_track_secs),
             crossfade_album_gapless: self.settings.crossfade_album_gapless,
@@ -138,12 +137,12 @@ impl Nokkvi {
             crossfade_offset_secs: i64::from(self.settings.crossfade_offset_secs),
             crossfade_bar_snap: self.settings.crossfade_bar_snap,
             rewind_on_previous: self.settings.rewind_on_previous,
-            volume_normalization: self.engine.volume_normalization.as_label().into(),
-            normalization_level: self.engine.normalization_level.as_label().into(),
-            replay_gain_preamp_db: self.engine.replay_gain_preamp_db.round() as i64,
-            replay_gain_fallback_db: self.engine.replay_gain_fallback_db.round() as i64,
-            replay_gain_fallback_to_agc: self.engine.replay_gain_fallback_to_agc,
-            replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
+            volume_normalization: self.settings.volume_normalization.as_label().into(),
+            normalization_level: self.settings.normalization_level.as_label().into(),
+            replay_gain_preamp_db: self.settings.replay_gain_preamp_db.round() as i64,
+            replay_gain_fallback_db: self.settings.replay_gain_fallback_db.round() as i64,
+            replay_gain_fallback_to_agc: self.settings.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: self.settings.replay_gain_prevent_clipping,
             scrobbling_enabled: self.settings.scrobbling_enabled,
             scrobble_threshold: f64::from(self.settings.scrobble_threshold),
             radio_scrobbling_enabled: self.settings.radio_scrobbling_enabled,

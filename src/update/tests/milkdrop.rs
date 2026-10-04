@@ -63,9 +63,9 @@ pub(super) fn tick(app: &mut Nokkvi) {
 
 /// Cycle from Scope into MilkDrop and run one tick, which picks a preset.
 pub(super) fn enter_milkdrop(app: &mut Nokkvi) {
-    app.engine.visualization_mode = VisualizationMode::Scope;
+    app.settings.visualization_mode = VisualizationMode::Scope;
     cycle(app);
-    assert_eq!(app.engine.visualization_mode, VisualizationMode::Milkdrop);
+    assert_eq!(app.settings.visualization_mode, VisualizationMode::Milkdrop);
     tick(app);
 }
 
@@ -79,11 +79,11 @@ pub(super) fn built(app: &mut Nokkvi, generation: u64, result: Result<(), String
 #[test]
 fn cycle_reaches_milkdrop_after_scope_and_wraps_to_off() {
     let mut app = md_app();
-    app.engine.visualization_mode = VisualizationMode::Scope;
+    app.settings.visualization_mode = VisualizationMode::Scope;
     cycle(&mut app);
-    assert_eq!(app.engine.visualization_mode, VisualizationMode::Milkdrop);
+    assert_eq!(app.settings.visualization_mode, VisualizationMode::Milkdrop);
     cycle(&mut app);
-    assert_eq!(app.engine.visualization_mode, VisualizationMode::Off);
+    assert_eq!(app.settings.visualization_mode, VisualizationMode::Off);
 }
 
 #[test]
@@ -200,9 +200,9 @@ fn built_after_leaving_the_mode_is_silent() {
     let mut app = md_app();
     enter_milkdrop(&mut app);
     let generation = app.milkdrop.generation;
-    app.engine.visualization_mode = VisualizationMode::Lines;
+    app.settings.visualization_mode = VisualizationMode::Lines;
     cycle(&mut app); // Lines → Scope; mode is no longer MilkDrop either way
-    app.engine.visualization_mode = VisualizationMode::Bars;
+    app.settings.visualization_mode = VisualizationMode::Bars;
     let toasts = app.toast.toasts.len();
     built(&mut app, generation, Ok(()));
     assert_eq!(app.toast.toasts.len(), toasts);
@@ -214,7 +214,7 @@ fn tick_reloads_when_running_without_a_preset() {
     let mut app = md_app();
     enter_milkdrop(&mut app);
     app.milkdrop_release();
-    assert_eq!(app.engine.visualization_mode, VisualizationMode::Milkdrop);
+    assert_eq!(app.settings.visualization_mode, VisualizationMode::Milkdrop);
     tick(&mut app);
     assert!(app.milkdrop.current.is_some());
     assert!(app.milkdrop.build_in_flight.is_some());
@@ -279,7 +279,7 @@ fn a_release_never_covers_a_later_load() {
     enter_milkdrop(&mut app);
     let first = app.milkdrop.generation;
     cycle(&mut app); // MilkDrop → Off: releases `first`
-    app.engine.visualization_mode = VisualizationMode::Scope;
+    app.settings.visualization_mode = VisualizationMode::Scope;
     cycle(&mut app); // back into MilkDrop
     tick(&mut app); // loads again
     let second = app.milkdrop.generation;
@@ -341,7 +341,7 @@ fn next_key_advances_and_previous_returns() {
 #[test]
 fn preset_keys_are_inert_outside_milkdrop_mode() {
     let mut app = md_app();
-    app.engine.visualization_mode = VisualizationMode::Bars;
+    app.settings.visualization_mode = VisualizationMode::Bars;
     let toasts = app.toast.toasts.len();
     press_plain(&mut app, "n");
     press_plain(&mut app, "p");
@@ -698,7 +698,7 @@ fn curation_controls_are_inert_outside_milkdrop_mode() {
     let mut app = curated_app(&dir);
     on_screen(&mut app);
     let shown = app.milkdrop.on_screen.clone().expect("a preset on screen");
-    app.engine.visualization_mode = VisualizationMode::Bars;
+    app.settings.visualization_mode = VisualizationMode::Bars;
     control(&mut app, crate::app_message::MilkdropControl::Hide);
     control(
         &mut app,
@@ -1122,7 +1122,7 @@ fn a_stale_cover_is_dropped() {
 #[test]
 fn no_cover_work_outside_milkdrop_mode() {
     let (mut app, _id) = app_with_cover();
-    app.engine.visualization_mode = VisualizationMode::Bars;
+    app.settings.visualization_mode = VisualizationMode::Bars;
     tick(&mut app);
     assert_eq!(app.milkdrop.cover_pending, None);
 }

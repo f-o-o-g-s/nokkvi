@@ -299,7 +299,7 @@ pub struct Nokkvi {
     /// Surfing-boat overlay state (lines-mode only). Phase + last sampled
     /// (x_ratio, y_ratio) + cached themed-logo SVG handle. Driven by per-frame
     /// `Message::BoatTick`; visibility derived from
-    /// `engine.visualization_mode == Lines && config.enabled && config.lines.boat`.
+    /// `settings.visualization_mode == Lines && config.enabled && config.lines.boat`.
     pub boat: crate::widgets::boat::BoatState,
     /// The Harbour Trawl panel's longship + procedural sea.
     pub harbour_scene: crate::state::HarbourScene,

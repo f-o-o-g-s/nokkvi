@@ -1075,7 +1075,7 @@ fn milkdrop_app() -> Nokkvi {
     use crate::widgets::visualizer::milkdrop::BUNDLED_MILKDROP_PRESETS;
     let mut app = home_app();
     app.current_view = crate::View::Queue;
-    app.engine.visualization_mode =
+    app.settings.visualization_mode =
         nokkvi_data::types::player_settings::VisualizationMode::Milkdrop;
     app.playback.playing = true;
     app.milkdrop.library = nokkvi_data::services::milkdrop_presets::PresetLibrary::new(
