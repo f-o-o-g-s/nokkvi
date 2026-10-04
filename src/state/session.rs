@@ -73,7 +73,6 @@ impl ActivePlaylistContext {
     /// the restored banner is complete and correct (visibility included) before
     /// the playlists list reloads. `handle_playlists_loaded` later re-syncs it
     /// against fresh server metadata.
-    #[allow(clippy::too_many_arguments)]
     pub fn from_persisted(
         id: String,
         name: String,

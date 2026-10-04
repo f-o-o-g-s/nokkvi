@@ -4,7 +4,7 @@
 //! Extracted from mod.rs to reduce file size.
 
 use iced::{
-    Alignment, Border, Color, Element, Length, Padding,
+    Alignment, Color, Element, Length, Padding,
     font::Weight,
     widget::{Space, button, column, container, row, svg, text},
 };
@@ -585,7 +585,6 @@ impl SettingsPage {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let _ = Border::default();
         slot_list::slot_list_background_container(content.into())
     }
 }

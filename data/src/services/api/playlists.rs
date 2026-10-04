@@ -25,16 +25,11 @@ struct PlaylistInner {
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)] // Fields needed for serde deserialization
 struct SubsonicPlaylistWithSongs {
-    id: Option<String>,
-    name: Option<String>,
     entry: Option<serde_json::Value>, // Can be array or single object
     /// OpenSubsonic `readonly` (0.61+, lowercase key —
     /// `reference-navidrome/server/subsonic/responses/responses.go:324`).
     readonly: Option<bool>,
-    #[serde(rename = "validUntil")]
-    valid_until: Option<String>,
 }
 
 /// Playlist-level attributes captured from the Subsonic `getPlaylist`
@@ -52,9 +47,7 @@ pub struct SubsonicPlaylistAttrs {
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)] // Fields needed for serde deserialization
 struct SubsonicSongEntry {
-    id: Option<String>,
     #[serde(rename = "albumId")]
     album_id: Option<String>,
 }

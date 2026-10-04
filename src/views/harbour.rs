@@ -1804,7 +1804,6 @@ fn render_row<'a>(
 /// quad from the row's own album ids (atomic upgrade once all tiles land) →
 /// single mini → blank `bg2` chassis until a cover warms. ONE ladder for Item
 /// rows AND collapsed teaser headers, so the two can't drift.
-#[allow(clippy::too_many_arguments)]
 fn harbour_art_element<'a, M: 'a>(
     custom_playlist_id: Option<&str>,
     art_album_id: Option<&String>,

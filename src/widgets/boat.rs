@@ -151,7 +151,6 @@ use crate::widgets::overflow_pin::OverflowPin;
 /// geometry (hull bottom-center → anchor ring); `anchor_sway` decays to 0
 /// while un-anchored, so the trawl rope draws taut. Pass `None` for the
 /// Lines-visualizer behavior (the drop-anchor event, unchanged).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
