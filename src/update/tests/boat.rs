@@ -604,6 +604,52 @@ mod harbour_scene_tests {
     }
 
     #[test]
+    fn harbour_scene_keeps_the_audio_feed_open_with_the_visualizer_off() {
+        // The scene's light follows the music, so while it shows the audio
+        // analysis stays open even with the visualizer Off; leaving Harbour
+        // closes it again.
+        use nokkvi_data::types::player_settings::VisualizationMode;
+
+        let mut app = app_on_harbour();
+        app.settings.visualization_mode = VisualizationMode::Off;
+        let _ = app.update(Message::FrameTick(Instant::now()));
+        assert!(
+            app.harbour_scene.feeds_visualizer,
+            "the scene marks itself feeding"
+        );
+        assert!(
+            app.visualizer_feed_wanted(),
+            "Harbour wants the feed with the visualizer Off"
+        );
+
+        app.current_view = View::Queue;
+        let _ = app.update(Message::FrameTick(Instant::now()));
+        assert!(
+            !app.harbour_scene.feeds_visualizer,
+            "leaving Harbour drops the mark"
+        );
+        assert!(
+            !app.visualizer_feed_wanted(),
+            "Off and off-Harbour closes the feed"
+        );
+    }
+
+    #[test]
+    fn harbour_music_settles_without_a_visualizer() {
+        // No visualizer (pre-login, tests): the scene reads silence and the
+        // light stays at its quiet look.
+        let mut app = app_on_harbour();
+        app.harbour_scene.music.reach = [0.9; crate::widgets::visualizer::state::SCENE_BANDS];
+        let t0 = Instant::now();
+        let _ = app.update(Message::FrameTick(t0));
+        let _ = app.update(Message::FrameTick(t0 + Duration::from_secs(2)));
+        assert!(
+            app.harbour_scene.music.level() < 0.01,
+            "silence settles the curtain"
+        );
+    }
+
+    #[test]
     fn harbour_boat_is_lit_at_night_and_plain_by_day() {
         // The night scene lights the boat (the shader's aurora behind it);
         // the day scene keeps the plain themed sprite. The harbour tick

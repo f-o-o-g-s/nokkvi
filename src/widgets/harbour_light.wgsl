@@ -24,6 +24,10 @@ struct Scene {
     moon: vec4<f32>,
     // star count, glow count, bubble count, unused
     sky: vec4<f32>,
+    // music level, surge strength, surge x (0..1 across), unused
+    music: vec4<f32>,
+    // the smoothed spectrum, bass first, 8 bands
+    spectrum: array<vec4<f32>, 2>,
     bg: vec4<f32>,
     text: vec4<f32>,
     highlight: vec4<f32>,
@@ -140,9 +144,21 @@ fn arc_base(px: f32, q1: f32, q2: f32) -> f32 {
         + 0.01 * sin(xx * 11.0 + q1 * 1.9);
 }
 
+// The smoothed spectrum at `b` (0 = bass .. 1 = treble).
+fn spectrum_at(b: f32) -> f32 {
+    let f = clamp(b, 0.0, 1.0) * 7.0;
+    let i0 = u32(floor(f));
+    let i1 = min(i0 + 1u, 7u);
+    return mix(scene.spectrum[i0 / 4u][i0 % 4u], scene.spectrum[i1 / 4u][i1 % 4u], fract(f));
+}
+
 // x = the curtain's light at (u, y); y = a soft wide glow standing in for
-// the preset's feedback trail and blur.
+// the preset's feedback trail and blur. With music the rays reach with the
+// spectrum (bass in the middle of the panel, treble at the sides, as in the
+// preset) and a kick's surge brightens the curtain where it passes.
 fn aurora(u: f32, px: f32, y: f32, q1: f32, q2: f32) -> vec2<f32> {
+    let hgt = spectrum_at(abs(u * 2.0 - 1.0));
+    let sweep = exp(-pow((u - scene.music.z) * 5.0, 2.0)) * scene.music.y;
     let xx = px + q2;
     let base = arc_base(px, q1, q2);
     let slope = 0.07 * cos(xx * 2.1 + q1 * 0.7) + 0.106 * cos(xx * 5.3 - q1 * 1.1)
@@ -154,21 +170,22 @@ fn aurora(u: f32, px: f32, y: f32, q1: f32, q2: f32) -> vec2<f32> {
     let r1c = vnoise(vec2<f32>(u * 96.0 + q2 * 11.2, 16.0 + q1 * 0.32));
     let r2 = vnoise(vec2<f32>(u * 256.0 - q2 * 19.2, y * 8.0 - q1 * 1.28));
     let r3 = vnoise(vec2<f32>(u * 640.0 + q2 * 28.8, y * 1.92 + q1 * 0.64));
-    let len = 0.15 * (0.5 + 1.1 * r1c * r1c);
+    let len = 0.15 * (0.5 + 1.1 * r1c * r1c) * (0.85 + 0.9 * hgt);
     let body = exp(-max(above, 0.0) / len) * ss(-0.02, 0.004, above);
     let edge = exp(-abs(above) / 0.014) * (0.6 + 0.4 * r2);
     let rays = (0.3 + 0.7 * r1 * r1) * (0.6 + 0.4 * r2) * (0.7 + 0.3 * r3);
-    var cur = (body * rays + edge * 0.6) * dens * env * 0.68;
+    var cur = (body * rays + edge * 0.6) * dens * env * 0.68
+        * (0.9 + 0.45 * hgt + 0.2 * scene.music.x) * (1.0 + 1.3 * sweep);
 
     let xx2 = px * 0.8 - q2 * 0.5 + 3.0;
     let base2 = AURORA_BACK_BASE + 0.025 * sin(xx2 * 1.7 + q1 * 0.4) + 0.012 * sin(xx2 * 4.1 - q1 * 0.6);
     let above2 = y - base2;
     let body2 = exp(-max(above2, 0.0) / 0.12) * ss(-0.07, 0.02, above2);
     let env2 = 0.3 + 0.7 * vnoise(vec2<f32>(u * 12.8 - q2 * 3.2 + 16.0, 19.5));
-    cur += body2 * env2 * (0.4 + 0.6 * r1) * (0.6 + 0.4 * r3) * 0.3;
+    cur += body2 * env2 * (0.4 + 0.6 * r1) * (0.6 + 0.4 * r3) * 0.3 * (0.9 + 0.4 * hgt);
 
     let soft = (exp(-max(above, 0.0) / (len * 2.5)) * ss(-0.08, 0.0, above)
-        + exp(-abs(above) / 0.05) * 0.5) * dens * env * 0.35;
+        + exp(-abs(above) / 0.05) * 0.5) * dens * env * 0.35 * (1.0 + 0.8 * sweep);
     return vec2<f32>(clamp(cur, 0.0, 1.0), clamp(soft, 0.0, 1.0));
 }
 

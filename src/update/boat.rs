@@ -204,10 +204,24 @@ pub(crate) fn step_boat(app: &mut Nokkvi, now: Instant) {
 ///   the thematic OPPOSITE of trawling, so both its fields are pinned BEFORE
 ///   `step()` each tick — pinning after would let the fire-check inside the
 ///   step land first and stall the boat for a frame every 45–120 s.
+impl Nokkvi {
+    /// The Harbour Trawl scene is on screen: the Harbour view on the home
+    /// screen with no search (a search replaces the panel with results).
+    pub(crate) fn harbour_scene_on_screen(&self) -> bool {
+        self.screen == crate::Screen::Home
+            && self.current_view == crate::View::Harbour
+            && self.harbour.search_query.trim().is_empty()
+    }
+}
+
 pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
-    let on_harbour = app.screen == crate::Screen::Home
-        && app.current_view == crate::View::Harbour
-        && app.harbour.search_query.trim().is_empty();
+    let on_harbour = app.harbour_scene_on_screen();
+    // The scene keeps the audio analysis open while it shows (its light
+    // follows the music with the visualizer Off): re-sync on the edge.
+    if app.harbour_scene.feeds_visualizer != on_harbour {
+        app.harbour_scene.feeds_visualizer = on_harbour;
+        app.sync_visualizer_feed();
+    }
     if !on_harbour {
         app.harbour_scene.boat.visible = false;
         app.harbour_scene.boat.last_tick = None;
@@ -233,6 +247,12 @@ pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     // `advanced` is non-negative, so the cast floors: its whole part is the
     // number of full cycles crossed this tick (0 on an ordinary frame).
     app.harbour_scene.sea_cycle = app.harbour_scene.sea_cycle.wrapping_add(advanced as u32);
+    let music = app
+        .visualizer
+        .as_ref()
+        .map(crate::widgets::visualizer::Visualizer::scene_music)
+        .unwrap_or_default();
+    app.harbour_scene.music.step(music, dt.as_secs_f32());
     let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_scene.sea_phase);
 
     // Suppress the drop-anchor state machine BEFORE the step (see docs),

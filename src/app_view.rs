@@ -2477,6 +2477,7 @@ impl Nokkvi {
                         harbour_sea_bars: &self.harbour_scene.sea_bars,
                         harbour_sea_phase: self.harbour_scene.sea_phase,
                         harbour_sea_cycle: self.harbour_scene.sea_cycle,
+                        harbour_music: &self.harbour_scene.music,
                     })
                     .map(Message::Harbour)
             }

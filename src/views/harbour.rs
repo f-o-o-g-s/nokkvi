@@ -1192,6 +1192,8 @@ pub(crate) struct HarbourViewData<'a> {
     /// Completed sea-phase cycles — varies the scene's rare events
     /// (shooting star, leaping fish) per cycle.
     pub harbour_sea_cycle: u32,
+    /// How the scene's night light is following the music.
+    pub harbour_music: &'a crate::widgets::harbour_light::HarbourMusic,
 }
 
 impl HarbourPage {
@@ -1384,6 +1386,7 @@ impl HarbourPage {
                     data.harbour_sea_bars,
                     data.harbour_sea_phase,
                     data.harbour_sea_cycle,
+                    data.harbour_music,
                     move || {
                         section_pill(
                             "assets/icons/anchor.svg",

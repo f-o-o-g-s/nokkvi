@@ -1735,11 +1735,34 @@ impl Nokkvi {
             return;
         };
         let mode = self.settings.visualization_mode;
-        viz.set_feed_active(mode != nokkvi_data::types::player_settings::VisualizationMode::Off);
+        viz.set_feed_active(self.visualizer_feed_wanted());
         if let Some(worker_mode) = crate::widgets::visualizer::VisualizationMode::from_setting(mode)
         {
             viz.set_mode(worker_mode);
         }
+    }
+
+    /// Whether the audio analysis should run: a visualizer is on, or the
+    /// Harbour Trawl scene is on screen (its night light follows the music
+    /// with the visualizer Off too). The one predicate behind both the
+    /// UI-side FFT feed and the engine's audio tap.
+    pub(crate) fn visualizer_feed_wanted(&self) -> bool {
+        self.settings.visualization_mode
+            != nokkvi_data::types::player_settings::VisualizationMode::Off
+            || self.harbour_scene_on_screen()
+    }
+
+    /// Push [`Self::visualizer_feed_wanted`] to the UI-side feed now and to
+    /// the engine's audio tap (async).
+    pub(crate) fn sync_visualizer_feed(&self) {
+        self.sync_visualizer_mode();
+        let active = self.visualizer_feed_wanted();
+        self.shell_spawn("sync_visualizer_tap", move |shell| async move {
+            let engine_arc = shell.audio_engine();
+            let engine = engine_arc.lock().await;
+            engine.set_visualizer_enabled(active);
+            Ok(())
+        });
     }
 
     pub(crate) fn handle_cycle_visualization(&mut self) -> Task<Message> {
@@ -1748,7 +1771,7 @@ impl Nokkvi {
 
         let mode = self.settings.visualization_mode;
         self.milkdrop_mode_edge(prev, mode);
-        let active = mode != nokkvi_data::types::player_settings::VisualizationMode::Off;
+        let active = self.visualizer_feed_wanted();
 
         // Synchronously gate the UI-side FFT worker + sample-buffering callback
         // so the 60 Hz DSP pipeline idles the instant the visualizer is turned
@@ -2226,8 +2249,7 @@ impl Nokkvi {
         // half idles the UI-side worker now; the engine-side tap gate is pushed
         // alongside crossfade below.
         self.sync_visualizer_mode();
-        let viz_active = settings.visualization_mode
-            != nokkvi_data::types::player_settings::VisualizationMode::Off;
+        let viz_active = self.visualizer_feed_wanted();
 
         // Crossfade and bit-perfect are mutually-exclusive modes. The toggle /
         // checkbox paths persist the cleared sibling so disk never holds both,

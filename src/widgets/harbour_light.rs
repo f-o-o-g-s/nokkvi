@@ -20,12 +20,16 @@ use iced::{
     widget::shader::{self, Viewport},
 };
 
-use crate::widgets::visualizer::milkdrop::palette::PresetPalette;
+use crate::widgets::visualizer::{
+    milkdrop::palette::PresetPalette,
+    state::{SCENE_BANDS, SceneMusic},
+};
 
 /// Samples per waterline handed to the shader (4 per `vec4`).
 pub(crate) const LINE_SAMPLES: usize = 128;
 const LINE_VEC4S: usize = LINE_SAMPLES / 4;
 const _: () = assert!(LINE_SAMPLES.is_multiple_of(4));
+const _: () = assert!(SCENE_BANDS.is_multiple_of(4));
 /// Star slots in the uniform; the constellation must fit.
 pub(crate) const MAX_STARS: usize = 64;
 /// Glow-point slots (kelp beads, notes, the anchor's glint).
@@ -60,6 +64,80 @@ pub(crate) struct SeaLight {
     /// Bubbles drawn as glassy spheres: x, height, radius, alpha.
     pub bubbles: [[f32; 4]; MAX_BUBBLES],
     pub bubble_count: usize,
+    /// The music the light follows this frame.
+    pub music: HarbourMusic,
+}
+
+/// How the night scene follows the music: the aurora's rays reach with a
+/// smoothed coarse spectrum, and each kick launches a surge of light that
+/// sweeps along the curtain, alternating sides (the `nokkvi - aurora`
+/// preset's own moves). Light only: the sea's sway and the boat stay calm.
+/// With nothing playing every input is zero and the scene settles to its
+/// quiet look.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HarbourMusic {
+    /// Smoothed spectrum, bass first, 0..1.
+    pub reach: [f32; SCENE_BANDS],
+    /// The surge's strength, 1 at a kick and decaying.
+    pub surge: f32,
+    /// Where the surge is, across the panel (runs past both edges).
+    pub surge_x: f32,
+    surge_dir: f32,
+    cooldown: f32,
+    /// The kick fell back below the re-arm level since the last surge.
+    armed: bool,
+}
+
+impl Default for HarbourMusic {
+    fn default() -> Self {
+        Self {
+            reach: [0.0; SCENE_BANDS],
+            surge: 0.0,
+            surge_x: 0.5,
+            surge_dir: -1.0,
+            cooldown: 0.0,
+            armed: true,
+        }
+    }
+}
+
+// TUNE: reach follows the spectrum over ~REACH_TAU; a kick above
+// KICK_TRIGGER (after falling under KICK_REARM, at most once per
+// SURGE_COOLDOWN) launches a surge crossing at SURGE_SPEED panels/s that
+// fades over SURGE_TAU.
+const REACH_TAU: f32 = 0.18;
+const KICK_TRIGGER: f32 = 0.6;
+const KICK_REARM: f32 = 0.35;
+const SURGE_COOLDOWN: f32 = 0.25;
+const SURGE_SPEED: f32 = 1.6;
+const SURGE_TAU: f32 = 0.45;
+
+impl HarbourMusic {
+    /// Advance by `dt` seconds toward the music `now`.
+    pub(crate) fn step(&mut self, now: SceneMusic, dt: f32) {
+        let ease = 1.0 - (-dt / REACH_TAU).exp();
+        for (r, target) in self.reach.iter_mut().zip(now.spectrum) {
+            *r += (target - *r) * ease;
+        }
+        self.cooldown = (self.cooldown - dt).max(0.0);
+        if now.kick < KICK_REARM {
+            self.armed = true;
+        }
+        if self.armed && self.cooldown <= 0.0 && now.kick > KICK_TRIGGER {
+            self.surge_dir = -self.surge_dir;
+            self.surge_x = if self.surge_dir > 0.0 { -0.1 } else { 1.1 };
+            self.surge = 1.0;
+            self.cooldown = SURGE_COOLDOWN;
+            self.armed = false;
+        }
+        self.surge_x += SURGE_SPEED * self.surge_dir * dt;
+        self.surge *= (-dt / SURGE_TAU).exp();
+    }
+
+    /// The overall level, 0..1.
+    pub(crate) fn level(&self) -> f32 {
+        self.reach.iter().sum::<f32>() / SCENE_BANDS as f32
+    }
 }
 
 /// The night scene's colours for the canvas furniture drawn over the
@@ -115,6 +193,10 @@ struct SceneUniform {
     moon: [f32; 4],
     /// Star, glow and bubble counts, unused.
     sky: [f32; 4],
+    /// Music level, surge strength, surge x (0..1 across), unused.
+    music: [f32; 4],
+    /// The smoothed spectrum, bass first.
+    spectrum: [[f32; 4]; SCENE_BANDS / 4],
     bg: [f32; 4],
     text: [f32; 4],
     highlight: [f32; 4],
@@ -134,7 +216,7 @@ unsafe impl bytemuck::Zeroable for SceneUniform {}
 
 const _: () = assert!(
     std::mem::size_of::<SceneUniform>()
-        == 16 * (8 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
+        == 16 * (9 + SCENE_BANDS / 4 + 6 + 2 * LINE_VEC4S + MAX_STARS + MAX_GLOWS + MAX_BUBBLES)
 );
 
 const WGSL: &str = include_str!("harbour_light.wgsl");
@@ -204,6 +286,15 @@ impl<Message> shader::Program<Message> for LightProgram {
                     self.light.bubble_count.min(MAX_BUBBLES) as f32,
                     0.0,
                 ],
+                music: [
+                    self.light.music.level(),
+                    self.light.music.surge,
+                    self.light.music.surge_x,
+                    0.0,
+                ],
+                spectrum: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| self.light.music.reach[4 * i + j])
+                }),
                 bg: rgba(p.bg),
                 text: rgba(p.text),
                 highlight: rgba(p.highlight),
@@ -385,6 +476,8 @@ mod tests {
                 "boat",
                 "moon",
                 "sky",
+                "music",
+                "spectrum",
                 "bg",
                 "text",
                 "highlight",
@@ -397,6 +490,57 @@ mod tests {
                 "bubbles"
             ],
             "WGSL `Scene` fields drifted from `SceneUniform`"
+        );
+    }
+
+    fn music(level: f32, kick: f32) -> SceneMusic {
+        SceneMusic {
+            spectrum: [level; SCENE_BANDS],
+            kick,
+        }
+    }
+
+    #[test]
+    fn music_reach_follows_the_spectrum_and_settles_in_silence() {
+        let mut m = HarbourMusic::default();
+        for _ in 0..120 {
+            m.step(music(0.8, 0.0), 1.0 / 60.0);
+        }
+        assert!((m.level() - 0.8).abs() < 0.01, "reach eases to the music");
+        for _ in 0..120 {
+            m.step(SceneMusic::default(), 1.0 / 60.0);
+        }
+        assert!(m.level() < 0.01, "silence settles the curtain");
+    }
+
+    #[test]
+    fn a_kick_launches_one_surge_and_sides_alternate() {
+        let mut m = HarbourMusic::default();
+        m.step(music(0.5, 0.9), 1.0 / 60.0);
+        assert!(m.surge > 0.9, "a kick launches a surge");
+        let first_dir_right = m.surge_x < 0.5;
+        // Held high, the kick does not retrigger.
+        for _ in 0..30 {
+            m.step(music(0.5, 0.9), 1.0 / 60.0);
+        }
+        assert!(m.surge < 0.6, "a held kick only decays the surge");
+        // Released and struck again: the next surge runs the other way.
+        m.step(music(0.5, 0.0), 1.0 / 60.0);
+        m.step(music(0.5, 0.9), 1.0 / 60.0);
+        assert!(m.surge > 0.9);
+        assert_ne!(m.surge_x < 0.5, first_dir_right, "surges alternate sides");
+    }
+
+    #[test]
+    fn surges_respect_the_cooldown() {
+        let mut m = HarbourMusic::default();
+        m.step(music(0.5, 0.9), 0.01);
+        let x = m.surge_x;
+        m.step(music(0.5, 0.0), 0.01);
+        m.step(music(0.5, 0.9), 0.01);
+        assert!(
+            (m.surge_x - x).abs() < 0.1,
+            "a kick inside the cooldown does not relaunch"
         );
     }
 

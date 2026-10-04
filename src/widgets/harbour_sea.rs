@@ -1830,6 +1830,7 @@ pub(crate) fn sea_light(
     phase: f32,
     cycle: u32,
     boat: &BoatState,
+    music: &crate::widgets::harbour_light::HarbourMusic,
     w: f32,
     h: f32,
 ) -> crate::widgets::harbour_light::SeaLight {
@@ -1924,6 +1925,7 @@ pub(crate) fn sea_light(
         glow_count,
         bubbles,
         bubble_count,
+        music: *music,
     }
 }
 
@@ -1966,6 +1968,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
     sea_bars: &'a [f64],
     sea_phase: f32,
     sea_cycle: u32,
+    music: &'a crate::widgets::harbour_light::HarbourMusic,
     pill: impl Fn() -> Element<'a, M> + 'a,
 ) -> Element<'a, M> {
     use iced::widget::{column, container, stack};
@@ -1987,7 +1990,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         let lit = scene_is_lit();
         let backdrop: Element<'a, M> = if lit {
             crate::widgets::harbour_light::light_backdrop(
-                sea_light(sea_bars, sea_phase, sea_cycle, boat, w, h),
+                sea_light(sea_bars, sea_phase, sea_cycle, boat, music, w, h),
                 w,
                 h,
             )

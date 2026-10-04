@@ -670,6 +670,35 @@ impl Drop for FftShutdownGuard {
     }
 }
 
+/// Bands in the Harbour scene's coarse spectrum (bass first).
+pub(crate) const SCENE_BANDS: usize = 8;
+
+/// The music for the Harbour Trawl scene (`VisualizerState::scene_music`):
+/// a coarse spectrum, bass first, and a kick envelope, each 0..1.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct SceneMusic {
+    pub spectrum: [f32; SCENE_BANDS],
+    pub kick: f32,
+}
+
+impl SceneMusic {
+    /// Average `fine` (bass first, any length) down to the scene's bands.
+    pub(crate) fn bands(fine: &[f32]) -> [f32; SCENE_BANDS] {
+        std::array::from_fn(|i| {
+            let start = i * fine.len() / SCENE_BANDS;
+            let end = ((i + 1) * fine.len() / SCENE_BANDS)
+                .max(start + 1)
+                .min(fine.len());
+            let chunk = fine.get(start..end).unwrap_or(&[]);
+            if chunk.is_empty() {
+                0.0
+            } else {
+                (chunk.iter().sum::<f32>() / chunk.len() as f32).clamp(0.0, 1.0)
+            }
+        })
+    }
+}
+
 impl VisualizerState {
     pub(crate) fn new(
         bar_count: usize,
@@ -1367,6 +1396,37 @@ impl VisualizerState {
             return 0.0;
         }
         f32::from_bits(self.beat_pulse.load(Ordering::Relaxed))
+    }
+
+    /// The music as the Harbour Trawl scene reads it, from whichever path
+    /// the worker runs: MilkDrop's analyzer (its 32-band spectrum and kick
+    /// onset) or the spectrum engine (the display bars and the beat pulse).
+    /// Silent (all zero) while the feed is closed or mid-clear, so the scene
+    /// settles instead of surging on stale energy.
+    pub(crate) fn scene_music(&self) -> SceneMusic {
+        if !self.feed_active.load(Ordering::Relaxed)
+            || self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return SceneMusic::default();
+        }
+        if self.mode.load() == VisualizationMode::Milkdrop {
+            let Some(f) = self.milkdrop.features.try_lock() else {
+                return SceneMusic::default();
+            };
+            if f.is_silent > 0.5 {
+                return SceneMusic::default();
+            }
+            return SceneMusic {
+                spectrum: SceneMusic::bands(&f.spectrum),
+                kick: f.kick_onset.clamp(0.0, 1.0),
+            };
+        }
+        let bars: Vec<f32> = self.get_bars().iter().map(|&b| b as f32).collect();
+        SceneMusic {
+            spectrum: SceneMusic::bands(&bars),
+            kick: self.current_beat_pulse(),
+        }
     }
 
     /// Per-band energies (bass, mid, treble), each ~[0,1]. Lock-free reads,

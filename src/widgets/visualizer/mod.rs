@@ -598,6 +598,12 @@ impl Visualizer {
         self.state.current_onset_energy()
     }
 
+    /// The music for the Harbour Trawl scene (a coarse spectrum and a kick
+    /// envelope), from whichever path the FFT worker runs.
+    pub(crate) fn scene_music(&self) -> state::SceneMusic {
+        self.state.scene_music()
+    }
+
     /// Slow-decay onset envelope (~10 s time constant). Used to scale
     /// the boat's baseline sail thrust by the song's overall energy
     /// level — energetic tracks make the boat sail noticeably faster

@@ -227,6 +227,13 @@ pub struct HarbourScene {
     /// the view draws the SAME array the physics sampled (the coherence
     /// guarantee that keeps the hull sitting ON the drawn water).
     pub sea_bars: Vec<f64>,
+    /// How the night light is following the music (stepped by the same
+    /// tick from the visualizer's `scene_music`).
+    pub music: crate::widgets::harbour_light::HarbourMusic,
+    /// Whether the scene was on screen at the last tick: the edge that
+    /// re-syncs the visualizer feed, which stays open while the scene shows
+    /// so it follows the music with the visualizer Off.
+    pub feeds_visualizer: bool,
 }
 
 impl Default for HarbourScene {
@@ -242,6 +249,8 @@ impl Default for HarbourScene {
             sea_phase: 0.0,
             sea_cycle: 0,
             sea_bars: Vec::new(),
+            music: crate::widgets::harbour_light::HarbourMusic::default(),
+            feeds_visualizer: false,
         }
     }
 }

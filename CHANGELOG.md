@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - On dark themes, the Trawl scene's longship is moonlit, keeping its colors, with a lantern at the masthead.
 - On dark themes, the Trawl scene's kelp, fish, rocks, crate, rope and anchor now catch the aurora's light, and the kelp glows faintly.
 - On dark themes, the Trawl scene's bubbles now look like glass and its sky notes glow softly.
+- On dark themes, the Trawl scene's aurora now follows the music, reaching with the spectrum and surging on each kick, even with the visualizer off.
 
 ### Fixed
 
