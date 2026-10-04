@@ -480,270 +480,200 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
             ArtworkStretchFit::Cover => ContentFit::Cover,
             ArtworkStretchFit::Fill => ContentFit::Fill,
         };
+        // The cover fills the column edge to edge, and every layer above it
+        // spans the same full (non-square) rect.
         return iced::widget::responsive(move |size| {
-            use iced::widget::{container, image, stack};
-
-            let content: Element<'_, Message> = if let Some(handle) = artwork_handle {
-                image(handle.clone())
-                    .content_fit(fit)
-                    .width(Length::Fixed(size.width))
-                    .height(Length::Fixed(size.height))
-                    .into()
-            } else {
-                placeholder.content(Length::Fixed(size.width), Length::Fixed(size.height))
-            };
-
-            let cover = container(content)
-                .width(Length::Fixed(size.width))
-                .height(Length::Fixed(size.height))
-                .style(|_theme| container::Style {
-                    background: Some(artwork_outer_bg().into()),
-                    ..Default::default()
-                });
-
-            // Overlay the active visualizer across the FULL (non-square) cover,
-            // not a centered square. For Scope the shader sizes the ring off
-            // `min(w, h)` in pixel space, so it stays a true circle centered in
-            // the panel regardless of aspect; letting the visualizer fill the
-            // whole rect means the particle dust fades out at the real panel
-            // edges instead of being hard-clipped (scissored) at a sub-square
-            // boundary. Bars/Lines instead honor the Visualizer Height setting:
-            // they occupy `height_percent` of the cover height, bottom-anchored
-            // (cover art shows above) — the same knob the bottom band uses. Bars
-            // also recompute their bar layout from the panel width.
-            // Lyrics scrim BELOW the visualizer: the art dims for legibility
-            // while the visualizer keeps full strength above it; the haloed
-            // lyric text stacks topmost. All lyric pieces are event-
-            // transparent, so the panel context menu still works.
-            //
-            // MilkDrop is the exception: it replaces the cover, so the scrim
-            // moves ABOVE it (dimming the preset, not the hidden cover).
-            let milkdrop_over_art = over_art.as_ref().is_some_and(|(_, mode, _)| {
-                *mode == crate::widgets::visualizer::VisualizationMode::Milkdrop
-            });
-            let scrim = || {
-                crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(size.width, size.height)
-            };
-            let mut layers = stack![cover];
-            if lyrics.is_some() && !milkdrop_over_art {
-                layers = layers.push(scrim());
-            }
-            let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
-                let fills_panel = mode.fills_panel();
-                let band_h = if fills_panel {
-                    size.height
-                } else {
-                    (size.height * *height_percent).clamp(0.0, size.height)
-                };
-                let top_pad = (size.height - band_h).max(0.0);
-
-                let mut configured = viz.clone().mode(*mode);
-                // Bars recompute their bar layout from the actual panel width
-                // (the bottom-band path feeds the window width, which over a
-                // narrow column overflows and scissor-clips). Lines/Scope use a
-                // fixed point count, so no width hint is needed.
-                if *mode == crate::widgets::visualizer::VisualizationMode::Bars {
-                    configured = configured.width(size.width);
-                }
-                let ring = configured.view::<Message>();
-                let ring_layer: Element<'_, Message> = if fills_panel {
-                    container(ring)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .into()
-                } else {
-                    column![
-                        container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
-                        container(ring)
-                            .width(Length::Fill)
-                            .height(Length::Fixed(band_h)),
-                    ]
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-                };
-                layers = layers.push(ring_layer);
-                if lyrics.is_some() && milkdrop_over_art {
-                    layers = layers.push(scrim());
-                }
-                // Surfing boat over the Lines wave, confined to the same bottom
-                // band so it rides the rendered waveform. Inert + event-
-                // transparent, so it never steals the artwork right-click.
-                if let Some(b) = &boat
-                    && *mode == crate::widgets::visualizer::VisualizationMode::Lines
-                {
-                    // Size the boat off min(width, band) so its width can't exceed
-                    // a narrow band — keeps the over-cover wrap-margin constant
-                    // valid; the band's bottom is the boat's waterline.
-                    let boat_el = crate::widgets::boat::boat_overlay::<Message>(
-                        b.state,
-                        size.width,
-                        band_h,
-                        size.width.min(band_h),
-                        b.opacity,
-                        b.mirror,
-                        // Lines over-cover boat keeps the drop-anchor doodad.
-                        None,
-                    );
-                    let boat_layer = column![
-                        container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
-                        container(boat_el)
-                            .width(Length::Fill)
-                            .height(Length::Fixed(band_h)),
-                    ]
-                    .width(Length::Fill)
-                    .height(Length::Fill);
-                    layers = layers.push(boat_layer);
-                }
-                layers.into()
-            } else {
-                layers.into()
-            };
-            // Haloed lyric text, topmost — above the visualizer and boat.
-            if let Some(ly) = lyrics {
-                stack![
-                    panel,
-                    crate::widgets::lyrics_viewport::lyrics_text_layer(
-                        ly,
-                        lyrics_on_wheel,
-                        size.width,
-                        size.height
-                    )
-                ]
-                .into()
-            } else {
-                panel
-            }
+            let cover = cover_layer(artwork_handle, placeholder, fit, size.width, size.height);
+            compose_cover_panel(
+                cover,
+                size.width,
+                size.height,
+                over_art.as_ref(),
+                boat,
+                lyrics,
+                lyrics_on_wheel,
+            )
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
     }
 
-    // Square (Auto / AlwaysNative) — original behavior, plus the optional ring.
+    // Square (Auto / AlwaysNative): the cover and every layer above it sit in
+    // a centered `min(w, h)` square (so the lyric text matches the cover rect,
+    // not the raw column).
     iced::widget::responsive(move |size| {
-        use iced::widget::{container, image, stack};
-
         let square_size = size.width.min(size.height).max(0.0);
-
-        let content: Element<'_, Message> = if let Some(handle) = artwork_handle {
-            image(handle.clone())
-                .content_fit(ContentFit::Cover)
-                .width(Length::Fixed(square_size))
-                .height(Length::Fixed(square_size))
-                .into()
-        } else {
-            placeholder.content(Length::Fixed(square_size), Length::Fixed(square_size))
-        };
-
-        let cover = container(content)
-            .width(Length::Fixed(square_size))
-            .height(Length::Fixed(square_size))
-            .style(|_theme| container::Style {
-                background: Some(artwork_outer_bg().into()),
-                ..Default::default()
-            });
-
-        // Overlay the active visualizer over the cover square. Scope fills the
-        // square (centered ring). Bars/Lines honor the Visualizer Height setting:
-        // they occupy `height_percent` of the square, bottom-anchored (cover art
-        // shows above) — the same knob the bottom band uses.
-        // Lyrics scrim BELOW the visualizer, ABOVE MilkDrop (see the stretched
-        // closure above).
-        let milkdrop_over_art = over_art.as_ref().is_some_and(|(_, mode, _)| {
-            *mode == crate::widgets::visualizer::VisualizationMode::Milkdrop
-        });
-        let scrim =
-            || crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(square_size, square_size);
-        let mut layers = stack![cover];
-        if lyrics.is_some() && !milkdrop_over_art {
-            layers = layers.push(scrim());
-        }
-        let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
-            let fills_panel = mode.fills_panel();
-            let band_h = if fills_panel {
-                square_size
-            } else {
-                (square_size * *height_percent).clamp(0.0, square_size)
-            };
-            let top_pad = (square_size - band_h).max(0.0);
-
-            let mut configured = viz.clone().mode(*mode);
-            if *mode == crate::widgets::visualizer::VisualizationMode::Bars {
-                configured = configured.width(square_size);
-            }
-            let ring = configured.view::<Message>();
-            let ring_layer: Element<'_, Message> = if fills_panel {
-                container(ring)
-                    .width(Length::Fixed(square_size))
-                    .height(Length::Fixed(square_size))
-                    .into()
-            } else {
-                column![
-                    container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
-                    container(ring)
-                        .width(Length::Fixed(square_size))
-                        .height(Length::Fixed(band_h)),
-                ]
-                .width(Length::Fixed(square_size))
-                .height(Length::Fixed(square_size))
-                .into()
-            };
-            layers = layers.push(ring_layer);
-            if lyrics.is_some() && milkdrop_over_art {
-                layers = layers.push(scrim());
-            }
-            // Surfing boat over the Lines wave, confined to the same bottom band
-            // so it rides the rendered waveform. Inert + transparent.
-            if let Some(b) = &boat
-                && *mode == crate::widgets::visualizer::VisualizationMode::Lines
-            {
-                // Sprite basis = min(square_size, band): on a short band the boat
-                // sizes off the band height, keeping the wrap-margin constant valid.
-                let boat_el = crate::widgets::boat::boat_overlay::<Message>(
-                    b.state,
-                    square_size,
-                    band_h,
-                    square_size.min(band_h),
-                    b.opacity,
-                    b.mirror,
-                    // Lines over-cover boat keeps the drop-anchor doodad.
-                    None,
-                );
-                let boat_layer = column![
-                    container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
-                    container(boat_el)
-                        .width(Length::Fixed(square_size))
-                        .height(Length::Fixed(band_h)),
-                ]
-                .width(Length::Fixed(square_size))
-                .height(Length::Fixed(square_size));
-                layers = layers.push(boat_layer);
-            }
-            layers.into()
-        } else {
-            layers.into()
-        };
-        // Haloed lyric text over the centered square (matches the cover
-        // rect, not the raw column). Topmost — above visualizer and boat.
-        if let Some(ly) = lyrics {
-            stack![
-                panel,
-                crate::widgets::lyrics_viewport::lyrics_text_layer(
-                    ly,
-                    lyrics_on_wheel,
-                    square_size,
-                    square_size
-                )
-            ]
-            .into()
-        } else {
-            panel
-        }
+        let cover = cover_layer(
+            artwork_handle,
+            placeholder,
+            ContentFit::Cover,
+            square_size,
+            square_size,
+        );
+        compose_cover_panel(
+            cover,
+            square_size,
+            square_size,
+            over_art.as_ref(),
+            boat,
+            lyrics,
+            lyrics_on_wheel,
+        )
     })
     .width(Length::Shrink)
     .height(Length::Shrink)
     .into()
+}
+
+/// The cover image (or its placeholder) at `w` x `h` on the artwork backdrop:
+/// the base layer [`compose_cover_panel`] stacks onto.
+fn cover_layer<'a, Message: 'a>(
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    placeholder: ArtworkPlaceholder,
+    fit: ContentFit,
+    w: f32,
+    h: f32,
+) -> Element<'a, Message> {
+    let content: Element<'a, Message> = if let Some(handle) = artwork_handle {
+        iced::widget::image(handle.clone())
+            .content_fit(fit)
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .into()
+    } else {
+        placeholder.content(Length::Fixed(w), Length::Fixed(h))
+    };
+
+    container(content)
+        .width(Length::Fixed(w))
+        .height(Length::Fixed(h))
+        .style(|_theme| container::Style {
+            background: Some(artwork_outer_bg().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Stack the over-cover layers onto `cover`, which is already sized to
+/// `w` x `h`. The one copy of the layer order, shared by the square and the
+/// stretched panels. Bottom to top:
+///
+/// 1. The cover.
+/// 2. The lyrics scrim, BELOW the visualizer: the art dims for legibility
+///    while the visualizer keeps full strength. MilkDrop is the exception: it
+///    replaces the cover, so the scrim moves ABOVE it (dimming the preset, not
+///    the hidden cover).
+/// 3. The visualizer. Scope and MilkDrop fill the rect: the shader sizes the
+///    Scope ring off `min(w, h)` in pixel space, so it stays a true centered
+///    circle whatever the aspect, and its particle dust fades out at the real
+///    panel edges instead of being scissored at a sub-square. Bars and Lines
+///    honor the Visualizer Height setting instead: they occupy `height_percent`
+///    of the height, bottom-anchored (cover art shows above), the same knob the
+///    bottom band uses.
+/// 4. The surfing boat, confined to the Lines band so it rides the rendered
+///    waveform.
+/// 5. The haloed lyric text, topmost.
+///
+/// Every piece is inert and event-transparent, so a wrapping context menu
+/// still receives the artwork right-click. The stack takes its size from the
+/// cover and lays each layer above out against that same rect.
+fn compose_cover_panel<'a, Message: 'a + 'static>(
+    cover: Element<'a, Message>,
+    w: f32,
+    h: f32,
+    over_art: Option<&(
+        crate::widgets::visualizer::Visualizer,
+        crate::widgets::visualizer::VisualizationMode,
+        f32,
+    )>,
+    boat: Option<OverCoverBoat<'a>>,
+    lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
+    lyrics_on_wheel: Option<fn(f32) -> Message>,
+) -> Element<'a, Message> {
+    use iced::widget::{Space, stack};
+
+    use crate::widgets::{lyrics_viewport, visualizer::VisualizationMode};
+
+    let milkdrop_over_art =
+        over_art.is_some_and(|(_, mode, _)| *mode == VisualizationMode::Milkdrop);
+    let scrim = || lyrics_viewport::lyrics_scrim::<Message>(w, h);
+    let mut layers = stack![cover];
+    if lyrics.is_some() && !milkdrop_over_art {
+        layers = layers.push(scrim());
+    }
+    if let Some((viz, mode, height_percent)) = over_art {
+        let mode = *mode;
+        let fills_panel = mode.fills_panel();
+        let band_h = if fills_panel {
+            h
+        } else {
+            (h * *height_percent).clamp(0.0, h)
+        };
+        let top_pad = (h - band_h).max(0.0);
+        // A `band_h`-tall layer resting on the panel's bottom edge.
+        let bottom_band = |content: Element<'a, Message>| -> Element<'a, Message> {
+            column![
+                container(Space::new()).height(Length::Fixed(top_pad)),
+                container(content)
+                    .width(Length::Fixed(w))
+                    .height(Length::Fixed(band_h)),
+            ]
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .into()
+        };
+
+        let mut configured = viz.clone().mode(mode);
+        // Bars recompute their bar layout from the actual panel width (the
+        // bottom-band path feeds the window width, which over a narrow column
+        // overflows and scissor-clips). Lines/Scope use a fixed point count,
+        // so no width hint is needed.
+        if mode == VisualizationMode::Bars {
+            configured = configured.width(w);
+        }
+        let ring = configured.view::<Message>();
+        let ring_layer: Element<'a, Message> = if fills_panel {
+            container(ring)
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(h))
+                .into()
+        } else {
+            bottom_band(ring)
+        };
+        layers = layers.push(ring_layer);
+        if lyrics.is_some() && milkdrop_over_art {
+            layers = layers.push(scrim());
+        }
+        if let Some(b) = boat
+            && mode == VisualizationMode::Lines
+        {
+            // Size the boat off min(width, band) so its width can't exceed a
+            // narrow band — keeps the over-cover wrap-margin constant valid;
+            // the band's bottom is the boat's waterline.
+            let boat_el = crate::widgets::boat::boat_overlay::<Message>(
+                b.state,
+                w,
+                band_h,
+                w.min(band_h),
+                b.opacity,
+                b.mirror,
+                // Lines over-cover boat keeps the drop-anchor doodad.
+                None,
+            );
+            layers = layers.push(bottom_band(boat_el));
+        }
+    }
+    let panel: Element<'a, Message> = layers.into();
+    if let Some(ly) = lyrics {
+        stack![
+            panel,
+            lyrics_viewport::lyrics_text_layer(ly, lyrics_on_wheel, w, h)
+        ]
+        .into()
+    } else {
+        panel
+    }
 }
 
 /// Wrap an artwork panel in its right-click menu when `entries` is non-empty;
