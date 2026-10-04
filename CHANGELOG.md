@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - A prompt that opens while another window is up now appears on top of it instead of hiding behind it.
 - The `nav-up`, `nav-down` and `enter` commands now do nothing while the EQ, About or Get Info window or a dialog is open, like the keys.
+- With Fade on Skip set to Boundary Fade, Next and Previous now cut straight out of a song the server is still transcoding.
 
 ### Fixed
 
