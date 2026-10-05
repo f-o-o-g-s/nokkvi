@@ -1136,7 +1136,9 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         .into()
 }
 
-#[cfg(test)]
+// iced only implements its null renderer `()` under `debug_assertions`, so
+// these tests cannot build in a release-profile `cargo test`.
+#[cfg(all(test, debug_assertions))]
 mod layout_invariants {
     //! Verifies the layout pattern used by `nav_content`'s outer row. The
     //! merged-mode marquee depends on `center_section` being given a max width
