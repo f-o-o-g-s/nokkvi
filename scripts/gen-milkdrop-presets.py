@@ -120,6 +120,119 @@ BEATS = ("bk = bass - bass_att; sinceb = sinceb + dt;\n"
          "ba1 = if(trig, 0, ba1); bs1 = if(trig, min(0.5 + bk * 1.4, 1.6), bs1);\n"
          "sinceb = if(trig, 0, sinceb);\n"
          "ba1 = ba1 + dt; ba2 = ba2 + dt; ba3 = ba3 + dt;\n")
+# A beat clock: the tempo and the phase of the beat, so a preset can act ON the
+# beat, ahead of it if it likes, and in bars, instead of on every bass rise
+# (BEATS fires on off-beat bass notes as often as on kicks, and more than once
+# per beat on busy bass lines). Everything runs in real time (`time`), not
+# `fps`, which nokkvi pins at 60 whatever the frame rate.
+# - Onset: the bass above its follower plus some of the mids, resampled on a
+#   60 Hz grid. Its last 232 ticks (mean removed) live in megabuf 0..231 and a
+#   leaky autocorrelation (~9 s) of them in 256..487.
+# - Tempo: each beat period of 18 to 56 ticks (200 to 64 BPM) is scored by a
+#   comb over its multiples (1, 2, 3 and 4 periods: the bar shows in most
+#   music even where the beat itself is syncopated; the k-th read takes the
+#   best of +-k/2 ticks, since a true period falls between ticks and its
+#   multiples drift off the integer lags) and its half, under a prior around
+#   120 BPM (megabuf 512..), then refined between ticks. A new
+#   tempo must out-score the current one by 15% for 2.5 s (except in the first
+#   6 s), so a dotted bass line does not flip it to 2/3 speed for a bar.
+# - Phase: the onset energy (squared, so kicks outweigh the bass notes between
+#   them) is binned by the clock's own phase (16 bins, ~4 s memory, megabuf
+#   600..615); the clock's offset follows the strongest bin, but only moves
+#   across to a far bin when that bin holds twice what the current one does
+#   (riding out breakdowns and fills).
+# - bc_beat fires once per beat, 40 ms early (the analyzer reports onsets that
+#   much late); bc_ph is the phase (0 at the beat), bc_per the period in 60 Hz
+#   ticks, bc_lock 1 once the phase histogram is peaked (confidence above 2.8,
+#   below 2.3 unlocks; never in the first 6 s). bc_bmax is the onset peak
+#   seen since this beat (a window of a quarter beat + 50 ms), bc_lb the last
+#   finished window's and bc_sema their running mean (~4 beats). bc_j is the
+#   position in a bar of 4, 0 = the beat that has carried the strongest
+#   onsets lately (megabuf 620..623, ~32 beats); bc_bar counts bars.
+# Measured against offline beat tracking on 10 songs (dance, techno,
+# hip-hop, rock, downtempo): 91% of its beats within 1/8 beat of the real
+# one (93-100% where the beat is plain; ~50% through a long kick-less
+# breakdown, where it follows the bass line's syncopation).
+BC_INIT = ("bc_pt = 0; bc_acc = 0; bc_t = 0; bc_tt = 0; bc_om = 0; bc_per = 30; bc_chal = 0; bc_pref = 0; bc_off = 0;"
+           " bc_ph = 0; bc_pph = 0; bc_tsb = 9; bc_beat = 0; bc_cs = 0; bc_lock = 0; bc_win = 0; bc_bmax = 0; bc_lb = 0;"
+           " bc_sema = 0.3; bc_bq = 0; bc_anc = 0; bc_j = 0; bc_bar = 0;"
+           " bc_l = 0; loop(760, megabuf(bc_l) = 0; bc_l = bc_l + 1);"
+           " bc_l = 18; loop(39, megabuf(512 + bc_l) = exp(-0.5 * sqr(log(30 / bc_l) / log(2))); bc_l = bc_l + 1);")
+BC_FRAME = """bc_dt = min(max(time - bc_pt, 0), 0.1); bc_pt = time; bc_tt = bc_tt + bc_dt;
+bc_o = min(max(bass - bass_att, 0) + 0.3 * max(mid - mid_att, 0), 3);
+bc_acc = bc_acc + bc_dt; bc_nt = min(int(bc_acc * 60), 6); bc_acc = bc_acc - bc_nt / 60;
+loop(bc_nt,
+  bc_om = bc_om + (bc_o - bc_om) / 60;
+  bc_x = bc_o - bc_om;
+  bc_w = bc_t % 232;
+  megabuf(bc_w) = bc_x;
+  bc_l = 0;
+  loop(232,
+    megabuf(256 + bc_l) = megabuf(256 + bc_l) * 0.998148 + bc_x * megabuf((bc_w - bc_l + 232) % 232);
+    bc_l = bc_l + 1;
+  );
+  bc_t = bc_t + 1;
+);
+bc_best = -1000000; bc_bl = 30; bc_l = 18;
+loop(39,
+  bc_s = (megabuf(256 + bc_l)
+          + 0.5 * max(megabuf(255 + 2 * bc_l), max(megabuf(256 + 2 * bc_l), megabuf(257 + 2 * bc_l)))
+          + 0.5 * max(megabuf(255 + 3 * bc_l), max(megabuf(256 + 3 * bc_l), megabuf(257 + 3 * bc_l)))
+          + max(max(megabuf(254 + 4 * bc_l), megabuf(255 + 4 * bc_l)), max(megabuf(256 + 4 * bc_l), max(megabuf(257 + 4 * bc_l), megabuf(258 + 4 * bc_l))))
+          + 0.25 * (megabuf(256 + int(bc_l / 2)) + megabuf(256 + int((bc_l + 1) / 2)))) * megabuf(512 + bc_l);
+  megabuf(700 + bc_l) = bc_s;
+  bc_bl = if(above(bc_s, bc_best), bc_l, bc_bl);
+  bc_best = max(bc_best, bc_s);
+  bc_l = bc_l + 1;
+);
+bc_sa = megabuf(699 + bc_bl); bc_sb = megabuf(700 + bc_bl); bc_sc = megabuf(701 + bc_bl);
+bc_den = bc_sa - 2 * bc_sb + bc_sc;
+bc_lr = bc_bl + if(above(bc_bl, 18) * below(bc_bl, 56) * below(bc_den, 0), 0.5 * (bc_sa - bc_sc) / min(bc_den, -0.000001), 0);
+bc_cur = megabuf(700 + min(max(int(bc_per + 0.5), 18), 56));
+bc_near = below(abs(bc_lr - bc_per) / bc_per, 0.06);
+bc_per = if(bc_near, bc_per + (bc_lr - bc_per) * min(0.05 * bc_dt * 60, 1), bc_per);
+bc_chal = if(bc_near, 0, if(above(bc_best, 1.15 * bc_cur), bc_chal + bc_dt, max(bc_chal - bc_dt, 0)));
+bc_sw = (1 - bc_near) * max(above(bc_chal, 2.5), below(bc_tt, 6));
+bc_per = if(bc_sw, bc_lr, bc_per); bc_chal = bc_chal * (1 - bc_sw);
+bc_kh = exp(-bc_dt / 4) * if(bc_sw, 0.3, 1);
+bc_pref = bc_pref + bc_dt * 60 / bc_per; bc_pref = bc_pref - floor(bc_pref);
+bc_hx = bc_pref * 16; bc_i0 = int(bc_hx) % 16; bc_f = bc_hx - int(bc_hx);
+bc_l = 0; loop(16, megabuf(600 + bc_l) = megabuf(600 + bc_l) * bc_kh; bc_l = bc_l + 1);
+bc_ww = bc_o * bc_o * bc_dt * 60;
+megabuf(600 + bc_i0) = megabuf(600 + bc_i0) + bc_ww * (1 - bc_f);
+megabuf(600 + (bc_i0 + 1) % 16) = megabuf(600 + (bc_i0 + 1) % 16) + bc_ww * bc_f;
+bc_k = 0; bc_h0 = -1; bc_hs = 0; bc_l = 0;
+loop(16, bc_hv = megabuf(600 + bc_l); bc_k = if(above(bc_hv, bc_h0), bc_l, bc_k); bc_h0 = max(bc_h0, bc_hv); bc_hs = bc_hs + bc_hv; bc_l = bc_l + 1);
+bc_hm = megabuf(600 + (bc_k + 15) % 16); bc_hp = megabuf(600 + (bc_k + 1) % 16);
+bc_den = bc_hm - 2 * bc_h0 + bc_hp;
+bc_sub = if(below(bc_den, 0), 0.5 * (bc_hm - bc_hp) / min(bc_den, -0.000001), 0);
+bc_conf = bc_h0 / max(bc_hs / 16, 0.000001);
+bc_dv = (bc_k + bc_sub) / 16 - bc_off + 0.5; bc_dv = bc_dv - floor(bc_dv) - 0.5;
+bc_xc = bc_off * 16; bc_ic = int(bc_xc) % 16; bc_fc = bc_xc - int(bc_xc);
+bc_hcur = megabuf(600 + bc_ic) * (1 - bc_fc) + megabuf(600 + (bc_ic + 1) % 16) * bc_fc;
+bc_g = 0.15 * min(max(bc_conf - 1.6, 0), 1) * (1 - above(abs(bc_dv), 0.09375) * below(bc_h0, 2 * bc_hcur));
+bc_off = bc_off + min(max(bc_dv * bc_g, -0.01), 0.01) * bc_dt * 60; bc_off = bc_off - floor(bc_off);
+bc_ph = bc_pref + 2.4 / bc_per - bc_off; bc_ph = bc_ph - floor(bc_ph);
+bc_tsb = bc_tsb + bc_dt;
+bc_beat = above(bc_pph, 0.75) * below(bc_ph, 0.25) * above(bc_tsb, bc_per / 100);
+bc_pph = bc_ph;
+bc_tsb = if(bc_beat, 0, bc_tsb);
+bc_cs = bc_cs + (bc_conf - bc_cs) * min(bc_dt, 1);
+bc_lock = if(below(bc_tt, 6), 0, if(bc_lock, above(bc_cs, 2.3), above(bc_cs, 2.8)));
+bc_wend = bc_win * above(bc_tsb, bc_per / 240 + 0.05);
+bc_sema = if(bc_wend, bc_sema * 0.75 + 0.25 * bc_bmax, bc_sema);
+bc_lb = if(bc_wend, bc_bmax, bc_lb);
+bc_l = bc_bq; megabuf(620 + bc_l) = megabuf(620 + bc_l) + bc_wend * bc_bmax;
+bc_win = if(bc_beat, 1, bc_win * (1 - bc_wend));
+bc_bmax = if(bc_beat, bc_o, if(bc_win, max(bc_bmax, bc_o), bc_bmax));
+bc_bq = (bc_bq + bc_beat) % 4;
+bc_l = 0; loop(4, megabuf(620 + bc_l) = megabuf(620 + bc_l) * if(bc_beat, 0.97, 1); bc_l = bc_l + 1);
+bc_av = megabuf(620 + bc_anc); bc_ka = 0; bc_kv = -1; bc_l = 0;
+loop(4, bc_hv = megabuf(620 + bc_l); bc_ka = if(above(bc_hv, bc_kv), bc_l, bc_ka); bc_kv = max(bc_kv, bc_hv); bc_l = bc_l + 1);
+bc_anc = if(above(bc_kv, 1.25 * bc_av), bc_ka, bc_anc);
+bc_j = (bc_bq - bc_anc + 4) % 4;
+bc_bar = bc_bar + bc_beat * equal(bc_j, 0);
+"""
 
 presets = {}
 
@@ -766,29 +879,44 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # by the golden ratio each frame) is resolved by TAA against
 # sampler_prev_comp, reprojected with last frame's camera and clamped to the
 # new sample (+/- 0.12).
-# Music: each drop holds a snapshot of the moment it was born: the spectral
-# balance (each band against its own 8 s average) picks the child count, the
-# beat strength its size, the mids how turbulent it gets, the waveform's
-# harmonics 2 to 5 (captured from get_wave into the data row on the spawn
-# frame) bend its rim; species cycle so neighbours differ. Each beat lights
-# the dense ink and the young ring's core (heat, in the theme's warm colour)
-# and sends a band of that light out from the tank's centre through the ink
-# bodies (5 units a second); it also kicks a damped spring (kvel / kpos, in
-# ink time, so it plays as the clock resumes after the camera move) whose
-# velocity scales the whole tank about its centre and twists it about a
-# slowly turning axis: the ink thumps outward and recoils. The bass level
-# (fast attack, 0.22 s release) lifts the body field in the render, so the
-# bodies and young rings swell and thin with it (about their usual size); the treble level tilts the surface
-# normals with fine drifting noise, so the highlights ripple. The mids stir the
-# whole tank (0.1 to 0.32); loudness sets the ink clock and how soon the
-# next drop may come (0.6-0.9 ink-seconds on a beat, 3 without one, and never
-# before the oldest of the IK_NS slots has finished its life).
+# Music: the timing comes from the beat clock (BC_FRAME), so things happen ON
+# the beat and in bars; until the clock locks (the first ~6 s, and music with
+# no steady pulse) they follow bass rises as before, more sparsely. Each drop
+# holds a snapshot of the moment it was born: the spectral balance (each band
+# against its own 8 s average) picks the child count, the recent beats'
+# strength its size, the mids how turbulent it gets, the waveform's harmonics
+# 2 to 5 (captured from get_wave into the data row on the spawn frame) bend
+# its rim; species cycle so neighbours differ. Drops are born on the beats the
+# camera leaves alone: every second one (2 and 4 of the bar), every one when
+# the slots can carry it (slow songs), once a bar on quiet beats; never
+# before the oldest of the IK_NS slots has finished its life. When two young
+# rings collide (their tubes touch while their centres pass within IK_CORE of
+# their summed radii: the same drop model in EEL, ik_eel_ring / ik_eel_touch;
+# a glancing crossing does not count, ~6 a minute do) both merge a level
+# (up to 2): each grows
+# about its own ring's centre (IK_GROW a level, eased over ~1 s of ink time)
+# and its own clock slows (IK_SLOW), so the pair swells, drifts on slower and
+# outlives its neighbours. Each beat lights the dense ink and the young
+# ring's core (heat, in the theme's warm colour; brightness from the onset
+# the clock sees at the beat) and sends a band of that light out from the
+# tank's centre through the ink bodies (5 units a second); it also kicks a
+# damped spring (kvel / kpos, in ink time, so it plays as the clock resumes
+# after the camera move) whose velocity scales the whole tank about its
+# centre and twists it about a slowly turning axis: the ink thumps outward
+# and recoils. The bass level (fast attack, 0.22 s release) lifts the body
+# field in the render, so the bodies and young rings swell and thin with it
+# (about their usual size); the treble level tilts the surface normals with
+# fine drifting noise, so the highlights ripple. The mids stir the whole
+# tank (0.1 to 0.32); loudness sets the ink clock.
 # Camera: it stands still and moves only with the music (starfield nebula's
-# language). On a beat (or after 4 s without one) the ink clock stops, and the
-# camera swings to a new pose around the tank in 42% of the beat interval
-# (0.12-0.36 s, ease-out): a kick-sized orbit step, a new elevation and lens,
-# and a roll that alternates sides (the twist); every 8th move re-frames
-# widely, every 4th lands level. While it swings the COMP mixes in last
+# language). On the first beat of each bar (every half bar when bars are
+# longer than 3.2 s, every second bar when shorter than 1.4 s; without a
+# locked clock, on a bass rise at least 2.5 s after the last move, or after
+# 7 s) the ink clock stops, and the camera swings to a new pose around the
+# tank in 45% of a beat (0.15-0.4 s, ease-out): an orbit step sized by the
+# beats' strength, a new elevation and lens, and a roll that alternates sides
+# (the twist); every 4th move (a 4-bar phrase) re-frames widely and lands
+# level. While it swings the COMP mixes in last
 # frame's picture, reprojected through both cameras, at up to 85%: the frozen
 # frame drags and twists as an echo smear and the new view resolves as the
 # camera settles. The pose is (azimuth, elevation, lens, roll, look-at) at a
@@ -806,8 +934,8 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # ((v + 4) * 100, integer part); q12 this frame's ink-clock step (0 while the
 # camera moves); q13/q14 the last two beats (age + 16 * strength in
 # hundredths); q15/q16 the look-at point's offsets across and up the view
-# (12 bits each), now and last frame; q17-q24 slot ages; q25-q32 slot codes
-# (ik_code).
+# (12 bits each), now and last frame; q17-q24 slot ages + 128 * merge level
+# (0-127 for 0-2, ik_slot_frame unpacks); q25-q32 slot codes (ik_code).
 IK_NS = 8
 IK_LIFE = 8.0
 IK_TS = 3.0
@@ -825,6 +953,9 @@ IK_LEAD = 1.3      # a drop starts this many of its own sizes before its aim poi
 IK_LEADMAX = 2.0   # ...but no farther than this
 IK_RATE = 1.3      # ink clock scale (the clock stands still during a camera move)
 IK_NF = (1.2, 1.9) # a young drop's analytic shape fades into its own dye over these ages
+IK_CORE = 0.75     # two young rings collide when their tubes touch with centres closer than this share of their radii
+IK_GROW = 0.45     # a merged drop grows by this much a merge level, about its ring's centre...
+IK_SLOW = 0.5      # ...and its clock runs at 1 / (1 + IK_SLOW * level), so it lasts longer
 IK_TOK = {
     "@SC@": f"{IK_SC}", "@TS@": f"{IK_TS}", "@TS2@": f"{IK_TS + 1.2}", "@KSF@": f"{IK_KSF:.4f}",
     "@SR@": f"{0.36 * (1.0 + 0.09 * IK_TS):.4f}", "@L0@": f"{IK_LIFE - 2.2}", "@L1@": f"{IK_LIFE - 0.3}",
@@ -834,7 +965,7 @@ IK_TOK = {
     "@BMAX@": "vec3({}, {}, {})".format(*(a + b for a, b in zip(IK_BMIN, IK_BSIZE))),
     "@RMIN@": "vec3({}, {}, {})".format(*(a - 0.4 for a in IK_BMIN)),
     "@RMAX@": "vec3({}, {}, {})".format(*(a + b + 0.4 for a, b in zip(IK_BMIN, IK_BSIZE))),
-    "@STEPS@": f"{IK_STEPS}", "@KOFF@": f"{IK_KOFF}", "@TSURF@": f"{IK_TSURF}",
+    "@STEPS@": f"{IK_STEPS}", "@KOFF@": f"{IK_KOFF}", "@TSURF@": f"{IK_TSURF}", "@GROW@": f"{IK_GROW}",
 }
 def ik_sub(text):
     for k, v in IK_TOK.items():
@@ -1033,9 +1164,14 @@ def ik_slot_frame(age, code):
     over the sphere, a Fibonacci lattice); `sex`, `sey`, `sez` are that frame's
     axes in the tank (a branchless orthonormal basis, Duff et al. 2017) and
     `so` its origin: the aim point (a 4x4x4 lattice about the tank's centre)
-    backed off against the travel direction."""
+    backed off against the travel direction. The age arrives packed with the
+    drop's merge level (`sgm`, 0-127 for 0-2, see the q map); `sgr` is the
+    size it has grown to."""
     return ik_sub(f"""
-        float sa = {age};
+        float sgq = {age};
+        float sgm = floor(sgq / 128.0);
+        float sa = sgq - 128.0 * sgm;
+        float sgr = 1.0 + @GROW@ * sgm / 63.5;
         float sc = {code};
         float sdi = mod(floor(sc / 4096.0), 64.0);
         float sdh = (2.0 * sdi + 1.0) / 64.0 - 1.0;
@@ -1052,6 +1188,14 @@ def ik_slot_frame(age, code):
         float sspc = mod(floor(sc / 8.0), 8.0);
         vec3 smsk = vec3(1.0 - step(0.5, sspc), step(0.5, sspc) * (1.0 - step(1.5, sspc)), step(1.5, sspc));
 """)
+def ik_grow_rel(pv):
+    """Scale a point in drop k's frame about its ring's centre (on the travel
+    axis, where the model has carried it by age `sa`) by 1 / `sgr`: the drop
+    model then draws the drop `sgr` times its size around that centre."""
+    return ik_sub(f"""
+        float sgc = (@KOFF@ - 0.7 * log(1.0 + sa / 0.25)) * ssz;
+        {pv} = vec3({pv}.x / sgr, sgc + ({pv}.y - sgc) / sgr, {pv}.z / sgr);
+""")
 def ik_slot_bound(pv):
     return ik_sub(f"""
         float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
@@ -1067,7 +1211,7 @@ def ik_warp_slot(k):
       {{""" + ik_slot_vals(k) + """
         vec3 swp = wp - so;
         vec3 swl = vec3(dot(swp, sex), dot(swp, sey), dot(swp, sez));
-""" + ik_slot_bound("swl") + f"""
+""" + ik_grow_rel("swl") + ik_slot_bound("swl") + f"""
         if (sa < 6.5) {{
           float swf = (0.7 * log(1.0 + sa / 0.25) - @KOFF@) * ssz;
           vec3 swd = swl + vec3(0.0, swf, 0.0);
@@ -1080,7 +1224,7 @@ def ik_warp_slot(k):
           vec2 swu = vec2(-swq.y, swq.x) * swg / (swr2 + swa * swa);
           vec2 swh = swd.xz / max(swrho, 0.001);
           float swy = swu.y - 0.7 / (0.25 + sa) * ssz * 0.6 * exp(-swr2 / (swR * swR + 0.05));
-          wv += sex * (swh.x * swu.x) + sey * swy + sez * (swh.y * swu.x);
+          wv += (sex * (swh.x * swu.x) + sey * swy + sez * (swh.y * swu.x)) * sgr;
         }}
         if (sbd < 0.0) {{
           vec4 sr = ik_drop(swl, sa, sc, {k}.0, 0.0);
@@ -1212,7 +1356,9 @@ float ik_bf(vec3 fp, float ft, """) + ", ".join(f"vec4 fb{k}" for k in range(IK_
   if (sbd{k} < 0.0) {{""" + ik_slot_vals(k) + f"""
     vec3 srw = fp - so;
     vec3 srel = vec3(dot(srw, sex), dot(srw, sey), dot(srw, sez));
+""" + ik_grow_rel("srel") + f"""
     vec2 snr = ik_near(srel, sa, sc, {k}.0);
+    snr = vec2(snr.x * sgr, snr.y);
     frd = min(frd, -snr.x / 14.0);
     if (snr.x > fr) {{
       fr = snr.x;
@@ -1234,7 +1380,9 @@ float ik_b1(vec3 fp, float ft, float f1a, float f1c, float f1k, out vec4 fsp, ou
   if (f1k > -0.5) {""" + ik_slot_frame("f1a", "f1c") + """
     vec3 srw = fp - so;
     vec3 srel = vec3(dot(srw, sex), dot(srw, sey), dot(srw, sez));
+""" + ik_grow_rel("srel") + """
     vec2 snr = ik_near(srel, sa, sc, f1k);
+    snr = vec2(snr.x * sgr, snr.y);
     fr = snr.x;
     if (snr.x > fv - @TSURF@) fsp = vec4(smsk, snr.y);
   }
@@ -1455,7 +1603,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
   {{""" + ik_slot_vals(k) + f"""
     if (sa < @NF1@) {{
       float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
-      sb{k} = vec4(so - sey * (sf0 * ssz), ssz * (0.47 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa) + 0.3) + 0.08);
+      sb{k} = vec4(so - sey * (sf0 * ssz), (ssz * (0.47 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa) + 0.3) + 0.08) * sgr);
       vec3 sro = ro - sb{k}.xyz;
       float srb = dot(sro, rd);
       float srd = srb * srb - dot(sro, sro) + sb{k}.w * sb{k}.w;
@@ -1643,12 +1791,12 @@ def ik_code(nn, cq, sz, cy, tb, di, cx, cz):
 
 IK_AGE0 = [1.2, 3.3, 5.4] + [99] * (IK_NS - 3)
 IK_CODE0 = [ik_code(3, 0, 1, 2, 1, 5, 1, 2), ik_code(1, 1, 0, 1, 1, 41, 2, 1), ik_code(4, 2, 1, 2, 2, 22, 1, 1)] + [0] * (IK_NS - 3)
-IK_INIT = (BEATS_INIT + " inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
+IK_INIT = (BC_INIT + " sinceb = 1; tbs = 0.8; ib1 = 9; ib2 = 9; is1 = 0; is2 = 0; ncol = 0; inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
            " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; spb = 0.1; spawnf = 0;"
            " az = rand(628) / 100; el = 0.15; lens = 0.62; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
            " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; kvel = 0; kpos = 0; bsw = 0; trp = 0; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
-           " mvt = 9; mvd = 0.3; odir = 1; tsb = 0.5; ibi = 0.5; smv = 0; nmv = 0; pvalid = 0; "
-           + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]};" for k in range(IK_NS)))
+           " mvt = 9; mvd = 0.3; odir = 1; smv = 0; nmv = 0; pvalid = 0; "
+           + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]}; mt{k} = 0; mg{k} = 0;" for k in range(IK_NS)))
 def ik_eel_drop(k):
     """Where drop k's ring will be 0.7 s from now (the same model as
     ik_slot_frame), and its weight in the camera's framing."""
@@ -1660,6 +1808,41 @@ def ik_eel_drop(k):
             f"ky{k} = ((int(kc / 256) % 4) - 1.5) * {IK_CSTEP} - kdh * ktr;\n"
             f"kz{k} = ((int(kc / 1048576) % 4) - 1.5) * {IK_CSTEP} + kdr * sin(kdi * 2.3999632) * ktr;\n"
             f"wsm = wsm + kw{k}; cgx = cgx + kw{k} * kx{k}; cgy = cgy + kw{k} * ky{k}; cgz = cgz + kw{k} * kz{k};\n")
+def ik_eel_ring(k):
+    """Drop k's young ring now (the same model as ik_slot_frame): its centre
+    (rx, ry, rz), axis n and in-plane axes a, b, radius rr and tube half-width
+    tk (grown by its merge level), and rl = 1 while it is a crisp ring (past
+    the bead, before it hands over to its dye)."""
+    return (f"kc = ikc{k}; ka = ika{k};\n"
+            f"kdi = int(kc / 4096) % 64; kdh = (2 * kdi + 1) / 64 - 1; kdr = sqrt(max(1 - kdh * kdh, 0));\n"
+            f"kcs = cos(kdi * 2.3999632); ksn = sin(kdi * 2.3999632);\n"
+            f"ksz = (0.8 + 0.15 * (int(kc / 64) % 4)) * {IK_SC}; kgr = 1 + {IK_GROW} * mg{k};\n"
+            f"ktr = (0.7 * log(1 + ka / 0.25) - {IK_KOFF}) * ksz - min({IK_LEAD} * ksz, {IK_LEADMAX});\n"
+            f"rx{k} = ((int(kc / 262144) % 4) - 1.5) * {IK_CSTEP} + kdr * kcs * ktr;\n"
+            f"ry{k} = ((int(kc / 256) % 4) - 1.5) * {IK_CSTEP} - kdh * ktr;\n"
+            f"rz{k} = ((int(kc / 1048576) % 4) - 1.5) * {IK_CSTEP} + kdr * ksn * ktr;\n"
+            f"nx{k} = -kdr * kcs; ny{k} = kdh; nz{k} = -kdr * ksn;\n"
+            f"ax{k} = ksn; az{k} = -kcs; bx{k} = -kdh * kcs; by{k} = -kdr; bz{k} = -kdh * ksn;\n"
+            f"kb = min(max((ka - 0.02) / 0.36, 0), 1);\n"
+            f"rr{k} = ksz * 0.36 * kb * kb * (3 - 2 * kb) * (1 + 0.09 * min(ka, 3)) * kgr;\n"
+            f"tk{k} = ksz * 0.072 * (1 + 0.07 * ka) * kgr;\n"
+            f"rl{k} = above(ka, 0.3) * below(ka, {IK_NF[1]});\n")
+def ik_eel_touch(i, j):
+    """Rings i and j colliding: both young, centres passing within IK_CORE of
+    their summed radii, and their tubes touching (the closest of 8 points on
+    ring i to ring j's circle, tested only when the rings are near). On the
+    first frame of contact both merge a level (up to 2)."""
+    return (f"cd2 = sqr(rx{i} - rx{j}) + sqr(ry{i} - ry{j}) + sqr(rz{i} - rz{j});\n"
+            f"cn = rl{i} * rl{j} * below(cd2, sqr({IK_CORE} * (rr{i} + rr{j})));\n"
+            f"cn = if(cn, exec2(cm = 1000; cth = 0; loop(8,"
+            f" cqx = rx{i} + rr{i} * (cos(cth) * ax{i} + sin(cth) * bx{i}) - rx{j};"
+            f" cqy = ry{i} + rr{i} * sin(cth) * by{i} - ry{j};"
+            f" cqz = rz{i} + rr{i} * (cos(cth) * az{i} + sin(cth) * bz{i}) - rz{j};"
+            f" chh = cqx * nx{j} + cqy * ny{j} + cqz * nz{j};"
+            f" cm = min(cm, chh * chh + sqr(sqrt(max(cqx * cqx + cqy * cqy + cqz * cqz - chh * chh, 0)) - rr{j}));"
+            f" cth = cth + 0.7853982), below(cm, sqr(tk{i} + tk{j}))), 0);\n"
+            f"ht = cn * (1 - pc{i}_{j}); pc{i}_{j} = cn;\n"
+            f"mt{i} = min(mt{i} + ht, 2); mt{j} = min(mt{j} + ht, 2); ncol = ncol + ht;\n")
 
 IK_TARGETS = """odir = if(gom * above(rand(100), 75), -odir, odir);
 az = if(gom * above(abs(az), 31.4159265), az - sign(az) * 62.8318531, az);
@@ -1671,17 +1854,34 @@ rol1 = if(gom, if(equal(nmv % 4, 0), 0, rdir * (0.15 + 0.4 * kk)), rol1);
 az1 = if(gom, az + odir * (0.3 + 0.55 * kk + 0.8 * big), az1);
 el1 = if(gom, if(big, ur1, min(max(el * 0.8 + ur1 * (0.25 + 0.4 * kk), -1.05), 1.05)), el1);
 """
-IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + f"""tsb = tsb + dt;
-ibi = if(trig, ibi + (min(tsb, 1.2) - ibi) * 0.4, ibi);
-tsb = if(trig, 0, tsb);
+# Merging: a new drop starts unmerged; then every pair of rings is tested and
+# each drop's size eases towards its merge level (ink time, so it holds still
+# while the camera moves).
+IK_MERGE = ("".join(f"mt{k} = if(go * equal(old, {k}), 0, mt{k}); mg{k} = if(go * equal(old, {k}), 0, mg{k});\n" for k in range(IK_NS))
+            + "".join(ik_eel_ring(k) for k in range(IK_NS))
+            + "".join(ik_eel_touch(i, j) for i in range(IK_NS) for j in range(i + 1, IK_NS))
+            + "".join(f"mg{k} = mg{k} + (mt{k} - mg{k}) * (1 - exp(-dts / 0.6));\n" for k in range(IK_NS)))
+IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BC_FRAME + f"""bk = bass - bass_att; sinceb = sinceb + dt;
+trig = above(bk, 0.22) * above(sinceb, 0.2);
+sinceb = if(trig, 0, sinceb);
+tbs = if(trig, min(0.5 + bk * 1.4, 1.6), tbs);
+lk = bc_lock; bps = bc_per / 60;
+bstr = min(0.5 + 0.7 * bc_sema, 1.6);
+ikb = if(lk, bc_beat, trig);
+ib2 = if(ikb, ib1, ib2); is2 = if(ikb, is1, is2);
+ib1 = if(ikb, 0, ib1); is1 = if(ikb, if(lk, 0, tbs), is1);
+is1 = if(lk * bc_win * below(ib1, 0.3), max(is1, min(0.5 + 0.7 * bc_bmax, 1.6) * above(bc_bmax, 0.12)), is1);
+ib1 = ib1 + dt; ib2 = ib2 + dt;
 en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);
 """ + ease("loud", "en", "1.0") + ease("rate", f"{IK_RATE} * (0.65 + 0.7 * min(max(loud - 0.5, 0), 1))", "1.5") + f"""
+cad = if(above(4 * bps, 3.2), 2, if(below(4 * bps, 1.4), 8, 4));
+camb = lk * bc_beat * if(equal(cad, 2), equal(bc_j % 2, 0), equal(bc_j, 0) * if(equal(cad, 8), equal(bc_bar % 2, 0), 1));
 mvt = mvt + dt; smv = smv + dt;
-gom = max(trig, above(smv, 4)) * above(mvt, mvd) * above(smv, 0.22);
-kk = if(trig, min(max((bs1 - 0.8) / 0.8, 0), 1), 0.25);
+gom = if(lk, camb, max(trig * above(smv, 2.5), above(smv, 7))) * above(mvt, mvd) * above(smv, 0.22);
+kk = min(max((if(lk, bstr, if(trig, tbs, 1)) - 0.8) / 0.8, 0), 1);
 nmv = nmv + gom;
-big = equal(nmv % 8, 0);
-mvd = if(gom, if(trig, min(max(0.42 * ibi, 0.12), 0.36), 0.36), mvd);
+big = equal(nmv % 4, 0);
+mvd = if(gom, if(lk, min(max(0.45 * bps, 0.15), 0.4), 0.4), mvd);
 mvt = if(gom, 0, mvt); smv = if(gom, 0, smv);
 mvx = min(mvt / mvd, 1);
 mvu = 1 - (1 - mvx) * (1 - mvx) * (1 - mvx);
@@ -1694,11 +1894,11 @@ kdt = min(dts, 0.03);
 bswg = min(max((bass - 0.6) / 1.9, 0), 1);
 bsw = bsw + (bswg - bsw) * (1 - exp(-dt / if(above(bswg, bsw), 0.03, 0.22)));
 trp = trp + (min(max((treb - 0.4) / 1.5, 0), 1) - trp) * (1 - exp(-dt / 0.07));
-kvel = if(trig, min(kvel + 2.0 + 1.2 * kk, 3.2), kvel);
+kvel = if(ikb, min(kvel + (2.0 + 1.2 * kk) * if(lk, min(bc_sema / 0.25, 1), 1), 3.2), kvel);
 kvel = kvel + (-324 * kpos - 12.6 * kvel) * kdt;
 kpos = kpos + kvel * kdt;
 inkt = inkt + dts;
-""" + "".join(f"ika{k} = min(ika{k} + dts, 99);\n" for k in range(IK_NS)) + f"""
+""" + "".join(f"ika{k} = min(ika{k} + dts / (1 + {IK_SLOW} * mg{k}), 99);\n" for k in range(IK_NS)) + f"""
 vis = equal(frame, 3);
 uv1 = rand(1000) / 1000 + bass_att * 3.7 + treb_att * 1.3; uv1 = uv1 - int(uv1);
 mood = if(vis, int(uv1 * 3), mood);
@@ -1706,14 +1906,18 @@ spb = if(vis, uv1 * 7.3 - int(uv1 * 7.3), spb);
 since = since + dts;
 gap = 0.6 + 0.3 * (1 - min(max(loud - 0.7, 0), 1));
 old = 0; oa = ika0;
-""" + "".join(f"old = if(above(ika{k}, oa), {k}, old); oa = max(oa, ika{k});\n" for k in range(1, IK_NS)) + f"""go = max(trig * above(since, gap), above(since, 3)) * above(oa, {IK_LIFE - 0.8});
+""" + "".join(f"old = if(above(ika{k}, oa), {k}, old); oa = max(oa, ika{k});\n" for k in range(1, IK_NS)) + f"""cap1 = rate * bps * {IK_NS / IK_LIFE};
+dstep = if(below(bc_sema, 0.12), 4, if(above(cap1, 1.15), 1, if(above(cap1, 0.6), 2, 4)));
+dpat = if(equal(dstep, 1), 1, if(equal(dstep, 2), equal(bc_j % 2, 1), equal(bc_j, if(equal(cad, 2), 1, 2))));
+go = if(lk, bc_beat * (1 - camb) * max(dpat, above(since, 4)) * above(since, 0.3),
+        max(trig * above(since, gap), above(since, 3))) * above(oa, {IK_LIFE - 0.8});
 bavg = bavg + (bass_att - bavg) * (1 - exp(-dt / 8)); mavg = mavg + (mid_att - mavg) * (1 - exp(-dt / 8)); tavg = tavg + (treb_att - tavg) * (1 - exp(-dt / 8));
 nb = bass_att / max(bavg, 0.01); nm = mid_att / max(mavg, 0.01); nt = treb_att / max(tavg, 0.01);
 """ + ease("turb", "0.1 + 0.15 * min(max(nm - 0.7, 0), 1.5)", "1.0") + f"""cent = (0.5 * nm + nt) / max(nb + nm + nt, 0.01);
 nn = min(max(int(5 + (cent - 0.5) * 14 + rand(2) - 0.5), 3), 7) - 3;
 cq = (lastcq + 1 + above(rand(100), 75)) % 3;
 lastcq = if(go, cq, lastcq);
-sz = min(max(int((bs1 - 0.7) * 4.5), 0), 3);
+sz = min(max(int((if(lk, min(0.5 + 0.21 * bc_sema + 0.63 * bc_lb, 1.6), tbs) - 0.7) * 4.5), 0), 3);
 tb = min(max(int((nm - 0.6) * 3.5), 0), 3);
 uv2 = rand(1000) / 1000 + mid_att * 5.3 + bass * 1.7; uv2 = uv2 - int(uv2);
 di = (lastdi + 13 + int(uv2 * 38)) % 64;
@@ -1721,7 +1925,7 @@ lastdi = if(go, di, lastdi);
 code = nn + 8 * cq + 64 * sz + 256 * int(rand(4)) + 1024 * tb + 4096 * di + 262144 * int(rand(4)) + 1048576 * int(rand(4));
 """ + "".join(f"ika{k} = if(go * equal(old, {k}), 0, ika{k}); ikc{k} = if(go * equal(old, {k}), code, ikc{k});\n" for k in range(IK_NS)) + f"""since = if(go, 0, since);
 spawnf = if(go, old + 1, 0);
-wsm = 0; cgx = 0; cgy = 0; cgz = 0;
+""" + IK_MERGE + """wsm = 0; cgx = 0; cgy = 0; cgz = 0;
 """ + "".join(ik_eel_drop(k) for k in range(IK_NS)) + """cgx = cgx / max(wsm, 0.01); cgy = cgy / max(wsm, 0.01); cgz = cgz / max(wsm, 0.01);
 sig = 0;
 """ + "".join(f"sig = sig + kw{k} * (sqr(kx{k} - cgx) + sqr(ky{k} - cgy) + sqr(kz{k} - cgz));\n" for k in range(IK_NS)) + """sig = if(above(wsm, 0.01), sqrt(sig / max(wsm, 0.01)), 1);
@@ -1737,8 +1941,8 @@ q1 = az; q2 = el; q3 = lqi; q4 = paz; q5 = pel; q6 = plq;
 q15 = pqi; q16 = ppq;
 paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
 q7 = if(frz, drg, -taaw); q8 = spawnf + min(bsw, 0.99) * 0.999; q9 = inkt; q10 = mood + 4 * int(trp * 100) + spb * 0.999; q11 = int((min(max(kvel, -4), 4) + 4) * 100 + 0.5) + min(turb, 0.99); q12 = dts;
-q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
-""" + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
+q13 = min(ib1, 15.9) + 16 * int(is1 * 100); q14 = min(ib2, 15.9) + 16 * int(is2 * 100);
+""" + "".join(f"q{17 + k} = ika{k} + 128 * int(min(mg{k}, 2) * 63.5 + 0.5); q{25 + k} = ikc{k};\n" for k in range(IK_NS))
 presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, ik_lod0(IK_COMP),
                                         init=IK_INIT, frame=IK_FRAME)
 
