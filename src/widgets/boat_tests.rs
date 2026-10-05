@@ -2803,3 +2803,37 @@ fn moon_veil_cache_invalidates_when_theme_generation_advances() {
     );
     assert!(repopulated, "rebuilding after the change must repopulate");
 }
+
+// --- wave geometry -------------------------------------------------------
+
+#[test]
+fn the_reflection_lifts_the_wave_baseline_to_the_waterline() {
+    use crate::widgets::visualizer::WATER_LINE;
+    let plain = LineGeometry::default();
+    assert_eq!(wave_baseline_and_scale(200.0, plain), (200.0, 200.0));
+    let mirrored = LineGeometry {
+        mirror: true,
+        reflection: false,
+    };
+    assert_eq!(wave_baseline_and_scale(200.0, mirrored), (100.0, 100.0));
+    // The Reflection draws the line in the band above the waterline, so the
+    // boat rides that band, not the water below it.
+    let (base, scale) = wave_baseline_and_scale(
+        200.0,
+        LineGeometry {
+            mirror: false,
+            reflection: true,
+        },
+    );
+    assert!((base - 200.0 * WATER_LINE).abs() < 1e-4);
+    assert!((scale - 200.0 * WATER_LINE).abs() < 1e-4);
+    let (base, scale) = wave_baseline_and_scale(
+        200.0,
+        LineGeometry {
+            mirror: true,
+            reflection: true,
+        },
+    );
+    assert!((base - 100.0 * WATER_LINE).abs() < 1e-4);
+    assert!((scale - 100.0 * WATER_LINE).abs() < 1e-4);
+}

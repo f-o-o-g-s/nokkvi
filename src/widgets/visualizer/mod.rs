@@ -3,9 +3,12 @@
 //! Modular audio visualizer supporting multiple visualization modes.
 
 mod flash;
+mod horizon;
 pub(crate) mod milkdrop;
 mod particles;
 mod pipeline;
+mod reflection;
+pub(crate) use reflection::WATER_LINE;
 pub(crate) mod shader;
 pub(crate) mod state;
 
@@ -697,6 +700,12 @@ impl Visualizer {
             // No shader params for MilkDrop; `view()` returns before this runs.
             VisualizationMode::Milkdrop => (0.0, 0.0),
         };
+        // Reflection and Horizon are Bars / Lines only.
+        let (reflection, horizon) = match self.mode {
+            VisualizationMode::Bars => (cfg.bars.reflection, cfg.bars.horizon),
+            VisualizationMode::Lines => (cfg.lines.reflection, cfg.lines.horizon),
+            VisualizationMode::Scope | VisualizationMode::Milkdrop => (false, false),
+        };
 
         let (
             outline_thickness,
@@ -775,6 +784,8 @@ impl Visualizer {
             trails,
             echo,
             crt: cfg.crt,
+            reflection,
+            horizon,
         }
     }
 
@@ -1156,6 +1167,12 @@ mod wgsl_config_identity_tests {
         let bars_cfg = extract_config_block(BARS);
         let lines_cfg = extract_config_block(LINES);
         let scope_cfg = extract_config_block(SCOPE);
+        let horizon_cfg = extract_config_block(include_str!("shaders/horizon.wgsl"));
+        assert_eq!(
+            bars_cfg, horizon_cfg,
+            "WGSL Config block in horizon.wgsl must declare identical fields to bars.wgsl. \
+             It binds the same uniform buffer; a drift reinterprets memory."
+        );
         assert_eq!(
             bars_cfg, lines_cfg,
             "WGSL Config blocks in bars.wgsl + lines.wgsl must declare identical fields. \
@@ -1416,6 +1433,8 @@ mod wgsl_compile_tests {
         "lines",
         "scope",
         "particles",
+        "horizon",
+        "reflection",
         "bloom",
         "echo",
         "crt",
@@ -1453,6 +1472,16 @@ mod wgsl_compile_tests {
     #[test]
     fn scope_wgsl_compiles() {
         validate_wgsl("scope.wgsl", include_str!("shaders/scope.wgsl"));
+    }
+
+    #[test]
+    fn reflection_wgsl_compiles() {
+        validate_wgsl("reflection.wgsl", include_str!("shaders/reflection.wgsl"));
+    }
+
+    #[test]
+    fn horizon_wgsl_compiles() {
+        validate_wgsl("horizon.wgsl", include_str!("shaders/horizon.wgsl"));
     }
 
     #[test]
@@ -1521,6 +1550,9 @@ mod build_shader_params_tests {
         cfg.lines.echo = 0.7;
         cfg.scope.trails = 0.9;
         cfg.scope.echo = 0.1;
+        // Opposite Reflection / Horizon per mode, so a Bars/Lines swap fails.
+        cfg.bars.reflection = true;
+        cfg.lines.horizon = true;
 
         let shared = Arc::new(RwLock::new(cfg.clone()));
         let viz = Visualizer::new(64, shared.clone(), Default::default());
@@ -1544,6 +1576,7 @@ mod build_shader_params_tests {
         // mode, so it must source the Bars values (not Lines/Scope, not zero).
         assert!((params.trails - 0.25).abs() < 1e-6);
         assert!((params.echo - 0.6).abs() < 1e-6);
+        assert!(params.reflection && !params.horizon);
 
         // Lines mode must source cfg.lines.*; Scope mode must source cfg.scope.*.
         let lines_params = Visualizer::new(64, shared.clone(), Default::default())
@@ -1551,12 +1584,17 @@ mod build_shader_params_tests {
             .build_shader_params(&cfg, &colors);
         assert!((lines_params.trails - 0.5).abs() < 1e-6);
         assert!((lines_params.echo - 0.7).abs() < 1e-6);
+        assert!(!lines_params.reflection && lines_params.horizon);
 
         let scope_params = Visualizer::new(64, shared, Default::default())
             .mode(VisualizationMode::Scope)
             .build_shader_params(&cfg, &colors);
         assert!((scope_params.trails - 0.9).abs() < 1e-6);
         assert!((scope_params.echo - 0.1).abs() < 1e-6);
+        assert!(
+            !scope_params.reflection && !scope_params.horizon,
+            "Bars / Lines only"
+        );
 
         // colors-routed — peak/bar gradient palettes must be padded to 8.
         assert_eq!(params.gradient_colors.len(), 8);

@@ -197,6 +197,8 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::BARS_FLASH_INTENSITY));
     e.push(m.take(keys::BARS_TRAILS));
     e.push(m.take(keys::BARS_ECHO));
+    e.push(m.take(keys::BARS_REFLECTION));
+    e.push(m.take(keys::BARS_HORIZON));
 
     // --- Bar Colors (Dark / Light) ---
     // These keys are theme-file-relative — they write to the active theme file,
@@ -237,6 +239,8 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::LINES_BOAT));
     e.push(m.take(keys::LINES_TRAILS));
     e.push(m.take(keys::LINES_ECHO));
+    e.push(m.take(keys::LINES_REFLECTION));
+    e.push(m.take(keys::LINES_HORIZON));
 
     // --- Scope section (circular oscilloscope) ---
     e.push(SettingsEntry::Header {

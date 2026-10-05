@@ -275,6 +275,16 @@ pub struct BarsConfig {
     /// Default: 0.0 (off — strong character change)
     pub echo: f32,
 
+    /// Reflection: the bars stand on a waterline and are mirrored in a band of
+    /// dark rippling water below it (kicks send ripples across).
+    /// Default: false (off — strong character change)
+    pub reflection: bool,
+
+    /// Horizon: about the last second and a half of bars recede behind the live ones
+    /// in rows toward a horizon, shrinking and fading into mist.
+    /// Default: false (off — strong character change)
+    pub horizon: bool,
+
     /// Where the Bars visualizer is drawn. See [`VisualizerPlacement`].
     /// Default: [`VisualizerPlacement::OverCover`] (over the now-playing cover art)
     #[serde(deserialize_with = "deserialize_or_default")]
@@ -303,6 +313,8 @@ impl Default for BarsConfig {
             max_bars: 512,
             trails: 0.0,
             echo: 0.0,
+            reflection: false,
+            horizon: false,
             placement: VisualizerPlacement::OverCover,
         }
     }
@@ -395,6 +407,16 @@ pub struct LinesConfig {
     /// Default: 0.0 (off — strong character change)
     pub echo: f32,
 
+    /// Reflection: the line rides above a waterline and is mirrored in a band
+    /// of dark rippling water below it (kicks send ripples across).
+    /// Default: false (off — strong character change)
+    pub reflection: bool,
+
+    /// Horizon: about the last second and a half of the line recedes behind it as
+    /// misty waves toward a horizon.
+    /// Default: false (off — strong character change)
+    pub horizon: bool,
+
     /// Where the Lines visualizer is drawn. See [`VisualizerPlacement`].
     /// Default: [`VisualizerPlacement::OverCover`] (over the now-playing cover art)
     #[serde(deserialize_with = "deserialize_or_default")]
@@ -417,6 +439,8 @@ impl Default for LinesConfig {
             boat: true,
             trails: 0.0,
             echo: 0.0,
+            reflection: false,
+            horizon: false,
             placement: VisualizerPlacement::OverCover,
         }
     }
@@ -662,6 +686,8 @@ pub mod keys {
     pub const BARS_FLASH_INTENSITY: &str = "visualizer.bars.flash_intensity";
     pub const BARS_TRAILS: &str = "visualizer.bars.trails";
     pub const BARS_ECHO: &str = "visualizer.bars.echo";
+    pub const BARS_REFLECTION: &str = "visualizer.bars.reflection";
+    pub const BARS_HORIZON: &str = "visualizer.bars.horizon";
     pub const BARS_PLACEMENT: &str = "visualizer.bars.placement";
 
     // ── Lines ────────────────────────────────────────────────────────────
@@ -678,6 +704,8 @@ pub mod keys {
     pub const LINES_BOAT: &str = "visualizer.lines.boat";
     pub const LINES_TRAILS: &str = "visualizer.lines.trails";
     pub const LINES_ECHO: &str = "visualizer.lines.echo";
+    pub const LINES_REFLECTION: &str = "visualizer.lines.reflection";
+    pub const LINES_HORIZON: &str = "visualizer.lines.horizon";
     pub const LINES_PLACEMENT: &str = "visualizer.lines.placement";
 
     // ── Scope (circular oscilloscope) ────────────────────────────────────
@@ -744,6 +772,8 @@ pub mod keys {
         BARS_FLASH_INTENSITY,
         BARS_TRAILS,
         BARS_ECHO,
+        BARS_REFLECTION,
+        BARS_HORIZON,
         BARS_PLACEMENT,
         LINES_POINT_COUNT,
         LINES_LINE_THICKNESS,
@@ -758,6 +788,8 @@ pub mod keys {
         LINES_BOAT,
         LINES_TRAILS,
         LINES_ECHO,
+        LINES_REFLECTION,
+        LINES_HORIZON,
         LINES_PLACEMENT,
         SCOPE_POINT_COUNT,
         SCOPE_RADIUS,

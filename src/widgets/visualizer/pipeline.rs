@@ -6,7 +6,8 @@
 use iced::wgpu;
 
 use super::shader::{
-    BloomParams, CrtParams, EchoParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline,
+    BloomParams, CrtParams, EchoParams, ReflectionParams, TRAIL_FORMAT, Uniforms,
+    VisualizerPipeline,
 };
 
 /// Build one of the four bars/lines × default/MSAA render pipelines.
@@ -231,7 +232,7 @@ impl VisualizerPipeline {
                 // Particle data (two vec4 per particle, scope mode only)
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -442,6 +443,37 @@ impl VisualizerPipeline {
             "visualizer scope beam pipeline (MSAA 4x)",
             format,
             additive_blend,
+        );
+
+        // Horizon (horizon.wgsl): the receding rows drawn behind the bars /
+        // line, one fullscreen triangle. Premultiplied output, composited
+        // front to back in the shader.
+        let horizon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer horizon shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/horizon.wgsl"
+            ))),
+        });
+        let horizon_blend = wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING;
+        let horizon_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &horizon_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            false,
+            "visualizer horizon pipeline",
+            format,
+            horizon_blend,
+        );
+        let horizon_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &horizon_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            true,
+            "visualizer horizon pipeline (MSAA 4x)",
+            format,
+            horizon_blend,
         );
 
         // --- Blit pipeline for compositing MSAA result onto framebuffer ---
@@ -821,6 +853,60 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             "visualizer crt pipeline",
         );
 
+        // --- Reflection (reflection.wgsl): mirrors the displayed scene below
+        // the waterline. Group 0 = the blit layout, group 1 = ReflectionParams.
+        let reflection_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer reflection shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/reflection.wgsl"
+            ))),
+        });
+        let reflection_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("visualizer reflection uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let reflection_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("visualizer reflection uniform buffer"),
+            size: std::mem::size_of::<ReflectionParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let reflection_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("visualizer reflection uniform bind group"),
+            layout: &reflection_uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: reflection_uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let reflection_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("visualizer reflection pipeline layout"),
+            bind_group_layouts: &[
+                Some(&blit_bind_group_layout),
+                Some(&reflection_uniform_layout),
+            ],
+            immediate_size: 0,
+        });
+        let reflection_pipeline = build_postprocess_pipeline(
+            device,
+            &reflection_layout,
+            &reflection_shader,
+            ("vs_reflection", "fs_reflection"),
+            premultiplied_blend,
+            format,
+            "visualizer reflection pipeline",
+        );
+
         Self {
             bars_pipeline,
             bars_pipeline_msaa,
@@ -832,6 +918,8 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             particle_pipeline_msaa,
             scope_pipeline_beam,
             scope_pipeline_beam_msaa,
+            horizon_pipeline,
+            horizon_pipeline_msaa,
             uniform_buffer,
             bar_buffer,
             particle_buffer,
@@ -877,6 +965,9 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             crt_pipeline,
             crt_uniform_buffer,
             crt_uniform_bind_group,
+            reflection_pipeline,
+            reflection_uniform_buffer,
+            reflection_uniform_bind_group,
         }
     }
 }

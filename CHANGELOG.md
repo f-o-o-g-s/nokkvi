@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The new Reflection setting for Bars and Lines stands the visualizer on a waterline above rippling dark water that mirrors it.
+- With Reflection on, beats send ripples running sideways across the water.
+- With Reflection on, the Lines surfing boat rides the line above the water.
+- The new Horizon setting for Bars sends the last second and a half of bars receding behind the live ones toward a misty horizon.
+- For Lines, the Horizon setting sends the last second and a half of the line receding behind it as misty waves.
+- Horizon rows nearest the viewer run off both edges of the visualizer, while farther rows narrow toward the middle.
+- In LED mode, the Horizon's receding bars are cut into LED segments too.
 ### Changed
 
 ### Fixed

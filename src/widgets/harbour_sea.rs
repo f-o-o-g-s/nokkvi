@@ -26,7 +26,7 @@
 use iced::{Color, Element, Length, Point, Rectangle, Size, widget::canvas};
 
 use crate::widgets::{
-    boat::{BoatState, boat_overlay, parse_hex_color, sample_line_height},
+    boat::{BoatState, LineGeometry, boat_overlay, parse_hex_color, sample_line_height},
     harbour_runes,
 };
 
@@ -1796,7 +1796,15 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         // The longship, trawling: full opacity (it's the panel's content,
         // not an overlay dimmed against art), mirror off (the harbour sea
         // has no lower reflection), anchor trailed on the seabed.
-        let boat_el = boat_overlay::<M>(boat, w, h, w.min(h), 1.0, false, Some(TRAIL_OFFSET));
+        let boat_el = boat_overlay::<M>(
+            boat,
+            w,
+            h,
+            w.min(h),
+            1.0,
+            LineGeometry::default(),
+            Some(TRAIL_OFFSET),
+        );
 
         let mut layers = stack![backdrop, sea];
         // The moon's (and by day the sun's) disc is the shader's; during a

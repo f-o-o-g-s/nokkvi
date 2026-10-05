@@ -68,8 +68,9 @@
 mod boat_physics;
 pub(crate) use boat_physics::{
     ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, ANCHOR_INTERVAL_MAX_SECS, BOAT_SINK_FRACTION,
-    BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState, MusicSignals, OVER_COVER_WRAP_MARGIN, boat_pixel_size,
-    effective_bars, rope_stroke_for, sample_line_height, step, wave_baseline_and_scale,
+    BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState, LineGeometry, MusicSignals, OVER_COVER_WRAP_MARGIN,
+    boat_pixel_size, effective_bars, rope_stroke_for, sample_line_height, step,
+    wave_baseline_and_scale,
 };
 use iced::{
     Color, Element, Length, Point, Rectangle,
@@ -157,9 +158,10 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     area_height: f32,
     size_basis: f32,
     opacity: f32,
-    mirror: bool,
+    line: LineGeometry,
     trail: Option<f32>,
 ) -> Element<'a, M> {
+    let mirror = line.mirror;
     // The handler is responsible for calling `cache_handle_for(tilt,
     // facing)` on the first visible tick, so by the time we render the
     // matching handle is cached. The fallback rebuilds inline if a render
@@ -213,7 +215,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // remains at those coordinates regardless of the surrounding margin.
     let cx = state.x_ratio * area_width;
     let target_x = cx - boat_w * 0.5;
-    let (baseline_y, wave_scale) = wave_baseline_and_scale(area_height, mirror);
+    let (baseline_y, wave_scale) = wave_baseline_and_scale(area_height, line);
     // Inverted-boat affordance (mirrored line mode only): when
     // `state.inverted` flips on after an off-screen wrap, render the
     // boat upside-down on the LOWER wave (the shader-mirrored

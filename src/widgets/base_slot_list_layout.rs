@@ -423,7 +423,7 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a + 'static>(
 
 /// Surfing-boat overlay for the over-cover Lines visualizer. Carries a borrow of
 /// the live [`BoatState`](crate::widgets::boat::BoatState) plus the visual params
-/// the boat needs (global visualizer `opacity` + the Lines `mirror` flag).
+/// the boat needs (global visualizer `opacity` + the Lines wave geometry).
 /// `Some` only when Lines is drawn over the cover and the boat is visible; the
 /// physics ticks in `update::boat` regardless of placement, so the position is
 /// already live. The boat is inert (emits no messages, event-transparent), so it
@@ -432,7 +432,8 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a + 'static>(
 pub(crate) struct OverCoverBoat<'a> {
     pub state: &'a crate::widgets::boat::BoatState,
     pub opacity: f32,
-    pub mirror: bool,
+    /// The Lines wave's geometry (mirror, Reflection).
+    pub line: crate::widgets::boat::LineGeometry,
 }
 
 /// Like [`single_artwork_panel`], but stacks the active visualizer over the
@@ -657,7 +658,7 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
                 band_h,
                 w.min(band_h),
                 b.opacity,
-                b.mirror,
+                b.line,
                 // Lines over-cover boat keeps the drop-anchor doodad.
                 None,
             );

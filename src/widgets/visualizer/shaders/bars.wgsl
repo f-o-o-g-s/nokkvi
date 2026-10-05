@@ -3,10 +3,10 @@
 // Based on reference-qml/plugins/cavavisualizer/rendering/barrenderer.cpp
 //
 // ⚠️  Config struct layout MUST match VisualizerConfig in shader.rs byte-for-byte.
-//     If you add/remove/reorder fields, update ALL THREE locations:
-//       1. src/widgets/visualizer/shader.rs          (VisualizerConfig)
-//       2. src/widgets/visualizer/shaders/bars.wgsl  (Config)
-//       3. src/widgets/visualizer/shaders/lines.wgsl (Config)
+//     If you add/remove/reorder fields, update EVERY copy together:
+//       src/widgets/visualizer/shader.rs (VisualizerConfig) and the Config block
+//       in shaders/bars.wgsl, lines.wgsl, scope.wgsl and horizon.wgsl
+//       (pinned by the wgsl_config_* tests in widgets/visualizer/mod.rs).
 
 struct Uniforms {
     viewport: vec4<f32>,  // x, y, width, height in PIXELS

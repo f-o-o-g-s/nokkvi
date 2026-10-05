@@ -1147,7 +1147,10 @@ impl Nokkvi {
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
             let viz_opacity = cfg.opacity;
-            let lines_mirror = cfg.lines.mirror;
+            let lines_geometry = crate::widgets::boat::LineGeometry {
+                mirror: cfg.lines.mirror,
+                reflection: cfg.lines.reflection,
+            };
             drop(cfg);
 
             let visualizer_width = (self.window.width - inset).max(0.0);
@@ -1193,7 +1196,7 @@ impl Nokkvi {
                         // the band height (the constraining dimension).
                         visualizer_height,
                         viz_opacity,
-                        lines_mirror,
+                        lines_geometry,
                         // No trawl trail — the Lines boat keeps its
                         // drop-anchor-and-rest doodad.
                         None,
@@ -1706,7 +1709,7 @@ impl Nokkvi {
         // stacks cover → lyrics scrim → visualizer → boat → haloed lyric
         // text, so both hero surfaces stay visible at once (owner-directed;
         // the per-glyph halo is what keeps text readable over the motion).
-        let (over_art_mode, height_percent, opacity, mirror) = {
+        let (over_art_mode, height_percent, opacity, line) = {
             let cfg = self.visualizer_config.read();
             let mode = widgets::visualizer::resolve_placement(
                 self.settings.visualization_mode,
@@ -1714,7 +1717,11 @@ impl Nokkvi {
                 cfg.lines.placement,
             )
             .over_art;
-            (mode, cfg.height_percent, cfg.opacity, cfg.lines.mirror)
+            let line = crate::widgets::boat::LineGeometry {
+                mirror: cfg.lines.mirror,
+                reflection: cfg.lines.reflection,
+            };
+            (mode, cfg.height_percent, cfg.opacity, line)
         };
         let visualizer = over_art_mode.and_then(|mode| {
             self.visualizer
@@ -1727,7 +1734,7 @@ impl Nokkvi {
             Some(crate::widgets::base_slot_list_layout::OverCoverBoat {
                 state: &self.boat,
                 opacity,
-                mirror,
+                line,
             })
         } else {
             None

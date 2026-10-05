@@ -114,12 +114,30 @@ pub(crate) fn rope_stroke_for(boat_h: f32) -> f32 {
 /// — the boat elides that inset because at the boat's Y-spring
 /// damping it's not visually distinguishable from the unpadded
 /// formula.
-pub(crate) fn wave_baseline_and_scale(area_height: f32, mirror: bool) -> (f32, f32) {
-    if mirror {
-        (area_height * 0.5, area_height * 0.5)
+///
+/// With the Reflection on, the line is drawn in the band above the waterline
+/// (`WATER_LINE` of the area from the top), so the same geometry applies to
+/// that band and the boat rides the line rather than the water below it.
+pub(crate) fn wave_baseline_and_scale(area_height: f32, line: LineGeometry) -> (f32, f32) {
+    let band = if line.reflection {
+        area_height * crate::widgets::visualizer::WATER_LINE
     } else {
-        (area_height, area_height)
+        area_height
+    };
+    if line.mirror {
+        (band * 0.5, band * 0.5)
+    } else {
+        (band, band)
     }
+}
+
+/// How the Lines wave sits in the visualizer area: mirrored about its centre
+/// (`lines.mirror`) and/or standing above the Reflection's waterline
+/// (`lines.reflection`). The Trawl's sea is neither (`default()`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LineGeometry {
+    pub(crate) mirror: bool,
+    pub(crate) reflection: bool,
 }
 
 // --- physics tuning constants ---------------------------------------------

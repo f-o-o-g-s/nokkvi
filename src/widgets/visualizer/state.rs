@@ -18,7 +18,12 @@ use parking_lot::{Mutex, RwLock};
 use tracing::{debug, trace};
 
 use super::{
-    VisualizationMode, flash::FlashField, milkdrop::MilkdropShared, particles::ParticleSystem,
+    VisualizationMode,
+    flash::FlashField,
+    horizon::{HorizonRows, RowShape},
+    milkdrop::MilkdropShared,
+    particles::ParticleSystem,
+    reflection::{KickRipples, RIPPLE_SLOTS},
 };
 use crate::visualizer_config::VisualizerConfig;
 
@@ -200,6 +205,9 @@ struct DisplayBuffers {
     /// `particles.rs`). Independent of `bar_count` (sized to the particle
     /// count), so `resize()` leaves it alone.
     particles: Vec<[f32; 8]>,
+    /// Bars / Lines Horizon rows snapshot (see `horizon.rs`), empty while the
+    /// Horizon is off. Independent of `bar_count`, like `particles`.
+    horizon: Vec<[f32; 8]>,
     /// Peak bar values (0.0-1.0 normalized) - tracks recent maximums
     peak_bars: Vec<f64>,
     /// Alpha values for each peak (1.0 = visible, 0.0 = hidden) - for fade mode
@@ -216,6 +224,7 @@ impl DisplayBuffers {
             bars: vec![0.0; bar_count],
             waveform: vec![0.0; bar_count],
             particles: Vec::new(),
+            horizon: Vec::new(),
             peak_bars: vec![0.0; bar_count],
             peak_alphas: vec![1.0; bar_count],
             flash_intensities: vec![0.0; bar_count],
@@ -248,6 +257,7 @@ impl DisplayBuffers {
             *sample = 0.0;
         }
         self.particles.clear();
+        self.horizon.clear();
         for peak in self.peak_bars.iter_mut() {
             *peak = 0.0;
         }
@@ -549,6 +559,13 @@ pub(crate) struct VisualizerState {
     /// snapshot is copied into `DisplayBuffers.particles` for upload.
     particles: Arc<Mutex<ParticleSystem>>,
 
+    /// Bars / Lines Horizon rows (horizon.rs), stepped each `tick()` while
+    /// the active mode's Horizon is on; snapshotted into `display.horizon`.
+    horizon: Arc<Mutex<HorizonRows>>,
+    /// Bars / Lines Reflection kick ripples (reflection.rs), stepped each
+    /// `tick()` while the active mode's Reflection is on.
+    ripples: Arc<Mutex<KickRipples>>,
+
     /// Master feed gate — `false` when the visualizer is toggled Off.
     ///
     /// The 60 Hz worker checks this at the top of `tick()` and the audio
@@ -773,6 +790,8 @@ impl VisualizerState {
                 0.7,
                 instance_id as u32,
             ))),
+            horizon: Arc::new(Mutex::new(HorizonRows::new())),
+            ripples: Arc::new(Mutex::new(KickRipples::new())),
             // Feed gate — on by default; the handler flips it off when Off
             feed_active: Arc::new(AtomicBool::new(true)),
             // Onset envelope
@@ -1024,6 +1043,11 @@ impl VisualizerState {
                     cfg.scope.particle_count,
                     cfg.scope.particle_speed,
                 );
+                let (reflection_on, horizon_on) = match mode {
+                    VisualizationMode::Bars => (cfg.bars.reflection, cfg.bars.horizon),
+                    VisualizationMode::Lines => (cfg.lines.reflection, cfg.lines.horizon),
+                    VisualizationMode::Scope | VisualizationMode::Milkdrop => (false, false),
+                };
                 drop(cfg);
 
                 // Apply smoothing filters on FFT output (before interpolation).
@@ -1064,6 +1088,22 @@ impl VisualizerState {
                         wave,
                         scope_sensitivity,
                     );
+                }
+
+                // Horizon rows and the Reflection's kick ripples. Like the Scope
+                // dust, they read last tick's beat / bass (the flux block below
+                // writes this tick's).
+                if horizon_on && let Some(mut rows) = self.horizon.try_lock() {
+                    let shape = if mode == VisualizationMode::Bars {
+                        RowShape::Stepped
+                    } else {
+                        RowShape::Smooth
+                    };
+                    rows.update(&output, shape);
+                }
+                if reflection_on && let Some(mut ripples) = self.ripples.try_lock() {
+                    let (bass, _, _) = self.current_bands();
+                    ripples.update(&output, self.current_beat_pulse(), bass);
                 }
 
                 // Spectral flux: positive bin-to-bin deltas vs. the last
@@ -1165,6 +1205,10 @@ impl VisualizerState {
                     if scope_particles && let Some(psys) = self.particles.try_lock() {
                         display.particles.clear();
                         display.particles.extend_from_slice(psys.gpu_data());
+                    }
+                    if horizon_on && let Some(rows) = self.horizon.try_lock() {
+                        display.horizon.clear();
+                        display.horizon.extend_from_slice(rows.gpu_data());
                     }
                     display.dirty = true;
                     // Re-arm the trail drain budget while audio is live; when it
@@ -1345,6 +1389,22 @@ impl VisualizerState {
             return vec![0.0; display.waveform.len()];
         }
         self.display.lock().waveform.clone()
+    }
+
+    /// The Reflection's kick ripples for the shader.
+    pub(crate) fn reflection_ripples(&self) -> [[f32; 4]; RIPPLE_SLOTS] {
+        self.ripples.lock().events()
+    }
+
+    /// The Horizon rows snapshot (see `horizon.rs`). Empty mid-clear so the
+    /// rows don't flash a stale history across track changes.
+    pub(crate) fn get_horizon(&self) -> Vec<[f32; 8]> {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return Vec::new();
+        }
+        self.display.lock().horizon.clone()
     }
 
     /// Scope particle-field snapshot (two `vec4`s per particle). Empty mid-clear
@@ -1695,6 +1755,8 @@ impl VisualizerState {
 
         self.sample_buffer.lock().clear();
         self.display.lock().clear();
+        self.horizon.lock().clear();
+        self.ripples.lock().clear();
         self.effects.lock().clear(bar_count);
         self.processing.lock().clear(bar_count);
 

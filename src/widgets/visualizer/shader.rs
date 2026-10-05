@@ -12,7 +12,11 @@ use iced::{
     widget::shader::{self, Viewport},
 };
 
-use super::{VisualizationMode, state::VisualizerState};
+use super::{
+    VisualizationMode,
+    reflection::{REFLECTION_STRETCH, RIPPLE_SLOTS, WATER_LINE},
+    state::VisualizerState,
+};
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 fn get_elapsed_time() -> f32 {
@@ -212,6 +216,13 @@ pub(crate) struct VisualizerPrimitive {
     pub particle_count: u32,
     /// Scope mode: render the ring additively for the luminous-beam look.
     pub scope_beam: bool,
+    /// Bars / Lines: stand on a waterline and mirror in the water below
+    /// (reflection.wgsl); the visualizer draws in the band above `WATER_LINE`.
+    pub reflection: bool,
+    /// Bars / Lines: the receding rows behind the visualizer (horizon.wgsl),
+    /// drawn from `horizon_data` (uploaded into the particle buffer, which
+    /// only Scope's dust uses otherwise). Empty when the Horizon is off.
+    pub horizon_data: Vec<[f32; 8]>,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -306,6 +317,10 @@ pub(crate) struct ShaderParams {
     pub echo: f32,
     /// CRT / film composite amount (0.0 = off, 1.0 = full retro)
     pub crt: f32,
+    /// Bars / Lines Reflection (the active mode's `reflection`).
+    pub reflection: bool,
+    /// Bars / Lines Horizon (the active mode's `horizon`).
+    pub horizon: bool,
 }
 
 impl VisualizerPrimitive {
@@ -460,6 +475,14 @@ impl VisualizerPrimitive {
         // Scope particle field: pull the latest snapshot only in Scope mode with
         // particles enabled (otherwise empty → nothing drawn). Dim by the global
         // visualizer opacity and cap to the GPU buffer size.
+        let reflection = !mode.uses_waveform() && params.reflection;
+        let horizon_data = if !mode.uses_waveform() && params.horizon {
+            let mut rows = state.get_horizon();
+            rows.truncate(VisualizerPipeline::MAX_PARTICLES);
+            rows
+        } else {
+            Vec::new()
+        };
         let particle_data = if mode == VisualizationMode::Scope && params.scope_particles {
             let opacity = params.global_opacity.clamp(0.0, 1.0);
             let mut p = state.get_particles();
@@ -496,6 +519,8 @@ impl VisualizerPrimitive {
             particle_data,
             particle_count,
             scope_beam: params.scope_beam,
+            reflection,
+            horizon_data,
         }
     }
 }
@@ -512,6 +537,9 @@ pub(crate) struct VisualizerPipeline {
     pub(super) particle_pipeline_msaa: wgpu::RenderPipeline,
     pub(super) scope_pipeline_beam: wgpu::RenderPipeline,
     pub(super) scope_pipeline_beam_msaa: wgpu::RenderPipeline,
+    /// Horizon rows (horizon.wgsl), drawn behind the bars / line.
+    pub(super) horizon_pipeline: wgpu::RenderPipeline,
+    pub(super) horizon_pipeline_msaa: wgpu::RenderPipeline,
     pub(super) uniform_buffer: wgpu::Buffer,
     pub(super) bar_buffer: wgpu::Buffer,
     pub(super) particle_buffer: wgpu::Buffer,
@@ -602,7 +630,31 @@ pub(crate) struct VisualizerPipeline {
     pub(super) crt_uniform_buffer: wgpu::Buffer,
     /// Bind group for the CrtParams uniform (group 1; reused every frame).
     pub(super) crt_uniform_bind_group: wgpu::BindGroup,
+    /// Reflection pass (reflection.wgsl): blit layout + ReflectionParams.
+    pub(super) reflection_pipeline: wgpu::RenderPipeline,
+    pub(super) reflection_uniform_buffer: wgpu::Buffer,
+    pub(super) reflection_uniform_bind_group: wgpu::BindGroup,
 }
+
+/// Reflection pass parameters (reflection.wgsl `ReflectionParams`) — a small
+/// standalone uniform like `BloomParams`, outside the `VisualizerConfig` interlock.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub(super) struct ReflectionParams {
+    /// waterline (fraction from the top), clock s, beat pulse, bass level
+    pub(super) surface: [f32; 4],
+    /// widget width px, height px, mirror compression, unused
+    pub(super) size: [f32; 4],
+    /// water body colour (the theme's dark stroke)
+    pub(super) tint: [f32; 4],
+    /// surface highlight colour (the first peak colour)
+    pub(super) glint: [f32; 4],
+    /// kick ripples: x (0..1 across), age s, strength (0 = none), unused
+    pub(super) ripples: [[f32; 4]; RIPPLE_SLOTS],
+}
+
+unsafe impl bytemuck::Pod for ReflectionParams {}
+unsafe impl bytemuck::Zeroable for ReflectionParams {}
 
 /// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
 /// the 8336-byte `VisualizerConfig` interlock.
@@ -674,9 +726,39 @@ unsafe impl bytemuck::Pod for Uniforms {}
 unsafe impl bytemuck::Zeroable for Uniforms {}
 
 impl VisualizerPrimitive {
+    /// Texture rows the visualizer draws into: the band above the waterline
+    /// when the Reflection is on, else all of it.
+    fn scene_tex_h(&self, tex_h: u32) -> u32 {
+        if self.reflection {
+            ((tex_h as f32 * WATER_LINE).round() as u32).clamp(1, tex_h)
+        } else {
+            tex_h
+        }
+    }
+
+    /// The Horizon rows' pipeline, when they are on.
+    fn horizon_pipe<'a>(
+        &self,
+        pipeline: &'a VisualizerPipeline,
+        msaa: bool,
+    ) -> Option<&'a wgpu::RenderPipeline> {
+        if self.horizon_data.is_empty() {
+            return None;
+        }
+        Some(if msaa {
+            &pipeline.horizon_pipeline_msaa
+        } else {
+            &pipeline.horizon_pipeline
+        })
+    }
+
     /// Shared draw logic for both the non-MSAA and MSAA render paths.
     /// Accepts individual pipeline references to allow the caller to choose
     /// between the standard and MSAA pipeline variants.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the per-pass pipeline picks; the callers choose MSAA or not"
+    )]
     fn draw_bars_and_lines(
         mode: VisualizationMode,
         config: &VisualizerConfig,
@@ -684,11 +766,18 @@ impl VisualizerPrimitive {
         bars_pipeline: &wgpu::RenderPipeline,
         lines_pipeline: &wgpu::RenderPipeline,
         scope_pipeline: &wgpu::RenderPipeline,
+        horizon: Option<&wgpu::RenderPipeline>,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) {
         let bar_count = config.bar_count;
 
         render_pass.set_bind_group(0, bind_group, &[]);
+
+        // The Horizon rows sit behind the bars / line.
+        if let Some(horizon) = horizon {
+            render_pass.set_pipeline(horizon);
+            render_pass.draw(0..3, 0..1);
+        }
 
         match mode {
             VisualizationMode::Bars => {
@@ -815,6 +904,7 @@ impl VisualizerPrimitive {
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
             scope_pipe,
+            self.horizon_pipe(pipeline, false),
             &mut render_pass,
         );
         Self::draw_particles(
@@ -865,9 +955,16 @@ impl shader::Primitive for VisualizerPrimitive {
         // Clear dirty flag since we've read the current state
         self.state.clear_dirty();
 
+        // Reflection: the visualizer stands in the band above the waterline.
+        let scene_h = if self.reflection {
+            bounds.height * WATER_LINE
+        } else {
+            bounds.height
+        };
+
         // Update uniforms
         let uniforms = Uniforms {
-            viewport: [bounds.x, bounds.y, bounds.width, bounds.height],
+            viewport: [bounds.x, bounds.y, bounds.width, scene_h],
             gradient_colors: self.gradient_colors,
             peak_gradient_colors: self.peak_gradient_colors,
             peak_color: self.peak_color,
@@ -883,6 +980,26 @@ impl shader::Primitive for VisualizerPrimitive {
             },
         };
         queue.write_buffer(&pipeline.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+        if self.reflection {
+            let (bass, _, _) = self.state.current_bands();
+            let params = ReflectionParams {
+                surface: [
+                    WATER_LINE,
+                    self.config.time,
+                    self.state.current_beat_pulse() * self.beat_reactivity,
+                    bass,
+                ],
+                size: [bounds.width, bounds.height, REFLECTION_STRETCH, 0.0],
+                tint: self.border_color,
+                glint: self.peak_gradient_colors[0],
+                ripples: self.state.reflection_ripples(),
+            };
+            queue.write_buffer(
+                &pipeline.reflection_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&params),
+            );
+        }
 
         // Update bar data (pad to max size)
         let mut bar_data_padded = bar_data;
@@ -920,6 +1037,15 @@ impl shader::Primitive for VisualizerPrimitive {
                 bytemuck::cast_slice(&self.particle_data),
             );
         }
+        // The Horizon rows share that buffer (Scope's dust and the Horizon
+        // never draw in the same mode).
+        if !self.horizon_data.is_empty() {
+            queue.write_buffer(
+                &pipeline.particle_buffer,
+                0,
+                bytemuck::cast_slice(&self.horizon_data),
+            );
+        }
 
         // Create/resize offscreen targets if perspective/3D, bloom, trails, OR
         // echo are active (all need the resolve texture; bloom adds the half-res
@@ -929,6 +1055,7 @@ impl shader::Primitive for VisualizerPrimitive {
             || self.trails_enabled
             || self.echo_enabled
             || self.crt_enabled
+            || self.reflection
         {
             let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
@@ -1300,6 +1427,7 @@ impl shader::Primitive for VisualizerPrimitive {
             || self.trails_enabled
             || self.echo_enabled
             || self.crt_enabled
+            || self.reflection
         {
             return false;
         }
@@ -1316,6 +1444,7 @@ impl shader::Primitive for VisualizerPrimitive {
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
             scope_pipe,
+            self.horizon_pipe(pipeline, false),
             render_pass,
         );
         Self::draw_particles(
@@ -1377,8 +1506,9 @@ impl shader::Primitive for VisualizerPrimitive {
 
             // Viewport covers the full widget-sized texture (0,0 origin)
             let (tex_w, tex_h) = pipeline.msaa_size;
-            render_pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
-            render_pass.set_scissor_rect(0, 0, tex_w, tex_h);
+            let scene_tex_h = self.scene_tex_h(tex_h);
+            render_pass.set_viewport(0.0, 0.0, tex_w as f32, scene_tex_h as f32, 0.0, 1.0);
+            render_pass.set_scissor_rect(0, 0, tex_w, scene_tex_h);
 
             let scope_pipe = if self.scope_beam {
                 &pipeline.scope_pipeline_beam_msaa
@@ -1392,6 +1522,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.bars_pipeline_msaa,
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
+                self.horizon_pipe(pipeline, true),
                 &mut render_pass,
             );
             Self::draw_particles(
@@ -1429,8 +1560,9 @@ impl shader::Primitive for VisualizerPrimitive {
             });
 
             let (tex_w, tex_h) = pipeline.msaa_size;
-            ring_pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
-            ring_pass.set_scissor_rect(0, 0, tex_w, tex_h);
+            let scene_tex_h = self.scene_tex_h(tex_h);
+            ring_pass.set_viewport(0.0, 0.0, tex_w as f32, scene_tex_h as f32, 0.0, 1.0);
+            ring_pass.set_scissor_rect(0, 0, tex_w, scene_tex_h);
 
             let scope_pipe = if self.scope_beam {
                 &pipeline.scope_pipeline_beam_msaa
@@ -1445,6 +1577,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.bars_pipeline_msaa,
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
+                self.horizon_pipe(pipeline, true),
                 &mut ring_pass,
             );
         }
@@ -1769,6 +1902,41 @@ impl shader::Primitive for VisualizerPrimitive {
                 self.particle_count,
                 &mut particle_pass,
             );
+        }
+
+        // Reflection: mirror the displayed scene below the waterline. Drawn
+        // before the bloom composite, so the glow spills over the surface.
+        if self.reflection {
+            let mut reflection_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visualizer reflection pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            reflection_pass.set_viewport(
+                clip_bounds.x as f32,
+                clip_bounds.y as f32,
+                tex_w as f32,
+                tex_h as f32,
+                0.0,
+                1.0,
+            );
+            reflection_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
+            reflection_pass.set_pipeline(&pipeline.reflection_pipeline);
+            reflection_pass.set_bind_group(0, display_bg, &[]);
+            reflection_pass.set_bind_group(1, &pipeline.reflection_uniform_bind_group, &[]);
+            reflection_pass.draw(0..3, 0..1);
         }
 
         // Pass 3: additively composite the blurred bloom over the scene.
