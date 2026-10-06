@@ -13,7 +13,10 @@ All notable changes to this project will be documented in this file.
 - For Lines, the Horizon setting sends the last second and a half of the line receding behind it as misty waves.
 - Horizon rows nearest the viewer run off both edges of the visualizer, while farther rows narrow toward the middle.
 - In LED mode, the Horizon's receding bars are cut into LED segments too.
+
 ### Changed
+
+- Living Ink now drops ink jellyfish trailing tentacles and bursting splashes among its rings.
 
 ### Fixed
 
