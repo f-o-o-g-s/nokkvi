@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Living Ink now drops ink jellyfish trailing tentacles and bursting splashes among its rings.
+- Living Ink now drops rings and amorphous blobs on the music's hits, and its ink swells and merges while the music is busy.
 
 ### Fixed
 

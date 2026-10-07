@@ -853,7 +853,9 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # along that gradient, so a body dilates (advection copies its profile
 # outward rather than thinning it); four times harder where species overlap
 # (inks that touch billow into each other) and harder while the music is
-# busy (its activity, from loudness over ~1.5 s, rides in q8). Values are
+# busy (its activity, rides in q8: with a locked beat 0.55 to 1 by the
+# section's strength, 0.4 of that in a breakdown, 0.25 without one; eased
+# over ~1.5 s). Values are
 # rounded stochastically and unbiased (floor(v * 255 + hash)), so slow decay
 # never stalls; total mass is bounded (decay 3 s, up to 1.8x as long while
 # the music is busy and 2.2x where inks touch, plus a small absolute loss,
@@ -878,16 +880,14 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # bodies. The young drop (bead, then ring, up to IK_NF[1] s) joins the same
 # field analytically (sphere-traced inside its bounding sphere), so it is
 # crisp, and hands over to its own dye. A drop is one of three kinds (the
-# code's top bits, IK_KIND): a ring; a jellyfish, the ring as its bell
-# trailing a stem back to where it entered and a tentacle off the rim per
-# child, waving and thinning with age, on a slow clock (ik_jelly); or a
-# splash, no ring but two cones of arms flung out of the entry point that
-# curl back, each ending in a bead, growing as it ages and crisp until it
-# bursts (IK_NFS; ik_splash): at IK_TS, as a ring splits, each bead blooms
-# into a smaller splash flung out along its arm (ik_splash_bulb finds the
-# bead and its arm's direction), drawn in the dye like a ring's children. A
-# jellyfish's strands lay half the dye a ring's tube does, a splash's arms
-# 0.8 of it, and the largest sizes lay less. The march has three field functions
+# code's top bits, IK_KIND): a ring, or an amorphous blob, slow or quick
+# (ik_blob): a lopsided cluster of 3 to 7 balls (directions, sizes and
+# wobble hashed per drop, ik_ball) melted together, that punches in like a
+# ring, then spreads, swells and wobbles (a quick one spreads faster and
+# splats wider), crisp until it bursts (IK_NFS): at IK_TS, as a ring
+# splits, each ball flies off as a smaller blob along its own direction
+# (ik_blob_ball finds the ball nearest a point), drawn in the dye like a
+# ring's children. The largest sizes lay less dye. The march has three field functions
 # because the young-drop code is the expensive part: ik_bd (dye only, most
 # steps), ik_bf (dye + every young drop, only between the ray's first entry
 # into and last exit from a bounding sphere) and ik_b1 (dye + the one drop
@@ -903,9 +903,9 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # and the beat light follow swells, entries and hits (IK_EVENTS). Each drop
 # holds a snapshot of the moment it was born: the spectral balance (each band
 # against its own 8 s average) picks the child count, the strength of the hit
-# that dropped it its size (0.55x to 1.6x, IK_SIZE; jellyfish not the smallest
-# nor the largest), the sound its kind (a swell or an entry drops a jellyfish;
-# a hit a splash when its onset is among the song's brightest, mid and treble
+# that dropped it its size (0.55x to 1.6x, IK_SIZE; a slow blob not the smallest
+# nor the largest), the sound its kind (a swell or an entry drops a slow blob;
+# a hit a quick blob when its onset is among the song's brightest, mid and treble
 # against bass, else a ring; a clock beat goes by its slot in the bar's usual
 # brightness, since it drops before the hit is heard), the mids how turbulent
 # it gets, the waveform's
@@ -992,7 +992,7 @@ IK_LEAD = 1.3      # a drop starts this many of its own sizes before its aim poi
 IK_LEADMAX = 2.0   # ...but no farther than this
 IK_RATE = 1.3      # ink clock scale (the clock stands still during a camera move)
 IK_NF = (1.2, 1.9) # a young drop's analytic shape fades into its own dye over these ages...
-IK_NFS = (2.4, 3.2) # ...a splash's later: it keeps growing, crisp, until it bursts
+IK_NFS = (2.4, 3.2) # ...a blob's later: it keeps swelling, crisp, until it bursts
 IK_CORE = 0.65     # two young rings collide when their tubes touch with centres closer than this share of their radii
 IK_GROW = 0.45     # a merged drop grows by this much a merge level, about its ring's centre...
 IK_SLOW = 0.5      # ...and its clock runs at 1 / (1 + IK_SLOW * level), so it lasts longer
@@ -1000,9 +1000,9 @@ IK_STEAL = 5.8     # a strong hit may take the oldest slot from this age (its ch
 IK_POP = 5.0       # a new drop's clock runs this much faster (real time) at birth...
 IK_POPA = 0.34     # ...easing off by this age, so its ring snaps open on the hit
 IK_SIZE = (0.55, 0.25, 0.0333)  # a drop's size for size code s = 0..3: (A + s * (B + C * s)) * IK_SC = 0.55, 0.83, 1.18, 1.6
-IK_KIND = 4194304  # the drop code's top two bits: 0 = ring, 1 = jellyfish, 2 = splash
-IK_KRATE = (1.0, 0.6, 1.0)  # each kind's clock: a jellyfish drifts slowly and lingers
-IK_BRIGHT = (0.45, 0.5)  # a hit drops a splash instead of a ring when its onset (mid + treble against bass) is brighter
+IK_KIND = 4194304  # the drop code's top two bits: 0 = ring, 1 = slow blob, 2 = quick blob
+IK_KRATE = (1.0, 0.7, 1.0)  # each kind's clock: a slow blob drifts and lingers
+IK_BRIGHT = (0.45, 0.5)  # a hit drops a quick blob instead of a ring when its onset (mid + treble against bass) is brighter
                          # than max(A, the song's mean + B spreads), its brightest third or so
 IK_TOK = {
     "@SC@": f"{IK_SC}", "@TS@": f"{IK_TS}", "@TS2@": f"{IK_TS + 1.2}", "@KSF@": f"{IK_KSF:.4f}",
@@ -1098,87 +1098,56 @@ float ik_kind(float zc) {
 vec2 ik_pick(vec2 za, vec2 zb) {
   return mix(za, zb, step((za.x - 0.22) * za.y, (zb.x - 0.22) * zb.y));
 }
-vec2 ik_jelly(vec3 jq, float jt, float jfall, float jR, float jga, float jn, float jseed) {
-  float jL = jfall + 0.05;
-  float js = clamp(jq.y / max(jL, 0.01), 0.0, 1.0);
-  vec2 jw = vec2(sin(js * 5.0 - jt * 1.9 + jseed * 6.3), cos(js * 4.1 - jt * 1.6 + jseed * 4.1)) * 0.07 * js;
-  float jsw = jga * (0.6 - 0.35 * js);
-  float jsd = length(vec2(length(jq.xz - jw), max(max(-jq.y, jq.y - jL), 0.0)));
-  float jsect = 6.2831853 / jn;
-  float jph = jseed * 6.2831853;
-  float jk = floor((atan(jq.z, jq.x) - jph) / jsect + 0.5);
-  float jang = jph + jk * jsect;
-  float jh = ik_hash(jseed * 7.1 + mod(jk, jn) * 1.37);
-  float jtl = min(jfall * (0.6 + 0.6 * jh), 1.7) + 0.05;
-  vec2 jdir = vec2(cos(jang), sin(jang));
-  float jts = clamp(jq.y / jtl, 0.0, 1.0);
-  vec2 jc = jdir * (jR * (1.0 - 0.4 * jts)) + vec2(-jdir.y, jdir.x) * (0.1 * jts * sin(jts * 7.0 - jt * 2.6 + jh * 6.3));
-  float jtw = jga * (0.4 - 0.28 * jts) * (1.0 - 0.45 * smoothstep(2.0, 6.0, jt));
-  float jtd = length(vec2(length(jq.xz - jc), max(max(-jq.y, jq.y - jtl), 0.0)));
-  return ik_pick(vec2(1.0 - jsd / (1.8 * jsw), jsw), vec2(1.0 - jtd / (1.8 * jtw), jtw));
+float ik_smin(float mna, float mnb, float mnk) {
+  float mnh = clamp(0.5 + 0.5 * (mnb - mna) / mnk, 0.0, 1.0);
+  float mnd = mix(mnb, mna, mnh) - mnk * mnh * (1.0 - mnh);
+  return mnd;
 }
-vec2 ik_splash(vec3 xq, float xt, float xn, float xseed, float xthk) {
-  float xr0 = (1.0 - exp(-xt / 0.14)) * (1.0 + 0.08 * min(xt, 4.0));
-  float xcurl = smoothstep(0.1, 0.9, xt);
-  float xthin = (1.0 - 0.35 * smoothstep(0.6, 3.0, xt)) * xthk;
-  float xphi = atan(xq.z, xq.x);
-  vec2 xb = vec2(-10.0, 0.05);
-  for (int xi = 0; xi < 2; xi++) {
-    float xfi = float(xi);
-    float xcnt = xn + 2.0 * xfi;
-    float xsect = 6.2831853 / xcnt;
-    float xph = xseed * 6.2831853 + xfi * 0.5 * xsect;
-    float xk = floor((xphi - xph) / xsect + 0.5);
-    float xkk = mod(xk, xcnt);
-    float xh = ik_hash(xseed * 3.3 + xfi * 5.1 + xkk * 1.71);
-    float xh2 = ik_hash(xseed * 1.9 + xfi * 2.7 + xkk * 3.13);
-    float xang = xph + (xk + 0.6 * (xh2 - 0.5)) * xsect;
-    float xpol = mix(0.5, 1.2, xfi) + 0.7 * (xh - 0.5);
-    vec2 xaz = vec2(cos(xang), sin(xang));
-    vec3 xd = vec3(sin(xpol) * xaz.x, -cos(xpol), sin(xpol) * xaz.y);
-    float xL = xr0 * (0.4 + 0.65 * fract(xh * 7.3)) * mix(1.0, 0.85, xfi);
-    vec3 xbend = (vec3(xaz.x, 0.0, xaz.y) * 0.12 + vec3(-xaz.y, 0.0, xaz.x) * (0.5 * (xh2 - 0.5)) + vec3(0.0, 0.3, 0.0)) * xL * xcurl;
-    float xs = clamp(dot(xq, xd) / max(xL, 0.01), 0.0, 1.0);
-    float xw = 0.032 * (1.0 - 0.6 * xs) * xthin;
-    xb = ik_pick(xb, vec2(1.0 - length(xq - xd * (xs * xL) - xbend * (xs * xs)) / (1.8 * xw), xw));
-    float xbr = 0.058 * xthin * (0.6 + 0.6 * fract(xh2 * 5.7)) * (1.0 + 0.1 * min(xt, 3.0));
-    xb = ik_pick(xb, vec2(1.0 - length(xq - xd * xL - xbend) / (1.8 * xbr), xbr));
-  }
-  return xb;
+vec3 ik_ball(float blf, float blt, float blseed, float blquick, out float blr) {
+  vec3 blh = vec3(ik_hash(blseed * 3.1 + blf * 1.37), ik_hash(blseed * 5.7 + blf * 2.11), ik_hash(blseed * 7.9 + blf * 3.71)) - 0.5;
+  vec3 bldir = normalize(blh + vec3(0.0, -0.15, 0.0) + 0.001);
+  float blsp = (0.03 + 0.32 * (1.0 - exp(-blt / mix(1.6, 0.7, blquick)))) * (1.0 + 0.06 * blt);
+  float blo = blsp * (0.4 + 0.9 * ik_hash(blseed * 2.3 + blf * 1.9));
+  vec3 blw = vec3(sin(blt * 1.7 + blf * 2.1), sin(blt * 1.3 + blf * 3.7), sin(blt * 1.9 + blf * 1.3)) * (0.025 + 0.02 * blquick);
+  blr = (0.09 + 0.1 * ik_hash(blseed + blf * 4.3)) * (1.0 + 0.2 * min(blt, 3.0)) * mix(1.15, 0.85, blquick);
+  vec3 blc = bldir * blo + blw;
+  return blc;
 }
-vec3 ik_splash_bulb(vec3 lbq, float lbt, float lbn, float lbseed, out vec3 lbdir, out float lbid) {
-  float lbr0 = (1.0 - exp(-lbt / 0.14)) * (1.0 + 0.08 * min(lbt, 4.0));
-  float lbcurl = smoothstep(0.1, 0.9, lbt);
-  float lbphi = atan(lbq.z, lbq.x);
-  vec3 lbbest = vec3(0.0, -0.5, 0.0);
-  float lbbd = 1000.0;
-  lbdir = vec3(0.0, -1.0, 0.0);
-  lbid = 0.0;
-  for (int lbi = 0; lbi < 2; lbi++) {
-    float lbfi = float(lbi);
-    float lbcnt = lbn + 2.0 * lbfi;
-    float lbsect = 6.2831853 / lbcnt;
-    float lbph = lbseed * 6.2831853 + lbfi * 0.5 * lbsect;
-    float lbk = floor((lbphi - lbph) / lbsect + 0.5);
-    float lbkk = mod(lbk, lbcnt);
-    float lbh = ik_hash(lbseed * 3.3 + lbfi * 5.1 + lbkk * 1.71);
-    float lbh2 = ik_hash(lbseed * 1.9 + lbfi * 2.7 + lbkk * 3.13);
-    float lbang = lbph + (lbk + 0.6 * (lbh2 - 0.5)) * lbsect;
-    float lbpol = mix(0.5, 1.2, lbfi) + 0.7 * (lbh - 0.5);
-    vec2 lbaz = vec2(cos(lbang), sin(lbang));
-    vec3 lbd = vec3(sin(lbpol) * lbaz.x, -cos(lbpol), sin(lbpol) * lbaz.y);
-    float lbL = lbr0 * (0.4 + 0.65 * fract(lbh * 7.3)) * mix(1.0, 0.85, lbfi);
-    vec3 lbbend = (vec3(lbaz.x, 0.0, lbaz.y) * 0.12 + vec3(-lbaz.y, 0.0, lbaz.x) * (0.5 * (lbh2 - 0.5)) + vec3(0.0, 0.3, 0.0)) * lbL * lbcurl;
-    vec3 lbpos = lbd * lbL + lbbend;
-    float lbdd = length(lbq - lbpos);
-    if (lbdd < lbbd) {
-      lbbd = lbdd;
-      lbbest = lbpos;
-      lbdir = normalize(lbd * lbL + 2.0 * lbbend);
-      lbid = lbkk + 16.0 * lbfi;
+vec2 ik_blob(vec3 bbq, float bbt, float bbn, float bbseed, float bbquick) {
+  float bbd = 1000.0;
+  float bbk = 0.1 + 0.05 * bbquick;
+  for (int bbi = 0; bbi < 7; bbi++) {
+    float bbfi = float(bbi);
+    if (bbfi < bbn) {
+      float bbr = 0.1;
+      vec3 bbc = ik_ball(bbfi, bbt, bbseed, bbquick, bbr);
+      float bbs = length(bbq - bbc) - bbr;
+      bbd = ik_smin(bbd, bbs, bbk);
     }
   }
-  return lbbest;
+  vec2 bbw = vec2(1.0 - (bbd + 0.1404) / 0.18, 0.1);
+  return bbw;
+}
+vec3 ik_blob_ball(vec3 bcq, float bct, float bcn, float bcseed, float bcquick, out vec3 bcdir, out float bcid) {
+  vec3 bcbest = vec3(0.0);
+  float bcbd = 1000.0;
+  bcdir = vec3(0.0, -1.0, 0.0);
+  bcid = 0.0;
+  for (int bci = 0; bci < 7; bci++) {
+    float bcfi = float(bci);
+    if (bcfi < bcn) {
+      float bcr = 0.1;
+      vec3 bcc = ik_ball(bcfi, bct, bcseed, bcquick, bcr);
+      float bcs = length(bcq - bcc) - bcr;
+      if (bcs < bcbd) {
+        bcbd = bcs;
+        bcbest = bcc;
+        bcdir = normalize(bcc + vec3(0.0, -0.05, 0.0) + 0.001);
+        bcid = bcfi;
+      }
+    }
+  }
+  return bcbest;
 }
 """)
 
@@ -1190,7 +1159,7 @@ vec4 ik_drop(vec3 kp, float kage, float kcode, float kslot, float kdet) {
   float ktb = 0.6 + 0.3 * mod(floor(kcode / 1024.0), 4.0);
   float kseed = ik_hash(kcode * 0.00137 + kslot * 3.7);
   int kix = int(kslot) * 2;
-  float kgmax = mix(2.0 + step(1.5, mod(floor(kcode / 64.0), 4.0)) * step(kn, 4.5), mix(1.0, 2.0, step(1.5, kkind)), step(0.5, kkind));
+  float kgmax = mix(2.0 + step(1.5, mod(floor(kcode / 64.0), 4.0)) * step(kn, 4.5), 2.0, step(0.5, kkind));
   vec3 kq = kp / ksz;
   float kf0 = 0.7 * log(1.0 + kage / 0.25);
   float ktil = (0.12 + 0.22 * ik_hash(kseed + 5.1)) * smoothstep(0.3, 1.5, kage);
@@ -1255,14 +1224,12 @@ vec4 ik_drop(vec3 kp, float kage, float kcode, float kslot, float kdet) {
     float kthin = 1.0 - 0.8 * gA * (1.0 - kl01);
     float ka2 = ga * (0.55 + 0.45 * kthin);
     float kcore = 0.0;
-    vec2 kbw = vec2(mix(1.0 - ktr / (1.8 * ka2), -10.0, step(1.5, kkind)), ka2);
+    vec2 kbw = vec2(mix(1.0 - ktr / (1.8 * ka2), -10.0, step(0.5, kkind)), ka2);
     float kstr = 1.0;
-    vec3 kxp = mix(kq - vec3(0.0, @KOFF@, 0.0), kqq, step(0.5, kfg));
-    if (kkind > 1.5 || (kg == 0 && kkind > 0.5)) {
-      float kxt = 1.0 + 0.6 * kfg;
-      vec2 kx = kkind < 1.5 ? ik_jelly(rq, kt, kf0, gR, ga, kn, kseed) : ik_splash(kxp, kt, kgn, kss, kxt);
-      kstr = mix(1.0, mix(0.5, 0.8, step(1.5, kkind)), step((kbw.x - 0.22) * kbw.y, (kx.x - 0.22) * kx.y));
-      kbw = ik_pick(kbw, kx);
+    float kquick = step(1.5, kkind);
+    if (kkind > 0.5) {
+      kbw = ik_blob(rq, kt, min(kgn, 7.0), kss, kquick);
+      kstr = mix(0.5, 0.42, kquick);
     }
     if (kbw.x > -0.0834) {
       float kbase = kbw.x;
@@ -1283,24 +1250,25 @@ vec4 ik_drop(vec3 kp, float kage, float kcode, float kslot, float kdet) {
     }
     float ksdr = (ktr - 1.95 * ka2) * ksc;
     if (ksdr < ksd) { ksd = ksdr; kfs = clamp(0.35 * ka2 * ksc, mix(0.055, 0.08, step(0.5, kfg)), @DTS@); }
-    if (kkind > 1.5) {
+    if (kkind > 0.5) {
       if (kt < @TS@ || kfg > kgmax - 1.5) break;
       vec3 kbdir = vec3(0.0, -1.0, 0.0);
       float kbid = 0.0;
-      vec3 kbul = ik_splash_bulb(kxp, kt, kgn, kss, kbdir, kbid);
+      vec3 kbul = ik_blob_ball(rq, kt, min(kgn, 7.0), kss, kquick, kbdir, kbid);
       vec3 kby = -kbdir;
       float kbs = step(0.0, kby.z) * 2.0 - 1.0;
       float kba = -1.0 / (kbs + kby.z);
       float kbb = kby.x * kby.y * kba;
       vec3 kbz = vec3(1.0 + kbs * kby.x * kby.x * kba, kbs * kbb, -kbs * kby.x);
       vec3 kbx = vec3(kbb, kbs + kby.y * kby.y * kba, -kby.y);
-      vec3 kbd = kxp - kbul;
+      vec3 kbd = rq - kbul;
       float kbsc = 0.5 * (0.8 + 0.4 * ik_hash(kss * 3.3 + kbid * 1.7));
       kqq = vec3(dot(kbd, kbx), dot(kbd, kby), dot(kbd, kbz)) / kbsc;
       ksc *= kbsc;
       kt = (kt - @TS@) * 1.3;
       kss = ik_hash(kss * 7.13 + kbid * 3.1);
       kgn = max(kgn - 1.0, 3.0);
+      koff = 0.0;
       continue;
     }
     if (kt < @TS@ || kqq.y > -@KSF@ + 0.25 || kfg > kgmax - 1.5) break;
@@ -1376,8 +1344,9 @@ def ik_grow_rel(pv):
 def ik_slot_bound(pv):
     return ik_sub(f"""
         float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
-        float sbr = mix(ssz * (0.42 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * min(sa, 3.0)) + 0.45 + 0.95 * smoothstep(2.8, 5.5, sa)), ssz * (1.4 + 0.8 * smoothstep(2.6, 3.6, sa)), step(1.5, skind)) + 0.12;
-        float sbd = max(length({pv}.xz) - sbr, max({pv}.y - ssz * max(0.45 - sf0, mix(-100.0, @KOFF@ + 0.3 + 0.9 * step(1.5, skind) * smoothstep(2.6, 3.6, sa), step(0.5, skind))), -3.9 * ssz - {pv}.y));
+        float sbr = mix(ssz * (0.42 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * min(sa, 3.0)) + 0.45 + 0.95 * smoothstep(2.8, 5.5, sa)), ssz * (1.15 + 0.9 * smoothstep(2.6, 3.6, sa)), step(0.5, skind)) + 0.12;
+        float sbtop = mix(ssz * (0.45 - sf0), sbr - ssz * sf0, step(0.5, skind));
+        float sbd = max(length({pv}.xz) - sbr, max({pv}.y - sbtop, -3.9 * ssz - {pv}.y));
         sbd = mix(1000.0, sbd, step(sa, @LIFE@));
 """)
 
@@ -1394,7 +1363,7 @@ def ik_warp_slot(k):
           float sxr = length(sxo);
           wv += (sex * sxo.x + sey * sxo.y + sez * sxo.z) * (1.2 * exp(-sa / 0.35) * exp(-sxr * sxr / (ssz * ssz * 1.2)) / max(sxr, 0.05));
         }}
-        if (sa < 6.5 && skind < 1.5) {{
+        if (sa < 6.5 && skind < 0.5) {{
           float swf = (0.7 * log(1.0 + sa / 0.25) - @KOFF@) * ssz;
           vec3 swd = swl + vec3(0.0, swf, 0.0);
           float swR = 0.36 * ssz * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa);
@@ -1490,7 +1459,7 @@ vec2 ik_near(vec3 np, float nage, float ncode, float nslot) {
   float nA = smoothstep(1.1, @TS@, nage);
   vec3 nrq = nq + vec3(0.0, nf0 - @KOFF@, 0.0);
   vec2 nbw = vec2(-10.0, 0.05);
-  if (nkind < 1.5) {
+  if (nkind < 0.5) {
     float nrho = length(nrq.xz);
     vec2 nu1 = nrq.xz / max(nrho, 0.00001);
     vec2 nu2 = vec2(nu1.x * nu1.x - nu1.y * nu1.y, 2.0 * nu1.x * nu1.y);
@@ -1518,9 +1487,8 @@ vec2 ik_near(vec3 np, float nage, float ncode, float nslot) {
     float nthin = 1.0 - 0.8 * nA * (1.0 - nl01);
     float na2 = nga * (0.55 + 0.45 * nthin);
     nbw = vec2(1.0 - ntr / (1.8 * na2), na2);
-    if (nkind > 0.5) nbw = ik_pick(nbw, ik_jelly(nrq, nage, nf0, nR, nga, nn, nseed));
   } else {
-    nbw = ik_splash(nq - vec3(0.0, @KOFF@, 0.0), nage, nn, nseed, 1.0);
+    nbw = ik_blob(nrq, nage, nn, nseed, step(1.5, nkind));
   }
   float nbase = nbw.x;
   float nemit = 0.0;
@@ -1532,7 +1500,7 @@ vec2 ik_near(vec3 np, float nage, float ncode, float nslot) {
     float ne2 = ik_ba(q14) / 0.12;
     nemit = smoothstep(-0.2, 0.5, nbase) * ((ik_bs(q13) * exp(-ne1 * ne1) + ik_bs(q14) * exp(-ne2 * ne2)) * 0.8 + smoothstep(0.6, 0.0, nage) * 2.5);
   }
-  float nspl = step(1.5, nkind);
+  float nspl = step(0.5, nkind);
   float nfade = smoothstep(mix(@NF0@, @NFS0@, nspl), mix(@NF1@, @NFS1@, nspl), nage);
   return vec2((nbase - 0.22 + (fract(q8) - 0.4) * 0.22 - nfade * 1.3) * 1.8 * nbw.y * nsz * 14.0, nemit * (1.0 - nfade));
 }
@@ -1808,12 +1776,11 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
 """) + "".join(ik_sub(f"""
   vec4 sb{k} = vec4(0.0, 1000.0, 0.0, 0.0);
   {{""" + ik_slot_vals(k) + f"""
-    if (sa < mix(@NF1@, @NFS1@, step(1.5, skind))) {{
+    if (sa < mix(@NF1@, @NFS1@, step(0.5, skind))) {{
       float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
       float sbc = -sf0;
       float sbrr = 0.47 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa) + 0.3;
-      if (skind > 1.5) {{ sbc = @KOFF@ - 0.35; sbrr = 1.2 * (1.0 - exp(-sa / 0.14)) * (1.0 + 0.08 * min(sa, 4.0)) + 0.2; }}
-      else if (skind > 0.5) {{ sbc = 0.5 * (@KOFF@ + 0.05 - sf0); sbrr += 0.5 * (sf0 + @KOFF@ + 0.05); }}
+      if (skind > 0.5) {{ sbrr = 0.45 + 0.75 * (1.0 - exp(-sa / 0.9)); }}
       sb{k} = vec4(so + sey * (sbc * ssz), (ssz * sbrr + 0.08) * sgr);
       vec3 sro = ro - sb{k}.xyz;
       float srb = dot(sro, rd);
@@ -1998,8 +1965,8 @@ IKHKSEL
 
 def ik_code(nn, cq, sz, cy, tb, di, cx, cz):
     """A drop's code: child count - 3, species, size, aim point y, turbulence,
-    travel direction (0..63), aim point x and z (a ring's; a jellyfish or a
-    splash adds IK_KIND times 1 or 2)."""
+    travel direction (0..63), aim point x and z (a ring's; a slow or a quick
+    blob adds IK_KIND times 1 or 2)."""
     return nn + 8 * cq + 64 * sz + 256 * cy + 1024 * tb + 4096 * di + 262144 * cx + 1048576 * cz
 
 IK_AGE0 = [1.2, 3.3, 5.4] + [99] * (IK_NS - 3)
@@ -2030,7 +1997,7 @@ def ik_eel_ring(k):
     camera's), radius rr and tube half-width tk (grown by its merge level), and
     rl = 1 while it is a crisp ring (past the bead, before it hands over to its
     dye) that may merge: only rings, and only up to size code 2 (a merged
-    jellyfish or largest ring outgrew the tank)."""
+    blob or largest ring outgrew the tank)."""
     return (f"kc = ikc{k}; ka = ika{k};\n"
             f"kdi = int(kc / 4096) % 64; kdh = (2 * kdi + 1) / 64 - 1; kdr = sqrt(max(1 - kdh * kdh, 0));\n"
             f"kcs = cos(kdi * 2.3999632); ksn = sin(kdi * 2.3999632);\n"
@@ -2084,7 +2051,7 @@ IK_MERGE = ("".join(f"mt{k} = if(go * equal(old, {k}), 0, mt{k}); mg{k} = if(go 
 # in units of its own spread over 8 s; the strongest band counts, treble at
 # 0.7) peaking above 2.2 (falling to 0.6 from 2 s to 7.3 s without a ring), at
 # most one every 0.9 s: evup, score evs, ring strength rsu; under a locked
-# beat a gentler one (peaks above 1.5, 3.5 s after the last jellyfish): evj.
+# beat a gentler one (peaks above 1.5, 3.5 s after the last slow blob): evj.
 # And a hit: the
 # beat clock's onset crossing 3.2 of its own spreads over 6 s (and 0.3): hup,
 # strength rsh.
@@ -2219,7 +2186,7 @@ go = above(rs, 0) * above(tsr, 0.22) * max(above(oa, {IK_LIFE - 0.8}), above(rs,
 kbr = if(rqb * (1 - max(rqa, rqh)), megabuf(630 + bc_bq), obr);
 knd = if(rqu * (1 - max(max(rqb, rqa), rqh)), 1, 2 * above(kbr, max({IK_BRIGHT[0]}, bmn + {IK_BRIGHT[1]} * sqrt(bvr))));
 krn = if(equal(knd, 1), {IK_KRATE[1]}, if(equal(knd, 2), {IK_KRATE[2]}, {IK_KRATE[0]}));
-pkk = if(equal(knd, 1), 0.55, if(equal(knd, 2), 0, 1));
+pkk = if(equal(knd, 1), 0.55, 1);
 rbeat = max(rbeat, go);
 tjl = if(go * equal(knd, 1), 0, tjl); bkh = go * (1 - equal(knd, 1)); bmn = bmn + (kbr - bmn) * 0.08 * bkh; bvr = bvr + (sqr(kbr - bmn) - bvr) * 0.08 * bkh;
 bavg = bavg + (bass_att - bavg) * (1 - exp(-dt / 8)); mavg = mavg + (mid_att - mavg) * (1 - exp(-dt / 8)); tavg = tavg + (treb_att - tavg) * (1 - exp(-dt / 8));
@@ -2250,7 +2217,7 @@ paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plq = if(pvalid, plq, lqi)
 q1 = az; q2 = el; q3 = lqi; q4 = paz; q5 = pel; q6 = plq;
 q15 = pqi; q16 = ppq;
 paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
-act = act + (min(max((loud - 0.5) / 0.6, 0), 1) - act) * (1 - exp(-dt / 1.5));
+act = act + (if(lk, (0.55 + 0.45 * min(bre, 1.2) / 1.2) * (1 - 0.6 * brk), 0.25) - act) * (1 - exp(-dt / 1.5));
 q7 = if(frz, drg, -taaw); q8 = spawnf + 16 * int(act * 15 + 0.5) + min(bsw, 0.99) * 0.999; q9 = inkt; q10 = mood + 4 * int(trp * 100) + spb * 0.999; q11 = int((min(max(kvel, -4), 4) + 4) * 100 + 0.5) + min(turb, 0.99); q12 = dts;
 q13 = min(ib1, 15.9) + 16 * int(is1 * 100); q14 = min(ib2, 15.9) + 16 * int(is2 * 100);
 """ + "".join(f"q{17 + k} = ika{k} + 128 * int(min(mg{k}, 2) * 63.5 + 0.5); q{25 + k} = ikc{k};\n" for k in range(IK_NS))
