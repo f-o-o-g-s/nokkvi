@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The Lines Horizon now keeps its receding waves as dim contour lines where the music is quiet, instead of leaving the cover bare.
+- The Bars Horizon now keeps a short stub of every receding bar where the music is quiet, instead of leaving the cover bare.
+
 ### Removed
 
 ## v0.22.2 — 2026-10-07

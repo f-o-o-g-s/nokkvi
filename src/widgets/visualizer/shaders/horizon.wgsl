@@ -10,9 +10,10 @@
 //
 // Bars rows are stepped: each a row of bars standing on its baseline, with
 // real gaps and (in LED mode) LED segments, all shrinking with distance.
-// Lines rows are smooth waves; a quiet stretch of a wave is low ground (no
-// fill, no crest) so the cover shows through instead of a slab. The newest row
-// sits on the live bars / line.
+// Lines rows are smooth waves. A quiet stretch never drops out, or wherever
+// the music is low the horizon goes empty: it stays low ground, a dim contour
+// over a dark lip (Lines) or a row of stubs (Bars), thin enough that the cover
+// shows through instead of a slab. The newest row sits on the live bars / line.
 //
 // Drawn behind the bars / line, as one fullscreen triangle per frame. The rows
 // come from horizon.rs through the particle storage buffer (binding 4):
@@ -131,6 +132,12 @@ const RIDGE_HORIZON: f32 = 0.96;   // the farthest baseline (fraction of the ban
 const RIDGE_DEPTH: f32 = 0.30;     // perspective per row
 const RIDGE_AMP: f32 = 0.95;       // nearest row's height vs the live visualizer
 const RIDGE_NARROW: f32 = 0.07;    // how much narrower each row back
+const FLAT_CREST: f32 = 0.45;      // a quiet stretch's contour vs a ridge's crest
+const FLAT_LIP_ALPHA: f32 = 0.7;   // the dark lip right under a quiet contour
+const FLAT_LIP: f32 = 0.03;        // its depth (fraction of the band)
+const FLAT_HAZE: f32 = 0.05;       // the faint ground below the lip
+const FLAT_BAR_BODY: f32 = 0.6;    // a quiet row bar's stub vs a loud bar's body
+const BAR_STUB_PX: f32 = 3.0;      // a row bar's least height (px) without LEDs
 
 fn ridge_value(r: u32, samples: u32, i: u32) -> f32 {
     let f = r * samples + i;
@@ -138,17 +145,19 @@ fn ridge_value(r: u32, samples: u32, i: u32) -> f32 {
 }
 
 // Smooth: height of row `r` at field position `u` (0..1); the row covers
-// `margin` past the field either side, tapering at its very ends.
-fn ridge_at(r: u32, samples: u32, u: f32, margin: f32) -> f32 {
+// `margin` past the field either side, tapering at its very ends. x = height,
+// y = how much of the row is there (0 past its ends).
+fn ridge_at(r: u32, samples: u32, u: f32, margin: f32) -> vec2<f32> {
     let t = (u + margin) / (1.0 + 2.0 * margin);
     if (t <= 0.0 || t >= 1.0) {
-        return 0.0;
+        return vec2<f32>(0.0);
     }
     let s = t * f32(samples - 1u);
     let i0 = u32(floor(s));
     let i1 = min(i0 + 1u, samples - 1u);
     let edge = ss(0.0, 0.06, t) * ss(1.0, 0.94, t);
-    return mix(ridge_value(r, samples, i0), ridge_value(r, samples, i1), s - floor(s)) * edge;
+    let h = mix(ridge_value(r, samples, i0), ridge_value(r, samples, i1), s - floor(s));
+    return vec2<f32>(h * edge, edge);
 }
 
 // Stepped: row `r`'s bar under `b` (that row's own bar units, 0 = the field's
@@ -208,11 +217,15 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         let sc = 1.0 + z * RIDGE_NARROW;
         var h = 0.0;
         var cov = 1.0;
+        var span = 1.0;
         if (stepped) {
             let br = core * 0.5 + (bfield - core * 0.5) * sc;
             let aa = 0.6 * sc / (pitch * group);
             let hs = ridge_step(r, samples, margin, br, gfrac, aa);
-            h = hs.x;
+            // Every row bar keeps a stub (one LED in LED mode), so a quiet
+            // stretch still shows its row.
+            let stub = select(BAR_STUB_PX, uniforms.config.led_segment_height + 0.5 * led_segment_gap(), led);
+            h = max(hs.x, stub / (uh * RIDGE_AMP));
             cov = hs.y;
             // Bars stand on their row's baseline, LED-cut in LED mode.
             cov *= ss(-1.0, 0.5, (y - base) * uh);
@@ -225,7 +238,9 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
             }
         } else {
             let ur = 0.5 + (u - 0.5) * sc;
-            h = ridge_at(r, samples, ur, margin);
+            let hs = ridge_at(r, samples, ur, margin);
+            h = hs.x;
+            span = hs.y;
         }
         let top = base + RIDGE_AMP * h / d;
         let dpx = (y - top) * uh;
@@ -237,7 +252,8 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
             let fill = ss(0.6, -1.2, dpx);
             // Aerial perspective: near ridges dark, far ones lifted into the
             // mist, and mist pooling at each ridge's foot so layers separate.
-            // Crests only where the ridge has shape: a quiet stretch is calm mist.
+            // Full crests only where the ridge has shape: a quiet stretch is calm
+            // mist with a dimmer contour.
             let relief = select(ss(0.07, 0.22, h), ss(0.01, 0.06, h), stepped);
             let depth_below = clamp((top - y) / max(top - base + 0.08, 0.05), 0.0, 1.0);
             let haze = clamp(fog * 0.85 + depth_below * 0.45 * relief + (1.0 - relief) * 0.35, 0.0, 1.0);
@@ -256,8 +272,14 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
             let thin = select(mix(0.16, 1.0, exp(-under / 0.08)), 1.0, stepped);
             // Flat (quiet) stretches are low ground: no slab, the cover shows.
             let ground = select(ss(0.02, 0.14, h), ss(0.0, 0.05, h), stepped);
-            let fill_a = fill * mix(0.92, 0.55, fog) * vanish * thin * ground * cov;
-            let line_a = clamp(line, 0.0, 1.0) * vanish * (1.0 - 0.55 * fog) * relief * cov;
+            // But a row never vanishes there, or wherever the music is low the
+            // horizon goes empty: a smooth row keeps a dimmer contour over a
+            // dark lip, a stepped row its stubs.
+            let lip = mix(FLAT_HAZE, FLAT_LIP_ALPHA, exp(-under / FLAT_LIP));
+            let floor_a = select(lip, FLAT_BAR_BODY, stepped) * span;
+            let crest_gate = max(relief, FLAT_CREST * span);
+            let fill_a = fill * mix(0.92, 0.55, fog) * vanish * max(thin * ground, floor_a) * cov;
+            let line_a = clamp(line, 0.0, 1.0) * vanish * (1.0 - 0.55 * fog) * crest_gate * cov;
             let top_fade = ss(1.0, 0.82, y) * uniforms.config.global_opacity;
             let a = clamp(fill_a + line_a * (1.0 - fill_a), 0.0, 1.0) * top_fade;
             let col = (body * fill_a * (1.0 - line_a) + crest * line_a * 1.3) * top_fade;
