@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.22.2 — 2026-10-07
+
+### Added
+
 - The new Reflection setting for Bars and Lines stands the visualizer on a waterline above rippling dark water that mirrors it.
 - With Reflection on, beats send ripples running sideways across the water.
 - With Reflection on, the Lines surfing boat rides the line above the water.
@@ -17,13 +27,10 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Living Ink now drops rings and amorphous blobs on the music's hits.
-- Living Ink's ink now swells and merges while the music is busy.
 
 ### Fixed
 
 - With LED Mode and Isometric Depth on, each LED segment now shows its top face in the gap above it, like the topmost one.
-
-### Removed
 
 ## v0.22.1 — 2026-10-04
 
