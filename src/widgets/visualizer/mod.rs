@@ -870,7 +870,7 @@ mod wgsl_helper_tests {
         );
         // Confirm callsites use the helper rather than reinlining the body.
         assert!(
-            BARS.contains("apply_brightness_mod(base_color, input.brightness_mod)"),
+            BARS.contains("apply_brightness_mod(base_color, brightness_mod)"),
             "bars.wgsl gradient-bar path is not calling apply_brightness_mod",
         );
         assert!(
@@ -898,7 +898,7 @@ mod wgsl_helper_tests {
         );
         assert!(
             BARS.contains("let segment_period = segment_height + led_segment_gap();"),
-            "in_led_gap is not using led_segment_gap() for the LED period",
+            "led_gap_offset is not using led_segment_gap() for the LED period",
         );
         assert!(
             BARS.contains("let spacing_per_bar = led_segment_gap();"),
@@ -929,9 +929,11 @@ mod wgsl_helper_tests {
     }
 
     /// Each LED gets its own outline, the way each bar does: the fill and the
-    /// border quads share one period helper, border quads are told apart from
+    /// border quads share one gap helper, border quads are told apart from
     /// peak fills by `is_border`, and the side-face unslant is keyed on the
-    /// face type so the side border (brightness 1.0) is unslanted too.
+    /// face type so the side border (brightness 1.0) is unslanted too. In 3D
+    /// each gap shows the top face of the LED below (fill and outline alike
+    /// test it through `on_led_top_face`), lit like the topmost LED's.
     #[test]
     fn bars_wgsl_led_outline_per_segment() {
         assert!(
@@ -939,16 +941,32 @@ mod wgsl_helper_tests {
             "bars.wgsl VertexOutput is missing is_border",
         );
         assert!(
-            BARS.contains("fn in_led_gap(dist_from_bottom: f32, is_border: bool) -> bool"),
-            "bars.wgsl is missing the in_led_gap helper",
+            BARS.contains("@location(11) x_in_bar: f32"),
+            "bars.wgsl VertexOutput is missing x_in_bar",
+        );
+        assert_eq!(
+            BARS.matches("let gap_offset = led_gap_offset(").count(),
+            2,
+            "the fill and border paths must both measure the gap with led_gap_offset",
         );
         assert!(
-            BARS.contains("in_led_gap(canvas_height - input.local_y, false)"),
-            "gradient (fill) path is not calling in_led_gap",
+            BARS.contains("if (!led_gap_shows_top_face(gap_offset, input.x_in_bar))"),
+            "gradient (fill) path is not drawing the LED top face in the gap",
         );
         assert!(
-            BARS.contains("in_led_gap(uniforms.viewport.w - input.local_y, true)"),
-            "border path is not calling in_led_gap",
+            BARS.contains("if (led_gap_cuts_border(gap_offset, input.x_in_bar))"),
+            "border path is not cutting through led_gap_cuts_border",
+        );
+        assert_eq!(
+            BARS.matches("on_led_top_face(gap_offset, x_in_bar, ")
+                .count(),
+            2,
+            "the gap fill and the gap outline must share on_led_top_face",
+        );
+        assert_eq!(
+            BARS.matches("FACE_BRIGHTNESS_TOP;").count(),
+            2,
+            "the topmost LED's top quad and the gap top faces must share FACE_BRIGHTNESS_TOP",
         );
         assert!(
             BARS.contains("output.local_y = pixel_y + (pixel_x - c_tl.x);"),

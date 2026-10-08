@@ -71,6 +71,9 @@ struct Config {
 const BRIGHTNESS_TOP_THRESHOLD: f32 = 1.1;
 const BRIGHTNESS_SIDE_THRESHOLD: f32 = 0.9;
 const BRIGHTNESS_LIGHTEN_FACTOR: f32 = 0.5;
+// Top face brightness, shared by the topmost LED's top quad and the top faces
+// the lower LEDs show through their gaps.
+const FACE_BRIGHTNESS_TOP: f32 = 1.4;
 
 // ---------- Animation constants ----------
 // Complete cycle through gradient/peak colors in ~4 seconds (1.0 / 0.25).
@@ -145,22 +148,57 @@ fn led_segment_gap() -> f32 {
     return uniforms.config.bar_spacing + select(0.0, border_width, border_width > 0.0);
 }
 
-// Whether a fragment `dist_from_bottom` px above the bar base falls in the gap
-// between two LED segments. Fills are cut across the whole gap. Border quads are
-// cut only between this LED's top outline and the next LED's bottom outline, so
-// the gap reads outline | background | outline, like the gap between two bars;
-// when bar_spacing <= border_width that middle band is empty and the outlines
-// merge, as adjacent bar outlines do.
-fn in_led_gap(dist_from_bottom: f32, is_border: bool) -> bool {
+// How far a fragment `dist_from_bottom` px above the bar base sits above the
+// top edge of the LED below it: in [0, led_segment_gap()) inside a gap,
+// negative inside an LED. Side faces pass their unslanted local y, so their
+// gaps line up with the front face's.
+fn led_gap_offset(dist_from_bottom: f32) -> f32 {
     let segment_height = uniforms.config.led_segment_height;
     let segment_period = segment_height + led_segment_gap();
-    let pos_in_period = dist_from_bottom % segment_period;
-    if (is_border) {
-        let border_width = uniforms.config.border_width;
-        return pos_in_period >= segment_height + border_width
-            && pos_in_period < segment_period - border_width;
+    return dist_from_bottom % segment_period - segment_height;
+}
+
+// In 3D, whether a gap fragment `gap_offset` px above the LED below and
+// `x_in_bar` px right of the bar's front-left edge lies on that LED's top face,
+// the parallelogram compute_top_fill draws for the topmost LED. `grow` widens
+// it past its left and back edges by an outline, matching compute_top_border.
+// Its right edge is the side face's, which every front or side quad fragment
+// is already left of.
+fn on_led_top_face(gap_offset: f32, x_in_bar: f32, grow: f32) -> bool {
+    let depth = uniforms.config.bar_depth_3d;
+    if (depth <= 0.001) {
+        return false;
     }
-    return pos_in_period >= segment_height;
+    // Height above the LED's front-top edge on screen: the side-face unslant undone.
+    let rise = gap_offset + max(x_in_bar - uniforms.config.bar_width, 0.0);
+    let left_edge = rise * depth / (depth + grow) - grow;
+    return rise <= depth + grow && x_in_bar >= left_edge;
+}
+
+// Whether a front or side fill fragment in an LED gap draws the top face of
+// the LED below. Without 3D the gap is empty; with it the face shows up to the
+// next LED's bottom outline, which hides the rest of it as the LED above would.
+fn led_gap_shows_top_face(gap_offset: f32, x_in_bar: f32) -> bool {
+    let border_width = max(uniforms.config.border_width, 0.0);
+    return gap_offset < led_segment_gap() - border_width
+        && on_led_top_face(gap_offset, x_in_bar, 0.0);
+}
+
+// Whether a front or side border fragment in an LED gap is cut away. The gap
+// keeps the next LED's bottom outline and this LED's top outline: a band of
+// border_width when flat, the outline around its top face in 3D (the fill
+// paints the face over the rest). So the gap reads outline | background |
+// outline, like the gap between two bars; when bar_spacing <= border_width
+// the cut is empty and the outlines merge, as adjacent bar outlines do.
+fn led_gap_cuts_border(gap_offset: f32, x_in_bar: f32) -> bool {
+    let border_width = max(uniforms.config.border_width, 0.0);
+    if (gap_offset < 0.0 || gap_offset >= led_segment_gap() - border_width) {
+        return false;
+    }
+    if (uniforms.config.bar_depth_3d > 0.001) {
+        return !on_led_top_face(gap_offset, x_in_bar, border_width);
+    }
+    return gap_offset >= border_width;
 }
 
 // Snap bar height to the nearest complete LED segment count, leaving the trailing gap off.
@@ -187,6 +225,7 @@ struct VertexOutput {
     @location(8) brightness_mod: f32,   // 3D face brightness: 1.0=front, 1.4=top, 0.45=side
     @location(9) local_y: f32,          // Y for LED segments (undoes side-face slant)
     @location(10) is_border: f32,       // 1.0 for front/side border quads (LED-cut), else 0.0
+    @location(11) x_in_bar: f32,        // X from the bar's front-left edge (LED top faces)
 }
 
 // Convert pixel coordinates to NDC (-1 to 1)
@@ -431,6 +470,7 @@ fn dead_output(energy: f32) -> VertexOutput {
     output.brightness_mod = 1.0;
     output.local_y = 0.0;
     output.is_border = 0.0;
+    output.x_in_bar = 0.0;
     return output;
 }
 
@@ -535,7 +575,7 @@ fn compute_top_fill(
     r.quad_h = depth;
     r.color = fill_color;
     r.is_gradient_bar = select(0.0, 1.0, use_gradient);
-    r.brightness = 1.4;
+    r.brightness = FACE_BRIGHTNESS_TOP;
     return r;
 }
 
@@ -810,6 +850,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     // Bar front and side border quads get the per-LED outline cut. Top borders
     // sit above the bar and a peak is a single LED, so neither is cut.
     output.is_border = select(0.0, 1.0, !is_peak && (face_type == 0u || face_type == 4u));
+    output.x_in_bar = pixel_x - snapped_x;
     output.is_gradient_bar = is_gradient_bar;
     output.bar_height = quad_h;
     output.bar_index = f32(bar_idx);
@@ -840,10 +881,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let normalized_y = (canvas_height - input.pixel_y - top_margin) / usable_height;
         let clamped_y = clamp(normalized_y, 0.0, 1.0);
         
-        // LED bars mode: create gaps between segments (front face + side face, not top face)
-        if (uniforms.config.led_bars != 0u && input.brightness_mod < 1.1) {
-            if (in_led_gap(canvas_height - input.local_y, false)) {
-                discard;
+        // LED bars mode: cut the gaps between segments out of the front and
+        // side faces (the topmost LED's top face sits above them). In 3D each
+        // gap shows the top face of the LED below, as the topmost LED does.
+        var brightness_mod = input.brightness_mod;
+        if (uniforms.config.led_bars != 0u && input.brightness_mod < BRIGHTNESS_TOP_THRESHOLD) {
+            let gap_offset = led_gap_offset(canvas_height - input.local_y);
+            if (gap_offset >= 0.0) {
+                if (!led_gap_shows_top_face(gap_offset, input.x_in_bar)) {
+                    discard;
+                }
+                brightness_mod = FACE_BRIGHTNESS_TOP;
             }
         }
         
@@ -902,7 +950,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         // Apply 3D brightness modulation
-        base_color = apply_brightness_mod(base_color, input.brightness_mod);
+        base_color = apply_brightness_mod(base_color, brightness_mod);
         // Front face (bm ~= 1.0): no modification
 
         // Beat lift: gently brighten the whole spectrum on each kick.
@@ -918,7 +966,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // LED mode: cut the border quad between neighbouring LED outlines
     if (uniforms.config.led_bars != 0u && input.is_border > 0.5) {
-        if (in_led_gap(uniforms.viewport.w - input.local_y, true)) {
+        let gap_offset = led_gap_offset(uniforms.viewport.w - input.local_y);
+        if (led_gap_cuts_border(gap_offset, input.x_in_bar)) {
             discard;
         }
     }
