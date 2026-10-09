@@ -77,8 +77,8 @@ pub struct PlaylistsViewData<'a> {
     pub total_playlist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
-    /// Where the artwork column runs past the chrome this frame (top-nav
-    /// elevation, the lowered player bar). Forwarded into
+    /// Where the artwork column runs past the chrome this frame (the lowered
+    /// layout, `Nokkvi::artwork_bleed`). Forwarded into
     /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
     pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// Current default playlist's display name (empty when no default set).

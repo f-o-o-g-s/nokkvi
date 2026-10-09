@@ -627,14 +627,31 @@ pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
 use super::player_bar::player_bar_height;
 
-/// Total height of chrome elements for views with headers.
+/// Height of the chrome docked above the page: the nav bar in top nav mode,
+/// plus the metadata strip row when one shows. In top nav that is the
+/// `TopBarUnder` strip, in its own row beneath the nav bar (see
+/// `show_top_bar_under_strip`). In side and none nav it is `TopBar` or
+/// `TopBarUnder`, both a row above the content (see `show_top_bar_strip`).
 ///
-/// In top nav mode: nav_bar + player_bar + view_header_chrome(), plus the
-/// `TopBarUnder` strip when that mode is active (sits in its own row beneath
-/// the nav bar — see `show_top_bar_under_strip`).
-/// In side and none nav modes: player_bar + view_header_chrome() (no top bar),
-/// plus the strip when `TopBar` or `TopBarUnder` is active (both render as a
-/// row above the content in those layouts — see `show_top_bar_strip`).
+/// `home_view` pads the content clear of it, or, beside the lowered artwork,
+/// docks this chrome over the list's top band of the same height
+/// (`ArtworkBleed::top`).
+pub(crate) fn top_chrome_height() -> f32 {
+    let nav = if crate::theme::is_top_nav() {
+        crate::theme::nav_bar_height()
+    } else {
+        0.0
+    };
+    let strip = if crate::theme::show_top_bar_under_strip() || crate::theme::show_top_bar_strip() {
+        super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
+    } else {
+        0.0
+    };
+    nav + strip
+}
+
+/// Total height of chrome elements for views with headers: the chrome docked
+/// above the page ([`top_chrome_height`]) + player_bar + view_header_chrome().
 ///
 /// The slot list runs flush to the player bar, so no bottom pad is subtracted
 /// from the slot-count math in `with_dynamic_slots`.
@@ -644,22 +661,7 @@ pub(crate) fn chrome_height_with_header(collapsed_header: bool) -> f32 {
     } else {
         view_header_chrome()
     };
-    if crate::theme::is_top_nav() {
-        let top_bar_under_strip = if crate::theme::show_top_bar_under_strip() {
-            super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
-        } else {
-            0.0
-        };
-        crate::theme::nav_bar_height() + player_bar_height() + header_chrome + top_bar_under_strip
-    } else {
-        // Side or None mode: no top nav bar, but TopBar / TopBarUnder add height
-        let top_bar_strip = if crate::theme::show_top_bar_strip() {
-            super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
-        } else {
-            0.0
-        };
-        player_bar_height() + header_chrome + top_bar_strip
-    }
+    top_chrome_height() + player_bar_height() + header_chrome
 }
 
 /// Chrome height for a view whose own bar fully **replaces** the view header
@@ -1545,7 +1547,7 @@ impl SlotListChrome {
         let chrome = self.height();
         // `bleed` and `slot_list_chrome` don't reach the vertical term
         // (`resolve_artwork_layout` reads only the pane size, the show flag, and
-        // the theme atomics), so the render's elevation is moot here.
+        // the theme atomics), so the render's bleed is moot here.
         chrome
             + vertical_artwork_chrome(&BaseSlotListLayoutConfig {
                 window_width: self.pane_width,

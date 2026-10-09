@@ -140,8 +140,8 @@ pub struct QueueViewData<'a> {
     pub milkdrop_favorite: bool,
     pub total_queue_count: usize, // Total count before filtering (for empty state detection)
     pub stable_viewport: bool,
-    /// Where the artwork column runs past the chrome this frame (top-nav
-    /// elevation, the lowered player bar). Forwarded into
+    /// Where the artwork column runs past the chrome this frame (the lowered
+    /// layout, `Nokkvi::artwork_bleed`). Forwarded into
     /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
     pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// When a playlist is loaded for playback (editing happens in the

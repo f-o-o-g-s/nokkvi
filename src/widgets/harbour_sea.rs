@@ -1754,9 +1754,8 @@ const SCENE_CLOCK_CYCLES: u32 = 4096;
 /// sizes the whole artwork column off the panel's natural size — the
 /// contract is "panels shrink to a `min(w, h)` square" (see
 /// `single_artwork_panel_inner`'s square arm). A Fill panel here balloons
-/// the column to the reserved maximum, wider than every sibling, and the
-/// elevated-mode nav overlay then juts INTO the scene. Only the stretched
-/// modes (where the layout wraps the panel in a user-tuned
+/// the column to the reserved maximum, wider than every sibling. Only the
+/// stretched modes (where the layout wraps the panel in a user-tuned
 /// `Length::Fixed(extent)`) get the full-bleed Fill treatment.
 ///
 /// `pill` is a FACTORY (not an element): the square arm builds the panel

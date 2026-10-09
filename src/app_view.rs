@@ -490,133 +490,27 @@ impl Nokkvi {
         if self.screen != Screen::Home || self.theater.active {
             return (left, 0.0);
         }
-        let right = self
-            .lowered_player_bar_width(self.elevated_artwork_extent().is_some())
-            .map_or(0.0, |bar_width| {
-                (self.window.width - left - bar_width).max(0.0)
-            });
+        let right = self.lowered_player_bar_width().map_or(0.0, |bar_width| {
+            (self.window.width - left - bar_width).max(0.0)
+        });
         (left, right)
-    }
-
-    /// Width of the artwork *column* (the `bg0_soft` image container) when
-    /// elevation is active, or `None` when it does not apply.
-    ///
-    /// Returns `Some(extent)` when all of these hold:
-    /// - Top-nav layout is active (the only layout this elevation reshapes).
-    /// - `track_info_display` is neither `TopBar` nor `TopBarUnder` — the nav
-    ///   bar's right portion is otherwise reserved for the metadata strip
-    ///   (TopBar) or the strip occupies its own row beneath the nav
-    ///   (TopBarUnder), and either case keeps the artwork in its regular
-    ///   column-stacked spot beneath the chrome.
-    /// - The browsing panel is not open — split-view has its own dual-pane
-    ///   shape and skips elevation.
-    /// - The current view's `ViewPage` reports `uses_horizontal_artwork_column()`
-    ///   true (Albums, Artists, Songs, Genres, Queue, Playlists, Radios today).
-    ///   Settings has no `ViewPage` and is not eligible.
-    /// - The active `ArtworkColumnMode` resolves to a Horizontal layout for
-    ///   the current window using **the same config the view passes**
-    ///   (raw `window.height`, not the player-bar-adjusted variant).
-    ///   Otherwise the view's `base_slot_list_layout` falls into the
-    ///   no-artwork branch (no top spacer added to the slot-list column),
-    ///   and elevating anyway would hide the view header behind the nav
-    ///   bar overlay.
-    ///
-    /// Once we've confirmed the view will render Horizontal artwork, the
-    /// returned *value* uses a second `resolve_artwork_layout` call with
-    /// `window.height - player_bar_height` to match iced's `responsive`
-    /// natural-size math for the in-tree panel (Auto-mode square sized
-    /// against the actual row height, not the raw window height). Without
-    /// the second call the nav-bar overlay under-reaches the artwork's
-    /// real left edge and the stripe peeks through above the nav.
-    ///
-    /// The returned extent is the artwork's **inner column width** —
-    /// excluding the 1 px `border()` stripe (the Always modes' drag handle
-    /// takes no width; it overlays the column). `home_view` computes
-    /// `nav_visual_width = content_pane_width - extent`, which makes the
-    /// nav-overlay's right edge align with the inner artwork's LEFT edge:
-    /// the stripe sits *underneath* the nav-bar band in the top
-    /// `NAV_BAR_HEIGHT` strip, then becomes visible as designed below it.
-    /// Subtracting the stripe from `nav_visual_width` would invert that —
-    /// the stripe would peek through above the nav.
-    pub(crate) fn elevated_artwork_extent(&self) -> Option<f32> {
-        if !crate::theme::is_artwork_elevated()
-            || !crate::theme::is_top_nav()
-            || self.browsing_panel.is_some()
-        {
-            return None;
-        }
-        // View eligibility — `ViewPage::uses_horizontal_artwork_column` is
-        // the single source of truth (overridden `true` on each view whose
-        // `show_artwork_column: true` config flows into `horizontal_layout`).
-        // A new horizontal-artwork view becomes elevation-eligible by
-        // overriding that method, with no second list to maintain here.
-        let view_eligible = self
-            .view_page(self.current_view)
-            .is_some_and(|p| p.uses_horizontal_artwork_column());
-        if !view_eligible {
-            return None;
-        }
-        use crate::widgets::base_slot_list_layout::{
-            ArtworkOrientation, BaseSlotListLayoutConfig, resolve_artwork_layout,
-        };
-        // Probe config shared by both resolver passes — only `window_height`
-        // differs between Step 1 (raw, matches the view's own call) and
-        // Step 2 (player-bar-adjusted, matches the responsive's bbox).
-        let probe_config = |window_height: f32| BaseSlotListLayoutConfig {
-            window_width: self.content_pane_width(),
-            window_height,
-            show_artwork_column: true,
-            slot_list_chrome: 0.0,
-            bleed: ArtworkBleed::NONE,
-        };
-        // Step 1 — does the view actually render Horizontal artwork?
-        //          The view's call uses raw `window.height`, so we must too.
-        let view_layout = resolve_artwork_layout(&probe_config(self.window.height))?;
-        match view_layout.orientation {
-            ArtworkOrientation::Horizontal => {}
-            ArtworkOrientation::Vertical => return None,
-        }
-        // Step 2 — size the overlay against the responsive's actual square.
-        //          The in-tree responsive widget receives a height of
-        //          `window.height - player_bar_height` from main_content's
-        //          row, so mirror that here. Auto-mode square shrinks
-        //          accordingly; Always-mode `window_width * pct` extent
-        //          is height-independent (same value either way).
-        let adjusted_height =
-            (self.window.height - crate::widgets::player_bar::player_bar_height()).max(0.0);
-        let adjusted_layout = resolve_artwork_layout(&probe_config(adjusted_height))?;
-        match adjusted_layout.orientation {
-            ArtworkOrientation::Horizontal => Some(adjusted_layout.extent),
-            ArtworkOrientation::Vertical => None,
-        }
-    }
-
-    /// Whether the top-area metadata strip row shows in the current nav
-    /// layout: `TopBar` above the content in side / none nav, `TopBarUnder`
-    /// beneath the nav in top nav. `home_view` docks it with
-    /// [`Self::dock_chrome`].
-    fn top_strip_row_shown() -> bool {
-        if crate::theme::is_top_nav() {
-            crate::theme::show_top_bar_under_strip()
-        } else {
-            crate::theme::show_top_bar_strip()
-        }
     }
 
     /// Width of the lowered player bar, or `None` when the bar spans the
     /// whole content column as usual.
     ///
-    /// Lowered, the current view's Horizontal artwork column runs from the
-    /// nav bar (or the window's top edge) down to its bottom edge, and the
-    /// player bar and the top metadata strip row sit beside it, over the slot
-    /// list only. The returned width is the slot list's: `home_view` sizes the
-    /// bar and the strip to it and the view pins its slot-list column to it
-    /// (`ArtworkBleed::bottom`), so the edges meet.
+    /// Lowered, the current view's Horizontal artwork column runs the
+    /// window's full height, and the chrome above and below the view (the top
+    /// nav bar, the top metadata strip row, the player bar) docks beside it,
+    /// over the slot list only. The returned width is the slot list's:
+    /// `home_view` sizes that chrome to it and the view pins its slot-list
+    /// column to it (`ArtworkBleed::bottom`), so the edges meet.
     ///
     /// Applies when the view renders a Horizontal artwork column, resolved
-    /// from the same config the view builds (raw `window.height`, like
-    /// `elevated_artwork_extent`'s first pass); never in split-view.
-    pub(crate) fn lowered_player_bar_width(&self, elevated: bool) -> Option<f32> {
+    /// from the same config the view builds (raw `window.height`); never in
+    /// split-view. `ViewPage::uses_horizontal_artwork_column` names the views
+    /// that build one.
+    pub(crate) fn lowered_player_bar_width(&self) -> Option<f32> {
         use crate::widgets::base_slot_list_layout::{
             ArtworkOrientation, BaseSlotListLayoutConfig, horizontal_artwork_side_width,
             resolve_artwork_layout,
@@ -640,41 +534,42 @@ impl Nokkvi {
             ArtworkOrientation::Horizontal => {}
             ArtworkOrientation::Vertical => return None,
         }
-        // The artwork column spans everything below the top nav's band (none
-        // when elevated); the strip row and the player bar overlay the list.
-        let nav_band = if crate::theme::is_top_nav() && !elevated {
-            crate::theme::nav_bar_height()
-        } else {
-            0.0
-        };
-        let column_height = (self.window.height - nav_band).max(0.0);
-        let side = horizontal_artwork_side_width(&layout, pane_width, column_height);
+        // The column runs from the window's top edge to its bottom edge; the
+        // top chrome and the player bar dock over the list beside it.
+        let side = horizontal_artwork_side_width(&layout, pane_width, self.window.height);
         Some((pane_width - side).max(0.0))
     }
 
-    /// Dock the top metadata strip row (when shown) above `content` and the
-    /// player bar below it. Normally each spans the content column and
-    /// `content` is padded clear of both. With the bar lowered
-    /// (`lowered_width`), both sit at the slot list's width over the bands
-    /// the view keeps empty for them (`ArtworkBleed`), and `content` runs the
-    /// full height. One shape either way (the strip and the bar keep their
-    /// tree positions, so their slider and marquee state survive a flip, and
-    /// `content` keeps its own).
+    /// This frame's [`ArtworkBleed`], which `home_view` threads into the
+    /// current view. Beside the lowered artwork column the slot list keeps a
+    /// top band as tall as the chrome docked over it (the top nav bar and the
+    /// strip row, `slot_list::top_chrome_height`) and ends at the bar's width.
+    pub(crate) fn artwork_bleed(&self) -> ArtworkBleed {
+        let lowered_bar_width = self.lowered_player_bar_width();
+        ArtworkBleed {
+            top: lowered_bar_width.map(|_| widgets::slot_list::top_chrome_height()),
+            bottom: lowered_bar_width,
+        }
+    }
+
+    /// Dock the top chrome (the top nav bar and the metadata strip row,
+    /// whichever the layout shows) above `content` and the player bar below
+    /// it. Normally each spans the content column and `content` is padded
+    /// clear of both. With the bar lowered (`lowered_width`), both sit at the
+    /// slot list's width over the bands the view keeps empty for them
+    /// (`ArtworkBleed`), and `content` runs the full height. One shape either
+    /// way (the top chrome and the bar keep their tree positions, so their
+    /// slider and marquee state survive a flip, and `content` keeps its own).
     fn dock_chrome<'a>(
         content: Element<'a, Message>,
-        top_strip: Option<Element<'a, Message>>,
+        top_chrome: Option<Element<'a, Message>>,
         player_bar: Element<'a, Message>,
         lowered_width: Option<f32>,
     ) -> Element<'a, Message> {
-        use crate::widgets::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR;
         let (top_pad, bottom_pad) = match lowered_width {
             Some(_) => (0.0, 0.0),
             None => (
-                if top_strip.is_some() {
-                    STRIP_HEIGHT_WITH_SEPARATOR
-                } else {
-                    0.0
-                },
+                widgets::slot_list::top_chrome_height(),
                 widgets::player_bar::player_bar_height(),
             ),
         };
@@ -688,8 +583,8 @@ impl Nokkvi {
             });
         let chrome_width = lowered_width.map_or(Length::Fill, Length::Fixed);
         let mut chrome_layer = iced::widget::Column::<Element<'a, Message>>::new();
-        if let Some(strip) = top_strip {
-            chrome_layer = chrome_layer.push(container(strip).width(chrome_width).boxed());
+        if let Some(top) = top_chrome {
+            chrome_layer = chrome_layer.push(container(top).width(chrome_width).boxed());
         }
         let chrome_layer = chrome_layer
             .push(
@@ -727,27 +622,14 @@ impl Nokkvi {
 
     /// Home screen layout (nav bar + content + player bar)
     fn home_view(&self) -> Element<'_, Message> {
-        // Resolve elevation and the lowered player bar once per frame; the
-        // result threads through `main_content` into each view's
-        // `*ViewData.bleed`, which `BaseSlotListLayoutConfig.bleed` then
-        // carries into `horizontal_layout`. Both the elevated and
-        // non-elevated top-nav branches below produce the same
-        // `Stack[base, nav_overlay]` shape — see the branch comment for why.
-        let elevated_extent = self.elevated_artwork_extent();
-        let lowered_bar_width = self.lowered_player_bar_width(elevated_extent.is_some());
-        // The list's top band: the elevated nav bar, or the strip row docked
-        // over the list beside the lowered artwork (top-nav elevation never
-        // coexists with a strip row).
-        let bleed = ArtworkBleed {
-            top: if elevated_extent.is_some() {
-                Some(crate::theme::nav_bar_height())
-            } else if lowered_bar_width.is_some() && Self::top_strip_row_shown() {
-                Some(crate::widgets::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR)
-            } else {
-                None
-            },
-            bottom: lowered_bar_width,
-        };
+        // Resolve the lowered player bar once per frame; the result threads
+        // through `main_content` into each view's `*ViewData.bleed`, which
+        // `BaseSlotListLayoutConfig.bleed` then carries into
+        // `horizontal_layout`. Every nav layout below docks its chrome around
+        // `main_content` with `dock_chrome`, whose shape is the same lowered
+        // or not.
+        let bleed = self.artwork_bleed();
+        let lowered_bar_width = bleed.bottom;
 
         // Optional radio metadata mapping
         let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
@@ -883,16 +765,17 @@ impl Nokkvi {
                 )
             });
 
-        // Base layout:
-        //   Top mode:  nav_bar  + content + player_bar
-        //   Side mode: row[sidebar, column[strip?, content, player_bar]]
+        // Base layout (each docks its chrome around `main_content` with
+        // `dock_chrome`):
+        //   Top mode:  [nav_bar + strip?] + content + player_bar
+        //   Side mode: row[sidebar, [strip?] + content + player_bar]
         //              (sidebar runs the full window height — strip + player
         //              are pushed RIGHT of the sidebar to match the flat
         //              redesign mockups)
         //   None mode: [strip?] + content + player_bar  (no sidebar)
-        //   Lowered (any mode): the strip row and player_bar sit over the slot
-        //              list only and the artwork runs between them
-        //              (`dock_chrome`)
+        //   Lowered (any mode): the top chrome and player_bar sit over the
+        //              slot list only and the artwork runs the window's full
+        //              height beside them
 
         // Helper: build the optional top-area metadata strip as a single
         // Element. Returns `None` when the strip is hidden.
@@ -954,144 +837,75 @@ impl Nokkvi {
             );
         }
 
-        // Docked with the top strip row around `main_content` by `dock_chrome`
-        // in every layout.
+        // The chrome docked above `main_content`: the nav bar with the
+        // `TopBarUnder` strip row beneath it (top nav), or the strip row alone
+        // (side / none nav). Lowered, the nav bar spans the slot list like the
+        // player bar and lays out against that width (its tab and metadata
+        // breakpoints), so the artwork column beside them runs the window's
+        // full height.
+        let top_chrome: Option<Element<'_, Message>> = if crate::theme::is_top_nav() {
+            let nav_width = lowered_bar_width.unwrap_or(self.window.width);
+            Some(
+                iced::widget::Column::new()
+                    .push(self.navigation_bar(nav_width))
+                    .extend(build_top_strip(true))
+                    .boxed(),
+            )
+        } else {
+            build_top_strip(false)
+        };
         let player_bar = widgets::player_bar(&player_bar_data, player_strip)
             .map(Message::PlayerBar)
             .boxed();
+        let docked = Self::dock_chrome(
+            self.main_content(bleed),
+            top_chrome,
+            player_bar,
+            lowered_bar_width,
+        );
 
-        let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
-            || crate::theme::is_none_nav()
-        {
-            let mut outer = iced::widget::Column::new();
-
-            if crate::theme::is_side_nav() {
-                // Settings has no NavView counterpart; the sidebar treats it
-                // as Queue (`settings_open` flag below highlights it instead).
-                let side_nav_view: widgets::NavView =
-                    Option::<widgets::NavView>::from(self.current_view)
-                        .unwrap_or(widgets::NavView::Queue);
-                // Mirror the top-nav library state into the side-nav so
-                // the footer trigger + popover see the same source of
-                // truth (shared via `library_filter_view_data`).
-                let lib = self.library_filter_view_data();
-                let side_data = widgets::SideNavBarData {
-                    current_view: side_nav_view,
-                    settings_open: self.current_view == View::Settings,
-                    editor_session_active: self.playlist_editor.is_some(),
-                    editor_active: matches!(self.current_view, View::PlaylistEditor),
-                    harbour_active: matches!(self.current_view, View::Harbour),
-                    library_count: lib.count,
-                    active_library_count: lib.active_count,
-                    library_selector_open: lib.popover_open,
-                    library_selector_bounds: lib.trigger_bounds,
-                    library_rows: lib.rows,
-                    hamburger_open: matches!(
-                        self.open_menu,
-                        Some(crate::app_message::OpenMenu::Hamburger)
-                    ),
-                    is_light_mode: crate::theme::is_light_mode(),
-                };
-                // Side-nav mode: sidebar runs the FULL window height; the
-                // top-bar strip, content, and player bar all live in the
-                // right column so the sidebar is the visual leftmost band
-                // across every row of chrome (matches the flat-redesign
-                // side-nav mockups).
-                let right_col = Self::dock_chrome(
-                    self.main_content(bleed),
-                    build_top_strip(false),
-                    player_bar,
-                    lowered_bar_width,
-                );
-
-                outer = outer.push(
-                    iced::widget::row![
-                        widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                        right_col,
-                    ]
-                    .height(Length::Fill)
-                    .boxed(),
-                );
-            } else {
-                // None mode: no sidebar — strip (if any), content, player
-                // bar all span the full window width.
-                outer = outer.push(Self::dock_chrome(
-                    self.main_content(bleed),
-                    build_top_strip(false),
-                    player_bar,
-                    lowered_bar_width,
-                ));
-            }
-
-            // Fill the window height so the player bar sits flush at the bottom.
-            outer.height(Length::Fill).boxed()
-        } else {
-            // Top-nav layout — always wrap in `Stack` with the same column
-            // shape underneath, even when elevation is off. Switching the
-            // root widget type between Column (non-elevated) and Stack
-            // (elevated) would tear down `text_input` focus and any other
-            // stateful widgets every time elevation flipped — Ctrl+E to
-            // open the browsing panel, navigating to an ineligible view,
-            // a window resize crossing the Auto-mode threshold. See
-            // CLAUDE.md "Render output" gotcha and gotchas.md "Widget Tree & Focus".
-            //
-            // The outer `Space` reserves the nav-bar's vertical band:
-            //   - non-elevated → `NAV_BAR_HEIGHT` so `main_content` is
-            //     pushed below the nav band (same layout as before)
-            //   - elevated → `0.0` so `main_content` extends to the top
-            //     of the window, letting the artwork pane reach y=0
-            //
-            // `nav_visual_width` is the horizontal extent the nav-bar
-            // occupies — full window width when not elevated, only the
-            // slot-list area when elevated (the artwork pane underneath
-            // shows through to the right of the nav). With the player bar
-            // lowered too, the nav matches the bar's width, so the artwork
-            // column's stripe runs the full window height between them.
-            let (outer_space_height, nav_visual_width) =
-                if let Some(artwork_extent) = elevated_extent {
-                    let width = lowered_bar_width
-                        .unwrap_or_else(|| (self.content_pane_width() - artwork_extent).max(0.0));
-                    (0.0, width)
-                } else {
-                    // Use the live nav-bar height (32 flat / 44 rounded)
-                    // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
-                    // pinned at 32 and lets the rounded-mode nav overlay
-                    // into the view header by 12 px, eating its top
-                    // margin and pushing the header pill flush against
-                    // the bottom of the nav bar.
-                    (crate::theme::nav_bar_height(), self.window.width)
-                };
-            // `TopBarUnder` mode in top-nav: `dock_chrome` puts the
-            // player-bar-styled strip directly beneath the nav band, above
-            // `main_content` (over the slot list only when the bar is
-            // lowered, so the artwork starts right under the nav).
-            let base_col = iced::widget::Column::new()
-                .push(
-                    iced::widget::Space::new()
-                        .width(Length::Fill)
-                        .height(Length::Fixed(outer_space_height))
-                        .boxed(),
-                )
-                .push(Self::dock_chrome(
-                    self.main_content(bleed),
-                    build_top_strip(true),
-                    player_bar,
-                    lowered_bar_width,
-                ));
-            // Fill the window so `main_content` (Length::Fill) expands and pins
-            // the player bar flush to the window's bottom edge (no gap below it).
-            let base = base_col.height(Length::Fill);
-
-            let nav_overlay = column![
-                container(self.navigation_bar(nav_visual_width))
-                    .width(Length::Fixed(nav_visual_width))
-                    .height(Length::Shrink),
-                iced::widget::Space::new().height(Length::Fill),
+        let base_layer: Element<'_, Message> = if crate::theme::is_side_nav() {
+            // Settings has no NavView counterpart; the sidebar treats it
+            // as Queue (`settings_open` flag below highlights it instead).
+            let side_nav_view: widgets::NavView =
+                Option::<widgets::NavView>::from(self.current_view)
+                    .unwrap_or(widgets::NavView::Queue);
+            // Mirror the top-nav library state into the side-nav so
+            // the footer trigger + popover see the same source of
+            // truth (shared via `library_filter_view_data`).
+            let lib = self.library_filter_view_data();
+            let side_data = widgets::SideNavBarData {
+                current_view: side_nav_view,
+                settings_open: self.current_view == View::Settings,
+                editor_session_active: self.playlist_editor.is_some(),
+                editor_active: matches!(self.current_view, View::PlaylistEditor),
+                harbour_active: matches!(self.current_view, View::Harbour),
+                library_count: lib.count,
+                active_library_count: lib.active_count,
+                library_selector_open: lib.popover_open,
+                library_selector_bounds: lib.trigger_bounds,
+                library_rows: lib.rows,
+                hamburger_open: matches!(
+                    self.open_menu,
+                    Some(crate::app_message::OpenMenu::Hamburger)
+                ),
+                is_light_mode: crate::theme::is_light_mode(),
+            };
+            // Side-nav mode: sidebar runs the FULL window height; the
+            // top-bar strip, content, and player bar all live in the
+            // right column so the sidebar is the visual leftmost band
+            // across every row of chrome (matches the flat-redesign
+            // side-nav mockups).
+            iced::widget::row![
+                widgets::side_nav_bar(side_data).map(map_nav_bar_message),
+                docked,
             ]
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-            Stack::new().push(base).push(nav_overlay).boxed()
+            .height(Length::Fill)
+            .boxed()
+        } else {
+            // Top and None mode: no sidebar, so the docked chrome and content
+            // span the full window width.
+            docked
         };
 
         // In side-nav mode the sidebar is the full-height leftmost band; the
@@ -2277,11 +2091,9 @@ impl Nokkvi {
     /// Navigation bar - delegates to nav_bar component with playback data.
     ///
     /// `effective_width` is the horizontal extent the nav-bar actually
-    /// occupies. In the regular column-stacked layout this matches the
-    /// window width; in the artwork-elevated layout the nav bar only spans
-    /// the slot-list area to the left of the artwork pane, so callers pass
-    /// `content_pane_width - artwork_extent` instead. The nav bar uses this
-    /// width to drive its responsive collapse breakpoints.
+    /// occupies: the window width, or beside the lowered artwork column the
+    /// slot list's (`lowered_player_bar_width`). The nav bar uses this width
+    /// to drive its responsive collapse breakpoints.
     fn navigation_bar(&self, effective_width: f32) -> Element<'_, Message> {
         // Convert app::View to widgets::NavView for the component. Settings
         // is not a nav-bar column — fall back to Queue (ignored when

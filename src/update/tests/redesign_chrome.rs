@@ -17,18 +17,25 @@
 //! resolver returns the cached large-artwork handle; in every other
 //! `TrackInfoDisplay` mode it short-circuits to `None` (so other strip
 //! modes don't pay the per-frame queue walk).
+//!
+//! And the lowered layout's geometry: the top chrome docked over the list
+//! (`top_chrome_height`, `Nokkvi::artwork_bleed`), the full-height artwork
+//! column beside it, and the toast insets that follow the lowered bar.
 
-use nokkvi_data::types::player_settings::{NavLayout, RoundedMode, TrackInfoDisplay};
+use nokkvi_data::types::player_settings::{
+    ArtworkColumnMode, NavLayout, RoundedMode, TrackInfoDisplay,
+};
 
 use crate::{
     test_helpers::{make_queue_song, test_app},
     theme::{
-        THEME_MODE_LOCK, is_rounded_for_player, is_rounded_mode, nav_layout, rounded_mode,
-        set_nav_layout, set_rounded_mode, set_track_info_display, track_info_display,
+        THEME_MODE_LOCK, artwork_column_mode, is_rounded_for_player, is_rounded_mode, nav_layout,
+        rounded_mode, set_artwork_column_mode, set_nav_layout, set_rounded_mode,
+        set_track_info_display, track_info_display,
     },
     widgets::{
         player_bar::player_bar_height,
-        slot_list::{chrome_height_with_header, view_header_chrome},
+        slot_list::{chrome_height_with_header, top_chrome_height, view_header_chrome},
         track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR,
     },
 };
@@ -40,6 +47,7 @@ struct UiModeGuard {
     saved_tid: TrackInfoDisplay,
     saved_nav: NavLayout,
     saved_rounded: RoundedMode,
+    saved_artwork: ArtworkColumnMode,
 }
 
 impl UiModeGuard {
@@ -48,6 +56,7 @@ impl UiModeGuard {
             saved_tid: track_info_display(),
             saved_nav: nav_layout(),
             saved_rounded: rounded_mode(),
+            saved_artwork: artwork_column_mode(),
         }
     }
 }
@@ -57,14 +66,28 @@ impl Drop for UiModeGuard {
         set_track_info_display(self.saved_tid);
         set_nav_layout(self.saved_nav);
         set_rounded_mode(self.saved_rounded);
+        set_artwork_column_mode(self.saved_artwork);
     }
 }
 
-fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
+/// The chrome docked above the page: the top nav bar plus the strip row.
+fn expected_top_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
     let nav = match layout {
         NavLayout::Top => crate::theme::nav_bar_height(),
         NavLayout::Side | NavLayout::None => 0.0,
     };
+    let strip = match (tid, layout) {
+        (TrackInfoDisplay::TopBarUnder, NavLayout::Top) => STRIP_HEIGHT_WITH_SEPARATOR,
+        (
+            TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
+            NavLayout::Side | NavLayout::None,
+        ) => STRIP_HEIGHT_WITH_SEPARATOR,
+        _ => 0.0,
+    };
+    nav + strip
+}
+
+fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
     let player = if tid == TrackInfoDisplay::PlayerBar {
         // Base + 1 px top separator + strip-with-its-own-separator.
         72.0 + 1.0 + STRIP_HEIGHT_WITH_SEPARATOR
@@ -75,16 +98,18 @@ fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
     } else {
         72.0
     };
-    let strip = match (tid, layout) {
-        (TrackInfoDisplay::TopBarUnder, NavLayout::Top) => STRIP_HEIGHT_WITH_SEPARATOR,
-        (
-            TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
-            NavLayout::Side | NavLayout::None,
-        ) => STRIP_HEIGHT_WITH_SEPARATOR,
-        _ => 0.0,
-    };
-    nav + player + view_header_chrome() + strip
+    expected_top_chrome(tid, layout) + player + view_header_chrome()
 }
+
+const LAYOUTS: [NavLayout; 3] = [NavLayout::Top, NavLayout::Side, NavLayout::None];
+
+const MODES: [TrackInfoDisplay; 5] = [
+    TrackInfoDisplay::Off,
+    TrackInfoDisplay::PlayerBar,
+    TrackInfoDisplay::TopBar,
+    TrackInfoDisplay::TopBarUnder,
+    TrackInfoDisplay::MiniPlayer,
+];
 
 #[test]
 fn chrome_matrix_flat_mode_pins_every_combination() {
@@ -92,17 +117,8 @@ fn chrome_matrix_flat_mode_pins_every_combination() {
     let _restore = UiModeGuard::snapshot();
     set_rounded_mode(RoundedMode::Off);
 
-    let layouts = [NavLayout::Top, NavLayout::Side, NavLayout::None];
-    let modes = [
-        TrackInfoDisplay::Off,
-        TrackInfoDisplay::PlayerBar,
-        TrackInfoDisplay::TopBar,
-        TrackInfoDisplay::TopBarUnder,
-        TrackInfoDisplay::MiniPlayer,
-    ];
-
-    for layout in layouts {
-        for mode in modes {
+    for layout in LAYOUTS {
+        for mode in MODES {
             set_nav_layout(layout);
             set_track_info_display(mode);
             let got = chrome_height_with_header(false);
@@ -111,6 +127,32 @@ fn chrome_matrix_flat_mode_pins_every_combination() {
                 (got - expected).abs() < f32::EPSILON,
                 "chrome drifted at ({mode:?}, {layout:?}): got {got}, expected {expected}",
             );
+        }
+    }
+}
+
+#[test]
+fn top_chrome_matrix_pins_every_combination() {
+    // `top_chrome_height()` pads the content clear of the nav bar and the
+    // strip row, and beside the lowered artwork it is the list's top band
+    // under that docked chrome. The slot-count chrome is built on it.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+
+    for rounded in [RoundedMode::Off, RoundedMode::On] {
+        set_rounded_mode(rounded);
+        for layout in LAYOUTS {
+            for mode in MODES {
+                set_nav_layout(layout);
+                set_track_info_display(mode);
+                let got = top_chrome_height();
+                let expected = expected_top_chrome(mode, layout);
+                assert!(
+                    (got - expected).abs() < f32::EPSILON,
+                    "top chrome drifted at ({mode:?}, {layout:?}, {rounded:?}): got {got}, \
+                     expected {expected}",
+                );
+            }
         }
     }
 }
@@ -366,29 +408,31 @@ fn side_nav_inset_follows_the_drawn_sidebar() {
     );
 }
 
-#[test]
-fn toast_insets_follow_the_lowered_player_bar() {
-    // The toast rides just above the player bar. Lowered, the bar spans the
-    // slot list only and the artwork column runs down beside it, so a toast
-    // at the full content width would cross the artwork.
-    use nokkvi_data::types::player_settings::ArtworkColumnMode;
-
-    use crate::theme::{artwork_column_mode, set_artwork_column_mode};
-
-    let _guard = THEME_MODE_LOCK.lock();
-    let _restore = UiModeGuard::snapshot();
-    let saved_artwork = artwork_column_mode();
+/// A Home-screen app on the Queue view, sized so the Auto artwork column sits
+/// beside the list (which lowers the player bar) in every nav layout.
+fn lowered_queue_app() -> crate::Nokkvi {
     let mut app = test_app();
     app.screen = crate::Screen::Home;
     app.current_view = crate::View::Queue;
     app.window.width = 1600.0;
     app.window.height = 700.0;
+    app
+}
+
+#[test]
+fn toast_insets_follow_the_lowered_player_bar() {
+    // The toast rides just above the player bar. Lowered, the bar spans the
+    // slot list only and the artwork column runs down beside it, so a toast
+    // at the full content width would cross the artwork.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = lowered_queue_app();
     set_artwork_column_mode(ArtworkColumnMode::Auto);
 
     for layout in [NavLayout::Side, NavLayout::Top, NavLayout::None] {
         set_nav_layout(layout);
         let bar = app
-            .lowered_player_bar_width(app.elevated_artwork_extent().is_some())
+            .lowered_player_bar_width()
             .expect("setup invariant: the queue's artwork column lowers the bar");
         let (left, right) = app.toast_insets();
         assert!(
@@ -410,6 +454,77 @@ fn toast_insets_follow_the_lowered_player_bar() {
     set_artwork_column_mode(ArtworkColumnMode::Auto);
     app.theater.active = true;
     assert!(app.toast_insets().1.abs() < f32::EPSILON);
+}
 
-    set_artwork_column_mode(saved_artwork);
+#[test]
+fn lowered_artwork_column_runs_the_full_window_height() {
+    // Beside the lowered artwork the nav bar and the strip row dock over the
+    // list in every nav layout and strip mode, so the Auto column's square
+    // spans the window's whole height and the bar takes the width left of it.
+    use crate::widgets::base_slot_list_layout::HORIZONTAL_ARTWORK_STRIPE;
+
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let app = lowered_queue_app();
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+
+    for rounded in [RoundedMode::Off, RoundedMode::On] {
+        set_rounded_mode(rounded);
+        for layout in LAYOUTS {
+            for mode in MODES {
+                set_nav_layout(layout);
+                set_track_info_display(mode);
+                let bar = app
+                    .lowered_player_bar_width()
+                    .expect("setup invariant: the queue's artwork column lowers the bar");
+                let column = app.content_pane_width() - bar;
+                let full_height = HORIZONTAL_ARTWORK_STRIPE + app.window.height;
+                assert!(
+                    (column - full_height).abs() < 0.5,
+                    "({mode:?}, {layout:?}, {rounded:?}): the artwork column ({column}) must \
+                     be a full-height square plus its stripe ({full_height})",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn artwork_bleed_keeps_the_top_chrome_band_beside_the_lowered_artwork() {
+    // The list starts below the chrome docked over it (the nav bar and the
+    // strip row) and ends at the bar's width. With the bar spanning the
+    // content column, the artwork bleeds nowhere.
+    use crate::widgets::base_slot_list_layout::ArtworkBleed;
+
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = lowered_queue_app();
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+
+    for layout in LAYOUTS {
+        for mode in MODES {
+            set_nav_layout(layout);
+            set_track_info_display(mode);
+            let bleed = app.artwork_bleed();
+            assert!(
+                bleed.bottom.is_some(),
+                "setup invariant: the queue's artwork column lowers the bar"
+            );
+            assert_eq!(bleed.bottom, app.lowered_player_bar_width());
+            assert_eq!(
+                bleed.top,
+                Some(top_chrome_height()),
+                "({mode:?}, {layout:?}): the list's top band is the docked top chrome",
+            );
+        }
+    }
+
+    // No artwork column.
+    set_artwork_column_mode(ArtworkColumnMode::Never);
+    assert_eq!(app.artwork_bleed(), ArtworkBleed::NONE);
+
+    // The split view keeps its own two-pane shape.
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    assert_eq!(app.artwork_bleed(), ArtworkBleed::NONE);
 }

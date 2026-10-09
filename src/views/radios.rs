@@ -41,8 +41,8 @@ pub struct RadiosViewData<'a> {
     pub loading: bool,
     pub total_station_count: usize,
     pub stable_viewport: bool,
-    /// Where the artwork column runs past the chrome this frame (top-nav
-    /// elevation, the lowered player bar). Forwarded into
+    /// Where the artwork column runs past the chrome this frame (the lowered
+    /// layout, `Nokkvi::artwork_bleed`). Forwarded into
     /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
     pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     pub modifiers: iced::keyboard::Modifiers,
@@ -684,10 +684,10 @@ impl super::ViewPage for RadiosPage {
     }
 
     /// Radios renders a horizontal artwork column (`show_artwork_column: true`),
-    /// so it participates in the artwork-elevation feature like every other
-    /// artwork view — without this the elevated top-nav bar spans the full
-    /// window and the artwork column stops below the nav instead of extending
-    /// to the top of the window. See [`Nokkvi::elevated_artwork_extent`].
+    /// so it takes part in the lowered layout like every other artwork view —
+    /// without this the nav bar and the player bar span the full window and
+    /// the artwork column stops between them instead of running the window's
+    /// full height. See [`Nokkvi::lowered_player_bar_width`].
     fn uses_horizontal_artwork_column(&self) -> bool {
         true
     }

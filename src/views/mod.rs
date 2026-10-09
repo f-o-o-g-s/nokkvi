@@ -128,11 +128,12 @@ pub(crate) trait ViewPage {
     /// horizontal layout (i.e. passes `show_artwork_column: true` and
     /// resolves to `ArtworkOrientation::Horizontal`).
     ///
-    /// `Nokkvi::elevated_artwork_extent` consults this to gate the
-    /// artwork-elevation feature without a hand-maintained match on
-    /// `View`. Default `false` means a new `ViewPage` impl opts out
-    /// safely; override to `true` only when the view does in fact
-    /// participate in the horizontal-artwork layout.
+    /// `Nokkvi::lowered_player_bar_width` consults this to gate the lowered
+    /// layout (the artwork column running the window's full height beside
+    /// the docked nav bar, strip row and player bar) without a
+    /// hand-maintained match on `View`. Default `false` means a new
+    /// `ViewPage` impl opts out safely; override to `true` only when the
+    /// view does in fact participate in the horizontal-artwork layout.
     fn uses_horizontal_artwork_column(&self) -> bool {
         false
     }

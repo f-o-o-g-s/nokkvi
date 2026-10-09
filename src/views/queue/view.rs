@@ -268,7 +268,7 @@ pub(crate) fn queue_effective_chrome(inputs: &QueueChromeInputs<'_>) -> f32 {
 
     let chrome = queue_chrome_height(inputs);
     // `bleed` and `slot_list_chrome` don't reach the vertical term (see
-    // `playlist_strip_artwork_layout`), so the render's elevation is moot here.
+    // `playlist_strip_artwork_layout`), so the render's bleed is moot here.
     let layout = BaseSlotListLayoutConfig {
         window_width: inputs.pane_width,
         window_height: inputs.window_height,

@@ -103,16 +103,17 @@ pub(crate) struct BaseSlotListLayoutConfig {
 }
 
 /// How far the Horizontal artwork column runs past the chrome around the
-/// view. Each edge's chrome (the top nav bar, the player bar) is then drawn
-/// by `home_view` over the slot-list column only, on a band the column keeps
-/// empty for it.
+/// view. Each edge's chrome (the top nav bar and the metadata strip row, the
+/// player bar) is then drawn by `home_view` over the slot-list column only,
+/// on a band the column keeps empty for it. `Nokkvi::artwork_bleed` resolves
+/// both edges together.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ArtworkBleed {
     /// `Some(band)`: the artwork column reaches past the chrome above the
-    /// view and the slot-list column starts `band` lower, where `home_view`
-    /// draws that chrome over it — the nav bar under top-nav elevation
-    /// (`theme::nav_bar_height()`), or the metadata strip row beside the
-    /// lowered artwork.
+    /// view, up to the window's top edge, and the slot-list column starts
+    /// `band` lower, where `home_view` docks that chrome over it: the top
+    /// nav bar and the metadata strip row, whichever the layout shows
+    /// (`slot_list::top_chrome_height()`, `0.0` when neither does).
     pub top: Option<f32>,
     /// Lowered player bar: `Some(list_width)` pins the slot-list column to
     /// `list_width` and ends it with a `player_bar_height()` band, while the
@@ -1210,27 +1211,26 @@ where
         with_left_stripe(artwork_side_inner)
     };
 
-    // In elevated mode the home view stretches main_content up over the
-    // top-nav row and overlays the nav-bar back on top of the slot-list
-    // column (beside the lowered artwork it does the same with the
-    // metadata strip row). Stack a transparent spacer matching that
-    // chrome's height (`bleed.top`) above the header so the overlay lands
-    // on an unoccupied band rather than on top of the view header. The
-    // artwork column intentionally has no top padding so it fills the row
-    // all the way up.
+    // Beside the lowered artwork the home view runs main_content up to the
+    // window's top edge and docks the top chrome (the top nav bar, the
+    // metadata strip row) back over the slot-list column. Stack a
+    // transparent spacer matching that chrome's height (`bleed.top`) above
+    // the header so the chrome lands on an unoccupied band rather than on
+    // top of the view header. The artwork column intentionally has no top
+    // padding so it fills the row all the way up.
     //
-    // `home_view` passes `theme::nav_bar_height()` (32 flat / 44 rounded), not the
-    // legacy `slot_list::NAV_BAR_HEIGHT` const (pinned at 32) — in
-    // rounded mode the live nav is 44 px, so a 32 px spacer lets the
-    // overlay eat the view-header pill's 12 px top margin and pushes the
-    // pill flush against the bottom of the nav bar. Mirrors the
-    // non-elevated fix in `app_view.rs::home_view`.
+    // `home_view` passes `slot_list::top_chrome_height()`, which reads the
+    // live `theme::nav_bar_height()` (32 flat / 44 rounded), not the legacy
+    // `slot_list::NAV_BAR_HEIGHT` const (pinned at 32) — in rounded mode the
+    // live nav is 44 px, so a 32 px spacer lets the nav eat the view-header
+    // pill's 12 px top margin and pushes the pill flush against the bottom
+    // of the nav bar.
     //
     // `config.bleed` is plumbed by `home_view` through each view's
     // `*ViewData` — the only frame-level signal authoritative enough to
     // gate this branch. Reading a theme-only predicate would also fire in
-    // split-view, where home_view does *not* elevate, leaving the slot
-    // list with a stranded top gap.
+    // split-view, where home_view does *not* lower the bar, leaving the
+    // slot list with a stranded top gap.
     //
     // The spacer is intentionally a sibling `Space` rather than a wrapping
     // container with `padding(top: …)` — a wrapping container ends up

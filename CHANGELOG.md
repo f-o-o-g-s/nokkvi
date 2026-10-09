@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - The artwork column's resize handle is now invisible, marked only by the resize cursor at the column's left edge.
 - Mouse-wheel scrolling in Settings, the Get Info dialog and the rules editor now glides instead of jumping.
 - Hotkey badges in Settings are now at least 96 pixels wide.
+- With the Metadata Strip on Top Bar or Top Bar Under, the top nav bar now spans only the list beside the artwork column.
+- With the Metadata Strip on Top Bar or Top Bar Under, the artwork column beside the list now reaches the window's top edge.
 
 ### Fixed
 

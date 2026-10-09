@@ -210,38 +210,6 @@ pub(crate) fn show_top_bar_under_strip() -> bool {
     track_info_display() == TrackInfoDisplay::TopBarUnder && is_top_nav()
 }
 
-/// Whether the artwork-elevation feature is *enabled* by the user's theme
-/// settings.
-///
-/// True when the top-nav layout is active AND the metadata strip lives
-/// somewhere other than the top bar (i.e. `Off`, `PlayerBar`, or
-/// `MiniPlayer`) — in those modes the top nav doesn't carry any
-/// now-playing metadata, so its right portion is free real estate that
-/// the artwork can take over. `MiniPlayer` keeps its own artwork inside
-/// the player bar; that doesn't conflict with the top-nav elevation
-/// because they live on different rows.
-///
-/// `TopBar` keeps the regular column-stacked layout because the metadata
-/// strip still needs the full nav width. `TopBarUnder` likewise opts out:
-/// its strip sits as its own full-width row directly beneath the nav, so
-/// elevating the artwork into that band would either cover the strip or
-/// require the strip to span only the slot-list column. Easier to just
-/// disable elevation whenever a top-area strip is visible.
-///
-/// This is only the *theme* gate — `Nokkvi::elevated_artwork_extent`
-/// additionally excludes split-view, ineligible views, and the Auto-mode
-/// portrait fallback before publishing the result through each `*ViewData`
-/// as `BaseSlotListLayoutConfig::elevated`, which `horizontal_layout`
-/// finally reads.
-#[inline]
-pub(crate) fn is_artwork_elevated() -> bool {
-    is_top_nav()
-        && !matches!(
-            track_info_display(),
-            TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
-        )
-}
-
 // ============================================================================
 // Nav Layout Control
 // ============================================================================

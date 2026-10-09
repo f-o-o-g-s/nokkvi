@@ -55,8 +55,8 @@ pub struct SimilarViewData<'a> {
     pub source: Option<&'a crate::state::SimilarSource>,
     /// Whether an API call is in flight
     pub loading: bool,
-    /// Where the artwork column runs past the chrome this frame (top-nav
-    /// elevation, the lowered player bar). Forwarded into
+    /// Where the artwork column runs past the chrome this frame (the lowered
+    /// layout, `Nokkvi::artwork_bleed`). Forwarded into
     /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
     pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed

@@ -82,8 +82,8 @@ pub struct ArtistsViewData<'a> {
     /// (split-view, right pane). Used to suppress chrome that doesn't fit
     /// the narrower pane — e.g. the "Center on Playing" header button.
     pub in_browsing_panel: bool,
-    /// Where the artwork column runs past the chrome this frame (top-nav
-    /// elevation, the lowered player bar). Forwarded into
+    /// Where the artwork column runs past the chrome this frame (the lowered
+    /// layout, `Nokkvi::artwork_bleed`). Forwarded into
     /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
     pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
