@@ -125,6 +125,25 @@ git push
 
 ## 6. Tag and trigger the release workflow
 
+**Wait for the security audit first.** The step-5 push changed `Cargo.toml` and `Cargo.lock`, which starts the Security audit workflow (`.github/workflows/audit.yml`, `cargo audit` against the RustSec advisory database) on that commit. The release workflow runs the same audit and refuses to build on a vulnerability, but by then the tag is already on origin, so check it here:
+
+```bash
+sha=$(git rev-parse HEAD)
+for attempt in 1 2 3 4 5 6; do
+  run_id=$(gh run list --workflow=audit.yml --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run_id" ] && break
+  sleep 5   # the push's run takes a few seconds to register
+done
+if [ -n "$run_id" ]; then
+  gh run watch "$run_id" --exit-status
+else
+  echo "No audit.yml run for $sha. Did the step-5 push land, and is HEAD still the release commit?"
+  false
+fi
+```
+
+If it fails, its log names each advisory and the first patched version. Clear them with semver-compatible `cargo update -p <crate>` bumps, rerun the step 4 gates, commit and push, then repeat this wait for the new HEAD before you tag. If an advisory has no fixed version yet (the log says "No fixed upgrade is available!") or a dependent crate's version requirement blocks the bump, stop and ask the user. If they accept the risk, add its ID to `[advisories] ignore = [...]` in `.cargo/audit.toml` with a comment giving the reason, and push that rather than loosening the workflows. Unmaintained, unsound and yanked crates only warn and don't block.
+
 **Patch bump (default):** lightweight tag is fine.
 
 ```bash
@@ -148,16 +167,25 @@ git push --delete origin "vX.Y.Z" && git tag -d "vX.Y.Z"
 # then re-tag annotated and push again
 ```
 
-The tag push fires `.github/workflows/release.yml`, which validates the bump policy, builds the x86_64 Linux binary, packages it into `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` with a `.sha256` companion, and creates a **draft** GitHub Release with the matching CHANGELOG section as the body.
+The tag push fires `.github/workflows/release.yml`, which runs the security audit, validates the bump policy, builds the x86_64 Linux binary, packages it into `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` with a `.sha256` companion, and creates a **draft** GitHub Release with the matching CHANGELOG section as the body.
 
 ## 7. Watch the workflow and publish the draft
 
 Watch the run until it succeeds:
 
 ```bash
-sleep 5   # let the tag's run register
-run_id=$(gh run list --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')
-gh run watch "$run_id" --exit-status   # bare `gh run watch` needs an interactive terminal
+sha=$(git rev-parse HEAD)
+for attempt in 1 2 3 4 5 6; do
+  run_id=$(gh run list --workflow=release.yml --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run_id" ] && break
+  sleep 5   # the tag's run takes a few seconds to register
+done
+if [ -n "$run_id" ]; then
+  gh run watch "$run_id" --exit-status   # bare `gh run watch` needs an interactive terminal
+else
+  echo "No release.yml run for $sha. Did the tag push land?"
+  false
+fi
 ```
 
 Open the draft release and review:
