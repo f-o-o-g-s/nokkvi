@@ -69,9 +69,10 @@ const PLAYLIST_STRIP_DETAIL_BOTTOM_PAD: f32 = 12.0;
 /// Left edge of the identity's cover: the queue rows' own left padding,
 /// so the cover lines up with the row thumbnails' left edge.
 const PLAYLIST_COVER_INSET: f32 = crate::widgets::slot_list::SLOT_LIST_SLOT_PADDING;
-/// Indent of the identity's detail block: where the revealed name starts.
-const PLAYLIST_DETAIL_INDENT: f32 =
-    PLAYLIST_COVER_INSET + PLAYLIST_COVER_REVEALED + PLAYLIST_NAME_GAP_REVEALED;
+/// Indent of the identity's detail block: the cover's left edge, so the block
+/// starts in line with the cover and the rows' artwork instead of leaving an
+/// empty column under the cover.
+const PLAYLIST_DETAIL_INDENT: f32 = PLAYLIST_COVER_INSET;
 
 /// How the playlist identity fits the revealed toolbar.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -192,7 +193,7 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
 }
 
 /// Width the detail block's comment wraps within: the band minus the block's
-/// indent (where the revealed name starts) and right padding. Shared by the
+/// indent and right padding. Shared by the
 /// detail block's render and its height in [`queue_chrome_height`].
 fn playlist_strip_comment_width(inputs: &QueueChromeInputs<'_>) -> f32 {
     (playlist_strip_band_width(inputs.pane_width, inputs.window_height)
@@ -752,9 +753,9 @@ impl QueuePage {
                             column![comment_text, meta_row].spacing(8).into()
                         };
 
-                    // Under the toolbar across the band, indented to where the
-                    // revealed name starts. It keeps itself open while the
-                    // cursor moves between it and the identity.
+                    // Under the toolbar across the band, from the cover's left
+                    // edge. It keeps itself open while the cursor moves between
+                    // it and the identity.
                     let detail = container(detail_body)
                         .width(Length::Fill)
                         .height(Length::Fixed(playlist_detail_h))
