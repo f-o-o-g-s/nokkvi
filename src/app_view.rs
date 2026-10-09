@@ -465,6 +465,19 @@ impl Nokkvi {
         (self.window.width - nav_chrome).max(0.0)
     }
 
+    /// Horizontal footprint of the sidebar on screen right now:
+    /// `side_nav_total_width()` while the side nav is drawn (the Home screen
+    /// outside Theater Mode), else 0. The sidebar runs the full window
+    /// height, so the window-wide overlays (the bottom-band visualizer, the
+    /// toast strip) start at this x instead of painting over its tabs.
+    pub(crate) fn side_nav_inset(&self) -> f32 {
+        if self.screen == Screen::Home && !self.theater.active && crate::theme::is_side_nav() {
+            crate::widgets::side_nav_bar::side_nav_total_width()
+        } else {
+            0.0
+        }
+    }
+
     /// Width of the artwork *column* (the `bg0_soft` image container) when
     /// elevation is active, or `None` when it does not apply.
     ///
@@ -924,15 +937,10 @@ impl Nokkvi {
         // In side-nav mode the sidebar is the full-height leftmost band; the
         // visualizer (and boat) overlay must start to its RIGHT, not at x=0,
         // or the bars/lines bleed under the icons.
-        let side_nav_inset = if crate::theme::is_side_nav() {
-            crate::widgets::side_nav_bar::side_nav_total_width()
-        } else {
-            0.0
-        };
         self.bottom_band_layers(
             Stack::new().push(base_layer),
             widgets::player_bar::player_bar_height(),
-            side_nav_inset,
+            self.side_nav_inset(),
         )
         .into()
     }
@@ -1304,7 +1312,7 @@ impl Nokkvi {
                 top: 0.0,
                 right: 0.0,
                 bottom: bottom_padding,
-                left: 0.0,
+                left: self.side_nav_inset(),
             });
 
             stack = stack.push(toast_bar);

@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - The Bars Horizon now keeps a short stub of every receding bar where the music is quiet, instead of leaving the cover bare.
 - The "Playing From" header now shows a playlist's uploaded cover instead of its album collage.
 - After a restart, the "Playing From" header's details now refresh from the server without opening the Playlists view.
+- With Navigation Layout set to Side, toasts no longer cover the bottom of the sidebar's tabs.
 
 ### Removed
 

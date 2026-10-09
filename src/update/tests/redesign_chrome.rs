@@ -322,3 +322,46 @@ fn mini_player_artwork_uses_playing_radio_station_art() {
         "player bar must show the playing station's cached art",
     );
 }
+
+#[test]
+fn side_nav_inset_follows_the_drawn_sidebar() {
+    // The toast strip and the bottom-band visualizer start at this x. In
+    // side-nav mode the sidebar runs the full window height on Home, so an
+    // inset of 0 there paints the toast over the bottom tabs.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+
+    for rounded in [RoundedMode::Off, RoundedMode::On] {
+        set_rounded_mode(rounded);
+        set_nav_layout(NavLayout::Side);
+        let sidebar = crate::widgets::side_nav_bar::side_nav_total_width();
+        assert!(
+            (app.side_nav_inset() - sidebar).abs() < f32::EPSILON,
+            "side nav on Home ({rounded:?}) must inset by the sidebar's width",
+        );
+
+        for layout in [NavLayout::Top, NavLayout::None] {
+            set_nav_layout(layout);
+            assert!(
+                app.side_nav_inset().abs() < f32::EPSILON,
+                "{layout:?} has no sidebar to clear",
+            );
+        }
+    }
+
+    // Theater Mode and the login screen draw no sidebar.
+    set_nav_layout(NavLayout::Side);
+    app.theater.active = true;
+    assert!(
+        app.side_nav_inset().abs() < f32::EPSILON,
+        "theater hides the sidebar"
+    );
+    app.theater.active = false;
+    app.screen = crate::Screen::Login;
+    assert!(
+        app.side_nav_inset().abs() < f32::EPSILON,
+        "login has no sidebar"
+    );
+}
