@@ -125,6 +125,9 @@ impl Nokkvi {
                 // restored viewport may sit far past the queue head, so the
                 // visible-row prefetch above can miss exactly these albums.
                 tasks.extend(self.strip_quad_prefetch_tasks());
+                // …and its uploaded cover, which beats the quad when the
+                // playlist has one.
+                tasks.push(self.prefetch_active_playlist_custom_cover());
 
                 // Always clamp queue slot list offset to valid range after queue data changes.
                 // When the queue is replaced (e.g. playing an album), the old offset may

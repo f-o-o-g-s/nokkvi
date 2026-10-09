@@ -2437,6 +2437,15 @@ impl Nokkvi {
                 | crate::View::Settings
                 | crate::View::PlaylistEditor => Task::none(),
             };
+            // A restored "Playing From" banner needs its playlist's library row:
+            // only the row says whether the playlist has an uploaded cover (it
+            // isn't stored with the context), and `handle_playlists_loaded`
+            // refreshes the banner's metadata from it. The Playlists start view
+            // loads the list already.
+            if self.active_playlist_info.is_some() && self.current_view != crate::View::Playlists {
+                start_view_task =
+                    Task::batch([start_view_task, Task::done(Message::LoadPlaylists)]);
+            }
         }
 
         // Apply settings to engines

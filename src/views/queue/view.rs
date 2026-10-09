@@ -591,22 +591,29 @@ impl QueuePage {
             let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
 
             // Cover, sized and placed over the rows' art (see
-            // `playlist_strip_geometry`). A 2×2 quad of the queue's first
-            // distinct album covers is preferred — it reads as "a playlist", not
-            // "the song playing now" — with the single first-album cover as the
-            // warm-up fallback, and a blank square (as a row shows before its art
-            // arrives) until either is cached, so the name never shifts when the
-            // art lands. Square in every mode, like the rows' art.
+            // `playlist_strip_geometry`). The playlist's uploaded cover wins,
+            // as on every other playlist surface. Otherwise a 2×2 quad of the
+            // queue's first distinct album covers — it reads as "a playlist",
+            // not "the song playing now" — with the single first-album cover as
+            // the warm-up fallback, and a blank square (as a row shows before
+            // its art arrives) until any of them is cached, so the name never
+            // shifts when the art lands. Square in every mode, like the rows' art.
             use crate::widgets::base_slot_list_layout::quad_artwork_grid;
             let cover_edge = Length::Fixed(geometry.cover);
-            let cover: Element<'a, QueueMessage> = if let Some(tiles) = &data.playlist_quad {
-                quad_artwork_grid(tiles, geometry.cover, 1.0)
-            } else if let Some(handle) = data.playlist_cover {
+            let single = |handle: &iced::widget::image::Handle| -> Element<'a, QueueMessage> {
                 iced::widget::image(handle.clone())
                     .width(cover_edge)
                     .height(cover_edge)
                     .content_fit(iced::ContentFit::Cover)
                     .into()
+            };
+            let cover: Element<'a, QueueMessage> = if let Some(handle) = data.playlist_custom_cover
+            {
+                single(handle)
+            } else if let Some(tiles) = &data.playlist_quad {
+                quad_artwork_grid(tiles, geometry.cover, 1.0)
+            } else if let Some(handle) = data.playlist_cover {
+                single(handle)
             } else {
                 quad_artwork_grid(&[], geometry.cover, 1.0)
             };

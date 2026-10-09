@@ -152,7 +152,9 @@ impl Nokkvi {
         // re-sync it against the freshly loaded metadata so count / duration /
         // updated-date / visibility always reflect the server.
         self.resync_active_playlist_context();
-        task
+        // The row says whether the active playlist has an uploaded cover; the
+        // viewport prefetch only covers the rows on screen.
+        Task::batch([task, self.prefetch_active_playlist_custom_cover()])
     }
 
     /// Refresh `active_playlist_info` from the freshly loaded playlists list.

@@ -13,6 +13,7 @@ fn make_playlist_ctx() -> ActivePlaylistContext {
         updated: "2026-05-28T10:00:00Z".to_string(),
         smart: Some(false),
         readonly: None,
+        custom_cover: Some(false),
     }
 }
 

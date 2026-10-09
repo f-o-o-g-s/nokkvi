@@ -90,6 +90,58 @@ impl Nokkvi {
         out
     }
 
+    /// Whether the active playlist's uploaded cover needs an 80px fetch for the
+    /// "Playing From" strip: `(playlist_id, version)` like
+    /// [`Self::playlist_custom_minis_to_fetch`], whose gates it shares. The
+    /// viewport prefetch only reaches playlists the Playlists view has shown,
+    /// and a playlist played from Harbour or restored at launch may never be.
+    pub(crate) fn active_playlist_custom_cover_to_fetch(&self) -> Option<(String, Option<String>)> {
+        use std::collections::HashSet;
+
+        let ctx = self.active_playlist_info.as_ref()?;
+        if !self.active_playlist_has_custom_cover()
+            || self.artwork.playlist_custom_art_pending.contains(&ctx.id)
+        {
+            return None;
+        }
+        // The library row's version when it is loaded (the viewport
+        // prefetch's, so the two record the same one), else the play-time
+        // `updated`.
+        let version = match self.library.playlists.iter().find(|p| p.id == ctx.id) {
+            Some(row) => artwork_version(&row.image, Some(&row.updated_at)),
+            None => (!ctx.updated.is_empty()).then(|| ctx.updated.clone()),
+        };
+        let cached: HashSet<&String> = self
+            .artwork
+            .playlist_custom_art
+            .snapshot
+            .contains_key(&ctx.id)
+            .then_some(&ctx.id)
+            .into_iter()
+            .collect();
+        crate::update::components::should_refetch(
+            &cached,
+            &self.artwork.playlist_custom_art_versions,
+            &self.artwork.playlist_custom_art_failed,
+            &ctx.id,
+            &version,
+        )
+        .then(|| (ctx.id.clone(), version))
+    }
+
+    /// The task side of [`Self::active_playlist_custom_cover_to_fetch`]. Run
+    /// after every queue load (each play lands one), after the playlists list
+    /// loads (the row that knows about the upload arrives), and so on restore.
+    pub(crate) fn prefetch_active_playlist_custom_cover(&mut self) -> Task<Message> {
+        if self.app_service.is_none() {
+            return Task::none();
+        }
+        match self.active_playlist_custom_cover_to_fetch() {
+            Some((id, version)) => self.dispatch_playlist_custom_mini_fetch(id, version),
+            None => Task::none(),
+        }
+    }
+
     /// Viewport-window 80px prefetch of CUSTOM playlist covers — the task
     /// side of [`Self::playlist_custom_minis_to_fetch`]. Dispatched from the
     /// viewport-driven `LoadArtwork` pass that also drives the collage

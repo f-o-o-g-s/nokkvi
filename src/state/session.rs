@@ -50,6 +50,13 @@ pub struct ActivePlaylistContext {
     /// regular playlists the session user doesn't own — a tripwire signal
     /// (never open a Tracks editor when `Some(true)`), not proof-of-smart.
     pub readonly: Option<bool>,
+    /// Whether the playlist has an uploaded (custom) cover, from its
+    /// `uploaded_image` when built from native data ([`Self::from_playlist`]);
+    /// `None` from [`Self::minimal`] / [`Self::from_persisted`] (not stored, like
+    /// `smart`). Lets the "Playing From" banner show the uploaded cover for a
+    /// playlist played without ever visiting the Playlists view; the live
+    /// library row wins when it is loaded.
+    pub custom_cover: Option<bool>,
 }
 
 impl ActivePlaylistContext {
@@ -67,6 +74,7 @@ impl ActivePlaylistContext {
             updated: p.updated_at.clone(),
             smart: Some(p.is_smart),
             readonly: None,
+            custom_cover: Some(p.uploaded_image.is_some()),
         }
     }
 
@@ -95,6 +103,7 @@ impl ActivePlaylistContext {
             updated,
             smart: None,
             readonly: None,
+            custom_cover: None,
         }
     }
 
@@ -112,6 +121,7 @@ impl ActivePlaylistContext {
             updated,
             smart: _,
             readonly: _,
+            custom_cover: _,
         } = self;
         ActivePlaylistRecord {
             id: id.clone(),
@@ -138,6 +148,7 @@ impl ActivePlaylistContext {
             updated: String::new(),
             smart: None,
             readonly: None,
+            custom_cover: None,
         }
     }
 }

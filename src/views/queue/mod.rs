@@ -147,6 +147,10 @@ pub struct QueueViewData<'a> {
     /// rules-aware edit button. Resolved by `Nokkvi::active_playlist_is_smart`
     /// (freshest library signal, falling back to the play-time context flag).
     pub playlist_context_is_smart: bool,
+    /// The active playlist's uploaded (custom) cover, when it has one and it is
+    /// cached. Preferred over `playlist_quad` and `playlist_cover`, as on every
+    /// other playlist surface.
+    pub playlist_custom_cover: Option<&'a iced::widget::image::Handle>,
     /// Resolved cover handle for the active playlist's strip thumbnail (collage
     /// first tile, falling back to the mini cover). `None` when no playlist is
     /// active or its artwork isn't cached yet — the strip shows a blank square.

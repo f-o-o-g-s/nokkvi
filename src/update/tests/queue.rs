@@ -212,6 +212,128 @@ fn active_playlist_is_smart_library_row_overrides_stale_context() {
     assert!(!app.active_playlist_is_smart());
 }
 
+// ============================================================================
+// "Playing From" strip — the playlist's uploaded cover (app_view.rs,
+// playlist_artwork.rs)
+//
+// A playlist with an uploaded image shows that image everywhere else; the strip
+// must too, over its album quad. The library row's `uploaded_image` is the
+// authority, the play-time context flag stands in until the row loads.
+// ============================================================================
+
+/// Library row for `pl-1` with an uploaded cover.
+fn uploaded_row() -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    let mut row = playlist_lib_row("pl-1", true);
+    row.uploaded_image = Some("pl-1".to_string());
+    row.updated_at = "2026-10-08T10:00:00Z".to_string();
+    row
+}
+
+/// Active `pl-1` context with every quad tile cached, so a regression that
+/// falls back to the quad is visible.
+fn app_with_warm_strip_quad() -> crate::Nokkvi {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4"]);
+    app.snapshot_strip_quad_ids();
+    for s in &["s1", "s2", "s3", "s4"] {
+        app.artwork
+            .album_art
+            .put(format!("album_{s}"), blank_handle());
+    }
+    app
+}
+
+#[test]
+fn strip_shows_the_uploaded_cover_when_the_row_has_one() {
+    let mut app = app_with_warm_strip_quad();
+    app.library.playlists.set_from_vec(vec![uploaded_row()]);
+    app.artwork
+        .playlist_custom_art
+        .put("pl-1".to_string(), blank_handle());
+
+    assert!(app.active_playlist_custom_cover().is_some());
+}
+
+#[test]
+fn strip_ignores_a_cached_cover_the_row_no_longer_has() {
+    // Reset elsewhere: the row says no upload, so a leftover cache entry must
+    // not keep showing.
+    let mut app = app_with_warm_strip_quad();
+    app.library
+        .playlists
+        .set_from_vec(vec![playlist_lib_row("pl-1", true)]);
+    app.artwork
+        .playlist_custom_art
+        .put("pl-1".to_string(), blank_handle());
+
+    assert!(app.active_playlist_custom_cover().is_none());
+}
+
+#[test]
+fn strip_uses_the_play_time_flag_until_the_row_loads() {
+    // Played from Harbour: the context knows about the upload, the library
+    // list has not loaded.
+    let mut app = app_with_warm_strip_quad();
+    if let Some(ctx) = app.active_playlist_info.as_mut() {
+        ctx.custom_cover = Some(true);
+    }
+    app.artwork
+        .playlist_custom_art
+        .put("pl-1".to_string(), blank_handle());
+
+    assert!(app.active_playlist_custom_cover().is_some());
+}
+
+#[test]
+fn strip_fetches_the_uploaded_cover_when_it_is_cold() {
+    let mut app = app_with_warm_strip_quad();
+    app.library.playlists.set_from_vec(vec![uploaded_row()]);
+
+    let (id, version) = app
+        .active_playlist_custom_cover_to_fetch()
+        .expect("a cold uploaded cover is fetched");
+    assert_eq!(id, "pl-1");
+    assert_eq!(version.as_deref(), Some("2026-10-08T10:00:00Z"));
+}
+
+#[test]
+fn strip_fetch_uses_the_play_time_flag_until_the_row_loads() {
+    let mut app = app_with_warm_strip_quad();
+    if let Some(ctx) = app.active_playlist_info.as_mut() {
+        ctx.custom_cover = Some(true);
+    }
+
+    assert!(app.active_playlist_custom_cover_to_fetch().is_some());
+}
+
+#[test]
+fn strip_fetch_skips_warm_in_flight_and_upload_free_playlists() {
+    // Warm at the row's version.
+    let mut app = app_with_warm_strip_quad();
+    app.library.playlists.set_from_vec(vec![uploaded_row()]);
+    app.artwork
+        .playlist_custom_art
+        .put("pl-1".to_string(), blank_handle());
+    app.artwork
+        .playlist_custom_art_versions
+        .insert("pl-1".to_string(), Some("2026-10-08T10:00:00Z".to_string()));
+    assert!(app.active_playlist_custom_cover_to_fetch().is_none());
+
+    // Already in flight.
+    let mut app = app_with_warm_strip_quad();
+    app.library.playlists.set_from_vec(vec![uploaded_row()]);
+    app.artwork
+        .playlist_custom_art_pending
+        .insert("pl-1".to_string());
+    assert!(app.active_playlist_custom_cover_to_fetch().is_none());
+
+    // No upload at all (context flag unknown, row says none).
+    let mut app = app_with_warm_strip_quad();
+    app.library
+        .playlists
+        .set_from_vec(vec![playlist_lib_row("pl-1", true)]);
+    assert!(app.active_playlist_custom_cover_to_fetch().is_none());
+}
+
 /// `handle_queue_loaded` freezes the snapshot only while it is empty — the
 /// first queue for a context wins; later reloads leave it alone.
 #[test]

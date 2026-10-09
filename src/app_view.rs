@@ -1492,6 +1492,36 @@ impl Nokkvi {
         resolve_quad_handles(&self.strip_quad_album_ids, &self.artwork.album_art.snapshot)
     }
 
+    /// The active playlist's uploaded (custom) cover for the "Playing From"
+    /// strip. It beats the quad and the collage, as it does on every other
+    /// playlist surface. `None` while no playlist is active, the playlist has
+    /// no upload, or the 80px cover isn't cached yet.
+    pub(crate) fn active_playlist_custom_cover(&self) -> Option<&iced::widget::image::Handle> {
+        let ctx = self.active_playlist_info.as_ref()?;
+        if !self.active_playlist_has_custom_cover() {
+            return None;
+        }
+        self.artwork.playlist_custom_art.snapshot.get(&ctx.id)
+    }
+
+    /// Whether the active playlist has an uploaded cover: the live library
+    /// row's `uploaded_image` when the list is loaded, else the play-time
+    /// context flag, unknown reading as `false`. Same precedence as
+    /// [`Self::active_playlist_is_smart`], so a reset made elsewhere wins over
+    /// a stale flag and a leftover cache entry.
+    pub(crate) fn active_playlist_has_custom_cover(&self) -> bool {
+        let Some(ctx) = self.active_playlist_info.as_ref() else {
+            return false;
+        };
+        let lib_row = self.library.playlists.iter().find(|p| p.id == ctx.id);
+        matches!(
+            lib_row
+                .map(|p| p.uploaded_image.is_some())
+                .or(ctx.custom_cover),
+            Some(true)
+        )
+    }
+
     /// Whether the playlist currently loaded for playback is a smart playlist.
     /// Resolves via the freshest available signal — the live library row's
     /// `is_smart` first, falling back to the play-time
@@ -1978,6 +2008,7 @@ impl Nokkvi {
             elevated,
             playlist_context_info: self.active_playlist_info.clone(),
             playlist_context_is_smart: self.active_playlist_is_smart(),
+            playlist_custom_cover: self.active_playlist_custom_cover(),
             playlist_cover: self.active_playlist_strip_cover(),
             playlist_quad: self.active_playlist_strip_quad(),
             overlay: views::OverlayMenuViewData {
