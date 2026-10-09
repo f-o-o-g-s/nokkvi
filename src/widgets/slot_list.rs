@@ -8,7 +8,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use iced::{
-    Background, Color, Element, Gradient, Length, Radians,
+    Background, Color, Element, Gradient, Length, Radians, Widget as _,
     gradient::Linear,
     widget::{Space, Stack, button, column, container, mouse_area},
 };
@@ -277,10 +277,9 @@ fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
 /// normal full-bleed slot with the glow painted on top. The overlay layers are
 /// non-interactive, so the [`Stack`] passes clicks straight through to the row.
 pub(crate) fn glow_overlay<'a, M: 'a>(
-    row: impl Into<Element<'a, M>>,
+    row: Element<'a, M>,
     style: SlotListSlotStyle,
 ) -> Element<'a, M> {
-    let row = row.into();
     let Some(seed) = style.glow_seed else {
         return row;
     };
@@ -304,7 +303,11 @@ pub(crate) fn glow_overlay<'a, M: 'a>(
             ))),
             ..Default::default()
         });
-    Stack::new().push(row).push(inner).push(shimmer).into()
+    Stack::new()
+        .push(row)
+        .push(inner.boxed())
+        .push(shimmer.boxed())
+        .boxed()
 }
 
 /// Styling for slot list slots (backgrounds, borders, text colors)
@@ -832,7 +835,7 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     )
     .width(Length::Fill)
     .height(Length::Fill)
-    .into();
+    .boxed();
     // Reserve the gutter (Always mode) on the content FIRST, then wrap the
     // whole stack in the wheel `mouse_area`. Order matters: wrapping the
     // mouse_area first and padding it afterward would shrink the wheel
@@ -883,7 +886,7 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .on_drag(on_drag_event)
-        .into();
+        .boxed();
 
     // Drop indicator rendered inside the slot list's own coordinate space,
     // so its y-position is `slot_index * (row_height + SLOT_SPACING)` with
@@ -898,7 +901,7 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     // fires mid-gesture. Adding/removing the indicator as child 1 leaves child 0
     // (the DragColumn) untouched, so keeping the Stack unconditional is load-
     // bearing: do not collapse it back to a bare element.
-    let mut content_stack: Stack<'a, Message> = stack![drag_column];
+    let mut content_stack: Stack<Element<'a, Message>> = stack![drag_column];
     if let Some(slot_idx) = drop_indicator_slot {
         let slot_step = row_height + SLOT_SPACING;
         let indicator_y = ((slot_idx as f32 * slot_step) - SLOT_SPACING / 2.0).max(0.0);
@@ -919,14 +922,14 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
             right: 0.0,
             bottom: 0.0,
         });
-        content_stack = content_stack.push(indicator);
+        content_stack = content_stack.push(indicator.boxed());
     }
-    let content: Element<'a, Message> = content_stack.into();
+    let content: Element<'a, Message> = content_stack.boxed();
 
     let inner: Element<'a, Message> = container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .into();
+        .boxed();
 
     // Reserve the gutter (Always mode) on the content FIRST, then wrap the
     // whole stack in the wheel `mouse_area`. Order matters: wrapping the
@@ -1069,7 +1072,7 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
                 .border_radius(slot_list_border_radius())
                 .flash_at(flash)
                 .wash_enabled(config.hover_wash)
-                .into();
+                .boxed();
 
         let wrapped = if let Some(cb) = on_hover.as_ref() {
             let hovered = match item_index_opt {
@@ -1098,7 +1101,7 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
                 .on_enter(enter_msg)
                 .on_exit(exit_msg)
                 .on_move(move |_pt| move_msg.clone())
-                .into()
+                .boxed()
         } else {
             hover_target
         };
@@ -1130,7 +1133,7 @@ fn wrap_with_scroll<'a, Message: Clone + 'a>(
                 on_scroll_down.clone()
             }
         })
-        .into()
+        .boxed()
 }
 
 /// Standard slot list text with no line wrapping
@@ -1212,7 +1215,7 @@ pub(crate) fn slot_list_labeled_index_column<'a, Message: 'a>(
     .width(Length::Fixed(SLOT_LIST_INDEX_WIDTH))
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
-    .into()
+    .boxed()
 }
 
 /// Alpha applied to `theme::fg2()` for the UNCHECKED select-checkbox outline.
@@ -1258,7 +1261,7 @@ fn unchecked_box_outline() -> iced::Color {
 fn checkbox_box_visual<'a, Message: 'a>(
     checked: bool,
     glyph: impl FnOnce(iced::Color) -> Element<'a, Message>,
-) -> iced::widget::Container<'a, Message> {
+) -> iced::widget::Container<'a, Element<'a, Message>> {
     use iced::Alignment;
 
     let bg_color = if checked {
@@ -1302,7 +1305,7 @@ fn select_check_glyph<'a, Message: 'a>(color: iced::Color) -> Element<'a, Messag
         .width(Length::Fixed(14.0))
         .height(Length::Fixed(14.0))
         .style(move |_, _| svg::Style { color: Some(color) })
-        .into()
+        .boxed()
 }
 
 /// Render the leading multi-select checkbox column for a slot list row.
@@ -1334,7 +1337,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
             Space::new()
                 .width(Length::Fixed(0.0))
                 .height(Length::Fixed(0.0))
-                .into()
+                .boxed()
         }
     });
 
@@ -1352,7 +1355,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
     mouse_area(cell)
         .on_press(on_toggle(item_index))
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
 }
 
 /// Wrap a slot's main content with the leading select-checkbox column when
@@ -1377,7 +1380,7 @@ pub(crate) fn wrap_with_select_column<'a, Message: 'a + Clone>(
     row![cb, inner]
         .align_y(iced::Alignment::Center)
         .spacing(0.0)
-        .into()
+        .boxed()
 }
 
 /// Context-driven convenience wrapper over [`wrap_with_select_column`] for the
@@ -1438,11 +1441,11 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
                 background: Some(glyph_color.into()),
                 ..Default::default()
             })
-            .into(),
+            .boxed(),
         SelectAllState::None => Space::new()
             .width(Length::Fixed(0.0))
             .height(Length::Fixed(0.0))
-            .into(),
+            .boxed(),
     });
 
     let cb_cell = mouse_area(box_visual)
@@ -1466,7 +1469,7 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
         background: Some(theme::bg0_soft().into()),
         ..Default::default()
     })
-    .into()
+    .boxed()
 }
 
 /// Compose a view's existing header element with the tri-state select-all
@@ -1483,7 +1486,7 @@ pub(crate) fn compose_header_with_select<'a, Message: Clone + 'a>(
     }
     iced::widget::column![header, slot_list_select_header(state, on_toggle)]
         .spacing(0)
-        .into()
+        .boxed()
 }
 
 /// Chrome height with optional select-header bar. Each view consults this
@@ -1616,13 +1619,13 @@ pub(crate) fn slot_list_artwork_column_filled<'a, Message: 'a>(
             .width(Length::Fill)
             .height(Length::Fill)
             .opacity(effective_opacity)
-            .into()
+            .boxed()
     } else {
         // Empty-state child stays a `text("")` (not `Space`) — an empty text
         // node and a Space have different intrinsic layout in some
         // containers, and the placeholder must keep pixel parity with the
         // artwork branch's chassis.
-        iced::widget::text("").into()
+        iced::widget::text("").boxed()
     };
 
     container(inner)
@@ -1638,7 +1641,7 @@ pub(crate) fn slot_list_artwork_column_filled<'a, Message: 'a>(
             ),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Render a 2×2 quad artwork column for a slot list slot.
@@ -1681,7 +1684,7 @@ pub(crate) fn slot_list_artwork_quad_column<'a, Message: 'a>(
             ),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// The two lines of a [`slot_list_text_column`], by name: title and subtitle
@@ -1752,7 +1755,7 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .hover_color(style.hover_text_color)
             .font(title_font)
             .on_press(Some(msg))
-            .into()
+            .boxed()
     } else {
         iced::widget::text(title)
             .size(title_size)
@@ -1760,7 +1763,7 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .font(title_font)
             .wrapping(Wrapping::None)
             .ellipsis(Ellipsis::End)
-            .into()
+            .boxed()
     };
 
     // Empty subtitle → render title-only so the row doesn't reserve a
@@ -1772,7 +1775,7 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .height(Length::Fill)
             .clip(true)
             .align_y(Alignment::Center)
-            .into();
+            .boxed();
     }
 
     let subtitle_widget: Element<'a, Message> = if let Some(msg) = subtitle_on_press {
@@ -1782,9 +1785,9 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .hover_color(style.hover_text_color)
             .font(theme::ui_font())
             .on_press(Some(msg))
-            .into()
+            .boxed()
     } else {
-        slot_list_text(subtitle, subtitle_size, style.subtext_color).into()
+        slot_list_text(subtitle, subtitle_size, style.subtext_color).boxed()
     };
 
     container(column![title_widget, subtitle_widget].spacing(SLOT_LIST_COL_SPACING))
@@ -1792,7 +1795,7 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Render a metadata column for a slot list slot (single line of text)
@@ -1819,9 +1822,9 @@ pub(crate) fn slot_list_metadata_column<'a, Message: Clone + 'a + 'static>(
                 .hover_color(style.hover_text_color)
                 .font(theme::ui_font())
                 .on_press(Some(msg))
-                .into()
+                .boxed()
         } else {
-            slot_list_text(content, font_size, style.subtext_color).into()
+            slot_list_text(content, font_size, style.subtext_color).boxed()
         };
 
     container(text_widget)
@@ -1829,7 +1832,7 @@ pub(crate) fn slot_list_metadata_column<'a, Message: Clone + 'a + 'static>(
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Inter-star gap in the five-star rating row, in logical pixels. Shared
@@ -1884,7 +1887,7 @@ fn outlined_svg_icon<'a, M: 'a>(
         .style(move |_theme, _status| svg::Style {
             color: Some(fill_color),
         })
-        .into();
+        .boxed();
     let outline_svg: Element<'a, M> = crate::embedded_svg::svg_widget(outline_path)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -1892,11 +1895,11 @@ fn outlined_svg_icon<'a, M: 'a>(
         .style(move |_theme, _status| svg::Style {
             color: Some(outline_color),
         })
-        .into();
+        .boxed();
     iced::widget::stack![fill_svg, outline_svg]
         .width(width)
         .height(Length::Fixed(icon_size))
-        .into()
+        .boxed()
 }
 
 /// The color of a FILLED star or heart on a row: its role color
@@ -1967,7 +1970,7 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
                     .height(Length::Fixed(icon_size))
                     .opacity(svg_opacity)
                     .style(move |_theme, _status| svg::Style { color: Some(color) })
-                    .into()
+                    .boxed()
             };
 
             // Wrap each star in a clickable mouse_area when on_click is provided
@@ -1975,7 +1978,7 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
                 mouse_area(star_element)
                     .on_press(on_click(i))
                     .interaction(iced::mouse::Interaction::Pointer)
-                    .into()
+                    .boxed()
             } else {
                 star_element
             };
@@ -1991,8 +1994,8 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
         Some(p) => container(stars)
             .width(Length::FillPortion(p))
             .align_y(Alignment::Center)
-            .into(),
-        None => stars.into(),
+            .boxed(),
+        None => stars.boxed(),
     }
 }
 
@@ -2077,7 +2080,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
             .height(Length::Fixed(icon_size))
             .opacity(svg_opacity)
             .style(move |_theme, _status| svg::Style { color: Some(color) })
-            .into()
+            .boxed()
     };
 
     // Wrap in clickable mouse_area when on_click is provided
@@ -2085,7 +2088,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
         mouse_area(svg_element)
             .on_press(message)
             .interaction(iced::mouse::Interaction::Pointer)
-            .into()
+            .boxed()
     } else {
         svg_element
     }
@@ -2114,7 +2117,7 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .style(move |_theme| style.to_container_style())
-    .into()
+    .boxed()
 }
 
 /// Wrap slot list content with standard dark background container
@@ -2159,13 +2162,13 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
                 ..Default::default()
             })
             .clip(true)
-            .into()
+            .boxed()
     } else {
         container(slot_list_content)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(theme::container_bg0_hard)
-            .into()
+            .boxed()
     }
 }
 
@@ -2231,7 +2234,7 @@ pub(crate) fn highlight_only_slot_click_message(
 /// type, typically `AlbumsMessage::SlotList` / `QueueMessage::SlotList` /
 /// etc.
 pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
-    content: impl Into<Element<'a, M>>,
+    content: impl iced::Widget<M> + 'a,
     ctx: &SlotListRowContext,
     stable_viewport: bool,
     wrap: impl Fn(SlotListPageMessage) -> M,
@@ -2249,7 +2252,7 @@ pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
 /// with always-`SetOffset` dispatch — Similar's intentional highlight-only
 /// contract. See [`highlight_only_slot_click_message`].
 pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
-    content: impl Into<Element<'a, M>>,
+    content: impl iced::Widget<M> + 'a,
     ctx: &SlotListRowContext,
     wrap: impl Fn(SlotListPageMessage) -> M,
 ) -> Element<'a, M> {
@@ -2271,7 +2274,7 @@ pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
 /// `wrap` lifts a `SlotListPageMessage` into the caller's outer message type,
 /// typically `AlbumsMessage::SlotList` / `ArtistsMessage::SlotList` / etc.
 pub(crate) fn child_slot_button<'a, M: Clone + 'a>(
-    content: iced::widget::Row<'a, M>,
+    content: iced::widget::Row<Element<'a, M>>,
     ctx: &SlotListRowContext,
     style: SlotListSlotStyle,
     stable_viewport: bool,
@@ -2288,7 +2291,7 @@ pub(crate) fn child_slot_button<'a, M: Clone + 'a>(
 // the visual chrome out of the dispatch helpers keeps one source of truth
 // so a future style tweak lands in both ladders.
 fn make_slot_button<'a, M: Clone + 'a>(
-    content: impl Into<Element<'a, M>>,
+    content: impl iced::Widget<M> + 'a,
     on_press: M,
 ) -> Element<'a, M> {
     button(content)
@@ -2300,7 +2303,7 @@ fn make_slot_button<'a, M: Clone + 'a>(
         })
         .padding(0)
         .width(Length::Fill)
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]
@@ -3148,7 +3151,7 @@ mod tests {
         let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let ctx = dummy_row_context(false, Modifiers::default());
         let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 1);
-        let row = iced::widget::Row::new().push(iced::widget::text("child row"));
+        let row = iced::widget::Row::new().push(iced::widget::text("child row").boxed());
         let _: Element<'_, ()> = child_slot_button(row, &ctx, style, true, |_msg| ());
     }
 
@@ -3316,7 +3319,7 @@ mod tests {
             false, // show
             &ctx,
             |_msg| (),
-            iced::widget::text("row").into(),
+            iced::widget::text("row").boxed(),
         );
     }
 }

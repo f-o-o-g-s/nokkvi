@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{container, image},
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
@@ -42,7 +42,7 @@ impl GenresPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).

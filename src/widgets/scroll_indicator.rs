@@ -12,7 +12,7 @@
 //!   around this widget's result by the slot-list view builders).
 
 use iced::{
-    Alignment, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme,
+    Alignment, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Widget as _,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -134,6 +134,8 @@ impl<'a, Message> ScrollbarOverlay<'a, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for ScrollbarOverlay<'_, Message> {}
+
 impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay<'_, Message> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<ScrollbarState>()
@@ -152,19 +154,19 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         let size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
-        layout::Node::new(size)
+        tree.size = size;
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -223,7 +225,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -344,7 +346,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -364,12 +366,6 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
         } else {
             mouse::Interaction::default()
         }
-    }
-}
-
-impl<'a, Message: Clone + 'a> From<ScrollbarOverlay<'a, Message>> for Element<'a, Message> {
-    fn from(widget: ScrollbarOverlay<'a, Message>) -> Self {
-        Element::new(widget)
     }
 }
 
@@ -460,7 +456,7 @@ pub(crate) fn wrap_with_scroll_indicator<'a, Message: Clone + 'a>(
         has_overflow,
         on_seek,
     )
-    .into();
+    .boxed();
 
     let overlay = container(scrollbar)
         .width(Length::Fill)
@@ -482,12 +478,12 @@ pub(crate) fn wrap_with_scroll_indicator<'a, Message: Clone + 'a>(
         stack![reserved, overlay]
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .boxed()
     } else {
         // Transient: float over content (no reserved width).
         stack![inner, overlay]
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .boxed()
     }
 }

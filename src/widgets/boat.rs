@@ -73,7 +73,7 @@ pub(crate) use boat_physics::{
     wave_baseline_and_scale,
 };
 use iced::{
-    Color, Element, Length, Point, Rectangle,
+    Color, Element, Length, Point, Rectangle, Widget as _,
     widget::{Stack, Svg, canvas, container, svg},
 };
 
@@ -270,7 +270,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // and a trawled anchor swinging under the boat at a tack passes behind
     // the ship, not over its face. The boat sprite is pushed LAST, after
     // the conditional anchor/rope block.
-    let mut overlay = Stack::new();
+    let mut overlay = Stack::<Element<'_, _>>::new();
 
     // Anchor sprite + rope canvas: rendered while anchored (drop-anchor
     // event) OR always in trawl mode. The anchor sprite sits on the wave's
@@ -345,7 +345,8 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         overlay = overlay.push(
             canvas::Canvas::new(rope)
                 .width(Length::Fixed(area_width))
-                .height(Length::Fixed(area_height)),
+                .height(Length::Fixed(area_height))
+                .boxed(),
         );
         overlay = overlay.push(
             OverflowPin::new(
@@ -358,18 +359,19 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                 .width(Length::Fixed(anchor_total_w))
                 .height(Length::Fixed(anchor_total_h)),
             )
-            .position(Point::new(anchor_left_x, anchor_top_y)),
+            .position(Point::new(anchor_left_x, anchor_top_y))
+            .boxed(),
         );
     }
 
     // The ship rides on top of its own tackle.
-    let overlay = overlay.push(pin_at(target_x));
+    let overlay = overlay.push(pin_at(target_x).boxed());
 
     container(overlay)
         .width(Length::Fixed(area_width))
         .height(Length::Fixed(area_height))
         .clip(true)
-        .into()
+        .boxed()
 }
 
 /// Parse a `#rrggbb` hex color string into an `iced::Color`. Returns

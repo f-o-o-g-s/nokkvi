@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, ContentFit, Element, Length,
+    Alignment, ContentFit, Element, Length, Widget as _,
     widget::{column, container, image, mouse_area, text},
 };
 
@@ -50,7 +50,7 @@ pub(crate) fn cover_thumbnail<'a, M: Clone + 'a>(
             .width(Length::Fill)
             .height(Length::Fill)
             .content_fit(ContentFit::Cover)
-            .into()
+            .boxed()
     } else if let Some(tiles) = quad {
         crate::widgets::slot_list::slot_list_artwork_quad_column(&tiles, SIZE, true, false, 1.0)
     } else {
@@ -60,7 +60,7 @@ pub(crate) fn cover_thumbnail<'a, M: Clone + 'a>(
             .style(|_t, _s| iced::widget::svg::Style {
                 color: Some(theme::fg4()),
             })
-            .into()
+            .boxed()
     };
 
     let framed = container(iced::widget::stack![
@@ -107,9 +107,9 @@ pub(crate) fn cover_thumbnail<'a, M: Clone + 'a>(
         ]
         .spacing(2)
         .align_x(Alignment::Center)
-        .into()
+        .boxed()
     } else {
-        clickable.into()
+        clickable.boxed()
     }
 }
 
@@ -122,5 +122,5 @@ pub(crate) fn edit_affordance<'a, M: 'a>() -> Element<'a, M> {
         .style(|_t, _s| iced::widget::svg::Style {
             color: Some(theme::fg4()),
         })
-        .into()
+        .boxed()
 }

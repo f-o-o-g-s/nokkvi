@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{container, image, mouse_area, text},
 };
 use nokkvi_data::{
@@ -1581,7 +1581,8 @@ fn render_row<'a>(
                         text("See all")
                             .size(m.metadata_size)
                             .font(theme::ui_font())
-                            .color(see_all_color),
+                            .color(see_all_color)
+                            .boxed(),
                     )
                     .push(
                         crate::embedded_svg::svg_widget("assets/icons/chevron-right.svg")
@@ -1589,7 +1590,8 @@ fn render_row<'a>(
                             .height(Length::Fixed(12.0))
                             .style(move |_theme, _status| iced::widget::svg::Style {
                                 color: Some(see_all_color),
-                            }),
+                            })
+                            .boxed(),
                     );
                 header_row = header_row.push(
                     mouse_area(container(see_all_label).padding(iced::Padding {
@@ -1599,7 +1601,8 @@ fn render_row<'a>(
                         bottom: 2.0,
                     }))
                     .on_press(HarbourMessage::SeeAll(section))
-                    .interaction(iced::mouse::Interaction::Pointer),
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .boxed(),
                 );
             }
             header_row = header_row.push(caret_icon(
@@ -1622,7 +1625,7 @@ fn render_row<'a>(
             mouse_area(styled)
                 .on_press(HarbourMessage::ToggleSection(id))
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into()
+                .boxed()
         }
         HarbourRow::Trawl { seeds, blend } => {
             // The mix-builder door: anchor glyph (the feature's CTA mark) in
@@ -1806,7 +1809,7 @@ fn render_row<'a>(
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .into(),
+        .boxed(),
     }
 }
 
@@ -1874,7 +1877,7 @@ fn glyph_art_square<'a, M: 'a>(
         ),
         ..Default::default()
     })
-    .into()
+    .boxed()
 }
 
 /// The section-header caret: chevron-down when expanded, chevron-right when
@@ -1889,7 +1892,7 @@ fn caret_icon<'a>(expanded: bool, color: iced::Color) -> Element<'a, HarbourMess
         .width(Length::Fixed(14.0))
         .height(Length::Fixed(14.0))
         .style(move |_theme, _status| iced::widget::svg::Style { color: Some(color) })
-        .into()
+        .boxed()
 }
 
 /// The side-panel preview for a centered *shelf* section header. Fills what was
@@ -2122,34 +2125,38 @@ fn section_pill<'a>(
                 .height(Length::Fixed(12.0))
                 .style(|_theme, _status| iced::widget::svg::Style {
                     color: Some(theme::accent()),
-                }),
+                })
+                .boxed(),
         )
         .push(
             text(label)
                 .size(11)
                 .font(theme::ui_font())
-                .color(theme::accent()),
+                .color(theme::accent())
+                .boxed(),
         );
 
     iced::widget::Column::new()
         .spacing(6.0)
         .width(Length::Fill)
-        .push(eyebrow)
+        .push(eyebrow.boxed())
         .push(
             text(title)
                 .size(15)
                 .font(theme::weighted_ui_font(iced::font::Weight::Bold))
                 .color(theme::fg0())
-                .width(Length::Fill),
+                .width(Length::Fill)
+                .boxed(),
         )
         .push(
             text(meta)
                 .size(12)
                 .font(theme::ui_font())
                 .color(theme::fg2())
-                .width(Length::Fill),
+                .width(Length::Fill)
+                .boxed(),
         )
-        .into()
+        .boxed()
 }
 
 // ============================================================================

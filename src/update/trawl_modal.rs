@@ -284,6 +284,7 @@ impl Nokkvi {
                 iced::advanced::widget::operation::scrollable::scroll_by(
                     crate::widgets::trawl_modal::chips_scrollable_id(),
                     iced::widget::scrollable::AbsoluteOffset { x: delta, y: 0.0 },
+                    iced::advanced::widget::operation::Animation::Instant,
                 ),
             ),
         }

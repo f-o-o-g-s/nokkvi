@@ -9,7 +9,7 @@
 //! target playlist already has, with a "Skip the N already there" box).
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{button, checkbox, column, combo_box, container, row, text, text_input},
 };
 use nokkvi_data::utils::dedupe::without_present;
@@ -668,7 +668,8 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         content = content.push(
             row![combo_icon, combo]
                 .spacing(8)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .boxed(),
         );
     }
 
@@ -678,7 +679,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .size(13)
             .font(theme::ui_font())
             .color(theme::fg3());
-        content = content.push(warning);
+        content = content.push(warning.boxed());
         // The add-conflict confirm's box: skip the songs already there.
         if let Some(already_there) = state.skip_duplicates_offer() {
             let skip_check = checkbox(state.skip_duplicates)
@@ -688,7 +689,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 .text_size(13)
                 .font(theme::ui_font())
                 .style(dialog_checkbox_style);
-            content = content.push(skip_check);
+            content = content.push(skip_check.boxed());
         }
     } else if !is_overwrite {
         // Text input — shown when creating a new playlist (not overwriting) or for non-playlist flows
@@ -725,10 +726,11 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             content = content.push(
                 row![input_icon, input]
                     .spacing(8)
-                    .align_y(Alignment::Center),
+                    .align_y(Alignment::Center)
+                    .boxed(),
             );
         } else {
-            content = content.push(input);
+            content = content.push(input.boxed());
         }
 
         if let Some(sec_val) = &state.secondary_value {
@@ -741,7 +743,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 .font(theme::ui_font())
                 .width(Length::Fill)
                 .style(dialog_input_style);
-            content = content.push(input2);
+            content = content.push(input2.boxed());
         }
     }
 
@@ -768,10 +770,14 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .font(theme::ui_font())
             .style(dialog_checkbox_style);
         // Indent to align with the input content (16px icon + 8px spacing).
-        content = content.push(container(public_check).padding(iced::Padding {
-            left: 24.0,
-            ..Default::default()
-        }));
+        content = content.push(
+            container(public_check)
+                .padding(iced::Padding {
+                    left: 24.0,
+                    ..Default::default()
+                })
+                .boxed(),
+        );
     }
 
     // Overwrite/append confirmation message
@@ -794,7 +800,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .size(12)
             .font(theme::ui_font())
             .color(theme::fg3());
-        content = content.push(warning);
+        content = content.push(warning.boxed());
     }
 
     // Dimmed note line (file-backed honesty copy) — rendered after the
@@ -804,7 +810,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .size(12)
             .font(theme::ui_font())
             .color(theme::fg3());
-        content = content.push(container(note_text).width(Length::Fixed(340.0)));
+        content = content.push(container(note_text).width(Length::Fixed(340.0)).boxed());
     }
 
     // Submit / Cancel buttons
@@ -910,11 +916,11 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 ..Default::default()
             }
         });
-        button_row = button_row.push(extra_btn);
+        button_row = button_row.push(extra_btn.boxed());
     }
-    button_row = button_row.push(submit_btn);
+    button_row = button_row.push(submit_btn.boxed());
 
-    content = content.push(button_row);
+    content = content.push(button_row.boxed());
 
     // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
     // ui_radius_lg corners. Five overlay modals route through this helper.
@@ -925,7 +931,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
     // ── Backdrop + opaque wrapper (prevents click-through) ───────
     // Backdrop click fires Cancel — matches about/info/eq modal pattern.
     Some(theme::modal_scaffold(
-        dialog_box.into(),
+        dialog_box.boxed(),
         TextInputDialogMessage::Cancel,
         theme::MODAL_BACKDROP_ALPHA,
     ))

@@ -20,7 +20,7 @@
 //! `base_slot_list_*`) so the edit-bar `text_input` focus survives re-renders.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Space, column, container, mouse_area, row, svg},
 };
 
@@ -108,7 +108,7 @@ impl PlaylistEditorState {
         // --- Edit-bar header (mirrors the queue edit bar's chrome) ---
         let edit_bar = self.edit_bar(&data);
         let sep = crate::theme::horizontal_separator(1.0);
-        let header: Element<'a, EditorMessage> = column![edit_bar, sep].into();
+        let header: Element<'a, EditorMessage> = column![edit_bar, sep].boxed();
 
         // Tri-state "select all" header bar when the multi-select column is on.
         let filtered_count = data.songs.len();
@@ -284,7 +284,7 @@ impl PlaylistEditorState {
                         None => EditorMessage::SetOpenMenu(None),
                     },
                 )
-                .into()
+                .boxed()
             },
         );
         let slot_list_content = slot_list_background_container(slot_list_content);
@@ -409,7 +409,7 @@ impl PlaylistEditorState {
                 )
                 .on_press(msg)
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into()
+                .boxed()
             };
 
         // Hover label under an edit-bar action.
@@ -429,7 +429,7 @@ impl PlaylistEditorState {
             )
             .gap(4)
             .style(crate::theme::container_tooltip)
-            .into()
+            .boxed()
         }
 
         // Public/private toggle — accent when public, muted when private.
@@ -473,7 +473,7 @@ impl PlaylistEditorState {
             )
             .on_press(EditorMessage::PublicToggled(!is_public))
             .interaction(iced::mouse::Interaction::Pointer);
-            with_tooltip(trigger.into(), tooltip_label)
+            with_tooltip(trigger.boxed(), tooltip_label)
         };
 
         let dedupe_btn = with_tooltip(
@@ -545,7 +545,7 @@ impl PlaylistEditorState {
             background: Some(wash.into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
     }
 }
 

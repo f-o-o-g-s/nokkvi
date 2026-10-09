@@ -4,7 +4,7 @@
 //! Triggered via hotkey [Q] or from the player bar EQ button.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{button, column, container, mouse_area, pick_list, row, space, svg, text, tooltip},
 };
 
@@ -145,7 +145,7 @@ pub(crate) fn eq_modal_overlay<'a>(
         )
         .on_press(msg)
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
     };
 
     let text_btn = |label: &'static str,
@@ -171,7 +171,7 @@ pub(crate) fn eq_modal_overlay<'a>(
                     ..Default::default()
                 }
             })
-            .into()
+            .boxed()
     };
 
     let enable_btn_text = if eq_enabled { "Enabled" } else { "Disabled" };
@@ -199,7 +199,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     )
     .gap(4)
     .style(theme::container_tooltip)
-    .into();
+    .boxed();
 
     let reset_button: Element<'_, EqModalMessage> = tooltip(
         svg_btn(
@@ -213,7 +213,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     )
     .gap(4)
     .style(theme::container_tooltip)
-    .into();
+    .boxed();
 
     let close_button: Element<'_, EqModalMessage> = svg_btn(
         "assets/icons/x.svg",
@@ -353,13 +353,13 @@ pub(crate) fn eq_modal_overlay<'a>(
         ]
         .spacing(8)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
     } else {
         // Normal mode: title + preset picker + buttons
         let mut header_items: Vec<Element<'_, EqModalMessage>> = vec![
-            title_text.into(),
-            space::horizontal().into(),
-            preset_picker.into(),
+            title_text.boxed(),
+            space::horizontal().boxed(),
+            preset_picker.boxed(),
         ];
         if let Some(del_btn) = delete_button {
             header_items.push(del_btn);
@@ -372,7 +372,7 @@ pub(crate) fn eq_modal_overlay<'a>(
         iced::widget::Row::with_children(header_items)
             .spacing(12)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
     };
 
     let header_sep = theme::modal_header_separator();
@@ -412,7 +412,7 @@ pub(crate) fn eq_modal_overlay<'a>(
             .align_x(Alignment::Center)
             .width(Length::Fill);
 
-        sliders.push(band_col.into());
+        sliders.push(band_col);
     }
 
     let eq_row = row(sliders)
@@ -439,7 +439,7 @@ pub(crate) fn eq_modal_overlay<'a>(
 
     // ── Backdrop ─────────────────────────────────────────────────
     Some(theme::modal_scaffold(
-        dialog_box.into(),
+        dialog_box.boxed(),
         EqModalMessage::Close,
         theme::MODAL_BACKDROP_ALPHA,
     ))

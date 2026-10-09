@@ -10,7 +10,7 @@
 //! `Element<SettingsMessage>`.
 
 use iced::{
-    Alignment, Border, Color, Element, Length, Padding,
+    Alignment, Border, Color, Element, Length, Padding, Widget as _,
     font::Weight,
     widget::{Space, button, column, container, mouse_area, row, stack, svg, text},
 };
@@ -89,7 +89,7 @@ impl SettingsPage {
             column![search_bar, strip, right_pane]
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         } else {
             let pane_separator = container(Space::new())
                 .width(Length::Fixed(1.0))
@@ -101,7 +101,7 @@ impl SettingsPage {
             row![self.render_sidebar(), pane_separator, right_pane]
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         };
 
         // Theme / font picker overlays on top of either layout. Only one
@@ -111,13 +111,13 @@ impl SettingsPage {
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         } else if let Some(fsw) = &self.font_sub_list {
             let modal = self.render_font_modal(fsw, window_height);
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         } else {
             base
         }
@@ -150,7 +150,7 @@ impl SettingsPage {
                 },
                 ..Default::default()
             })
-            .into()
+            .boxed()
     }
 
     /// Sidebar header: "Settings" title + relocated search input. Search
@@ -191,7 +191,7 @@ impl SettingsPage {
         ]
         .width(Length::Fill)
         .height(Length::Fixed(SIDEBAR_HEADER_HEIGHT))
-        .into()
+        .boxed()
     }
 
     /// Sidebar body: a fixed `Column` of six compact category rows. Slot
@@ -210,7 +210,7 @@ impl SettingsPage {
         container(col)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .boxed()
     }
 
     /// Sidebar footer: version label on the left, decorative "Esc" pill on
@@ -282,7 +282,7 @@ impl SettingsPage {
         ]
         .width(Length::Fill)
         .height(Length::Fixed(SIDEBAR_FOOTER_HEIGHT))
-        .into()
+        .boxed()
     }
 
     // ========================================================================
@@ -323,7 +323,7 @@ impl SettingsPage {
                 ..Default::default()
             });
 
-        column![body, sep].width(Length::Fill).into()
+        column![body, sep].width(Length::Fill).boxed()
     }
 
     /// Narrow-variant category strip: horizontal row of pill chips, one
@@ -348,7 +348,7 @@ impl SettingsPage {
                 text_size,
             ));
         }
-        chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)));
+        chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)).boxed());
 
         let body = container(chip_row)
             .width(Length::Fill)
@@ -370,7 +370,7 @@ impl SettingsPage {
         column![body, sep]
             .width(Length::Fill)
             .height(Length::Fixed(NARROW_STRIP_HEIGHT))
-            .into()
+            .boxed()
     }
 
     // ========================================================================
@@ -412,7 +412,7 @@ impl SettingsPage {
                 background: Some(theme::bg0().into()),
                 ..Default::default()
             })
-            .into();
+            .boxed();
         }
 
         let focused_index = self.slot_list.viewport_offset;
@@ -489,9 +489,9 @@ impl SettingsPage {
             column![render_section_pill_strip(&sections), scrollable_body]
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         } else {
-            scrollable_body.into()
+            scrollable_body.boxed()
         };
 
         container(pane_body)
@@ -501,7 +501,7 @@ impl SettingsPage {
                 background: Some(theme::bg0().into()),
                 ..Default::default()
             })
-            .into()
+            .boxed()
     }
 
     /// Render the font picker as a modal overlay (dimmed backdrop + centered
@@ -626,7 +626,7 @@ fn picker_empty_state<'a>(msg: &'static str) -> Element<'a, SettingsMessage> {
     .width(Length::Fill)
     .height(Length::Fill)
     .center(Length::Fill)
-    .into()
+    .boxed()
 }
 
 /// Shared chrome for the settings picker modals (font + theme): a dimmed
@@ -761,7 +761,7 @@ fn render_picker_modal<'a>(
             SettingsMessage::SlotListDown
         }
     })
-    .into()
+    .boxed()
 }
 
 /// Narrow-variant category chip: pill-shaped, icon + name only (no
@@ -855,7 +855,7 @@ fn render_narrow_chip<'a>(
                 ..Default::default()
             }
         })
-        .into()
+        .boxed()
 }
 
 /// Single sidebar row at the design's compact proportions: 38 px icon
@@ -981,7 +981,7 @@ fn render_sidebar_row<'a>(
         .padding(0)
         .width(Length::Fill)
         .on_press(SettingsMessage::SidebarClickItem(idx))
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -1047,7 +1047,7 @@ fn render_section_pill_strip<'a>(sections: &[SectionInfo]) -> Element<'a, Settin
             section.header_idx,
         ));
     }
-    chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)));
+    chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)).boxed());
 
     let scrollable_row = iced::widget::scrollable(chip_row)
         .direction(iced::widget::scrollable::Direction::Horizontal(
@@ -1077,7 +1077,7 @@ fn render_section_pill_strip<'a>(sections: &[SectionInfo]) -> Element<'a, Settin
     column![body, sep]
         .width(Length::Fill)
         .height(Length::Fixed(MINI_INDEX_HEIGHT))
-        .into()
+        .boxed()
 }
 
 /// A single mini-index pill: icon + uppercase label, click dispatches
@@ -1126,5 +1126,5 @@ fn render_section_pill<'a>(
                 ..Default::default()
             }
         })
-        .into()
+        .boxed()
 }

@@ -6,7 +6,7 @@
 //! page structs — no duplicated slot list/search/sort logic.
 
 use iced::{
-    Element, Length,
+    Element, Length, Widget as _,
     widget::{container, mouse_area, row, space, svg, text},
 };
 
@@ -126,7 +126,7 @@ impl BrowsingPanel {
                 )
                 .on_press(BrowsingPanelMessage::SwitchView(view))
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into();
+                .boxed();
 
                 tab
             });
@@ -159,13 +159,13 @@ impl BrowsingPanel {
                 )
                 .on_press(BrowsingPanelMessage::Close)
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into(),
+                .boxed(),
             )
         };
 
         let mut tab_row = row(tabs).spacing(4).width(Length::Fill);
         if let Some(btn) = close_button {
-            tab_row = tab_row.push(space::horizontal()).push(btn);
+            tab_row = tab_row.push(space::horizontal().boxed()).push(btn);
         }
 
         container(tab_row.padding(iced::Padding {
@@ -179,7 +179,7 @@ impl BrowsingPanel {
             ..Default::default()
         })
         .width(Length::Fill)
-        .into()
+        .boxed()
     }
 }
 

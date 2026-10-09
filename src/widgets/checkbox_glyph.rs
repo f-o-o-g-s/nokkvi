@@ -24,7 +24,7 @@
 //! check) — both are deliberately distinct visual families.
 
 use iced::{
-    Border, Color, Element, Length, Point, Radians, Rectangle,
+    Border, Color, Element, Length, Point, Radians, Rectangle, Widget as _,
     advanced::{
         Renderer, renderer,
         svg::{Handle, Renderer as SvgRenderer, Svg as SvgData},
@@ -114,9 +114,9 @@ pub(crate) fn element<'a, Message: 'a>(checked: bool) -> Element<'a, Message> {
             .style(move |_theme, _status| iced::widget::svg::Style {
                 color: Some(p.check_tint),
             })
-            .into()
+            .boxed()
     } else {
-        Space::new().into()
+        Space::new().boxed()
     };
 
     // `.center(GLYPH_SIZE)` centers the 12 px check inside the 16 px box for
@@ -137,7 +137,7 @@ pub(crate) fn element<'a, Message: 'a>(checked: bool) -> Element<'a, Message> {
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Imperative adapter for hand-drawn overlays (`player_modes_menu`).

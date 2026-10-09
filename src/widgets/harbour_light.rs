@@ -16,7 +16,7 @@
 //! surface lit here.
 
 use iced::{
-    Element, Length, Rectangle, mouse, wgpu,
+    Element, Length, Rectangle, Widget as _, mouse, wgpu,
     widget::shader::{self, Viewport},
 };
 
@@ -286,7 +286,7 @@ pub(crate) fn light_backdrop<'a, M: 'a>(light: SeaLight, w: f32, h: f32) -> Elem
     })
     .width(Length::Fixed(w))
     .height(Length::Fixed(h))
-    .into()
+    .boxed()
 }
 
 /// The day scene's palette: the active (light) background and ink, the

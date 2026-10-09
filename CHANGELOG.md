@@ -16,10 +16,13 @@ All notable changes to this project will be documented in this file.
 - With the Metadata Strip on Top Bar or Top Bar Under, the strip now spans only the list beside the artwork column.
 - Toasts now sit over the list instead of across the artwork column.
 - The artwork column's resize handle is now invisible, marked only by the resize cursor at the column's left edge.
+- Mouse-wheel scrolling in Settings, the Get Info dialog and the rules editor now glides instead of jumping.
+- Hotkey badges in Settings are now at least 96 pixels wide.
 
 ### Fixed
 
 - Typing in a text field no longer briefly maxes out a CPU core after each keystroke.
+- Resizing the window no longer crashes the app while the rules JSON editor's cursor is scrolled out of view.
 
 ### Removed
 

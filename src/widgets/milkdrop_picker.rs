@@ -11,7 +11,7 @@
 //! `update/milkdrop_picker.rs`.
 
 use iced::{
-    Alignment, Border, Element, Length, Padding,
+    Alignment, Border, Element, Length, Padding, Widget as _,
     font::Weight,
     widget::{Space, button, column, container, mouse_area, row, svg, text},
 };
@@ -161,8 +161,8 @@ pub(crate) fn milkdrop_picker_overlay<'a>(
     picker_modal(
         PickerChrome {
             title: "MilkDrop Presets",
-            after_title: Some(count.into()),
-            before_close: Some(favorites_chip.into()),
+            after_title: Some(count.boxed()),
+            before_close: Some(favorites_chip.boxed()),
             search_placeholder: "Type to filter presets...",
             search_input_id: MILKDROP_PICKER_SEARCH_INPUT_ID,
             on_search: MilkdropPickerMessage::SearchChanged,
@@ -267,7 +267,7 @@ fn render_preset_slot<'a>(
         .wrapping(iced::widget::text::Wrapping::None);
     let subtitle = flags.subtitle();
     let text_col: Element<'a, MilkdropPickerMessage> = if subtitle.is_empty() {
-        title.into()
+        title.boxed()
     } else {
         column![
             title,
@@ -278,7 +278,7 @@ fn render_preset_slot<'a>(
                 .wrapping(iced::widget::text::Wrapping::None),
         ]
         .spacing(2)
-        .into()
+        .boxed()
     };
 
     let heart = row_toggle(
@@ -324,7 +324,7 @@ fn render_preset_slot<'a>(
     mouse_area(body)
         .on_press(MilkdropPickerMessage::ClickItem(item_index))
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
 }
 
 /// A row's heart / eye toggle: accent while on, dim while off.
@@ -343,7 +343,7 @@ fn row_toggle<'a>(
     .on_press(message)
     .style(theme::transparent_button_style)
     .padding(Padding::new(6.0))
-    .into()
+    .boxed()
 }
 
 #[cfg(test)]

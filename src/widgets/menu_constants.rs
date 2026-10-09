@@ -7,21 +7,16 @@
 //! "Visualizer: On" — they are kept as separate named constants here so a
 //! future agent does not collapse them by mistake.
 //!
-//! Also owns the [`MENU_SHADOW`] drop-shadow + the inflate/recover helpers
-//! (`inflate_for_shadow`, `inflate_for_shadow_around_child`,
-//! `visible_menu_bounds`, `visible_menu_layout`) that every menu overlay
-//! uses to dodge Iced's per-overlay scissor — see those items for the
-//! full mechanism.
+//! Also owns the [`MENU_SHADOW`] drop-shadow and [`menu_layer_bounds`], the
+//! draw layer every menu overlay uses so its shadow halo isn't scissored —
+//! see those items for the full mechanism.
 //!
 //! Module-level UPPER_SNAKE matches the longstanding flat-literal widget
 //! constant pattern (`NAV_BAR_HEIGHT`, `MAX_BARS`, `TOOLBAR_HEIGHT`, etc.).
 //! These are intentionally not part of `theme.rs` because they are widget
 //! geometry, not theme palette.
 
-use iced::{
-    Point, Rectangle, Size,
-    advanced::{Layout, layout},
-};
+use iced::Rectangle;
 
 /// Canonical minimum width for context-menu and checkbox-dropdown menus (px).
 ///
@@ -75,27 +70,23 @@ pub(crate) const MENU_SHADOW: iced::Shadow = iced::Shadow {
     blur_radius: 6.0,
 };
 
-/// Halo padding (px) added to every side of a menu overlay's `layout::Node`
-/// so the [`MENU_SHADOW`] tail isn't scissored by the per-overlay
-/// `with_layer(layout.bounds(), …)` clip Iced wraps around every
-/// `overlay::Overlay::draw` in `core/src/overlay/nested.rs`.
+/// Halo padding (px) a menu overlay's draw layer extends past the visible menu
+/// on every side, so the [`MENU_SHADOW`] tail isn't scissored.
 ///
-/// Each `MenuOverlay` reports `layout::Node` bounds inflated by this padding,
-/// then derives the visible menu rectangle by shrinking the bounds back —
-/// hit testing, background quads, items, and forwarded child layouts all use
-/// the visible rectangle, while only the outer scissor sees the inflated
-/// bounds. Mirrors the `shadow_overflow = 6.0` trick used for the scrub-handle
-/// shadow at `progress_bar.rs:537`.
+/// iced runs every `overlay::Overlay::draw` in the caller's layer; a menu draws
+/// in a layer of its own (so it sits above the widgets under it), and that
+/// layer's scissor is [`menu_layer_bounds`]: the visible menu rectangle grown
+/// by this padding. Hit testing, background quads, items and hosted child
+/// layouts all use the visible rectangle. Mirrors the `shadow_overflow = 6.0`
+/// trick used for the scrub-handle shadow at `progress_bar.rs:537`.
 ///
 /// Sized as `ceil(blur_radius + |offset.y|)` so the worst-case axis (the
 /// downward offset + blur) fits cleanly; the same value is applied uniformly
 /// to all sides for code simplicity — the over-inflated top / sides cost
 /// only invisible scissor area, not extra drawing.
 ///
-/// Kept module-private — call sites use [`inflate_for_shadow`] /
-/// [`inflate_for_shadow_around_child`] (producers) and
-/// [`visible_menu_bounds`] / [`visible_menu_layout`] (recoverers) instead
-/// of touching the raw constant.
+/// Kept module-private — call sites use [`menu_layer_bounds`] instead of
+/// touching the raw constant.
 const MENU_SHADOW_PADDING: f32 = 10.0;
 
 // Compile-time invariants — these are pure constants so they live in
@@ -134,70 +125,12 @@ const _: () = assert!(
     "MENU_SHADOW must displace downward — MENU_SHADOW_PADDING math assumes a non-negative offset.y",
 );
 
-/// Inflate a leaf menu overlay's `layout::Node` so the [`MENU_SHADOW`] halo
-/// isn't scissored. Used by the manual-draw overlays (`hamburger_menu`,
-/// `player_modes_menu`), which have no inner child widget to wrap.
-///
-/// `visible_size` and `position` describe the menu the way the surrounding
-/// math computes it (clamped, anchored, etc.); this helper expands by
-/// `MENU_SHADOW_PADDING` on every side and shifts the origin so the visible
-/// rect lands exactly where the caller asked. Recover the visible rect on
-/// the read side via [`visible_menu_bounds`].
-pub(crate) fn inflate_for_shadow(visible_size: Size, position: Point) -> layout::Node {
-    let pad = MENU_SHADOW_PADDING;
-    let inflated_size = Size::new(
-        visible_size.width + 2.0 * pad,
-        visible_size.height + 2.0 * pad,
-    );
-    layout::Node::new(inflated_size).move_to(Point::new(position.x - pad, position.y - pad))
-}
-
-/// Inflate a child-forwarding menu overlay's `layout::Node` around an
-/// existing inner `menu_node`. Used by `context_menu` and `checkbox_dropdown`,
-/// which host real child `Element`s that need their own coordinate space.
-///
-/// The returned node has exactly one child positioned at `(pad, pad)` inside
-/// inflated bounds shifted to land the visible rect at `position`. Recover
-/// the child layout on the read side via [`visible_menu_layout`].
-pub(crate) fn inflate_for_shadow_around_child(
-    menu_node: layout::Node,
-    position: Point,
-) -> layout::Node {
-    let pad = MENU_SHADOW_PADDING;
-    let menu_size = menu_node.size();
-    let inflated_size = Size::new(menu_size.width + 2.0 * pad, menu_size.height + 2.0 * pad);
-    let positioned_child = menu_node.move_to(Point::new(pad, pad));
-    layout::Node::with_children(inflated_size, vec![positioned_child])
-        .move_to(Point::new(position.x - pad, position.y - pad))
-}
-
-/// Recover the visible menu rectangle from an inflated overlay layout
-/// rectangle by shrinking by `MENU_SHADOW_PADDING` on every side. Use in
-/// the leaf overlays (`hamburger_menu`, `player_modes_menu`) wherever
-/// non-shadow rendering or hit-testing needs the visible bounds — the
-/// inflated rect is for the scissor only.
-pub(crate) fn visible_menu_bounds(inflated: Rectangle) -> Rectangle {
-    Rectangle {
-        x: inflated.x + MENU_SHADOW_PADDING,
-        y: inflated.y + MENU_SHADOW_PADDING,
-        width: inflated.width - 2.0 * MENU_SHADOW_PADDING,
-        height: inflated.height - 2.0 * MENU_SHADOW_PADDING,
-    }
-}
-
-/// Recover the inner visible `Layout` from an inflated child-forwarding
-/// overlay layout. Mirror of [`visible_menu_bounds`] for the overlays whose
-/// inflated node was built via [`inflate_for_shadow_around_child`].
-///
-/// Used by `context_menu` and `checkbox_dropdown` in `update` / `draw` /
-/// `mouse_interaction` to extract the layout to forward to the hosted child
-/// `Element`. The `expect` is unreachable in any non-corrupt iced version —
-/// `inflate_for_shadow_around_child` always wraps exactly one child.
-pub(crate) fn visible_menu_layout<'a>(inflated: Layout<'a>) -> Layout<'a> {
-    inflated
-        .children()
-        .next()
-        .expect("inflated layout always has exactly one menu child")
+/// The layer a menu overlay draws in: its `visible` rectangle grown by
+/// `MENU_SHADOW_PADDING` on every side, so the [`MENU_SHADOW`] halo survives
+/// the layer's scissor. Every menu overlay wraps its `draw` in
+/// `renderer.with_layer(menu_layer_bounds(visible), ..)`.
+pub(crate) fn menu_layer_bounds(visible: Rectangle) -> Rectangle {
+    visible.expand(MENU_SHADOW_PADDING)
 }
 
 #[cfg(test)]

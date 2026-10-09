@@ -4,7 +4,7 @@
 //! Each function returns `Option<Element>` — `None` when there's nothing to show,
 //! letting callers chain with `if let Some(row) = ... { col = col.push(row); }`.
 
-use iced::{Element, widget::text};
+use iced::{Element, Widget as _, widget::text};
 
 use crate::theme;
 
@@ -33,7 +33,7 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
                 heart
             ]
             .align_y(iced::Alignment::Center)
-            .into(),
+            .boxed(),
         );
     }
 
@@ -56,17 +56,18 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
                     .height(13)
                     .style(|_, _| iced::widget::svg::Style {
                         color: Some(theme::rating_color()),
-                    }),
+                    })
+                    .boxed(),
             );
         }
-        items.push(stars_row.into());
+        items.push(stars_row.boxed());
     }
 
     if items.is_empty() {
         return None;
     }
 
-    let mut row = iced::widget::row![]
+    let mut row = iced::widget::Row::<Element<'_, _>>::new()
         .spacing(12)
         .align_y(iced::Alignment::Center);
     for (i, item) in items.into_iter().enumerate() {
@@ -75,12 +76,13 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
                 text("•")
                     .size(13)
                     .font(theme::ui_font())
-                    .color(theme::fg3()),
+                    .color(theme::fg3())
+                    .boxed(),
             );
         }
         row = row.push(item);
     }
-    Some(row.into())
+    Some(row.boxed())
 }
 
 /// "N plays • Last played: YYYY-MM-DD" row.
@@ -106,7 +108,7 @@ pub(crate) fn play_stats_row<'a, M: 'a>(
             .size(13)
             .color(theme::fg2())
             .font(theme::ui_font())
-            .into(),
+            .boxed(),
     )
 }
 
@@ -150,7 +152,7 @@ pub(crate) fn tech_specs_row<'a, M: 'a>(
             .size(12)
             .color(theme::fg3())
             .font(theme::ui_font())
-            .into(),
+            .boxed(),
     )
 }
 
@@ -170,6 +172,6 @@ pub(crate) fn dot_row<'a, M: 'a>(
             .size(size)
             .color(color)
             .font(theme::ui_font())
-            .into(),
+            .boxed(),
     )
 }

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Row, container, image},
 };
 use nokkvi_data::{
@@ -48,7 +48,7 @@ impl AlbumsPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
@@ -322,7 +322,8 @@ impl AlbumsPage {
                         text(genres_display.clone())
                             .size(13)
                             .color(theme::fg3())
-                            .font(theme::ui_font()),
+                            .font(theme::ui_font())
+                            .boxed(),
                     );
                 }
 
@@ -337,7 +338,7 @@ impl AlbumsPage {
                     col = col.push(row);
                 }
 
-                col.into()
+                col.boxed()
             });
 
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
@@ -545,7 +546,8 @@ impl AlbumsPage {
                     ..Default::default()
                 })
                 .align_x(Alignment::Center)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .boxed(),
             );
         }
 

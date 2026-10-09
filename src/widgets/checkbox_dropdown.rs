@@ -45,9 +45,9 @@
 //! ```
 
 use iced::{
-    Element, Event, Length, Point, Rectangle, Size, Theme, Vector,
+    Element, Event, Length, Point, Rectangle, Size, Theme, Vector, Widget as _,
     advanced::{
-        Layout, Shell, Widget, layout, overlay, renderer,
+        Layout, Renderer as _, Shell, Widget, layout, overlay, renderer,
         widget::{self, tree},
     },
     mouse,
@@ -57,10 +57,7 @@ use iced::{
 use crate::{
     theme,
     widgets::{
-        menu_constants::{
-            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
-            visible_menu_layout,
-        },
+        menu_constants::{MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, menu_layer_bounds},
         menu_dismiss,
     },
 };
@@ -263,7 +260,7 @@ where
         .collect();
 
     CheckboxDropdown {
-        trigger: iced::widget::Space::new().into(),
+        trigger: iced::widget::Space::new().boxed(),
         items,
         on_item_toggle: Box::new(on_item_toggle),
         on_open_change: Box::new(on_open_change),
@@ -403,7 +400,7 @@ fn trigger_button<'a, Message: 'a>(
     )
     .gap(4)
     .style(theme::container_tooltip)
-    .into()
+    .boxed()
 }
 
 /// Render a single dropdown item: styled checkbox glyph + label. The glyph is
@@ -454,7 +451,7 @@ fn dropdown_item<'a, Message: Clone + 'a>(
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// Render a two-column dropdown item: styled checkbox glyph + name
@@ -523,7 +520,7 @@ fn dropdown_item_two_column<'a, Message: Clone + 'a>(
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// Render a one-shot ACTION row: leading action icon + label, with an optional
@@ -556,7 +553,8 @@ fn dropdown_item_action<'a, Message: Clone + 'a>(
             text(subtitle.to_string())
                 .size(MENU_TEXT_SIZE - 2.0)
                 .font(theme::ui_font())
-                .color(theme::fg2()),
+                .color(theme::fg2())
+                .boxed(),
         );
     }
 
@@ -590,7 +588,7 @@ fn dropdown_item_action<'a, Message: Clone + 'a>(
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// Build the menu element that floats below the trigger when open. Dispatches
@@ -620,7 +618,7 @@ where
                     background: Some(theme::border().into()),
                     ..Default::default()
                 })
-                .into(),
+                .boxed(),
         );
     }
     for item in items {
@@ -651,7 +649,7 @@ where
         .width(Length::Fixed(menu_width))
         .padding(4)
         .style(super::menu_chrome::container_style)
-        .into()
+        .boxed()
 }
 
 /// Non-clickable title row at the top of a header-equipped popover.
@@ -684,7 +682,7 @@ fn dropdown_header_row<'a, Message: 'a>(label: &str, counter: &str) -> Element<'
             top: 8.0,
             bottom: 8.0,
         })
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -702,7 +700,7 @@ struct DropdownHeader {
     counter: String,
 }
 
-pub struct CheckboxDropdown<'a, Key, Message> {
+pub(crate) struct CheckboxDropdown<'a, Key, Message> {
     trigger: Element<'a, Message>,
     items: Vec<DropdownItemData<Key>>,
     on_item_toggle: Box<dyn Fn(Key) -> Message + 'a>,
@@ -749,6 +747,8 @@ impl State {
     }
 }
 
+impl<Key, Message> iced::advanced::widget::Meta for CheckboxDropdown<'_, Key, Message> {}
+
 impl<'a, Key, Message> Widget<Message, Theme, iced::Renderer> for CheckboxDropdown<'a, Key, Message>
 where
     Key: Copy + 'a,
@@ -767,18 +767,20 @@ where
     }
 
     fn size(&self) -> Size<Length> {
-        self.trigger.as_widget().size()
+        self.trigger.size()
     }
 
+    // The trigger fills our bounds exactly (zero translation, same size), so
+    // it shares our `Layout` everywhere below.
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        self.trigger
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+    ) {
+        self.trigger.layout(&mut tree.children[0], renderer, limits);
+
+        tree.size = tree.children[0].size;
     }
 
     fn draw(
@@ -787,11 +789,11 @@ where
         renderer: &mut iced::Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.trigger.as_widget().draw(
+        self.trigger.draw(
             &tree.children[0],
             renderer,
             theme,
@@ -806,7 +808,7 @@ where
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -830,7 +832,7 @@ where
         // Forward all other events to the trigger child (e.g. for cursor
         // interaction tracking — the trigger is a plain container, so nothing
         // load-bearing happens here, but pass through for completeness).
-        self.trigger.as_widget_mut().update(
+        self.trigger.update(
             &mut tree.children[0],
             event,
             layout,
@@ -844,7 +846,7 @@ where
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
@@ -852,32 +854,29 @@ where
         if cursor.position_over(layout.bounds()).is_some() {
             return mouse::Interaction::Pointer;
         }
-        self.trigger.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        self.trigger
+            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut widget::Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         let Some(trigger_state) = tree.children.first_mut() else {
             return Vec::new();
         };
-        let mut overlays = self.trigger.as_widget_mut().overlay(
+        let mut overlays = self.trigger.overlay(
             trigger_state,
             layout,
             renderer,
             viewport,
             translation,
+            window,
         );
 
         let state = tree.state.downcast_mut::<State>();
@@ -893,6 +892,8 @@ where
                 self.trigger_bounds,
                 translation,
                 self.close_on_click,
+                renderer,
+                window,
             )
         } else {
             // Drop any cached menu element + reset the persisted tree so the
@@ -905,16 +906,6 @@ where
         // The menu goes last so it draws above the trigger's own overlays.
         overlays.extend(our_overlay);
         overlays
-    }
-}
-
-impl<'a, Key, Message> From<CheckboxDropdown<'a, Key, Message>> for Element<'a, Message>
-where
-    Key: Copy + 'a,
-    Message: Clone + 'a,
-{
-    fn from(dropdown: CheckboxDropdown<'a, Key, Message>) -> Self {
-        Element::new(dropdown)
     }
 }
 
@@ -937,6 +928,8 @@ fn build_overlay<'a, 'b, Key, Message>(
     trigger_bounds: Option<Rectangle>,
     translation: Vector,
     close_on_click: bool,
+    renderer: &iced::Renderer,
+    window: Size,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
     Key: Copy,
@@ -958,13 +951,15 @@ where
     state.menu_tree.diff(&mut *m as &mut Element<'a, Message>);
 
     menu.as_mut().map(|m| {
-        overlay::Element::new(Box::new(MenuOverlay {
-            menu: m,
+        overlay::Element::new(Box::new(MenuOverlay::new(
+            m,
             state,
             on_open_change,
-            trigger_bounds: trigger_bounds + translation,
+            trigger_bounds + translation,
             close_on_click,
-        }))
+            renderer,
+            window,
+        )))
     })
 }
 
@@ -980,29 +975,38 @@ struct MenuOverlay<'a, 'b, Message> {
     /// Action dropdowns (`close_on_click = true`) dismiss on row selection;
     /// checkbox dropdowns stay open. See [`action_dropdown`].
     close_on_click: bool,
+    /// The menu content's layout: the visible menu, in window coordinates.
+    layout: Layout,
 }
 
-impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, '_, Message> {
-    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
-        let limits = layout::Limits::new(Size::ZERO, bounds)
+impl<'a, 'b, Message> MenuOverlay<'a, 'b, Message> {
+    /// Lays the menu out under `trigger_bounds` (window coordinates),
+    /// right-aligned to it and clamped inside the `window`.
+    fn new(
+        menu: &'b mut Element<'a, Message>,
+        state: &'b mut State,
+        on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
+        trigger_bounds: Rectangle,
+        close_on_click: bool,
+        renderer: &iced::Renderer,
+        window: Size,
+    ) -> Self {
+        let limits = layout::Limits::new(Size::ZERO, window)
             .width(Length::Shrink)
             .height(Length::Shrink);
 
-        let menu_node =
-            self.menu
-                .as_widget_mut()
-                .layout(&mut self.state.menu_tree, renderer, &limits);
+        menu.layout(&mut state.menu_tree, renderer, &limits);
 
         // Anchor below the trigger, right-aligned to its right edge so the
         // menu doesn't visually pull away from the icon.
-        let menu_size = menu_node.size();
-        let mut x = self.trigger_bounds.x + self.trigger_bounds.width - menu_size.width;
-        let mut y = self.trigger_bounds.y + self.trigger_bounds.height + 4.0;
+        let menu_size = state.menu_tree.size;
+        let mut x = trigger_bounds.x + trigger_bounds.width - menu_size.width;
+        let mut y = trigger_bounds.y + trigger_bounds.height + 4.0;
 
         // Clamp inside the viewport (with a small inset).
         let padding = 5.0;
-        let max_x = bounds.width - padding - menu_size.width;
-        let max_y = bounds.height - padding - menu_size.height;
+        let max_x = window.width - padding - menu_size.width;
+        let max_y = window.height - padding - menu_size.height;
         if x < padding {
             x = padding;
         } else if x > max_x {
@@ -1013,16 +1017,24 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         } else if y > max_y {
             // Fall back to anchoring above the trigger if there's no room
             // below.
-            y = (self.trigger_bounds.y - menu_size.height - 4.0).max(padding);
+            y = (trigger_bounds.y - menu_size.height - 4.0).max(padding);
         }
 
-        inflate_for_shadow_around_child(menu_node, Point::new(x, y))
+        Self {
+            menu,
+            state,
+            on_open_change,
+            trigger_bounds,
+            close_on_click,
+            layout: Layout::new(menu_size).move_to(Point::new(x, y)),
+        }
     }
+}
 
+impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, '_, Message> {
     fn update(
         &mut self,
         event: &Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -1037,9 +1049,7 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             shell,
             || {
                 matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
-                    && cursor
-                        .position_over(visible_menu_layout(layout).bounds())
-                        .is_none()
+                    && cursor.position_over(self.layout.bounds()).is_none()
                     && cursor.position_over(self.trigger_bounds).is_none()
             },
             || (self.on_open_change)(None),
@@ -1047,13 +1057,13 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             return;
         }
 
-        let menu_layout = visible_menu_layout(layout);
+        let menu_layout = self.layout;
         let menu_bounds = menu_layout.bounds();
 
         // Forward to menu content so item mouse_areas fire on_press. Checkbox
         // rows stay open on click (the user can flip several toggles in one
         // open); action rows are closed just below via `close_on_click`.
-        self.menu.as_widget_mut().update(
+        self.menu.update(
             &mut self.state.menu_tree,
             event,
             menu_layout,
@@ -1094,29 +1104,32 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         renderer: &mut iced::Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let menu_layout = visible_menu_layout(layout);
-        self.menu.as_widget().draw(
-            &self.state.menu_tree,
-            renderer,
-            theme,
-            style,
-            menu_layout,
-            cursor,
-            &menu_layout.bounds(),
-        );
+        let menu_layout = self.layout;
+
+        // The menu draws in its own layer (above the widgets under it), grown
+        // so the drop shadow isn't scissored.
+        renderer.with_layer(menu_layer_bounds(menu_layout.bounds()), |renderer| {
+            self.menu.draw(
+                &self.state.menu_tree,
+                renderer,
+                theme,
+                style,
+                menu_layout,
+                cursor,
+                &menu_layout.bounds(),
+            );
+        });
     }
 
     fn mouse_interaction(
         &self,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        let menu_layout = visible_menu_layout(layout);
-        self.menu.as_widget().mouse_interaction(
+        let menu_layout = self.layout;
+        self.menu.mouse_interaction(
             &self.state.menu_tree,
             menu_layout,
             cursor,
@@ -1166,7 +1179,7 @@ mod tests {
             false,
             None,
         )
-        .into();
+        .boxed();
     }
 
     #[test]
@@ -1182,7 +1195,7 @@ mod tests {
             false,
             None,
         )
-        .into();
+        .boxed();
     }
 
     #[test]
@@ -1223,7 +1236,7 @@ mod tests {
                 height: 50.0,
             }),
         )
-        .into();
+        .boxed();
     }
 
     #[test]
@@ -1241,7 +1254,7 @@ mod tests {
             false,
             None,
         )
-        .into();
+        .boxed();
     }
 
     #[test]
@@ -1273,6 +1286,6 @@ mod tests {
                 height: 40.0,
             }),
         )
-        .into();
+        .boxed();
     }
 }

@@ -14,7 +14,7 @@
 //! their call sites.
 
 use iced::{
-    Element, Length,
+    Element, Length, Widget as _,
     widget::{container, mouse_area, svg},
 };
 
@@ -60,5 +60,5 @@ where
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }

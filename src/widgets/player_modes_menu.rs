@@ -20,7 +20,7 @@
 //!   matches the post-redesign player bar buttons.
 
 use iced::{
-    Element, Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
+    Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -36,7 +36,7 @@ use crate::{
     widgets::{
         menu_constants::{
             MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_SHADOW,
-            MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
+            MENU_TEXT_SIZE, menu_layer_bounds,
         },
         menu_dismiss,
         sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
@@ -75,7 +75,7 @@ const SEPARATOR_ROW_HEIGHT: f32 = SEPARATOR_HEIGHT + SEPARATOR_VPAD * 2.0;
 
 /// One row in the menu — either a togglable item or a divider.
 #[derive(Debug, Clone)]
-pub enum ModeMenuRow<Message> {
+pub(crate) enum ModeMenuRow<Message> {
     Item(ModeMenuItem<Message>),
     Separator,
 }
@@ -84,7 +84,7 @@ pub enum ModeMenuRow<Message> {
 /// (e.g. `"Shuffle: On"`) so the user can read mode status without relying
 /// solely on the check icon.
 #[derive(Debug, Clone)]
-pub struct ModeMenuItem<Message> {
+pub(crate) struct ModeMenuItem<Message> {
     pub label: String,
     pub is_active: bool,
     pub on_action: Message,
@@ -127,7 +127,7 @@ pub(crate) fn mode_menu_separator<Message>() -> ModeMenuRow<Message> {
 // Widget
 // ============================================================================
 
-pub struct PlayerModesMenu<Message> {
+pub(crate) struct PlayerModesMenu<Message> {
     icon_handle: Handle,
     check_handle: Handle,
     rows: Vec<ModeMenuRow<Message>>,
@@ -139,7 +139,7 @@ pub struct PlayerModesMenu<Message> {
 }
 
 impl<Message: Clone + 'static> PlayerModesMenu<Message> {
-    pub fn new(
+    pub(crate) fn new(
         rows: Vec<ModeMenuRow<Message>>,
         on_open_change: impl Fn(bool) -> Message + 'static,
         is_open: bool,
@@ -174,6 +174,8 @@ impl<Message: Clone + 'static> PlayerModesMenu<Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for PlayerModesMenu<Message> {}
+
 impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for PlayerModesMenu<Message> {
     fn size(&self) -> Size<Length> {
         Size {
@@ -184,18 +186,18 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(Size::new(TRIGGER_BUTTON_SIZE, TRIGGER_BUTTON_SIZE))
+    ) {
+        tree.size = Size::new(TRIGGER_BUTTON_SIZE, TRIGGER_BUTTON_SIZE);
     }
 
     fn update(
         &mut self,
         _tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -222,7 +224,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -286,7 +288,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -301,10 +303,11 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
     fn overlay<'b>(
         &'b mut self,
         _tree: &'b mut widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         if !self.is_open {
             return Vec::new();
@@ -322,15 +325,8 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
             on_open_change: &self.on_open_change,
             check_handle: &self.check_handle,
             rows: &self.rows,
-            menu_inner_height: self.menu_inner_height(),
-            anchor,
+            bounds: menu_bounds(anchor, self.menu_inner_height(), window),
         }))]
-    }
-}
-
-impl<'a, Message: Clone + 'a + 'static> From<PlayerModesMenu<Message>> for Element<'a, Message> {
-    fn from(menu: PlayerModesMenu<Message>) -> Self {
-        Element::new(menu)
     }
 }
 
@@ -342,11 +338,8 @@ struct MenuOverlay<'a, Message> {
     on_open_change: &'a dyn Fn(bool) -> Message,
     check_handle: &'a Handle,
     rows: &'a [ModeMenuRow<Message>],
-    menu_inner_height: f32,
-    /// Trigger top-right corner in screen coordinates. Overlay anchors its
-    /// bottom-right to this point so it floats above the player bar with the
-    /// kebab icon serving as the visual hinge.
-    anchor: Point,
+    /// The visible menu, in window coordinates (see [`menu_bounds`]).
+    bounds: Rectangle,
 }
 
 impl<Message: Clone> MenuOverlay<'_, Message> {
@@ -383,44 +376,47 @@ impl<Message: Clone> MenuOverlay<'_, Message> {
     }
 }
 
-impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
-    fn layout(&mut self, _renderer: &iced::Renderer, viewport: Size) -> layout::Node {
-        let menu_height = self.menu_inner_height + MENU_PADDING * 2.0;
+/// The visible menu rectangle. `anchor` is the trigger's top-right corner
+/// in window coordinates: the menu hangs its bottom-right from it so it
+/// floats above the player bar with the kebab as the visual hinge, clamped
+/// into the `window`.
+fn menu_bounds(anchor: Point, menu_inner_height: f32, window: Size) -> Rectangle {
+    let menu_height = menu_inner_height + MENU_PADDING * 2.0;
 
-        // Right-align: anchor.x is the trigger's right edge.
-        let mut x = self.anchor.x - MENU_WIDTH;
-        // Float above the player bar — anchor.y is the trigger's top edge,
-        // so subtract the menu height (plus a 4px gap).
-        let mut y = self.anchor.y - menu_height - 4.0;
+    // Right-align: anchor.x is the trigger's right edge.
+    let mut x = anchor.x - MENU_WIDTH;
+    // Float above the player bar — anchor.y is the trigger's top edge,
+    // so subtract the menu height (plus a 4px gap).
+    let mut y = anchor.y - menu_height - 4.0;
 
-        // Clamp to viewport with a small inset.
-        let padding = 4.0;
-        if x < padding {
-            x = padding;
-        }
-        if x + MENU_WIDTH > viewport.width - padding {
-            x = (viewport.width - padding - MENU_WIDTH).max(padding);
-        }
-        if y < padding {
-            // Fall back to anchoring below the trigger if the window is so
-            // short that opening upward clips off the top.
-            y = (self.anchor.y + TRIGGER_BUTTON_SIZE + 4.0)
-                .min(viewport.height - menu_height - padding)
-                .max(padding);
-        }
-
-        inflate_for_shadow(Size::new(MENU_WIDTH, menu_height), Point::new(x, y))
+    // Clamp to viewport with a small inset.
+    let padding = 4.0;
+    if x < padding {
+        x = padding;
+    }
+    if x + MENU_WIDTH > window.width - padding {
+        x = (window.width - padding - MENU_WIDTH).max(padding);
+    }
+    if y < padding {
+        // Fall back to anchoring below the trigger if the window is so
+        // short that opening upward clips off the top.
+        y = (anchor.y + TRIGGER_BUTTON_SIZE + 4.0)
+            .min(window.height - menu_height - padding)
+            .max(padding);
     }
 
+    Rectangle::new(Point::new(x, y), Size::new(MENU_WIDTH, menu_height))
+}
+
+impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
     fn update(
         &mut self,
         event: &Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let bounds = visible_menu_bounds(layout.bounds());
+        let bounds = self.bounds;
 
         // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
         // the capture semantics (outside presses deliberately stay
@@ -468,7 +464,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _defaults: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
         use iced::{
@@ -479,125 +474,128 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             alignment,
         };
 
-        let bounds = visible_menu_bounds(layout.bounds());
+        let bounds = self.bounds;
 
-        // Flat menu chrome — `bg1()` fill with a 1 px `border()` outline.
-        // `md` radius keeps the popover reading as a major surface in rounded
-        // mode without competing with the modal-frame scale.
-        // Shared menu-panel chrome — see `widgets::menu_chrome`.
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds,
-                border: super::menu_chrome::border(),
-                shadow: MENU_SHADOW,
-                ..Default::default()
-            },
-            super::menu_chrome::fill(),
-        );
+        // The menu draws in its own layer (above the widgets under it), grown
+        // so the drop shadow isn't scissored.
+        renderer.with_layer(menu_layer_bounds(bounds), |renderer| {
+            // Flat menu chrome — `bg1()` fill with a 1 px `border()` outline.
+            // `md` radius keeps the popover reading as a major surface in rounded
+            // mode without competing with the modal-frame scale.
+            // Shared menu-panel chrome — see `widgets::menu_chrome`.
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    border: super::menu_chrome::border(),
+                    shadow: MENU_SHADOW,
+                    ..Default::default()
+                },
+                super::menu_chrome::fill(),
+            );
 
-        let cursor_pos = cursor.position();
-        let offsets = self.row_offsets();
+            let cursor_pos = cursor.position();
+            let offsets = self.row_offsets();
 
-        for (i, row) in self.rows.iter().enumerate() {
-            let row_y = bounds.y + offsets[i];
-            match row {
-                ModeMenuRow::Separator => {
-                    let sep_y = row_y + SEPARATOR_VPAD;
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: bounds.x + MENU_ROW_INSET,
-                                y: sep_y,
-                                width: bounds.width - MENU_ROW_INSET * 2.0,
-                                height: SEPARATOR_HEIGHT,
-                            },
-                            ..Default::default()
-                        },
-                        theme::border(),
-                    );
-                }
-                ModeMenuRow::Item(item) => {
-                    let inset = MENU_ROW_INSET;
-                    let item_bounds = Rectangle {
-                        x: bounds.x + inset,
-                        y: row_y,
-                        width: bounds.width - inset * 2.0,
-                        height: MENU_ITEM_HEIGHT,
-                    };
-
-                    let is_hovered =
-                        item.enabled && cursor_pos.is_some_and(|p| item_bounds.contains(p));
-                    if is_hovered {
+            for (i, row) in self.rows.iter().enumerate() {
+                let row_y = bounds.y + offsets[i];
+                match row {
+                    ModeMenuRow::Separator => {
+                        let sep_y = row_y + SEPARATOR_VPAD;
                         renderer.fill_quad(
                             renderer::Quad {
-                                bounds: item_bounds,
-                                border: iced::Border {
-                                    radius: theme::ui_radius_sm_player(),
-                                    ..Default::default()
+                                bounds: Rectangle {
+                                    x: bounds.x + MENU_ROW_INSET,
+                                    y: sep_y,
+                                    width: bounds.width - MENU_ROW_INSET * 2.0,
+                                    height: SEPARATOR_HEIGHT,
                                 },
                                 ..Default::default()
                             },
-                            theme::bg2(),
+                            theme::border(),
                         );
                     }
+                    ModeMenuRow::Item(item) => {
+                        let inset = MENU_ROW_INSET;
+                        let item_bounds = Rectangle {
+                            x: bounds.x + inset,
+                            y: row_y,
+                            width: bounds.width - inset * 2.0,
+                            height: MENU_ITEM_HEIGHT,
+                        };
 
-                    // Leading styled checkbox glyph — the shared
-                    // `checkbox_glyph` recipe, identical to the library popover
-                    // and the view-header column dropdown. Always rendered
-                    // (filled when active, outlined when inactive) so labels
-                    // stay aligned and the checkbox state reads at a glance.
-                    let check_x = item_bounds.x + 6.0;
-                    let check_y = item_bounds.y
-                        + (MENU_ITEM_HEIGHT - super::checkbox_glyph::GLYPH_SIZE) / 2.0;
-                    super::checkbox_glyph::draw(
-                        renderer,
-                        Point::new(check_x, check_y),
-                        self.check_handle,
-                        item.shows_active(),
-                    );
+                        let is_hovered =
+                            item.enabled && cursor_pos.is_some_and(|p| item_bounds.contains(p));
+                        if is_hovered {
+                            renderer.fill_quad(
+                                renderer::Quad {
+                                    bounds: item_bounds,
+                                    border: iced::Border {
+                                        radius: theme::ui_radius_sm_player(),
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                },
+                                theme::bg2(),
+                            );
+                        }
 
-                    let text_x = check_x + super::checkbox_glyph::GLYPH_SIZE + MENU_CHECK_GAP;
-                    let text_color = if !item.enabled {
-                        theme::fg4()
-                    } else if is_hovered {
-                        theme::fg0()
-                    } else {
-                        theme::fg1()
-                    };
-                    let text_bounds_size = Size::new(
-                        item_bounds.x + item_bounds.width - text_x,
-                        item_bounds.height,
-                    );
-                    renderer.fill_text(
-                        Text {
-                            content: item.label.clone(),
-                            bounds: text_bounds_size,
-                            size: MENU_TEXT_SIZE.into(),
-                            line_height: crate::theme::UI_LINE_HEIGHT,
-                            font: theme::weighted_ui_font(iced::font::Weight::Medium),
-                            align_x: alignment::Horizontal::Left.into(),
-                            align_y: alignment::Vertical::Center,
-                            shaping: iced::advanced::text::Shaping::default(),
-                            wrapping: iced::advanced::text::Wrapping::None,
-                            ellipsis: iced::advanced::text::Ellipsis::default(),
-                            hint_factor: Some(1.0),
-                        },
-                        Point::new(text_x, item_bounds.center_y()),
-                        text_color,
-                        item_bounds,
-                    );
+                        // Leading styled checkbox glyph — the shared
+                        // `checkbox_glyph` recipe, identical to the library popover
+                        // and the view-header column dropdown. Always rendered
+                        // (filled when active, outlined when inactive) so labels
+                        // stay aligned and the checkbox state reads at a glance.
+                        let check_x = item_bounds.x + 6.0;
+                        let check_y = item_bounds.y
+                            + (MENU_ITEM_HEIGHT - super::checkbox_glyph::GLYPH_SIZE) / 2.0;
+                        super::checkbox_glyph::draw(
+                            renderer,
+                            Point::new(check_x, check_y),
+                            self.check_handle,
+                            item.shows_active(),
+                        );
+
+                        let text_x = check_x + super::checkbox_glyph::GLYPH_SIZE + MENU_CHECK_GAP;
+                        let text_color = if !item.enabled {
+                            theme::fg4()
+                        } else if is_hovered {
+                            theme::fg0()
+                        } else {
+                            theme::fg1()
+                        };
+                        let text_bounds_size = Size::new(
+                            item_bounds.x + item_bounds.width - text_x,
+                            item_bounds.height,
+                        );
+                        renderer.fill_text(
+                            Text {
+                                content: item.label.clone(),
+                                bounds: text_bounds_size,
+                                size: MENU_TEXT_SIZE.into(),
+                                line_height: crate::theme::UI_LINE_HEIGHT,
+                                font: theme::weighted_ui_font(iced::font::Weight::Medium),
+                                align_x: alignment::Horizontal::Left.into(),
+                                align_y: alignment::Vertical::Center,
+                                shaping: iced::advanced::text::Shaping::default(),
+                                wrapping: iced::advanced::text::Wrapping::None,
+                                ellipsis: iced::advanced::text::Ellipsis::default(),
+                                hint_factor: Some(1.0),
+                            },
+                            Point::new(text_x, item_bounds.center_y()),
+                            text_color,
+                            item_bounds,
+                        );
+                    }
                 }
             }
-        }
+        });
     }
 
     fn mouse_interaction(
         &self,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        let bounds = visible_menu_bounds(layout.bounds());
+        let bounds = self.bounds;
         match cursor.position() {
             Some(p) if bounds.contains(p) => {
                 if self.enabled_item_at(p.y - bounds.y).is_some() {
@@ -699,8 +697,7 @@ mod tests {
             on_open_change: &on_open_change,
             check_handle: &check_handle,
             rows: &rows,
-            menu_inner_height: 0.0,
-            anchor: Point::ORIGIN,
+            bounds: Rectangle::default(),
         };
         let label_at = |y: f32| overlay.enabled_item_at(y).map(|item| item.label.clone());
 

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Element, Length, Task,
+    Alignment, Element, Length, Task, Widget as _,
     widget::{container, image},
 };
 use nokkvi_data::{types::song::Song, utils::formatters};
@@ -310,7 +310,7 @@ impl SimilarPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: header_prefix,
@@ -502,7 +502,8 @@ impl SimilarPage {
                         .width(Length::FillPortion(15))
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                     );
                 }
                 if column_visibility.love {
@@ -526,7 +527,8 @@ impl SimilarPage {
                             ..Default::default()
                         })
                         .align_x(Alignment::Center)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                     );
                 }
                 let content = content_row

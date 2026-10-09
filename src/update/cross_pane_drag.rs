@@ -17,7 +17,7 @@
 //! state directly — no chrome reconstruction, no `cursor_y → slot` math,
 //! no stored-vs-inline `slot_count` divergence.
 
-use iced::Task;
+use iced::{Task, Widget as _};
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 use tracing::debug;
 
@@ -378,7 +378,7 @@ impl Nokkvi {
         iced::widget::text("Drag to queue")
             .font(crate::theme::ui_font())
             .color(crate::widgets::slot_list::SlotListSlotStyle::drag_preview().text_color)
-            .into()
+            .boxed()
     }
 
     /// Render a full slot list slot replica for the centered browsing panel item.
@@ -510,7 +510,8 @@ impl Nokkvi {
                     iced::widget::container(slot_content)
                         .style(move |_theme| style.to_container_style())
                         .width(Length::Fill)
-                        .height(Length::Fill),
+                        .height(Length::Fill)
+                        .boxed(),
                 )
                 .push(
                     iced::widget::container(badge)
@@ -522,16 +523,17 @@ impl Nokkvi {
                             top: 4.0,
                             right: 8.0,
                             ..Default::default()
-                        }),
+                        })
+                        .boxed(),
                 );
 
-            stack.into()
+            stack.boxed()
         } else {
             iced::widget::container(slot_content)
                 .style(move |_theme| style.to_container_style())
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .boxed()
         }
     }
 
@@ -584,7 +586,7 @@ impl Nokkvi {
         })
         .align_y(Alignment::Center)
         .height(Length::Fill)
-        .into()
+        .boxed()
     }
 
     /// The active within-list reorder drag for the current surface (the playlist
@@ -670,7 +672,7 @@ impl Nokkvi {
             bottom: 0.0,
         });
 
-        Some(overlay.into())
+        Some(overlay.boxed())
     }
 
     /// Translate a *filtered* queue row index (slot-list space when a queue

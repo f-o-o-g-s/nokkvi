@@ -498,7 +498,7 @@ pub(crate) fn build_trawl_seeds(
 // ── Shared child row renderers ──────────────────────────────────────────────
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{container, row, text},
 };
 use nokkvi_data::utils::formatters;
@@ -700,8 +700,12 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
 
     let leading_indent = child_leading_indent(depth);
 
-    let mut content = iced::widget::Row::new()
-        .push(container(text("")).width(Length::Fixed(leading_indent)))
+    let mut content = iced::widget::Row::<Element<'_, _>>::new()
+        .push(
+            container(text(""))
+                .width(Length::Fixed(leading_indent))
+                .boxed(),
+        )
         .push(slot_list_labeled_index_column(
             sub_index_label.to_string(),
             meta_size,
@@ -746,7 +750,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         ))
         .height(Length::Fill)
         .clip(true)
-        .align_y(Alignment::Center),
+        .align_y(Alignment::Center)
+        .boxed(),
     );
 
     let content = content
@@ -754,7 +759,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
             container(slot_list_text(year_str, meta_size, style.subtext_color))
                 .width(Length::FillPortion(12))
                 .height(Length::Fill)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .boxed(),
         )
         .push(slot_list_metadata_column(
             songs_str,
@@ -767,7 +773,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
             container(slot_list_text(duration_str, meta_size, style.subtext_color))
                 .width(Length::FillPortion(12))
                 .height(Length::Fill)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .boxed(),
         )
         .push(
             container(slot_list_favorite_icon::<M>(
@@ -784,7 +791,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
                 ..Default::default()
             })
             .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
+            .align_y(Alignment::Center)
+            .boxed(),
         )
         .spacing(4.0)
         .padding(iced::Padding {

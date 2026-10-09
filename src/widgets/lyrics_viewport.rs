@@ -21,7 +21,7 @@
 //! through to the panel beneath.
 
 use iced::{
-    Color, Element, Event, Length, Pixels, Rectangle, Size, Theme, Vector,
+    Color, Element, Event, Length, Pixels, Rectangle, Size, Theme, Vector, Widget as _,
     advanced::{
         Renderer as _, Shell, layout, renderer,
         text::{
@@ -490,6 +490,8 @@ impl<'a, M> LyricViewport<'a, M> {
     }
 }
 
+impl<M> iced::advanced::widget::Meta for LyricViewport<'_, M> {}
+
 impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
@@ -511,7 +513,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         tree: &mut widget::Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         let bounds = limits.bounds();
         let state = tree.state.downcast_mut::<State>();
 
@@ -545,7 +547,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
             state.out_cache_key = (0, 0, 0);
         }
 
-        layout::Node::new(bounds)
+        tree.size = bounds;
     }
 
     fn draw(
@@ -554,7 +556,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: layout::Layout<'_>,
+        layout: layout::Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -665,7 +667,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: layout::Layout<'_>,
+        layout: layout::Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, M>,
@@ -708,7 +710,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        _layout: layout::Layout<'_>,
+        _layout: layout::Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -717,12 +719,6 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // artwork context menu and clicks live on the panel beneath, and a
         // changed cursor would advertise an interaction this layer doesn't own.
         mouse::Interaction::default()
-    }
-}
-
-impl<'a, M: 'static> From<LyricViewport<'a, M>> for Element<'a, M> {
-    fn from(viewport: LyricViewport<'a, M>) -> Self {
-        Element::new(viewport)
     }
 }
 
@@ -765,7 +761,7 @@ pub(crate) fn lyrics_scrim<'a, Message: 'a>(width: f32, height: f32) -> Element<
                 ..Default::default()
             }
         })
-        .into()
+        .boxed()
 }
 
 /// The lyric text layer (the event-transparent viewport alone — the scrim is
@@ -779,10 +775,12 @@ pub(crate) fn lyrics_text_layer<'a, Message: 'a + 'static>(
 ) -> Element<'a, Message> {
     use iced::widget::container;
 
-    container(Element::<Message>::from(LyricViewport::new(data, on_wheel)))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .into()
+    container(Element::<Message>::from(
+        LyricViewport::new(data, on_wheel).boxed(),
+    ))
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(height))
+    .boxed()
 }
 
 #[cfg(test)]

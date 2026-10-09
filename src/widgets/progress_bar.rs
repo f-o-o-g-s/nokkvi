@@ -9,7 +9,7 @@
 //! Based on Iced's slider widget event handling pattern.
 
 use iced::{
-    Element, Event, Length, Point, Rectangle, Shadow, Size, Theme, Vector,
+    Event, Length, Point, Rectangle, Shadow, Size, Theme, Vector,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -35,14 +35,14 @@ pub(crate) struct State {
 /// codec / bitrate reads dimmer than the time. When the cap carries no metadata,
 /// `time == full` and it renders fully opaque.
 #[derive(Debug, Clone)]
-pub struct CapLabel {
+pub(crate) struct CapLabel {
     pub full: String,
     pub time: String,
 }
 
 impl CapLabel {
     /// Cap with no metadata — `time == full`, renders fully opaque.
-    pub fn time_only(time: impl Into<String>) -> Self {
+    pub(crate) fn time_only(time: impl Into<String>) -> Self {
         let time = time.into();
         Self {
             full: time.clone(),
@@ -52,7 +52,7 @@ impl CapLabel {
 
     /// Cap whose `time` stays opaque while the rest of `full` (codec / bitrate)
     /// renders dimmer.
-    pub fn new(full: impl Into<String>, time: impl Into<String>) -> Self {
+    pub(crate) fn new(full: impl Into<String>, time: impl Into<String>) -> Self {
         Self {
             full: full.into(),
             time: time.into(),
@@ -67,7 +67,7 @@ impl CapLabel {
 }
 
 /// Custom progress bar with flat styling
-pub struct ProgressBar<'a, Message> {
+pub(crate) struct ProgressBar<'a, Message> {
     position: f32,
     duration: f32,
     is_playing: bool,
@@ -93,7 +93,7 @@ const TRACK_THICKNESS: f32 = 6.0;
 const HANDLE_SIZE: f32 = 14.0;
 
 impl<'a, Message> ProgressBar<'a, Message> {
-    pub fn new<F>(position: f32, duration: f32, on_seek: F) -> Self
+    pub(crate) fn new<F>(position: f32, duration: f32, on_seek: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -114,7 +114,7 @@ impl<'a, Message> ProgressBar<'a, Message> {
     /// Draw the track + progress fill at the FULL widget height (a solid bar)
     /// instead of the default thin 6 px centered track. Used by the MiniPlayer
     /// capsule scrub, where the progress reads as one continuous filled block.
-    pub fn filled(mut self, filled: bool) -> Self {
+    pub(crate) fn filled(mut self, filled: bool) -> Self {
         self.filled = filled;
         self
     }
@@ -122,7 +122,7 @@ impl<'a, Message> ProgressBar<'a, Message> {
     /// Overlay the left / right end-cap labels on the filled track with
     /// color-aware (fill-vs-track) coloring and a dimmer codec / bitrate
     /// segment. Only drawn in [`Self::filled`] mode. See [`CapLabel`].
-    pub fn time_labels(mut self, left: CapLabel, right: CapLabel) -> Self {
+    pub(crate) fn time_labels(mut self, left: CapLabel, right: CapLabel) -> Self {
         self.time_labels = Some((left, right));
         self
     }
@@ -131,12 +131,12 @@ impl<'a, Message> ProgressBar<'a, Message> {
         clippy::wrong_self_convention,
         reason = "a builder setter named for its flag, not an is_ accessor"
     )]
-    pub fn is_playing(mut self, is_playing: bool) -> Self {
+    pub(crate) fn is_playing(mut self, is_playing: bool) -> Self {
         self.is_playing = is_playing;
         self
     }
 
-    pub fn hide_handle(mut self, hide: bool) -> Self {
+    pub(crate) fn hide_handle(mut self, hide: bool) -> Self {
         self.hide_handle = hide;
         self
     }
@@ -144,17 +144,17 @@ impl<'a, Message> ProgressBar<'a, Message> {
     /// Whether click/drag seeking is enabled. Defaults to `true`. Set `false`
     /// for non-seekable streams (radio). Decoupled from [`Self::hide_handle`]
     /// so a handle-less overlay scrub can still be clickable to seek.
-    pub fn interactive(mut self, interactive: bool) -> Self {
+    pub(crate) fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self
     }
 
-    pub fn width(mut self, width: impl Into<Length>) -> Self {
+    pub(crate) fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
     }
 
-    pub fn height(mut self, height: f32) -> Self {
+    pub(crate) fn height(mut self, height: f32) -> Self {
         self.height = height;
         self
     }
@@ -179,6 +179,8 @@ impl<'a, Message> ProgressBar<'a, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for ProgressBar<'_, Message> {}
+
 impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, Message> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
@@ -197,18 +199,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::atomic(limits, self.width, self.height)
+    ) {
+        tree.size = layout::atomic(limits, self.width, self.height);
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -324,7 +326,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -572,7 +574,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -595,10 +597,11 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
+        _window: Size,
     ) -> Vec<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
         let state = tree.state.downcast_ref::<State>();
 
@@ -608,23 +611,17 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             let handle_x = bounds.x + state.drag_progress * effective_width;
 
             vec![iced::advanced::overlay::Element::new(Box::new(
-                TooltipOverlay {
-                    handle_x: handle_x + translation.x,
-                    handle_width: HANDLE_SIZE,
-                    bounds_y: bounds.y + translation.y,
-                    drag_progress: state.drag_progress,
-                    duration: self.duration,
-                },
+                TooltipOverlay::new(
+                    handle_x + translation.x,
+                    HANDLE_SIZE,
+                    bounds.y + translation.y,
+                    state.drag_progress,
+                    self.duration,
+                ),
             ))]
         } else {
             Vec::new()
         }
-    }
-}
-
-impl<'a, Message: Clone + 'a> From<ProgressBar<'a, Message>> for Element<'a, Message> {
-    fn from(progress_bar: ProgressBar<'a, Message>) -> Self {
-        Element::new(progress_bar)
     }
 }
 
@@ -633,38 +630,48 @@ impl<'a, Message: Clone + 'a> From<ProgressBar<'a, Message>> for Element<'a, Mes
 /// Flat design: 1 px `theme::border()` outline on `theme::bg0_hard()` background;
 /// no 3D bevel. A small downward arrow points at the handle.
 struct TooltipOverlay {
-    handle_x: f32,
-    handle_width: f32,
-    bounds_y: f32,
+    /// The tooltip body plus the arrow under it, in window coordinates.
+    bounds: Rectangle,
     drag_progress: f32,
     duration: f32,
 }
 
-impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> for TooltipOverlay {
-    fn layout(&mut self, _renderer: &iced::Renderer, _bounds: Size) -> layout::Node {
-        // Tooltip dimensions
-        let tooltip_height = 20.0;
-        let tooltip_width = 44.0;
-        let tooltip_arrow_size = 6.0;
-        let tooltip_gap = 2.0;
+// Tooltip dimensions
+const TOOLTIP_HEIGHT: f32 = 20.0;
+const TOOLTIP_WIDTH: f32 = 44.0;
+const TOOLTIP_ARROW_SIZE: f32 = 6.0;
+const TOOLTIP_GAP: f32 = 2.0;
 
-        // Position tooltip above the handle
-        let tooltip_x = self.handle_x + (self.handle_width - tooltip_width) / 2.0;
-        let tooltip_y = self.bounds_y - tooltip_height - tooltip_arrow_size - tooltip_gap;
+impl TooltipOverlay {
+    /// A tooltip centered over the handle at `handle_x` (window coordinates),
+    /// floating just above the bar's top edge `bounds_y`.
+    fn new(
+        handle_x: f32,
+        handle_width: f32,
+        bounds_y: f32,
+        drag_progress: f32,
+        duration: f32,
+    ) -> Self {
+        let tooltip_x = handle_x + (handle_width - TOOLTIP_WIDTH) / 2.0;
+        let tooltip_y = bounds_y - TOOLTIP_HEIGHT - TOOLTIP_ARROW_SIZE - TOOLTIP_GAP;
 
-        layout::Node::new(Size::new(
-            tooltip_width,
-            tooltip_height + tooltip_arrow_size,
-        ))
-        .move_to(Point::new(tooltip_x, tooltip_y))
+        Self {
+            bounds: Rectangle::new(
+                Point::new(tooltip_x, tooltip_y),
+                Size::new(TOOLTIP_WIDTH, TOOLTIP_HEIGHT + TOOLTIP_ARROW_SIZE),
+            ),
+            drag_progress,
+            duration,
+        }
     }
+}
 
+impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> for TooltipOverlay {
     fn draw(
         &self,
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
         _cursor: mouse::Cursor,
     ) {
         use iced::{
@@ -676,12 +683,10 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
             alignment,
         };
 
-        let bounds = layout.bounds();
-
-        // Tooltip dimensions
-        let tooltip_height = 20.0;
-        let tooltip_width = 44.0;
-        let tooltip_arrow_size = 6.0;
+        let bounds = self.bounds;
+        let tooltip_height = TOOLTIP_HEIGHT;
+        let tooltip_width = TOOLTIP_WIDTH;
+        let tooltip_arrow_size = TOOLTIP_ARROW_SIZE;
 
         let tooltip_x = bounds.x;
         let tooltip_y = bounds.y;
@@ -705,68 +710,71 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
         let arrow_x = tooltip_x + tooltip_width / 2.0 - tooltip_arrow_size / 2.0;
         let arrow_y = tooltip_y + tooltip_height;
 
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: arrow_x,
-                    y: arrow_y,
-                    width: tooltip_arrow_size,
-                    height: tooltip_arrow_size / 2.0,
+        // The tooltip draws in its own layer, above the widgets under it.
+        renderer.with_layer(bounds, |renderer| {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x: arrow_x,
+                        y: arrow_y,
+                        width: tooltip_arrow_size,
+                        height: tooltip_arrow_size / 2.0,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-            tooltip_bg,
-        );
+                tooltip_bg,
+            );
 
-        // Tooltip body — flat fill with 1 px border.
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: tooltip_x,
-                    y: tooltip_y,
-                    width: tooltip_width,
-                    height: tooltip_height,
+            // Tooltip body — flat fill with 1 px border.
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x: tooltip_x,
+                        y: tooltip_y,
+                        width: tooltip_width,
+                        height: tooltip_height,
+                    },
+                    border: iced::Border {
+                        color: tooltip_border,
+                        width: 1.0,
+                        radius,
+                    },
+                    shadow: Shadow::default(),
+                    ..Default::default()
                 },
-                border: iced::Border {
-                    color: tooltip_border,
-                    width: 1.0,
-                    radius,
+                tooltip_bg,
+            );
+
+            // Draw the time text centered in tooltip
+            let font = crate::theme::ui_font();
+            let text_size = Pixels(12.0);
+
+            let tooltip_bounds = Rectangle {
+                x: tooltip_x,
+                y: tooltip_y,
+                width: tooltip_width,
+                height: tooltip_height,
+            };
+
+            renderer.fill_text(
+                Text {
+                    content: time_text,
+                    bounds: tooltip_bounds.size(),
+                    size: text_size,
+                    line_height: crate::theme::UI_LINE_HEIGHT,
+                    font,
+                    align_x: text::Alignment::Center,
+                    align_y: alignment::Vertical::Center,
+                    shaping: Shaping::Basic,
+                    wrapping: text::Wrapping::default(),
+                    ellipsis: iced::advanced::text::Ellipsis::default(),
+                    hint_factor: Some(1.0),
                 },
-                shadow: Shadow::default(),
-                ..Default::default()
-            },
-            tooltip_bg,
-        );
-
-        // Draw the time text centered in tooltip
-        let font = crate::theme::ui_font();
-        let text_size = Pixels(12.0);
-
-        let tooltip_bounds = Rectangle {
-            x: tooltip_x,
-            y: tooltip_y,
-            width: tooltip_width,
-            height: tooltip_height,
-        };
-
-        renderer.fill_text(
-            Text {
-                content: time_text,
-                bounds: tooltip_bounds.size(),
-                size: text_size,
-                line_height: crate::theme::UI_LINE_HEIGHT,
-                font,
-                align_x: text::Alignment::Center,
-                align_y: alignment::Vertical::Center,
-                shaping: Shaping::Basic,
-                wrapping: text::Wrapping::default(),
-                ellipsis: iced::advanced::text::Ellipsis::default(),
-                hint_factor: Some(1.0),
-            },
-            tooltip_bounds.center(),
-            tooltip_text_color,
-            Rectangle::with_size(Size::INFINITE),
-        );
+                tooltip_bounds.center(),
+                tooltip_text_color,
+                Rectangle::with_size(Size::INFINITE),
+            );
+        });
     }
 }
 

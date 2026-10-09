@@ -4,7 +4,7 @@
 //! Matches QML's BaseSlotListView architecture
 
 use iced::{
-    Alignment, Color, ContentFit, Element, Length,
+    Alignment, Color, ContentFit, Element, Length, Widget as _,
     widget::{column, container, row},
 };
 use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
@@ -21,7 +21,10 @@ fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'
             background: Some(theme::border().into()),
             ..Default::default()
         });
-    row![stripe, artwork].spacing(0).height(Length::Fill).into()
+    row![stripe, artwork]
+        .spacing(0)
+        .height(Length::Fill)
+        .boxed()
 }
 
 /// Artwork column styling - functions for dynamic theme support
@@ -358,7 +361,7 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
             })
             .width(Length::Fill)
             .height(Length::Fill)
-            .into(),
+            .boxed(),
         );
     }
 
@@ -376,7 +379,7 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
         })
         .width(Length::Shrink)
         .height(Length::Shrink)
-        .into(),
+        .boxed(),
     )
 }
 
@@ -418,8 +421,8 @@ impl ArtworkPlaceholder {
             ArtworkPlaceholder::Backdrop => cover_backdrop(),
             ArtworkPlaceholder::Blank | ArtworkPlaceholder::RadioTower => artwork_outer_bg(),
         };
-        let base = container::<Message, _, _>(match self {
-            ArtworkPlaceholder::Blank | ArtworkPlaceholder::Backdrop => Element::from(text("")),
+        let base = container(match self {
+            ArtworkPlaceholder::Blank | ArtworkPlaceholder::Backdrop => text("").boxed(),
             ArtworkPlaceholder::RadioTower => crate::embedded_svg::svg_widget(
                 crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
             )
@@ -428,7 +431,7 @@ impl ArtworkPlaceholder {
             .style(|_, _| iced::widget::svg::Style {
                 color: Some(theme::fg2()),
             })
-            .into(),
+            .boxed(),
         })
         .width(width)
         .height(height)
@@ -438,7 +441,7 @@ impl ArtworkPlaceholder {
             background: Some(background.into()),
             ..Default::default()
         });
-        base.into()
+        base.boxed()
     }
 }
 
@@ -541,7 +544,7 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
         })
         .width(Length::Fill)
         .height(Length::Fill)
-        .into();
+        .boxed();
     }
 
     // Square (Auto / AlwaysNative): the cover and every layer above it sit in
@@ -568,7 +571,7 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
     })
     .width(Length::Shrink)
     .height(Length::Shrink)
-    .into()
+    .boxed()
 }
 
 /// The cover image (or its placeholder) at `w` x `h` on the artwork backdrop:
@@ -585,7 +588,7 @@ fn cover_layer<'a, Message: 'a>(
             .content_fit(fit)
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
-            .into()
+            .boxed()
     } else {
         placeholder.content(Length::Fixed(w), Length::Fixed(h))
     };
@@ -597,7 +600,7 @@ fn cover_layer<'a, Message: 'a>(
             background: Some(artwork_outer_bg().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Stack the over-cover layers onto `cover`, which is already sized to
@@ -666,7 +669,7 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
             ]
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
-            .into()
+            .boxed()
         };
 
         let mut configured = viz.clone().mode(mode);
@@ -682,7 +685,7 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
             container(ring)
                 .width(Length::Fixed(w))
                 .height(Length::Fixed(h))
-                .into()
+                .boxed()
         } else {
             bottom_band(ring)
         };
@@ -709,13 +712,13 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
             layers = layers.push(bottom_band(boat_el));
         }
     }
-    let panel: Element<'a, Message> = layers.into();
+    let panel: Element<'a, Message> = layers.boxed();
     if let Some(ly) = lyrics {
         stack![
             panel,
             lyrics_viewport::lyrics_text_layer(ly, lyrics_on_wheel, w, h)
         ]
-        .into()
+        .boxed()
     } else {
         panel
     }
@@ -751,7 +754,7 @@ fn wrap_with_panel_menu<'a, Message: Clone + 'a>(
         open_position,
         on_open_change,
     )
-    .into()
+    .boxed()
 }
 
 /// Artwork panel with the active visualizer overlaid on the cover (when
@@ -835,7 +838,7 @@ pub(crate) fn wrap_with_pill_overlay<'a, Message: 'a>(
         .height(Length::Fill)
         .align_y(iced::Alignment::End);
 
-    stack![base_panel, overlay].into()
+    stack![base_panel, overlay].boxed()
 }
 
 /// The banded pill strip itself — `content` centered on a fixed `bg0_hard()`
@@ -864,7 +867,7 @@ pub(crate) fn banded_pill<'a, Message: 'a>(content: Element<'a, Message>) -> Ele
             ..Default::default()
         });
 
-    column![separator(), bar, separator()].into()
+    column![separator(), bar, separator()].boxed()
 }
 
 /// Create a single-image artwork panel with a bottom-anchored, full-width bar overlay
@@ -930,7 +933,7 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
                     background: Some(artwork_outer_bg().into()),
                     ..Default::default()
                 })
-                .into()
+                .boxed()
         } else {
             let num = collage_handles.len();
             let cell_size = square_size / 3.0;
@@ -949,14 +952,14 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
                         )
                         .width(Length::Fixed(cell_size))
                         .height(Length::Fixed(cell_size))
-                        .into(),
+                        .boxed(),
                     );
                 }
                 rows_vec.push(
                     irow(cells)
                         .spacing(0.0)
                         .height(Length::Fixed(cell_size))
-                        .into(),
+                        .boxed(),
                 );
             }
 
@@ -964,7 +967,7 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
                 .spacing(0.0)
                 .width(Length::Fixed(square_size))
                 .height(Length::Fixed(square_size))
-                .into()
+                .boxed()
         };
 
         container(content)
@@ -977,7 +980,7 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
     })
     .width(Length::Shrink)
     .height(Length::Shrink)
-    .into()
+    .boxed()
 }
 
 /// Create a 2×2 quad artwork grid at a fixed edge size.
@@ -1009,7 +1012,7 @@ pub(crate) fn quad_artwork_grid<'a, Message: 'a>(
                 background: Some(artwork_outer_bg().into()),
                 ..Default::default()
             })
-            .into();
+            .boxed();
     }
 
     let num = tile_handles.len();
@@ -1030,14 +1033,14 @@ pub(crate) fn quad_artwork_grid<'a, Message: 'a>(
                 )
                 .width(Length::Fixed(cell_size))
                 .height(Length::Fixed(cell_size))
-                .into(),
+                .boxed(),
             );
         }
         rows_vec.push(
             irow(cells)
                 .spacing(0.0)
                 .height(Length::Fixed(cell_size))
-                .into(),
+                .boxed(),
         );
     }
 
@@ -1045,7 +1048,7 @@ pub(crate) fn quad_artwork_grid<'a, Message: 'a>(
         .spacing(0.0)
         .width(Length::Fixed(edge))
         .height(Length::Fixed(edge))
-        .into()
+        .boxed()
 }
 
 /// Create standard base slot list layout with header, slot list content, and optional artwork
@@ -1127,7 +1130,7 @@ where
             .width(Length::Fill)
             .height(Length::Fill)
             .spacing(0)
-            .into()
+            .boxed()
     }
 }
 
@@ -1172,7 +1175,7 @@ where
                 background: Some(artwork_outer_bg().into()),
                 ..Default::default()
             })
-            .into()
+            .boxed()
     } else {
         artwork
     };
@@ -1197,7 +1200,7 @@ where
         iced::widget::Stack::new()
             .push(with_left_stripe(artwork_side_inner))
             .push(handle_elem)
-            .into()
+            .boxed()
     } else {
         with_left_stripe(artwork_side_inner)
     };
@@ -1252,7 +1255,7 @@ where
     .width(lowered_list_width.map_or(Length::Fill, Length::Fixed))
     .height(Length::Fill)
     .spacing(0)
-    .into();
+    .boxed();
 
     // Wrap the inner row in an outer column so every base_slot_list_layout
     // branch (horizontal, vertical, no-artwork) returns the same root widget
@@ -1268,7 +1271,7 @@ where
         .width(Length::Fill)
         .height(Length::Fill)
         .spacing(0)
-        .into()
+        .boxed()
 }
 
 /// Vertical layout — artwork stacked above the slot list, edge-to-edge L/R
@@ -1334,9 +1337,9 @@ where
         column![artwork_panel, h]
             .width(Length::Fill)
             .spacing(0)
-            .into()
+            .boxed()
     } else {
-        artwork_panel.into()
+        artwork_panel.boxed()
     };
 
     // Pin the slot-list rect to a Fixed height that matches what
@@ -1366,7 +1369,7 @@ where
         .width(Length::Fill)
         .height(Length::Fill)
         .spacing(0)
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

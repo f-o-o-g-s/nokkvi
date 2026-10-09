@@ -9,7 +9,7 @@
 //! does) stays in each picker's own module.
 
 use iced::{
-    Alignment, Element, Length, Padding,
+    Alignment, Element, Length, Padding, Widget as _,
     font::Weight,
     widget::{Space, button, column, container, mouse_area, row, svg, text},
 };
@@ -168,18 +168,18 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
     ];
     if let Some(extra) = after_title {
         title_row = title_row
-            .push(Space::new().width(Length::Fixed(10.0)))
+            .push(Space::new().width(Length::Fixed(10.0)).boxed())
             .push(extra);
     }
-    title_row = title_row.push(Space::new().width(Length::Fill));
+    title_row = title_row.push(Space::new().width(Length::Fill).boxed());
     if let Some(extra) = before_close {
         title_row = title_row
             .push(extra)
-            .push(Space::new().width(Length::Fixed(8.0)));
+            .push(Space::new().width(Length::Fixed(8.0)).boxed());
     }
     let title_row = title_row
-        .push(close_btn)
-        .push(Space::new().width(Length::Fixed(12.0)))
+        .push(close_btn.boxed())
+        .push(Space::new().width(Length::Fixed(12.0)).boxed())
         .align_y(Alignment::Center)
         .height(Length::Fixed(TITLE_BAR_HEIGHT));
     let title_bar = container(title_row).width(Length::Fill);
@@ -208,7 +208,7 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .center(Length::Fill)
-        .into()
+        .boxed()
     } else {
         let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
         let total = list.filtered.len();
@@ -249,7 +249,7 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
     .width(Length::Fill)
     .align_y(Alignment::Center);
 
-    let scaffold = theme::modal_scaffold(modal_row.into(), on_close, theme::MODAL_BACKDROP_ALPHA);
+    let scaffold = theme::modal_scaffold(modal_row.boxed(), on_close, theme::MODAL_BACKDROP_ALPHA);
 
     // `opaque` (inside the scaffold) captures presses, not scrolls, so the
     // wheel steps the list anywhere over the modal.
@@ -265,7 +265,7 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
                 on_down.clone()
             }
         })
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

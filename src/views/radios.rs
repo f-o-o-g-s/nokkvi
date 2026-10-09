@@ -3,7 +3,7 @@
 //! Flat slot list for internet radio stations. No expansion, no artwork, no star/rating.
 //! Activating a station transitions to ActivePlayback::Radio and plays the stream URL.
 
-use iced::{Alignment, Element, Length, Task, widget::container};
+use iced::{Alignment, Element, Length, Task, Widget as _, widget::container};
 use nokkvi_data::types::radio_station::RadioStation;
 
 use crate::{
@@ -407,7 +407,7 @@ impl RadiosPage {
                         },
                         ..Default::default()
                     })
-                    .into()
+                    .boxed()
                 } else {
                     container(
                         crate::embedded_svg::svg_widget(
@@ -423,7 +423,7 @@ impl RadiosPage {
                     .height(Length::Fixed(art_size))
                     .align_y(Alignment::Center)
                     .align_x(Alignment::Center)
-                    .into()
+                    .boxed()
                 };
 
                 // Name as title; stream URL as subtitle (aids identification when
@@ -531,7 +531,7 @@ impl RadiosPage {
                         None => RadiosMessage::SetOpenMenu(None),
                     },
                 )
-                .into()
+                .boxed()
             },
         );
 

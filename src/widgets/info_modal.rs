@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{
         button, column, container, mouse_area, row, scrollable, space, svg, text, text_editor,
     },
@@ -316,7 +316,7 @@ pub(crate) fn info_modal_overlay<'a>(
                 left: 0.0,
                 right: 0.0,
             })
-            .into()
+            .boxed()
         } else if is_url(value) {
             let url = value.trim().to_string();
             let url_copy = url.clone();
@@ -351,7 +351,7 @@ pub(crate) fn info_modal_overlay<'a>(
                     ..Default::default()
                 }
             })
-            .into()
+            .boxed()
         } else if is_long {
             let chevron_icon = if is_expanded {
                 "assets/icons/chevron-up.svg"
@@ -419,7 +419,7 @@ pub(crate) fn info_modal_overlay<'a>(
                     },
                 });
 
-            column![editor, spoiler_btn].into()
+            column![editor, spoiler_btn].boxed()
         } else {
             let editor = text_editor(content)
                 .on_action(move |action| InfoModalMessage::EditorAction(idx, action))
@@ -447,7 +447,7 @@ pub(crate) fn info_modal_overlay<'a>(
                         c
                     },
                 });
-            editor.into()
+            editor.boxed()
         };
 
         let property_row = {
@@ -474,11 +474,11 @@ pub(crate) fn info_modal_overlay<'a>(
                     border: iced::Border::default(),
                     ..Default::default()
                 })
-                .into()
+                .boxed()
             } else {
                 container(space::horizontal())
                     .width(Length::Fixed(26.0))
-                    .into()
+                    .boxed()
             };
 
             let inner = row![label_cell, value_cell, copy_slot]
@@ -490,7 +490,7 @@ pub(crate) fn info_modal_overlay<'a>(
                 .on_exit(InfoModalMessage::RowHovered(None))
         };
 
-        rows.push(property_row.into());
+        rows.push(property_row.boxed());
 
         // Row separator (skip after last row)
         if idx + 1 < n {
@@ -609,7 +609,7 @@ pub(crate) fn info_modal_overlay<'a>(
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────
     Some(theme::modal_scaffold(
-        dialog_box.into(),
+        dialog_box.boxed(),
         InfoModalMessage::Close,
         theme::MODAL_BACKDROP_ALPHA,
     ))

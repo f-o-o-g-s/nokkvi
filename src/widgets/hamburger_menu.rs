@@ -8,7 +8,7 @@
 //! other overlay menus (player-bar kebab, checkbox dropdowns, context menus).
 
 use iced::{
-    Element, Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
+    Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -24,7 +24,7 @@ use crate::{
     widgets::{
         menu_constants::{
             MENU_HAMBURGER_WIDTH as MENU_WIDTH, MENU_ITEM_HEIGHT, MENU_PADDING, MENU_SHADOW,
-            MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
+            MENU_TEXT_SIZE, menu_layer_bounds,
         },
         menu_dismiss,
     },
@@ -36,7 +36,7 @@ use crate::{
 
 /// Actions that the menu can emit
 #[derive(Debug, Clone, Copy)]
-pub enum MenuAction {
+pub(crate) enum MenuAction {
     ToggleLightMode,
     OpenSettings,
     About,
@@ -52,7 +52,7 @@ pub enum MenuAction {
 /// Open/closed is owned by the parent (controlled component): the parent
 /// passes `is_open` derived from `Nokkvi.open_menu`, and receives open/close
 /// requests through `on_open_change(bool)`.
-pub struct HamburgerMenu<Message> {
+pub(crate) struct HamburgerMenu<Message> {
     icon_handle: Handle,
     /// Called with the selected menu action
     on_action: Box<dyn Fn(MenuAction) -> Message>,
@@ -74,7 +74,7 @@ pub struct HamburgerMenu<Message> {
 }
 
 impl<Message: Clone> HamburgerMenu<Message> {
-    pub fn new(
+    pub(crate) fn new(
         on_action: impl Fn(MenuAction) -> Message + 'static,
         on_open_change: impl Fn(bool) -> Message + 'static,
         is_open: bool,
@@ -99,7 +99,7 @@ impl<Message: Clone> HamburgerMenu<Message> {
     /// Override the chassis dimensions (default 28 × 28). Nav-bar use cases
     /// size to match the adjacent nav-tab cell so hamburger, library
     /// trigger, and tabs share the same row/column band.
-    pub fn chassis(mut self, width: f32, height: f32) -> Self {
+    pub(crate) fn chassis(mut self, width: f32, height: f32) -> Self {
         self.button_width = width;
         self.button_height = height;
         self
@@ -108,7 +108,7 @@ impl<Message: Clone> HamburgerMenu<Message> {
     /// Use player-bar button chassis (44 × 44 button, 20 px icon, `ui_radius_sm()`
     /// in rounded mode). Same flat chrome as the nav-bar use; only the
     /// size and corner radius differ.
-    pub fn player_bar_style(mut self) -> Self {
+    pub(crate) fn player_bar_style(mut self) -> Self {
         self.player_bar_style = true;
         self.button_width = 44.0;
         self.button_height = 44.0;
@@ -116,6 +116,8 @@ impl<Message: Clone> HamburgerMenu<Message> {
         self
     }
 }
+
+impl<Message> iced::advanced::widget::Meta for HamburgerMenu<Message> {}
 
 impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for HamburgerMenu<Message> {
     fn size(&self) -> Size<Length> {
@@ -127,18 +129,18 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(Size::new(self.button_width, self.button_height))
+    ) {
+        tree.size = Size::new(self.button_width, self.button_height);
     }
 
     fn update(
         &mut self,
         _tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -165,7 +167,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -236,7 +238,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -251,10 +253,11 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
     fn overlay<'b>(
         &'b mut self,
         _tree: &'b mut widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         if !self.is_open {
             return Vec::new();
@@ -268,17 +271,11 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         );
 
         vec![overlay::Element::new(Box::new(MenuOverlay {
-            position,
+            bounds: menu_bounds(position, window),
             on_action: &self.on_action,
             on_open_change: &self.on_open_change,
             is_light_mode: self.is_light_mode,
         }))]
-    }
-}
-
-impl<'a, Message: Clone + 'a + 'static> From<HamburgerMenu<Message>> for Element<'a, Message> {
-    fn from(menu: HamburgerMenu<Message>) -> Self {
-        Element::new(menu)
     }
 }
 
@@ -288,7 +285,8 @@ impl<'a, Message: Clone + 'a + 'static> From<HamburgerMenu<Message>> for Element
 
 /// Menu overlay that appears below the hamburger icon
 struct MenuOverlay<'a, Message> {
-    position: Point,
+    /// The visible menu, in window coordinates.
+    bounds: Rectangle,
     on_action: &'a dyn Fn(MenuAction) -> Message,
     on_open_change: &'a dyn Fn(bool) -> Message,
     is_light_mode: bool,
@@ -316,41 +314,42 @@ const SEPARATOR_INDEX: usize = 3; // Separator drawn before this item
 const _: () = assert!(SEPARATOR_INDEX < MENU_ITEM_COUNT);
 const _: () = assert!(matches!(MENU_ITEMS[MENU_ITEM_COUNT - 1], MenuAction::Quit));
 
-impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
-    fn layout(&mut self, _renderer: &iced::Renderer, bounds: Size) -> layout::Node {
-        // Extra 1px for separator line before Quit
-        let menu_height = MENU_ITEM_HEIGHT * MENU_ITEM_COUNT as f32 + MENU_PADDING * 2.0 + 1.0;
+/// The visible menu rectangle: right-aligned under the trigger whose
+/// bottom-right corner is `position`, clamped into the `window`.
+fn menu_bounds(position: Point, window: Size) -> Rectangle {
+    // Extra 1px for separator line before Quit
+    let menu_height = MENU_ITEM_HEIGHT * MENU_ITEM_COUNT as f32 + MENU_PADDING * 2.0 + 1.0;
 
-        // Right-align: position.x is the right edge of the icon button
-        let mut x = self.position.x - MENU_WIDTH;
-        let y = self.position.y;
+    // Right-align: position.x is the right edge of the icon button
+    let mut x = position.x - MENU_WIDTH;
+    let y = position.y;
 
-        // Clamp to viewport
-        if x < 0.0 {
-            x = 0.0;
-        }
-        if x + MENU_WIDTH > bounds.width {
-            x = bounds.width - MENU_WIDTH;
-        }
-
-        let clamped_y = if y + menu_height > bounds.height {
-            (bounds.height - menu_height).max(0.0)
-        } else {
-            y
-        };
-
-        inflate_for_shadow(Size::new(MENU_WIDTH, menu_height), Point::new(x, clamped_y))
+    // Clamp to viewport
+    if x < 0.0 {
+        x = 0.0;
+    }
+    if x + MENU_WIDTH > window.width {
+        x = window.width - MENU_WIDTH;
     }
 
+    let clamped_y = if y + menu_height > window.height {
+        (window.height - menu_height).max(0.0)
+    } else {
+        y
+    };
+
+    Rectangle::new(Point::new(x, clamped_y), Size::new(MENU_WIDTH, menu_height))
+}
+
+impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
     fn update(
         &mut self,
         event: &Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let bounds = visible_menu_bounds(layout.bounds());
+        let bounds = self.bounds;
 
         // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
         // the capture semantics (outside presses deliberately stay
@@ -410,7 +409,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         renderer: &mut iced::Renderer,
         theme: &Theme,
         _defaults: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
         use iced::{
@@ -421,141 +419,145 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             alignment,
         };
 
-        let bounds = visible_menu_bounds(layout.bounds());
+        let bounds = self.bounds;
         let _ = theme; // We use our own theme functions
 
-        // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
-        // and a `ui_radius_md()` corner in rounded mode (flat = 0). The
-        // accent-bright outline of the old design read as "selected"; the
-        // new flat language reserves accent for active-state surfaces
-        // (tabs, buttons), not panel borders.
-        // Shared menu-panel chrome — see `widgets::menu_chrome`.
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds,
-                border: super::menu_chrome::border(),
-                shadow: MENU_SHADOW,
-                ..Default::default()
-            },
-            super::menu_chrome::fill(),
-        );
-
-        // Menu items
-        let items: [(&str, bool); MENU_ITEM_COUNT] = [
-            (
-                if self.is_light_mode {
-                    "Dark Mode"
-                } else {
-                    "Light Mode"
+        // The menu draws in its own layer (above the widgets under it), grown
+        // so the drop shadow isn't scissored.
+        renderer.with_layer(menu_layer_bounds(bounds), |renderer| {
+            // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
+            // and a `ui_radius_md()` corner in rounded mode (flat = 0). The
+            // accent-bright outline of the old design read as "selected"; the
+            // new flat language reserves accent for active-state surfaces
+            // (tabs, buttons), not panel borders.
+            // Shared menu-panel chrome — see `widgets::menu_chrome`.
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    border: super::menu_chrome::border(),
+                    shadow: MENU_SHADOW,
+                    ..Default::default()
                 },
-                true,
-            ),
-            ("Settings", true),
-            ("About", true),
-            ("Quit", true),
-        ];
-        debug_assert_eq!(
-            items.len(),
-            MENU_ITEM_COUNT,
-            "labels array out of sync with MENU_ITEMS"
-        );
+                super::menu_chrome::fill(),
+            );
 
-        let cursor_pos = cursor.position();
-
-        // Track extra offset for separator line
-        let mut separator_offset = 0.0;
-
-        for (i, (label, enabled)) in items.iter().enumerate() {
-            // Draw separator line before Quit item — 1 px `theme::border()`
-            // rule matching the panel outline color so the row band reads
-            // as a continuation of the chrome.
-            if i == SEPARATOR_INDEX {
-                let sep_y =
-                    bounds.y + MENU_PADDING + MENU_ITEM_HEIGHT * i as f32 + separator_offset;
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: bounds.x + 4.0,
-                            y: sep_y,
-                            width: bounds.width - 8.0,
-                            height: 1.0,
-                        },
-                        ..Default::default()
+            // Menu items
+            let items: [(&str, bool); MENU_ITEM_COUNT] = [
+                (
+                    if self.is_light_mode {
+                        "Dark Mode"
+                    } else {
+                        "Light Mode"
                     },
-                    theme::border(),
-                );
-                separator_offset += 1.0;
-            }
+                    true,
+                ),
+                ("Settings", true),
+                ("About", true),
+                ("Quit", true),
+            ];
+            debug_assert_eq!(
+                items.len(),
+                MENU_ITEM_COUNT,
+                "labels array out of sync with MENU_ITEMS"
+            );
 
-            let item_y = bounds.y + MENU_PADDING + MENU_ITEM_HEIGHT * i as f32 + separator_offset;
-            let inset = 1.0 + MENU_PADDING; // border + padding
-            let item_bounds = Rectangle {
-                x: bounds.x + inset,
-                y: item_y,
-                width: bounds.width - inset * 2.0,
-                height: MENU_ITEM_HEIGHT,
-            };
+            let cursor_pos = cursor.position();
 
-            // Hover highlight
-            let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
+            // Track extra offset for separator line
+            let mut separator_offset = 0.0;
 
-            // Hover highlight — `bg2()` fill with `ui_radius_xs()` corners
-            // so the highlight nests neatly inside a `ui_radius_md()`
-            // panel without sharing the larger outer curve.
-            if is_hovered && *enabled {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: item_bounds,
-                        border: iced::Border {
-                            radius: theme::ui_radius_xs(),
+            for (i, (label, enabled)) in items.iter().enumerate() {
+                // Draw separator line before Quit item — 1 px `theme::border()`
+                // rule matching the panel outline color so the row band reads
+                // as a continuation of the chrome.
+                if i == SEPARATOR_INDEX {
+                    let sep_y =
+                        bounds.y + MENU_PADDING + MENU_ITEM_HEIGHT * i as f32 + separator_offset;
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: bounds.x + 4.0,
+                                y: sep_y,
+                                width: bounds.width - 8.0,
+                                height: 1.0,
+                            },
                             ..Default::default()
                         },
-                        ..Default::default()
+                        theme::border(),
+                    );
+                    separator_offset += 1.0;
+                }
+
+                let item_y =
+                    bounds.y + MENU_PADDING + MENU_ITEM_HEIGHT * i as f32 + separator_offset;
+                let inset = 1.0 + MENU_PADDING; // border + padding
+                let item_bounds = Rectangle {
+                    x: bounds.x + inset,
+                    y: item_y,
+                    width: bounds.width - inset * 2.0,
+                    height: MENU_ITEM_HEIGHT,
+                };
+
+                // Hover highlight
+                let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
+
+                // Hover highlight — `bg2()` fill with `ui_radius_xs()` corners
+                // so the highlight nests neatly inside a `ui_radius_md()`
+                // panel without sharing the larger outer curve.
+                if is_hovered && *enabled {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: item_bounds,
+                            border: iced::Border {
+                                radius: theme::ui_radius_xs(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                        theme::bg2(),
+                    );
+                }
+
+                // Text color
+                let text_color = if !enabled {
+                    theme::fg4() // grayed out for placeholder
+                } else if is_hovered {
+                    theme::fg0()
+                } else {
+                    theme::fg1()
+                };
+
+                renderer.fill_text(
+                    Text {
+                        content: label.to_string(),
+                        bounds: Size::new(item_bounds.width, item_bounds.height),
+                        size: MENU_TEXT_SIZE.into(),
+                        line_height: crate::theme::UI_LINE_HEIGHT,
+                        font: theme::weighted_ui_font(iced::font::Weight::Medium),
+                        align_x: alignment::Horizontal::Left.into(),
+                        align_y: alignment::Vertical::Center,
+                        shaping: iced::advanced::text::Shaping::default(),
+                        wrapping: iced::advanced::text::Wrapping::None,
+                        ellipsis: iced::advanced::text::Ellipsis::default(),
+                        hint_factor: Some(1.0),
                     },
-                    theme::bg2(),
+                    Point::new(
+                        item_bounds.x + MENU_TEXT_PADDING_LEFT,
+                        item_bounds.center_y(),
+                    ),
+                    text_color,
+                    item_bounds,
                 );
             }
-
-            // Text color
-            let text_color = if !enabled {
-                theme::fg4() // grayed out for placeholder
-            } else if is_hovered {
-                theme::fg0()
-            } else {
-                theme::fg1()
-            };
-
-            renderer.fill_text(
-                Text {
-                    content: label.to_string(),
-                    bounds: Size::new(item_bounds.width, item_bounds.height),
-                    size: MENU_TEXT_SIZE.into(),
-                    line_height: crate::theme::UI_LINE_HEIGHT,
-                    font: theme::weighted_ui_font(iced::font::Weight::Medium),
-                    align_x: alignment::Horizontal::Left.into(),
-                    align_y: alignment::Vertical::Center,
-                    shaping: iced::advanced::text::Shaping::default(),
-                    wrapping: iced::advanced::text::Wrapping::None,
-                    ellipsis: iced::advanced::text::Ellipsis::default(),
-                    hint_factor: Some(1.0),
-                },
-                Point::new(
-                    item_bounds.x + MENU_TEXT_PADDING_LEFT,
-                    item_bounds.center_y(),
-                ),
-                text_color,
-                item_bounds,
-            );
-        }
+        });
     }
 
     fn mouse_interaction(
         &self,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(visible_menu_bounds(layout.bounds())) {
+        if cursor.is_over(self.bounds) {
             mouse::Interaction::Pointer
         } else {
             mouse::Interaction::default()

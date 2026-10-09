@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Border, Element, Length,
+    Alignment, Border, Element, Length, Widget as _,
     font::Weight,
     widget::{Space, column, container, image, mouse_area, row, svg, text},
 };
@@ -195,7 +195,7 @@ fn render_picker_slot<'a>(
             },
             ..Default::default()
         })
-        .into(),
+        .boxed(),
         PickerEntry::Playlist { id, .. } => {
             let handle = playlist_art.get(id).cloned();
             if let Some(h) = handle {
@@ -215,7 +215,7 @@ fn render_picker_slot<'a>(
                     ..Default::default()
                 })
                 .clip(true)
-                .into()
+                .boxed()
             } else {
                 container(
                     embedded_svg::svg_widget("assets/icons/list-music.svg")
@@ -236,7 +236,7 @@ fn render_picker_slot<'a>(
                     },
                     ..Default::default()
                 })
-                .into()
+                .boxed()
             }
         }
     };
@@ -296,7 +296,7 @@ fn render_picker_slot<'a>(
     mouse_area(body)
         .on_press(DefaultPlaylistPickerMessage::ClickItem(item_index))
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

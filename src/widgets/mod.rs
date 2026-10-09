@@ -64,6 +64,7 @@ pub(crate) mod volume_slider;
 
 // Re-export commonly used items
 pub(crate) use eq_modal::{EqModalMessage, PresetChoice, eq_modal_overlay};
+use iced::Widget as _;
 pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
 pub(crate) use player_bar::{PlayerBarMessage, PlayerBarViewData, player_bar};
 pub(crate) use side_nav_bar::{SideNavBarData, side_nav_bar};
@@ -111,14 +112,14 @@ fn base_slot_list_empty_content<'a, M: 'a>(message: &'a str) -> iced::Element<'a
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .style(theme::container_bg0_hard)
-    .into()
+    .boxed()
 }
 
 /// Empty state that routes through base_slot_list_layout to preserve widget tree
 /// structure (and thus text_input focus) when transitioning between results/no-results.
 /// Use this instead of empty_state_message for views that use base_slot_list_layout.
 pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
-    header: impl Into<iced::Element<'a, M>>,
+    header: iced::Element<'a, M>,
     message: &'a str,
     layout_config: &crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig,
 ) -> iced::Element<'a, M> {
@@ -133,7 +134,7 @@ pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
     // (Row when artwork is visible, Column when not) as the normal results path.
     // Passing None here would switch from Row→Column, destroying text_input focus.
     let artwork = base_slot_list_empty_artwork(layout_config);
-    base_slot_list_layout(layout_config, header.into(), empty_content, artwork)
+    base_slot_list_layout(layout_config, header, empty_content, artwork)
 }
 
 /// Empty state whose message area is also a cross-pane-drag drop target.
@@ -147,7 +148,7 @@ pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
 /// trailing empty slots do. Requires `M: Clone` because the hover messages are
 /// re-emitted across events.
 pub(crate) fn base_slot_list_empty_state_with_hover<'a, M: Clone + 'a>(
-    header: impl Into<iced::Element<'a, M>>,
+    header: iced::Element<'a, M>,
     message: &'a str,
     layout_config: &crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig,
     on_enter: M,
@@ -164,10 +165,10 @@ pub(crate) fn base_slot_list_empty_state_with_hover<'a, M: Clone + 'a>(
         .on_enter(on_enter)
         .on_exit(on_exit)
         .on_move(move |_pt| move_msg.clone())
-        .into();
+        .boxed();
 
     let artwork = base_slot_list_empty_artwork(layout_config);
-    base_slot_list_layout(layout_config, header.into(), empty_content, artwork)
+    base_slot_list_layout(layout_config, header, empty_content, artwork)
 }
 
 #[cfg(test)]

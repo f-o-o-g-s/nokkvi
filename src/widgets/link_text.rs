@@ -6,7 +6,7 @@
 //! to prevent them from bubbling to the parent row.
 
 use iced::{
-    Background, Color, Element, Event, Length, Pixels, Rectangle, Size, Theme,
+    Background, Color, Event, Length, Pixels, Rectangle, Size, Theme,
     advanced::{
         Layout, Renderer as AdvancedRenderer, Shell, Widget, layout, mouse, renderer,
         text::{self as advanced_text, Renderer as TextRenderer, Shaping, Text},
@@ -23,7 +23,7 @@ struct State {
     is_hovered: bool,
 }
 
-pub struct LinkText<M> {
+pub(crate) struct LinkText<M> {
     content: String,
     size: Pixels,
     font: Font,
@@ -33,7 +33,7 @@ pub struct LinkText<M> {
 }
 
 impl<M> LinkText<M> {
-    pub fn new(content: impl Into<String>) -> Self {
+    pub(crate) fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
             size: Pixels(14.0),
@@ -44,31 +44,33 @@ impl<M> LinkText<M> {
         }
     }
 
-    pub fn size(mut self, size: impl Into<Pixels>) -> Self {
+    pub(crate) fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.size = size.into();
         self
     }
 
-    pub fn font(mut self, font: Font) -> Self {
+    pub(crate) fn font(mut self, font: Font) -> Self {
         self.font = font;
         self
     }
 
-    pub fn color(mut self, color: impl Into<Color>) -> Self {
+    pub(crate) fn color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
     }
 
-    pub fn hover_color(mut self, color: impl Into<Color>) -> Self {
+    pub(crate) fn hover_color(mut self, color: impl Into<Color>) -> Self {
         self.hover_color = Some(color.into());
         self
     }
 
-    pub fn on_press(mut self, msg: Option<M>) -> Self {
+    pub(crate) fn on_press(mut self, msg: Option<M>) -> Self {
         self.on_press = msg;
         self
     }
 }
+
+impl<M> iced::advanced::widget::Meta for LinkText<M> {}
 
 impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
     fn tag(&self) -> widget::tree::Tag {
@@ -86,15 +88,10 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
         }
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) {
         let state = tree.state.downcast_mut::<State>();
 
-        layout::sized(limits, Length::Shrink, Length::Shrink, |limits| {
+        tree.size = layout::sized(limits, Length::Shrink, Length::Shrink, |limits| {
             let bounds = limits.bounds();
 
             let text = Text {
@@ -113,14 +110,14 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
             state.constrained.update(text);
 
             state.constrained.min_bounds()
-        })
+        });
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, M>,
@@ -147,7 +144,7 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
     fn mouse_interaction(
         &self,
         _tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -165,7 +162,7 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -205,11 +202,5 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
                 Background::Color(color),
             );
         }
-    }
-}
-
-impl<'a, M: Clone + 'static> From<LinkText<M>> for Element<'a, M> {
-    fn from(link: LinkText<M>) -> Self {
-        Element::new(link)
     }
 }

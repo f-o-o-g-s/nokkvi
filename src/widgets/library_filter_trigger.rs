@@ -37,7 +37,7 @@
 //! both render side-by-side on the right edge of the nav bar.
 
 use iced::{
-    Element, Event, Length, Point, Radians, Rectangle, Size, Theme,
+    Event, Length, Point, Radians, Rectangle, Size, Theme, Widget as _,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -109,7 +109,7 @@ where
     // first `refresh_libraries` lands; we don't want a brief flicker of
     // the trigger before the count arrives.
     if library_count <= 1 {
-        return iced::widget::Space::new().into();
+        return iced::widget::Space::new().boxed();
     }
 
     // Clamp active_count to the inclusive bound. A `> library_count`
@@ -126,7 +126,7 @@ where
         }
     };
 
-    Element::new(LibraryFilterTrigger {
+    LibraryFilterTrigger {
         mode,
         is_open,
         neutral_size,
@@ -135,7 +135,8 @@ where
             crate::embedded_svg::get_svg("assets/icons/library.svg").as_bytes(),
         ),
         on_open_change: Box::new(on_open_change),
-    })
+    }
+    .boxed()
 }
 
 // ============================================================================
@@ -176,6 +177,8 @@ impl<Message> LibraryFilterTrigger<'_, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for LibraryFilterTrigger<'_, Message> {}
+
 impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     for LibraryFilterTrigger<'a, Message>
 {
@@ -189,19 +192,19 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         let c = self.chassis();
-        layout::Node::new(Size::new(c.width, c.height))
+        tree.size = Size::new(c.width, c.height);
     }
 
     fn update(
         &mut self,
         _tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -232,7 +235,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -355,7 +358,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -368,18 +371,14 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     }
 }
 
-impl<'a, Message: Clone + 'a> From<LibraryFilterTrigger<'a, Message>> for Element<'a, Message> {
-    fn from(trigger: LibraryFilterTrigger<'a, Message>) -> Self {
-        Element::new(trigger)
-    }
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
+    use iced::Element;
+
     use super::*;
 
     /// Stand-in message type — the trigger never publishes on construction,

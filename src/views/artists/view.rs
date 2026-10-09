@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Row, container, image},
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
@@ -45,7 +45,7 @@ impl ArtistsPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
@@ -267,7 +267,8 @@ impl ArtistsPage {
                     col = col.push(
                         iced::widget::container(row)
                             .width(iced::Length::Shrink)
-                            .center_x(iced::Length::Fill),
+                            .center_x(iced::Length::Fill)
+                            .boxed(),
                     );
                 }
 
@@ -277,7 +278,8 @@ impl ArtistsPage {
                     col = col.push(
                         iced::widget::container(row)
                             .width(iced::Length::Shrink)
-                            .center_x(iced::Length::Fill),
+                            .center_x(iced::Length::Fill)
+                            .boxed(),
                     );
                 }
 
@@ -340,13 +342,13 @@ impl ArtistsPage {
                                 ..Default::default()
                             }
                         });
-                        bio_col = bio_col.push(read_more_btn);
+                        bio_col = bio_col.push(read_more_btn.boxed());
                     }
 
-                    col = col.push(bio_col);
+                    col = col.push(bio_col.boxed());
                 }
 
-                col.into()
+                col.boxed()
             });
 
         // Artists artwork panel has no menu entries wired up, but still
@@ -567,7 +569,8 @@ impl ArtistsPage {
                     ..Default::default()
                 })
                 .align_x(Alignment::Center)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .boxed(),
             );
         }
 

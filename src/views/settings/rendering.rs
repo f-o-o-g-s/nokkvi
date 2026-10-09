@@ -5,7 +5,7 @@
 //! - Color sub-list slots (gradient editing)
 
 use iced::{
-    Alignment, Border, Color, Element, Length, Padding,
+    Alignment, Border, Color, Element, Length, Padding, Widget as _,
     font::{Font, Weight},
     widget::{Row, Space, button, column, container, row, svg, text, text::Wrapping, text_input},
 };
@@ -78,7 +78,7 @@ fn highlighted_label<'a>(
     let label = &item.label;
     let spans = match spans {
         Some(spans) if !spans.is_empty() => spans,
-        _ => return seg(label.clone(), base_color, weight).into(),
+        _ => return seg(label.clone(), base_color, weight).boxed(),
     };
 
     let highlight = theme::accent_bright();
@@ -99,21 +99,21 @@ fn highlighted_label<'a>(
             continue;
         }
         if cursor < start {
-            segments.push(seg(label[cursor..start].to_string(), base_color, weight).into());
+            segments.push(seg(label[cursor..start].to_string(), base_color, weight).boxed());
         }
-        segments.push(seg(label[start..end].to_string(), highlight, Weight::Bold).into());
+        segments.push(seg(label[start..end].to_string(), highlight, Weight::Bold).boxed());
         cursor = end;
     }
     if cursor < label.len() {
-        segments.push(seg(label[cursor..].to_string(), base_color, weight).into());
+        segments.push(seg(label[cursor..].to_string(), base_color, weight).boxed());
     }
     if segments.is_empty() {
-        return seg(label.clone(), base_color, weight).into();
+        return seg(label.clone(), base_color, weight).boxed();
     }
     Row::with_children(segments)
         .spacing(0)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Transparent button style — no background, no border. Used for clickable
@@ -171,7 +171,7 @@ fn render_badge<'a>(
         chip = chip.width(Length::Fixed(width)).align_x(Alignment::Center);
     }
 
-    chip.into()
+    chip.boxed()
 }
 
 /// Render an inline hex color editor (text input + preview swatch).
@@ -209,7 +209,7 @@ fn render_hex_editor<'a>(
     row![preview_swatch, input]
         .spacing(6)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -274,7 +274,7 @@ fn with_cursor_stripe<'a>(
             background: Some(row_bg.into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Pin a 1 px [`theme::border()`] separator under a row. `is_center` controls
@@ -298,7 +298,7 @@ fn row_with_bottom_separator<'a>(
     ]
     .width(Length::Fill)
     .height(Length::Fill)
-    .into()
+    .boxed()
 }
 
 /// Render the value display based on SettingValue type
@@ -410,14 +410,14 @@ fn render_numeric_row<'a>(
     .align_y(Alignment::Center);
     if let Some(track_el) = track {
         layout = layout
-            .push(Space::new().width(Length::Fixed(10.0)))
+            .push(Space::new().width(Length::Fixed(10.0)).boxed())
             .push(track_el);
     }
     layout = layout
-        .push(Space::new().width(Length::Fixed(8.0)))
+        .push(Space::new().width(Length::Fixed(8.0)).boxed())
         .push(right_arrow);
 
-    layout.into()
+    layout.boxed()
 }
 
 /// 22×22 flat arrow button — 1 px [`theme::border()`] outline, [`theme::bg0()`]
@@ -461,7 +461,7 @@ fn arrow_button<'a>(
     if is_center {
         btn = btn.on_press(on_press);
     }
-    btn.into()
+    btn.boxed()
 }
 
 /// Slider track sitting between the value badge and the right stepper.
@@ -479,7 +479,7 @@ fn numeric_slider_track<'a>(
         .width(Length::Fixed(NUMERIC_TRACK_WIDTH))
         .enabled(is_center)
         .opacity(eff_opacity)
-        .into()
+        .boxed()
 }
 
 /// Compute the value's normalized 0..1 fraction within its `min..max` range,
@@ -662,7 +662,7 @@ fn render_hex_value_chip<'a>(
     row![hex_label, swatch]
         .spacing(10)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Small swatch strip for ColorArray rows — N tiny `theme::border()`-outlined
@@ -679,7 +679,9 @@ fn render_color_array_swatches<'a>(
     let swatch_size = (font_size * 0.95).clamp(10.0, 16.0);
     let border = scale_alpha_local(theme::border(), eff_opacity);
 
-    let mut r = row![].spacing(2).align_y(Alignment::Center);
+    let mut r = iced::widget::Row::<Element<'_, _>>::new()
+        .spacing(2)
+        .align_y(Alignment::Center);
     for hex in colors.iter().take(8) {
         let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
         let fill = scale_alpha_local(parsed, eff_opacity);
@@ -695,16 +697,20 @@ fn render_color_array_swatches<'a>(
                         radius: theme::ui_radius_xs(),
                     },
                     ..Default::default()
-                }),
+                })
+                .boxed(),
         );
     }
-    r = r.push(Space::new().width(Length::Fixed(8.0)));
-    r = r.push(slot_list::slot_list_text(
-        format!("{}", colors.len()),
-        font_size * 0.85,
-        count_label_color,
-    ));
-    r.into()
+    r = r.push(Space::new().width(Length::Fixed(8.0)).boxed());
+    r = r.push(
+        slot_list::slot_list_text(
+            format!("{}", colors.len()),
+            font_size * 0.85,
+            count_label_color,
+        )
+        .boxed(),
+    );
+    r.boxed()
 }
 
 // ============================================================================
@@ -807,7 +813,7 @@ fn hotkey_idle_badge<'a>(
             .height(Length::Fixed(0.0)),
         badge,
     ]
-    .into()
+    .boxed()
 }
 
 /// Capture / conflict badge — transparent fill, colored border + text, with
@@ -835,12 +841,8 @@ fn hotkey_capture_badge<'a>(
 
     if let Some(h) = hint {
         body = body
-            .push(Space::new().width(Length::Fixed(8.0)))
-            .push(slot_list::slot_list_text(
-                h.to_string(),
-                hint_size,
-                hint_color,
-            ));
+            .push(Space::new().width(Length::Fixed(8.0)).boxed())
+            .push(slot_list::slot_list_text(h.to_string(), hint_size, hint_color).boxed());
     }
 
     container(body)
@@ -854,7 +856,7 @@ fn hotkey_capture_badge<'a>(
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Local copy of the pill widget's alpha scaler (kept private to avoid
@@ -942,7 +944,7 @@ pub(crate) fn render_color_slot<'a>(
     let value_display: Element<'a, SettingsMessage> = if is_editing {
         render_hex_editor(hex_input, value_size, 16.0)
     } else {
-        slot_list::slot_list_text(hex_color.to_uppercase(), value_size, subtext_color).into()
+        slot_list::slot_list_text(hex_color.to_uppercase(), value_size, subtext_color).boxed()
     };
 
     let value_col = container(value_display)
@@ -964,7 +966,7 @@ pub(crate) fn render_color_slot<'a>(
     .align_y(Alignment::Center)
     .height(Length::Fill);
 
-    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let body = with_cursor_stripe(content.boxed(), ctx.is_center);
     let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
     button(with_separator)
@@ -976,7 +978,7 @@ pub(crate) fn render_color_slot<'a>(
         .style(transparent_button_style)
         .padding(0)
         .width(Length::Fill)
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -1050,7 +1052,7 @@ pub(crate) fn render_font_slot<'a>(
         .align_y(Alignment::Center)
         .height(Length::Fill);
 
-    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let body = with_cursor_stripe(content.boxed(), ctx.is_center);
     let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
     button(with_separator)
@@ -1062,7 +1064,7 @@ pub(crate) fn render_font_slot<'a>(
         .style(transparent_button_style)
         .padding(0)
         .width(Length::Fill)
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -1176,7 +1178,7 @@ pub(crate) fn render_theme_slot<'a>(
             ..Default::default()
         });
 
-    let with_separator = row_with_bottom_separator(body.into(), ctx.is_center);
+    let with_separator = row_with_bottom_separator(body.boxed(), ctx.is_center);
 
     button(with_separator)
         .on_press(if ctx.is_center {
@@ -1187,7 +1189,7 @@ pub(crate) fn render_theme_slot<'a>(
         .style(transparent_button_style)
         .padding(0)
         .width(Length::Fill)
-        .into()
+        .boxed()
 }
 
 // ============================================================================
@@ -1265,7 +1267,7 @@ pub(crate) fn render_detail_header<'a>(
                 .left(24.0)
                 .right(28.0),
         )
-        .into()
+        .boxed()
 }
 
 /// One settings detail row's display state, by name: `is_focused`,
@@ -1361,7 +1363,7 @@ pub(crate) fn render_detail_row<'a>(
         row![label_text, inline_icon]
             .spacing(5)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
     } else {
         label_text
     };
@@ -1372,7 +1374,8 @@ pub(crate) fn render_detail_row<'a>(
             text(help.to_string())
                 .size(help_size)
                 .color(theme::fg3())
-                .font(theme::ui_font()),
+                .font(theme::ui_font())
+                .boxed(),
         );
     }
 
@@ -1393,7 +1396,7 @@ pub(crate) fn render_detail_row<'a>(
                 .font(theme::ui_font()),
         ]
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
     } else {
         value_widget
     };
@@ -1473,7 +1476,7 @@ pub(crate) fn render_detail_row<'a>(
         .style(transparent_button_style)
         .padding(0)
         .width(Length::Fill)
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

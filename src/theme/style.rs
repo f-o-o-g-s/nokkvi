@@ -1,7 +1,7 @@
 //! Reusable widget style helpers — containers, separators, modal chrome,
 //! settings inputs, the iced Theme bridge, and toast level colors.
 
-use iced::Color;
+use iced::{Color, Widget as _};
 // ============================================================================
 // Container Style Helpers
 // ============================================================================
@@ -62,7 +62,7 @@ pub(crate) fn horizontal_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, 
             background: Some(border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Fixed-height vertical separator line (1px wide, `border()` colored).
@@ -82,7 +82,7 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
             background: Some(border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 // ----------------------------------------------------------------------------
@@ -110,7 +110,7 @@ pub(crate) fn modal_row_separator<'a, M: 'a>() -> iced::Element<'a, M> {
             background: Some(border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// 1-px horizontal separator under a modal's header.
@@ -129,7 +129,7 @@ pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
             background: Some(border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 // `NavSeparatorAxis` + `nav_separator` were the canonical "2-px nav-bar
@@ -180,7 +180,7 @@ pub(crate) fn modal_scaffold<'a, M: Clone + 'a>(
             }),
     )
     .on_press(on_backdrop_press);
-    opaque(backdrop)
+    opaque(backdrop).boxed()
 }
 
 /// Conventional backdrop alpha used by every overlay modal.

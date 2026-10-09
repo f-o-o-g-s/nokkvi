@@ -22,10 +22,10 @@
 //! recreated freely on every render without losing the in-flight drag.
 
 use iced::{
-    Color, Element, Length, Rectangle, Size,
+    Color, Element, Length, Rectangle, Size, Widget as _,
     advanced::{
         Shell,
-        layout::{self, Layout, Limits},
+        layout::{Layout, Limits},
         renderer,
         widget::{Tree, Widget, tree},
     },
@@ -188,6 +188,8 @@ impl<'a, Message> ArtworkSplitHandle<'a, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for ArtworkSplitHandle<'_, Message> {}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for ArtworkSplitHandle<'_, Message>
 where
     Renderer: renderer::Renderer,
@@ -204,15 +206,15 @@ where
         self.axis.size(self.thickness)
     }
 
-    fn layout(&mut self, _tree: &mut Tree, _renderer: &Renderer, limits: &Limits) -> layout::Node {
-        layout::Node::new(self.axis.layout_size(limits.bounds(), self.thickness))
+    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits) {
+        tree.size = self.axis.layout_size(limits.bounds(), self.thickness);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
@@ -276,7 +278,7 @@ where
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
@@ -301,7 +303,7 @@ where
         renderer: &mut Renderer,
         _theme: &Theme,
         _defaults: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -335,16 +337,6 @@ where
     }
 }
 
-impl<'a, Message: 'a, Theme, Renderer> From<ArtworkSplitHandle<'a, Message>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Renderer: renderer::Renderer,
-{
-    fn from(handle: ArtworkSplitHandle<'a, Message>) -> Self {
-        Self::new(handle)
-    }
-}
-
 /// Convenience constructor for the right-hand horizontal artwork column.
 /// Reads `theme::artwork_column_width_pct()` so the drag is anchored to the
 /// displayed width fraction.
@@ -365,7 +357,7 @@ where
         move |pct| on_change(DragEvent::Change(pct)),
         move |pct| on_commit(DragEvent::Commit(pct)),
     )
-    .into()
+    .boxed()
 }
 
 /// Convenience constructor for the Always-Vertical artwork stack. Reads
@@ -388,5 +380,5 @@ where
         move |pct| on_change(DragEvent::Change(pct)),
         move |pct| on_commit(DragEvent::Commit(pct)),
     )
-    .into()
+    .boxed()
 }

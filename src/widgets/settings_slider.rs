@@ -16,7 +16,7 @@
 //! [`SettingValue::set_fraction`]: nokkvi_data::types::setting_value::SettingValue::set_fraction
 
 use iced::{
-    Color, Element, Event, Length, Point, Rectangle, Size, Theme,
+    Color, Event, Length, Point, Rectangle, Size, Theme,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -40,7 +40,7 @@ pub(crate) struct State {
 }
 
 /// Draggable settings slider. Emits a fraction in `[0.0, 1.0]`.
-pub struct SettingsSlider<'a, Message> {
+pub(crate) struct SettingsSlider<'a, Message> {
     fraction: f32,
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
     width: Length,
@@ -52,7 +52,7 @@ pub struct SettingsSlider<'a, Message> {
 impl<'a, Message> SettingsSlider<'a, Message> {
     /// Build a slider showing `fraction` (clamped to `[0.0, 1.0]`). `on_change`
     /// receives a fresh fraction on click + every drag tick.
-    pub fn new<F>(fraction: f32, on_change: F) -> Self
+    pub(crate) fn new<F>(fraction: f32, on_change: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -66,7 +66,7 @@ impl<'a, Message> SettingsSlider<'a, Message> {
         }
     }
 
-    pub fn width(mut self, width: impl Into<Length>) -> Self {
+    pub(crate) fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
     }
@@ -75,14 +75,14 @@ impl<'a, Message> SettingsSlider<'a, Message> {
     /// input — clicks bubble through to whatever sits behind it. Used to keep
     /// non-focused rows in a settings detail pane visually consistent while
     /// letting a click on the row focus it via the surrounding row-button.
-    pub fn enabled(mut self, enabled: bool) -> Self {
+    pub(crate) fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
     /// Multiply every drawn color's alpha by this value. Used by the settings
     /// detail pane to dim non-focused rows.
-    pub fn opacity(mut self, opacity: f32) -> Self {
+    pub(crate) fn opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
@@ -93,6 +93,8 @@ impl<'a, Message> SettingsSlider<'a, Message> {
             .unwrap_or(0.0)
     }
 }
+
+impl<Message> iced::advanced::widget::Meta for SettingsSlider<'_, Message> {}
 
 impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'_, Message> {
     fn tag(&self) -> widget::tree::Tag {
@@ -112,18 +114,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::atomic(limits, self.width, Length::Fixed(self.height))
+    ) {
+        tree.size = layout::atomic(limits, self.width, Length::Fixed(self.height));
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -181,7 +183,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -263,7 +265,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -273,12 +275,6 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
         }
         let state = tree.state.downcast_ref::<State>();
         slider_drag::grab_interaction(state.drag.is_dragging(), cursor.is_over(layout.bounds()))
-    }
-}
-
-impl<'a, Message: Clone + 'a> From<SettingsSlider<'a, Message>> for Element<'a, Message> {
-    fn from(slider: SettingsSlider<'a, Message>) -> Self {
-        Element::new(slider)
     }
 }
 

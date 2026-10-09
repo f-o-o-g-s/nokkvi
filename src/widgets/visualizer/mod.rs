@@ -9,6 +9,7 @@ mod onset;
 mod particles;
 mod pipeline;
 mod reflection;
+use iced::Widget as _;
 pub(crate) use reflection::WATER_LINE;
 pub(crate) mod shader;
 pub(crate) mod state;
@@ -808,7 +809,7 @@ impl Visualizer {
             })
             .width(Length::Fill)
             .height(Length::Fill)
-            .into();
+            .boxed();
         }
 
         // Read behavior config from shared config (hot-reload from config.toml)
@@ -825,7 +826,7 @@ impl Visualizer {
         shader(shader_viz)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .boxed()
     }
 }
 

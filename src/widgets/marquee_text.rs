@@ -8,7 +8,7 @@
 use std::time::Instant;
 
 use iced::{
-    Color, Element, Length, Pixels, Rectangle, Size, Theme, Vector,
+    Color, Length, Pixels, Rectangle, Size, Theme, Vector,
     advanced::{
         Renderer, layout, renderer,
         text::{
@@ -140,6 +140,8 @@ impl MarqueeText {
     }
 }
 
+impl iced::advanced::widget::Meta for MarqueeText {}
+
 impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
@@ -161,13 +163,13 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
         tree: &mut widget::Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
 
         // Follow Iced's native text layout pattern: layout::sized() resolves
         // Length::Fill/Shrink against limits, then we build the paragraph with
         // the resolved bounds and return min_bounds().
-        layout::sized(limits, Length::Fill, Length::Shrink, |limits| {
+        tree.size = layout::sized(limits, Length::Fill, Length::Shrink, |limits| {
             let bounds = limits.bounds();
 
             let text = Text {
@@ -226,7 +228,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
             state.was_overflowing = now_overflowing;
 
             state.constrained.min_bounds()
-        })
+        });
     }
 
     fn draw(
@@ -235,7 +237,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: layout::Layout<'_>,
+        layout: layout::Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -320,7 +322,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
         &mut self,
         tree: &mut widget::Tree,
         _event: &iced::Event,
-        layout: layout::Layout<'_>,
+        layout: layout::Layout,
         _cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         _shell: &mut iced::advanced::Shell<'_, M>,
@@ -337,18 +339,12 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        _layout: layout::Layout<'_>,
+        _layout: layout::Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         mouse::Interaction::default()
-    }
-}
-
-impl<'a, M: 'static> From<MarqueeText> for Element<'a, M> {
-    fn from(marquee: MarqueeText) -> Self {
-        Element::new(marquee)
     }
 }
 

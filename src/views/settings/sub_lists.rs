@@ -4,7 +4,7 @@
 //! Extracted from mod.rs to reduce file size.
 
 use iced::{
-    Alignment, Color, Element, Length, Padding,
+    Alignment, Color, Element, Length, Padding, Widget as _,
     font::Weight,
     widget::{Space, button, column, container, row, svg, text},
 };
@@ -493,7 +493,7 @@ impl SettingsPage {
             .width(Length::Fill)
             .height(Length::Fill)
             .center(Length::Fill)
-            .into();
+            .boxed();
         }
 
         let config = slot_list::SlotListConfig::with_dynamic_slots(
@@ -585,6 +585,6 @@ impl SettingsPage {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        slot_list::slot_list_background_container(content.into())
+        slot_list::slot_list_background_container(content.boxed())
     }
 }

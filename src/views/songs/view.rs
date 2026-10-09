@@ -6,7 +6,7 @@
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Row, container},
 };
 use nokkvi_data::utils::formatters;
@@ -29,7 +29,7 @@ impl SongsPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
@@ -319,7 +319,7 @@ impl SongsPage {
                             .hover_color(style.hover_text_color)
                             .font(crate::theme::ui_font())
                             .on_press(if links_enabled { click } else { None })
-                            .into()
+                            .boxed()
                     };
                     let content: Element<'_, SongsMessage> = match (show_album, show_genre) {
                         (true, true) => {
@@ -328,7 +328,7 @@ impl SongsPage {
                                 make_link(genre_label, m.genre_stack_size, genre_click);
                             column![album_widget, genre_widget]
                                 .spacing(crate::widgets::slot_list::SLOT_LIST_STACK_SPACING)
-                                .into()
+                                .boxed()
                         }
                         (true, false) => make_link(song_album, metadata_size, album_click),
                         (false, true) => make_link(genre_label, metadata_size, genre_click),
@@ -339,7 +339,8 @@ impl SongsPage {
                             .width(Length::FillPortion(ALBUM_PORTION))
                             .height(Length::Fill)
                             .clip(true)
-                            .align_y(Alignment::Center),
+                            .align_y(Alignment::Center)
+                            .boxed(),
                     );
                 }
 
@@ -369,7 +370,8 @@ impl SongsPage {
                         .width(Length::FillPortion(PLAYS_PORTION))
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                     );
                 }
 
@@ -395,7 +397,8 @@ impl SongsPage {
                         .width(Length::FillPortion(DURATION_PORTION))
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                     );
                 }
 
@@ -416,7 +419,8 @@ impl SongsPage {
                             ..Default::default()
                         })
                         .align_x(Alignment::Center)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                     );
                 }
 
@@ -551,7 +555,7 @@ impl SongsPage {
                     col = col.push(row);
                 }
 
-                col.into()
+                col.boxed()
             });
 
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =

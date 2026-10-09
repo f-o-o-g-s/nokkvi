@@ -6,7 +6,7 @@
 //! Layout: `FLAC 44.1kHz │ │ title: xxx │ artist: xxx │ album: xxx │ │ 1411kbps`
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     font::Weight,
     widget::{container, mouse_area, row, space, text, tooltip},
 };
@@ -149,9 +149,9 @@ pub(crate) fn bit_perfect_badge_widget<'a, M: 'a>(
             )
             .gap(4)
             .style(theme::container_tooltip)
-            .into(),
+            .boxed(),
         ),
-        None => Some(badge.into()),
+        None => Some(badge.boxed()),
     }
 }
 
@@ -195,28 +195,26 @@ pub(crate) struct TrackInfoStripData<'a> {
 /// Returns the input `row` with the radio fields appended, ready for the
 /// caller to add any further trailing content.
 pub(crate) fn columnar_radio_strip<'a, M: 'static, F>(
-    mut row_in: iced::widget::Row<'a, M>,
+    mut row_in: iced::widget::Row<Element<'a, M>>,
     radio_name: &str,
     icy_title: &str,
     icy_artist: &str,
     radio_url: Option<&str>,
     info_sep: F,
-) -> iced::widget::Row<'a, M>
+) -> iced::widget::Row<Element<'a, M>>
 where
     F: Fn() -> Element<'a, M>,
 {
     row_in = row_in.push(info_sep());
-    row_in = row_in.push(super::nav_bar::colored_icon(
-        RADIO_TOWER_ICON_PATH,
-        12.0,
-        theme::fg4(),
-    ));
+    row_in = row_in
+        .push(super::nav_bar::colored_icon(RADIO_TOWER_ICON_PATH, 12.0, theme::fg4()).boxed());
 
     row_in = row_in.push(
         text(radio_name.to_string())
             .size(12.0)
             .font(theme::weighted_ui_font(Weight::Bold))
-            .color(strip_text(theme::fg2())),
+            .color(strip_text(theme::fg2()))
+            .boxed(),
     );
 
     if !icy_title.is_empty() {
@@ -287,7 +285,7 @@ pub(crate) fn info_field_widget<'a, M: 'static>(
     .spacing(spacing)
     .align_y(Alignment::Center)
     .width(Length::FillPortion(3))
-    .into()
+    .boxed()
 }
 
 /// Build the track info strip element, generic over any message type.
@@ -390,7 +388,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
 
     // Build the 3-column layout:
     // [codec+kHz │] [fill] [│ title │ artist │ album │] [fill] [│ kbps]
-    let mut info_row = iced::widget::Row::new()
+    let mut info_row = iced::widget::Row::<Element<'_, _>>::new()
         .spacing(6)
         .align_y(Alignment::Center);
 
@@ -401,7 +399,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 .size(10.0)
                 .font(theme::weighted_ui_font(Weight::Medium))
                 .color(strip_text(theme::fg3()))
-                .wrapping(text::Wrapping::None),
+                .wrapping(text::Wrapping::None)
+                .boxed(),
         );
         if let Some(badge) =
             bit_perfect_badge_widget(data.bit_perfect_status, data.bit_perfect_holder, strip_text)
@@ -413,7 +412,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     }
 
     // Fill spacer → center
-    info_row = info_row.push(space().width(Length::Fill));
+    info_row = info_row.push(space().width(Length::Fill).boxed());
 
     // CENTER: │ title: │ artist: │ album: │
     // Each field is independently toggleable. Separators only between visible fields.
@@ -445,7 +444,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                         .color(strip_text(theme::fg2())),
                 ]
                 .align_y(Alignment::Center)
-                .width(Length::FillPortion(9)),
+                .width(Length::FillPortion(9))
+                .boxed(),
             );
             center_row = center_row.push(info_sep());
         }
@@ -500,14 +500,14 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     }
 
     let center_element: Element<'a, M> = if let Some(msg) = on_press {
-        mouse_area(center_row).on_press(msg).into()
+        mouse_area(center_row).on_press(msg).boxed()
     } else {
-        center_row.into()
+        center_row.boxed()
     };
     info_row = info_row.push(center_element);
 
     // Fill spacer → right
-    info_row = info_row.push(space().width(Length::Fill));
+    info_row = info_row.push(space().width(Length::Fill).boxed());
 
     // RIGHT: bitrate (gated by strip_show_format_info)
     if let Some((_, Some(ref right))) = format_split {
@@ -517,7 +517,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 .size(10.0)
                 .font(theme::weighted_ui_font(Weight::Medium))
                 .color(strip_text(theme::fg3()))
-                .wrapping(text::Wrapping::None),
+                .wrapping(text::Wrapping::None)
+                .boxed(),
         );
     }
 
@@ -529,7 +530,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
             background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Merged-mode layout: a single row with shrink-sized codec/bitrate bookends
@@ -573,17 +574,17 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
     .width(Length::Fill);
 
     let marquee_clickable: Element<'a, M> = if let Some(msg) = on_press {
-        mouse_area(marquee).on_press(msg).into()
+        mouse_area(marquee).on_press(msg).boxed()
     } else {
-        marquee.into()
+        marquee.boxed()
     };
 
-    let mut info_row = iced::widget::Row::new()
+    let mut info_row = iced::widget::Row::<Element<'_, _>>::new()
         .spacing(6)
         .align_y(Alignment::Center)
         .padding([0, 8]);
     if let Some((ref left, _)) = format_split {
-        info_row = info_row.push(format_text(left.clone()));
+        info_row = info_row.push(format_text(left.clone()).boxed());
         if let Some(badge) =
             bit_perfect_badge_widget(bit_perfect_status, bit_perfect_holder, strip_text)
         {
@@ -592,12 +593,13 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         info_row = info_row.push(info_sep());
     }
     if let Some(icon_path) = leading_icon {
-        info_row = info_row.push(super::nav_bar::colored_icon(icon_path, 12.0, theme::fg4()));
+        info_row =
+            info_row.push(super::nav_bar::colored_icon(icon_path, 12.0, theme::fg4()).boxed());
     }
     info_row = info_row.push(marquee_clickable);
     if let Some((_, Some(ref right))) = format_split {
         info_row = info_row.push(info_sep());
-        info_row = info_row.push(format_text(right.clone()));
+        info_row = info_row.push(format_text(right.clone()).boxed());
     }
 
     container(info_row)
@@ -608,7 +610,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
             background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Build a full strip with separator line above it.
@@ -618,7 +620,7 @@ pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
 ) -> Element<'a, M> {
     let strip = track_info_strip(data, on_press);
     let separator = theme::horizontal_separator(1.0);
-    iced::widget::column![separator, strip].into()
+    iced::widget::column![separator, strip].boxed()
 }
 
 /// The now-playing values and strip toggles the merged-mode marquee is

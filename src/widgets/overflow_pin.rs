@@ -4,7 +4,7 @@
 //! edge).
 
 use iced::{
-    Element, Event, Length, Point, Rectangle, Size, Vector,
+    Event, Length, Point, Rectangle, Size, Vector,
     advanced::{
         Layout, Shell, Widget, layout, mouse, overlay, renderer,
         widget::{Operation, Tree},
@@ -29,21 +29,15 @@ use iced::{
 /// culling hint, which `Svg::draw` ignores — sprite quads are scissored
 /// exclusively by render layers, so without one the boat kept painting
 /// past the area's left edge (see `draw()` below).
-pub(crate) struct OverflowPin<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
-where
-    Renderer: iced::advanced::Renderer,
-{
-    content: Element<'a, Message, Theme, Renderer>,
+pub(crate) struct OverflowPin<W> {
+    content: W,
     position: Point,
 }
 
-impl<'a, Message, Theme, Renderer> OverflowPin<'a, Message, Theme, Renderer>
-where
-    Renderer: iced::advanced::Renderer,
-{
-    pub(crate) fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+impl<W> OverflowPin<W> {
+    pub(crate) fn new(content: W) -> Self {
         Self {
-            content: content.into(),
+            content,
             position: Point::ORIGIN,
         }
     }
@@ -54,21 +48,31 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for OverflowPin<'_, Message, Theme, Renderer>
+impl<W> iced::advanced::widget::Meta for OverflowPin<W> {}
+
+/// The pinned child's layout and state: the pin always holds exactly one.
+fn pinned(layout: Layout, tree: &Tree) -> (Layout, &Tree) {
+    layout
+        .iter(&tree.children)
+        .next()
+        .expect("OverflowPin always lays out exactly one child")
+}
+
+/// [`pinned`], mutably.
+fn pinned_mut(layout: Layout, tree: &mut Tree) -> (Layout, &mut Tree) {
+    layout
+        .iter_mut(&mut tree.children)
+        .next()
+        .expect("OverflowPin always lays out exactly one child")
+}
+
+impl<W, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for OverflowPin<W>
 where
+    W: Widget<Message, Theme, Renderer>,
     Renderer: iced::advanced::Renderer,
 {
-    fn tag(&self) -> iced::advanced::widget::tree::Tag {
-        self.content.as_widget().tag()
-    }
-
-    fn state(&self) -> iced::advanced::widget::tree::State {
-        self.content.as_widget().state()
-    }
-
     fn diff(&mut self, tree: &mut Tree) {
-        self.content.as_widget_mut().diff(tree);
+        tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
     fn size(&self) -> Size<Length> {
@@ -78,26 +82,19 @@ where
         }
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        let node = self
-            .content
-            .as_widget_mut()
-            .layout(tree, renderer, limits)
-            .move_to(self.position);
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
+        // The child gets our full limits (never `limits - position`, which is
+        // what squashes a fixed-size child near the far edge), then moves.
+        self.content.layout(&mut tree.children[0], renderer, limits);
+        tree.children[0].translation = Vector::new(self.position.x, self.position.y);
 
-        let size = limits.resolve(Length::Fill, Length::Fill, node.size());
-        layout::Node::with_children(size, vec![node])
+        tree.size = limits.resolve(Length::Fill, Length::Fill, tree.children[0].size);
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         viewport: &Rectangle,
         renderer: &Renderer,
         operation: &mut dyn Operation,
@@ -105,61 +102,40 @@ where
         // The child is clipped to our bounds when drawn, so operations see the
         // same clipped viewport (as iced's clipping `container` does).
         let clipped_viewport = layout.bounds().intersection(viewport).unwrap_or_default();
+        let (layout, tree) = pinned_mut(layout, tree);
 
-        self.content.as_widget_mut().operate(
-            tree,
-            layout
-                .children()
-                .next()
-                .expect("OverflowPin always lays out exactly one child"),
-            &clipped_viewport,
-            renderer,
-            operation,
-        );
+        self.content
+            .operate(tree, layout, &clipped_viewport, renderer, operation);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget_mut().update(
-            tree,
-            event,
-            layout
-                .children()
-                .next()
-                .expect("OverflowPin always lays out exactly one child"),
-            cursor,
-            renderer,
-            shell,
-            viewport,
-        );
+        let (layout, tree) = pinned_mut(layout, tree);
+
+        self.content
+            .update(tree, event, layout, cursor, renderer, shell, viewport);
     }
 
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            tree,
-            layout
-                .children()
-                .next()
-                .expect("OverflowPin always lays out exactly one child"),
-            cursor,
-            viewport,
-            renderer,
-        )
+        let (layout, tree) = pinned(layout, tree);
+
+        self.content
+            .mouse_interaction(tree, layout, cursor, viewport, renderer)
     }
 
     fn draw(
@@ -168,7 +144,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -189,16 +165,15 @@ where
             // edge, whose base scissor clips for free. Scoping the layer to
             // `bounds ∩ viewport` scissors the pinned sprite to the
             // visualizer/scene area on every edge.
+            let (layout, tree) = pinned(layout, tree);
+
             renderer.with_layer(clipped_viewport, |renderer| {
-                self.content.as_widget().draw(
+                self.content.draw(
                     tree,
                     renderer,
                     theme,
                     style,
-                    layout
-                        .children()
-                        .next()
-                        .expect("OverflowPin always lays out exactly one child"),
+                    layout,
                     cursor,
                     &clipped_viewport,
                 );
@@ -209,32 +184,15 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content.as_widget_mut().overlay(
-            tree,
-            layout
-                .children()
-                .next()
-                .expect("OverflowPin always lays out exactly one child"),
-            renderer,
-            viewport,
-            translation,
-        )
-    }
-}
+        let (layout, tree) = pinned_mut(layout, tree);
 
-impl<'a, Message, Theme, Renderer> From<OverflowPin<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced::advanced::Renderer + 'a,
-{
-    fn from(p: OverflowPin<'a, Message, Theme, Renderer>) -> Self {
-        Element::new(p)
+        self.content
+            .overlay(tree, layout, renderer, viewport, translation, window)
     }
 }

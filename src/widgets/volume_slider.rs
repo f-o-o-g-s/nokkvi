@@ -10,7 +10,7 @@
 //! - Variant determines accent color (Music = bright accent, SFX = base accent).
 
 use iced::{
-    Color, Element, Event, Length, Rectangle, Size, Theme,
+    Color, Event, Length, Rectangle, Size, Theme,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -42,7 +42,7 @@ const VOLUME_THROTTLE_THRESHOLD: f32 = 0.02; // 2% change required
 
 /// Visual theme variant for the volume slider
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SliderVariant {
+pub(crate) enum SliderVariant {
     /// Bright accent for main music volume
     #[default]
     Music,
@@ -67,7 +67,7 @@ pub(crate) struct State {
 }
 
 /// Custom volume slider with flat styling (vertical stereo bars or horizontal track)
-pub struct VolumeSlider<'a, Message> {
+pub(crate) struct VolumeSlider<'a, Message> {
     volume: f32, // 0.0-1.0
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
     on_release: Option<Box<dyn Fn(f32) -> Message + 'a>>,
@@ -79,7 +79,7 @@ pub struct VolumeSlider<'a, Message> {
 }
 
 impl<'a, Message> VolumeSlider<'a, Message> {
-    pub fn new<F>(volume: f32, on_change: F) -> Self
+    pub(crate) fn new<F>(volume: f32, on_change: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -96,7 +96,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     }
 
     /// Set the visual theme variant (Music or SFX)
-    pub fn variant(mut self, variant: SliderVariant) -> Self {
+    pub(crate) fn variant(mut self, variant: SliderVariant) -> Self {
         self.variant = variant;
         self
     }
@@ -106,7 +106,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     /// a drag, in addition to the regular `on_change` stream. Use this when
     /// the consumer needs to distinguish "still dragging" from "drag finished"
     /// — e.g. to force-persist the final value past a throttle on `on_change`.
-    pub fn on_release<F>(mut self, on_release: F) -> Self
+    pub(crate) fn on_release<F>(mut self, on_release: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -123,7 +123,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     ///
     /// When unset, wheel events fall back to the absolute computation via
     /// `on_release` (or `on_change` if `on_release` is also unset).
-    pub fn on_scroll<F>(mut self, on_scroll: F) -> Self
+    pub(crate) fn on_scroll<F>(mut self, on_scroll: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -132,7 +132,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     }
 
     /// Set horizontal orientation (swaps width/height, uses longer track)
-    pub fn horizontal(mut self, horizontal: bool) -> Self {
+    pub(crate) fn horizontal(mut self, horizontal: bool) -> Self {
         if horizontal {
             self.horizontal = true;
             self.width = HORIZONTAL_LENGTH;
@@ -143,7 +143,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
 
     /// Override the cross-axis thickness (height when horizontal, width when vertical).
     /// Used to size stacked horizontal sliders so their combined height matches button height.
-    pub fn thickness(mut self, size: f32) -> Self {
+    pub(crate) fn thickness(mut self, size: f32) -> Self {
         if self.horizontal {
             self.height = size;
         } else {
@@ -174,6 +174,8 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for VolumeSlider<'_, Message> {}
+
 impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_, Message> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
@@ -192,18 +194,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::atomic(limits, self.width, self.height)
+    ) {
+        tree.size = layout::atomic(limits, self.width, self.height);
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -296,7 +298,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -321,7 +323,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -485,12 +487,6 @@ impl<Message> VolumeSlider<'_, Message> {
             },
             accent,
         );
-    }
-}
-
-impl<'a, Message: Clone + 'a> From<VolumeSlider<'a, Message>> for Element<'a, Message> {
-    fn from(volume_slider: VolumeSlider<'a, Message>) -> Self {
-        Element::new(volume_slider)
     }
 }
 

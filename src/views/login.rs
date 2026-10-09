@@ -12,7 +12,7 @@
 //! which force windows below any min-size the app requests).
 
 use iced::{
-    Alignment, Element, Length, Task,
+    Alignment, Element, Length, Task, Widget as _,
     event::Event,
     keyboard,
     keyboard::key,
@@ -366,7 +366,7 @@ fn input_field<'a>(
     secure: bool,
     error: bool,
     on_input: fn(String) -> LoginMessage,
-) -> iced::widget::Column<'a, LoginMessage> {
+) -> iced::widget::Column<Element<'a, LoginMessage>> {
     column![
         text(label)
             .size(13)
@@ -408,7 +408,7 @@ impl LoginPage {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                     .padding(LOGIN_PAGE_PAD)
-                    .into()
+                    .boxed()
             } else {
                 scrollable(
                     container(card)
@@ -419,7 +419,7 @@ impl LoginPage {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(theme::settings_scrollable_style)
-                .into()
+                .boxed()
             };
 
             let page: Element<'_, LoginMessage> = container(body)
@@ -432,15 +432,19 @@ impl LoginPage {
                     shadow: iced::Shadow::default(),
                     snap: false,
                 })
-                .into();
+                .boxed();
             page
         })
-        .into()
+        .boxed()
     }
 
     /// Branding column: logo, wordmark, tagline. `logo_px` scales the mark for
     /// the two-pane (larger) vs single-column (smaller) arrangement.
-    fn branding(&self, logo_px: f32, title_px: f32) -> iced::widget::Column<'_, LoginMessage> {
+    fn branding(
+        &self,
+        logo_px: f32,
+        title_px: f32,
+    ) -> iced::widget::Column<Element<'_, LoginMessage>> {
         let logo_svg = crate::embedded_svg::themed_logo_svg();
         let logo_handle = iced::widget::svg::Handle::from_memory(logo_svg.into_bytes());
         let logo = iced::widget::svg(logo_handle)
@@ -474,7 +478,7 @@ impl LoginPage {
     }
 
     /// The form column: the three fields, error line, and Login button.
-    fn form(&self) -> iced::widget::Column<'_, LoginMessage> {
+    fn form(&self) -> iced::widget::Column<Element<'_, LoginMessage>> {
         let err = self.error.as_ref();
         let highlights = |field: LoginField| err.is_some_and(|e| e.highlights(field));
 
@@ -494,7 +498,8 @@ impl LoginPage {
                     .size(11)
                     .font(theme::ui_font())
                     .color(theme::warning())
-                    .width(Length::Fill),
+                    .width(Length::Fill)
+                    .boxed(),
             );
         }
 
@@ -527,7 +532,8 @@ impl LoginPage {
                     .size(13)
                     .font(theme::ui_font())
                     .width(Length::Fill)
-                    .align_x(Alignment::Center),
+                    .align_x(Alignment::Center)
+                    .boxed(),
             );
         }
 
@@ -542,7 +548,7 @@ impl LoginPage {
             "Login"
         };
         mouse_area(
-            crate::widgets::hover_overlay::HoverOverlay::<'_, LoginMessage>::new(
+            crate::widgets::hover_overlay::HoverOverlay::new(
                 container(
                     text(label)
                         .font(theme::ui_font())
@@ -567,7 +573,7 @@ impl LoginPage {
         )
         .on_press(LoginMessage::LoginPressed)
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
     }
 
     /// Version label, centered (shown at the bottom of the branding pane in
@@ -581,7 +587,7 @@ impl LoginPage {
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
-        .into()
+        .boxed()
     }
 
     /// The framed card: two-pane (branding | form) on wide windows, a single
@@ -609,7 +615,7 @@ impl LoginPage {
                     .width(Length::Fill)
                     .spacing(32)
                     .align_y(Alignment::Center)
-                    .into(),
+                    .boxed(),
                 card_w,
             )
         } else {
@@ -620,7 +626,7 @@ impl LoginPage {
                     .width(Length::Fill)
                     .spacing(24)
                     .align_x(Alignment::Center)
-                    .into(),
+                    .boxed(),
                 card_w,
             )
         };
@@ -643,7 +649,7 @@ impl LoginPage {
                 },
                 snap: false,
             })
-            .into()
+            .boxed()
     }
 }
 

@@ -16,7 +16,7 @@
 use std::f32::consts::FRAC_PI_2;
 
 use iced::{
-    Background, Border, Color, Element, Length, Point, Rectangle, Vector,
+    Background, Border, Color, Element, Length, Point, Rectangle, Vector, Widget as _,
     font::Weight,
     widget::{Space, canvas, column, container, mouse_area, row},
 };
@@ -186,7 +186,7 @@ fn side_nav_tab_content(
         })
         .width(Length::Fixed(card_width))
         .height(Length::Fill)
-        .into(),
+        .boxed(),
         NavDisplayMode::IconsOnly => {
             // Flat redesign uses a full-cell `accent_fill()` fill for
             // the active state, so the icon centers in the card without
@@ -196,7 +196,7 @@ fn side_nav_tab_content(
                 .height(Length::Fill)
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center)
-                .into()
+                .boxed()
         }
         NavDisplayMode::TextAndIcons => {
             // Icon header stays at its `ICON_SLOT_HEIGHT` slot anchored to
@@ -222,7 +222,7 @@ fn side_nav_tab_content(
                 .spacing(0)
                 .width(Length::Fixed(card_width))
                 .height(Length::Fill)
-                .into()
+                .boxed()
         }
     }
 }
@@ -296,7 +296,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         )
         .on_press(on_press)
         .interaction(iced::mouse::Interaction::Pointer)
-        .into()
+        .boxed()
     };
 
     // Separator line between tabs (horizontal rule in the vertical layout).
@@ -321,9 +321,9 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                 iced::widget::Space::new().width(Length::Fixed(side_inset)),
             ]
             .height(Length::Fixed(1.0))
-            .into()
+            .boxed()
         } else {
-            rule.into()
+            rule.boxed()
         }
     };
 
@@ -358,7 +358,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     },
                     ..Default::default()
                 })
-                .into(),
+                .boxed(),
         )
     } else {
         None
@@ -422,11 +422,11 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         .chassis(cluster_cell_width, cluster_cell_height),
     )
     .border_radius(cluster_radius)
-    .into();
+    .boxed();
     let hamburger: Element<'static, NavBarMessage> = container(hamburger_inner)
         .width(Length::Fixed(nav_width))
         .center_x(Length::Fixed(nav_width))
-        .into();
+        .boxed();
 
     let library_chassis = iced::Size::new(cluster_cell_width, cluster_cell_height);
     let library_trigger_inner = super::hover_overlay::HoverOverlay::new(
@@ -447,7 +447,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let library_trigger: Element<'_, NavBarMessage> = container(library_trigger_inner)
         .width(Length::Fixed(nav_width))
         .center_x(Length::Fixed(nav_width))
-        .into();
+        .boxed();
 
     let popover_items: Vec<(i32, String, String, bool)> = library_rows
         .into_iter()
@@ -488,7 +488,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                 .width(Length::Fixed(nav_width))
                 .height(Length::Fill)
                 .center_x(Length::Fixed(nav_width))
-                .into()
+                .boxed()
         } else {
             elem
         }
@@ -560,7 +560,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             ICON_TAB_HEIGHT,
         ))
         .width(Length::Fixed(nav_width))
-        .center_x(Length::Fixed(nav_width)),
+        .center_x(Length::Fixed(nav_width))
+        .boxed(),
     );
 
     // Apply top/bottom tray padding in rounded mode (matches the design's
@@ -590,7 +591,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             background: Some(theme::border().into()),
             ..Default::default()
         })
-        .into();
+        .boxed();
 
     container(
         row![
@@ -606,5 +607,5 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     )
     .width(Length::Fixed(side_nav_total_width()))
     .height(Length::Fill)
-    .into()
+    .boxed()
 }

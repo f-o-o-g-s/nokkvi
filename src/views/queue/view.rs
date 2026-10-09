@@ -7,7 +7,7 @@
 //! lives in `update.rs`; types live in `mod.rs`.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Row, Space, column, container, mouse_area, row},
 };
 
@@ -341,7 +341,7 @@ impl QueuePage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window). The
@@ -402,7 +402,7 @@ impl QueuePage {
                     data.sync_menu_open,
                     data.sync_menu_trigger_bounds,
                 );
-                btns.push(HeaderButton::Trailing(sync_menu.into()));
+                btns.push(HeaderButton::Trailing(sync_menu.boxed()));
             }
             // Default-playlist chip is gated by a user setting; when on,
             // it sits left of the columns dropdown in the trailing region.
@@ -558,7 +558,7 @@ impl QueuePage {
                         .width(cover_edge)
                         .height(cover_edge)
                         .content_fit(iced::ContentFit::Cover)
-                        .into()
+                        .boxed()
                 };
                 let cover: Element<'a, QueueMessage> =
                     if let Some(handle) = data.playlist_custom_cover {
@@ -595,7 +595,7 @@ impl QueuePage {
                 .gap(4)
                 .style(crate::theme::container_tooltip);
 
-                let mut identity_row = Row::new().align_y(Alignment::Center).push(cover);
+                let mut identity_row = Row::new().align_y(Alignment::Center).push(cover.boxed());
                 if let Some(name_w) = fit.name_w {
                     // At rest the name sits on the Count strip's line; revealed,
                     // it matches the sort control's size and weight.
@@ -611,8 +611,8 @@ impl QueuePage {
                         .wrapping(iced::widget::text::Wrapping::None)
                         .ellipsis(iced::widget::text::Ellipsis::End);
                     identity_row = identity_row
-                        .push(Space::new().width(Length::Fixed(name_gap)))
-                        .push(container(name).width(Length::Fit.max(name_w)));
+                        .push(Space::new().width(Length::Fixed(name_gap)).boxed())
+                        .push(container(name).width(Length::Fit.max(name_w)).boxed());
                     if smart_mark {
                         // The Playlists view's smart mark, kept quiet so the
                         // playing row stays the list's only accent.
@@ -629,8 +629,12 @@ impl QueuePage {
                         .gap(4)
                         .style(crate::theme::container_tooltip);
                         identity_row = identity_row
-                            .push(Space::new().width(Length::Fixed(PLAYLIST_SMART_MARK_W - 12.0)))
-                            .push(mark);
+                            .push(
+                                Space::new()
+                                    .width(Length::Fixed(PLAYLIST_SMART_MARK_W - 12.0))
+                                    .boxed(),
+                            )
+                            .push(mark.boxed());
                     }
                 }
                 // Hovering the identity (not the controls beside it) opens the
@@ -671,7 +675,7 @@ impl QueuePage {
                             ]
                             .spacing(5)
                             .align_y(Alignment::Center)
-                            .into()
+                            .boxed()
                         };
 
                     let count = if ctx.song_count > 0 {
@@ -734,7 +738,7 @@ impl QueuePage {
                         },
                         ..Default::default()
                     });
-                    meta_row = meta_row.push(chip);
+                    meta_row = meta_row.push(chip.boxed());
 
                     // A description-less playlist collapses the block to the meta row
                     // alone (the helper returned the meta-only height + an empty
@@ -744,13 +748,13 @@ impl QueuePage {
                     // the rendered structure and `playlist_detail_h` in lockstep.
                     let detail_body: Element<'a, QueueMessage> =
                         if playlist_comment_display.is_empty() {
-                            meta_row.into()
+                            meta_row.boxed()
                         } else {
                             let comment_text = iced::widget::text(playlist_comment_display)
                                 .font(crate::theme::ui_font())
                                 .size(12)
                                 .color(crate::theme::fg2());
-                            column![comment_text, meta_row].spacing(8).into()
+                            column![comment_text, meta_row].spacing(8).boxed()
                         };
 
                     // Under the toolbar across the band, from the cover's left
@@ -774,14 +778,14 @@ impl QueuePage {
                             .on_exit(QueueMessage::PlaylistStripHoverExit(
                                 PlaylistStripZone::Detail,
                             ))
-                            .into(),
+                            .boxed(),
                     )
                 } else {
                     None
                 };
 
                 Some(HeaderIdentity {
-                    cell: cell.into(),
+                    cell: cell.boxed(),
                     actions,
                     hide_count: !fit.show_count,
                     below,
@@ -1005,7 +1009,7 @@ impl QueuePage {
                         None => QueueMessage::SetOpenMenu(None),
                     },
                 )
-                .into()
+                .boxed()
             },
         );
 
@@ -1151,15 +1155,18 @@ impl QueuePage {
         // over the cover. `hover` is the OUTERMOST wrapper so the panel's
         // right-click menu (inside) keeps working; the icon's own
         // `mouse_area` captures only its left press.
-        let artwork_content = Some(iced::widget::hover(
-            panel,
-            crate::widgets::theater_corner::bottom_right(
-                crate::widgets::theater_corner::corner_button(
-                    "assets/icons/maximize-2.svg",
-                    QueueMessage::EnterTheater,
+        let artwork_content = Some(
+            iced::widget::hover(
+                panel,
+                crate::widgets::theater_corner::bottom_right(
+                    crate::widgets::theater_corner::corner_button(
+                        "assets/icons/maximize-2.svg",
+                        QueueMessage::EnterTheater,
+                    ),
                 ),
-            ),
-        ));
+            )
+            .boxed(),
+        );
 
         crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
             &layout_config,

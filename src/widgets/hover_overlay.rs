@@ -9,7 +9,7 @@
 //! (Enter key, MPRIS, player bar) to show a timed press animation.
 
 use iced::{
-    Background, Color, Element, Event, Length, Rectangle, Size, Transformation, Vector,
+    Background, Color, Event, Length, Rectangle, Size, Transformation, Vector,
     advanced::{
         Layout, Shell, Widget, layout, mouse, overlay, renderer,
         widget::{Operation, Tree, tree},
@@ -44,8 +44,8 @@ struct State {
 ///
 /// External triggers (Enter key, MPRIS, player bar) pass a `flash_at` timestamp which
 /// drives a timed press animation on the center slot.
-pub(crate) struct HoverOverlay<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
-    content: Element<'a, Message, Theme, Renderer>,
+pub(crate) struct HoverOverlay<W> {
+    content: W,
     border_radius: iced::border::Radius,
     /// External flash timestamp from `SlotListView::flash_center_at`.
     /// When within `FLASH_DURATION`, the widget shows the press animation.
@@ -61,14 +61,11 @@ pub(crate) struct HoverOverlay<'a, Message, Theme = iced::Theme, Renderer = iced
     wash_enabled: bool,
 }
 
-impl<'a, Message, Theme, Renderer> HoverOverlay<'a, Message, Theme, Renderer>
-where
-    Renderer: iced::advanced::Renderer,
-{
+impl<W> HoverOverlay<W> {
     /// Wrap `content` with a hover overlay.
-    pub(crate) fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub(crate) fn new(content: W) -> Self {
         Self {
-            content: content.into(),
+            content,
             border_radius: crate::theme::ui_border_radius(),
             flash_at: None,
             on_accent_surface: false,
@@ -107,9 +104,11 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for HoverOverlay<'_, Message, Theme, Renderer>
+impl<W> iced::advanced::widget::Meta for HoverOverlay<W> {}
+
+impl<W, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for HoverOverlay<W>
 where
+    W: Widget<Message, Theme, Renderer>,
     Renderer: iced::advanced::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -125,49 +124,41 @@ where
     }
 
     fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
+        self.content.size()
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+    // The child fills our bounds exactly (zero translation, same size), so it
+    // shares our `Layout` everywhere below.
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
+        self.content.layout(&mut tree.children[0], renderer, limits);
+
+        tree.size = tree.children[0].size;
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         viewport: &Rectangle,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        self.content.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout,
-            viewport,
-            renderer,
-            operation,
-        );
+        self.content
+            .operate(&mut tree.children[0], layout, viewport, renderer, operation);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
         // Delegate to child first — the inner button captures the event for click handling
-        self.content.as_widget_mut().update(
+        self.content.update(
             &mut tree.children[0],
             event,
             layout,
@@ -214,7 +205,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -240,7 +231,7 @@ where
 
             renderer.with_layer(bounds, |renderer| {
                 renderer.with_transformation(transformation, |renderer| {
-                    self.content.as_widget().draw(
+                    self.content.draw(
                         &tree.children[0],
                         renderer,
                         theme,
@@ -252,7 +243,7 @@ where
                 });
             });
         } else {
-            self.content.as_widget().draw(
+            self.content.draw(
                 &tree.children[0],
                 renderer,
                 theme,
@@ -297,46 +288,31 @@ where
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        self.content
+            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content.as_widget_mut().overlay(
+        self.content.overlay(
             &mut tree.children[0],
             layout,
             renderer,
             viewport,
             translation,
+            window,
         )
-    }
-}
-
-impl<'a, Message, Theme, Renderer> From<HoverOverlay<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced::advanced::Renderer + 'a,
-{
-    fn from(overlay: HoverOverlay<'a, Message, Theme, Renderer>) -> Self {
-        Self::new(overlay)
     }
 }

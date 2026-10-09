@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     font::Weight,
     widget::{container, mouse_area, pick_list, row, text},
 };
@@ -255,9 +255,9 @@ pub(crate) fn view_header_with_identity<
                     .height(Length::Fill)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)
-                    .into()
+                    .boxed()
                 } else {
-                    iced::widget::Space::new().into()
+                    iced::widget::Space::new().boxed()
                 };
                 let strip = container(inner)
                     .width(Length::Fill)
@@ -266,7 +266,7 @@ pub(crate) fn view_header_with_identity<
                         background: Some(theme::bg0_hard().into()),
                         ..Default::default()
                     });
-                iced::widget::column![strip, collapsed_separator()].into()
+                iced::widget::column![strip, collapsed_separator()].boxed()
             }
             // Hidden: visually nothing — but a thin transparent strip still
             // catches a mouse flick to the top edge (hotkeys reveal it too).
@@ -274,7 +274,7 @@ pub(crate) fn view_header_with_identity<
             CollapsedAppearance::Hidden => iced::widget::Space::new()
                 .width(Length::Fill)
                 .height(Length::Fixed(HIDDEN_CATCH_HEIGHT))
-                .into(),
+                .boxed(),
             // Count strip: a slim read-only strip echoing the current sort +
             // direction (left) and the item count (right).
             CollapsedAppearance::CountStrip => {
@@ -295,7 +295,7 @@ pub(crate) fn view_header_with_identity<
                     .align_y(Alignment::Center)
                     .height(Length::Fill)
                 };
-                let mut strip_row = iced::widget::Row::new()
+                let mut strip_row = iced::widget::Row::<Element<'_, _>>::new()
                     .align_y(Alignment::Center)
                     .height(Length::Fill);
                 // A merged identity leads the strip in the same slot shape as in
@@ -305,19 +305,21 @@ pub(crate) fn view_header_with_identity<
                     strip_row = strip_row.push(
                         iced::widget::Row::new()
                             .height(Length::Fill)
-                            .push(wrap_header_cell(identity.cell, true)),
+                            .push(wrap_header_cell(identity.cell, true))
+                            .boxed(),
                     );
                 }
                 strip_row = strip_row
-                    .push(strip_text(label))
+                    .push(strip_text(label).boxed())
                     .push(
                         row(hints.into_iter().map(hint_icon))
                             .spacing(HINT_SPACING)
                             .align_y(Alignment::Center)
-                            .height(Length::Fill),
+                            .height(Length::Fill)
+                            .boxed(),
                     )
-                    .push(iced::widget::Space::new().width(Length::Fill))
-                    .push(strip_text(count));
+                    .push(iced::widget::Space::new().width(Length::Fill).boxed())
+                    .push(strip_text(count).boxed());
                 let strip = container(strip_row)
                     .width(Length::Fill)
                     .height(Length::Fixed(COUNT_STRIP_HEIGHT))
@@ -325,7 +327,7 @@ pub(crate) fn view_header_with_identity<
                         background: Some(theme::bg0_hard().into()),
                         ..Default::default()
                     });
-                iced::widget::column![strip, collapsed_separator()].into()
+                iced::widget::column![strip, collapsed_separator()].boxed()
             }
         };
         return maybe_hover_wrap(collapsed_el, on_hover_enter, on_hover_exit);
@@ -349,7 +351,7 @@ pub(crate) fn view_header_with_identity<
         .width(Length::Fit.max(300.0))
         .align_y(Alignment::Center)
         .height(Length::Fixed(HEADER_HEIGHT))
-        .into()
+        .boxed()
     } else {
         // Wrap V into SortPickerEntry so we can splice a trailing
         // "Roulette" action without polluting the per-view sort enum.
@@ -435,7 +437,7 @@ pub(crate) fn view_header_with_identity<
             .height(Length::Fixed(HEADER_HEIGHT))
             .align_y(Alignment::Center)
             .padding([0, 6])
-            .into()
+            .boxed()
     };
 
     // Render each requested toolbar button into a cell. Render order is
@@ -490,7 +492,7 @@ pub(crate) fn view_header_with_identity<
                     container(element)
                         .height(Length::Fixed(HEADER_HEIGHT))
                         .align_y(Alignment::Center)
-                        .into(),
+                        .boxed(),
                 );
             }
         }
@@ -515,7 +517,7 @@ pub(crate) fn view_header_with_identity<
                     bottom: 0.0,
                     left: 8.0,
                 })
-                .into(),
+                .boxed(),
         )
     } else {
         None
@@ -533,7 +535,7 @@ pub(crate) fn view_header_with_identity<
     .padding([0, 14])
     .height(Length::Fixed(HEADER_HEIGHT))
     .align_y(Alignment::Center)
-    .into();
+    .boxed();
 
     // Wrap the sort-dropdown cell with a sided-border divider. Pinning to
     // a fixed `SORT_CELL_MIN_WIDTH` matches the design's
@@ -549,7 +551,7 @@ pub(crate) fn view_header_with_identity<
         } else {
             container(view_selector)
                 .width(Length::Fixed(SORT_CELL_MIN_WIDTH))
-                .into()
+                .boxed()
         },
         true,
     );
@@ -572,9 +574,9 @@ pub(crate) fn view_header_with_identity<
                     true,
                 ));
             }
-            (slot.into(), identity.hide_count, identity.below)
+            (slot.boxed(), identity.hide_count, identity.below)
         }
-        None => (iced::widget::Space::new().into(), false, None),
+        None => (iced::widget::Space::new().boxed(), false, None),
     };
     header_row = header_row.push(lead_slot);
     header_row = header_row.push(view_selector_cell);
@@ -591,7 +593,7 @@ pub(crate) fn view_header_with_identity<
             iced::widget::Space::new()
                 .width(Length::Fill)
                 .height(Length::Fixed(HEADER_HEIGHT))
-                .into(),
+                .boxed(),
             !hide_count,
         ));
     }
@@ -636,7 +638,7 @@ pub(crate) fn view_header_with_identity<
             ..Default::default()
         }),
     ]
-    .push(below)
+    .push(below.boxed())
     .push(
         container(iced::widget::Space::new())
             .width(Length::Fill)
@@ -644,9 +646,10 @@ pub(crate) fn view_header_with_identity<
             .style(|_| container::Style {
                 background: Some(theme::border().into()),
                 ..Default::default()
-            }),
+            })
+            .boxed(),
     )
-    .into();
+    .boxed();
 
     // When auto-hide is active (hover callbacks supplied), wrap the revealed
     // toolbar in the same hover zone so leaving it collapses again. Search
@@ -740,7 +743,7 @@ fn maybe_hover_wrap<'a, Message: 'a + Clone>(
     on_exit: Option<Message>,
 ) -> Element<'a, Message> {
     match (on_enter, on_exit) {
-        (Some(enter), Some(exit)) => mouse_area(el).on_enter(enter).on_exit(exit).into(),
+        (Some(enter), Some(exit)) => mouse_area(el).on_enter(enter).on_exit(exit).boxed(),
         _ => el,
     }
 }
@@ -755,7 +758,7 @@ fn collapsed_separator<'a, Message: 'a>() -> Element<'a, Message> {
             background: Some(theme::border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Item-count label shared by the full header and the CountStrip collapsed
@@ -794,7 +797,7 @@ fn hint_icon<'a, Message: 'a>(path: &str) -> Element<'a, Message> {
         .style(|_theme, _status| iced::widget::svg::Style {
             color: Some(theme::fg4()),
         })
-        .into()
+        .boxed()
 }
 
 /// Wrap a header cell with the redesign's sided-border divider treatment.
@@ -826,7 +829,7 @@ fn wrap_header_cell<'a, Message: 'a>(
     ]
     .align_y(Alignment::Center)
     .height(Length::Fill)
-    .into()
+    .boxed()
 }
 
 /// Reusable header icon button — `ICON_CELL_WIDTH × HEADER_HEIGHT` cell,
@@ -875,7 +878,7 @@ pub(crate) fn header_icon_cell<'a, Message: Clone + 'a>(
     )
     .gap(4)
     .style(theme::container_tooltip)
-    .into()
+    .boxed()
 }
 
 #[cfg(test)]
@@ -913,13 +916,13 @@ mod tests {
     #[test]
     fn wrap_header_cell_no_divider_returns_inner() {
         // Trailing cell (count) must NOT add a right border.
-        let inner: Element<'_, String> = iced::widget::text("count").into();
+        let inner: Element<'_, String> = iced::widget::text("count").boxed();
         let _ = wrap_header_cell(inner, false);
     }
 
     #[test]
     fn wrap_header_cell_with_divider_wraps_in_row() {
-        let inner: Element<'_, String> = iced::widget::text("cell").into();
+        let inner: Element<'_, String> = iced::widget::text("cell").boxed();
         let _ = wrap_header_cell(inner, true);
     }
 }

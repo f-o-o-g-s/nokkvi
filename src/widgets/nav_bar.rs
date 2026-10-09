@@ -6,7 +6,7 @@
 //! - Right: Audio format info
 
 use iced::{
-    Alignment, Background, Border, Element, Length,
+    Alignment, Background, Border, Element, Length, Widget as _,
     font::Weight,
     widget::{Space, column, container, mouse_area, row, text, text::Wrapping},
 };
@@ -290,7 +290,7 @@ fn tab_separator<'a, M: 'a>(force_visible: bool) -> Element<'a, M> {
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// 1 px vertical `theme::border()` separator for the metadata info row
@@ -305,7 +305,7 @@ fn info_separator<'a, M: 'a>() -> Element<'a, M> {
             background: Some(theme::border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// Tab label font size — scales down at narrow window widths so adjacent
@@ -371,13 +371,13 @@ fn tab_content<'a>(
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .into(),
+        .boxed(),
         NavDisplayMode::IconsOnly => container(colored_icon(icon_path, icon_size, text_color))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
-            .into(),
+            .boxed(),
         NavDisplayMode::TextAndIcons => container(
             row![
                 colored_icon(icon_path, icon_size, text_color),
@@ -393,7 +393,7 @@ fn tab_content<'a>(
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .into(),
+        .boxed(),
     }
 }
 
@@ -456,7 +456,7 @@ pub(crate) fn harbour_nav_button(active: bool, cell: f32) -> Element<'static, Na
     )
     .on_press(NavBarMessage::SwitchToHarbour)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// Build the Waybar-style navigation bar
@@ -550,7 +550,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 )
                 .on_press(on_press.clone())
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into();
+                .boxed();
                 elem
             } else {
                 // Flat mode: full-height accent block when active, `bg0_hard()`
@@ -583,7 +583,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 )
                 .on_press(on_press.clone())
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into();
+                .boxed();
                 elem
             }
         };
@@ -620,7 +620,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         .chassis(NAV_PILL_HEIGHT, cluster_pill_h),
     )
     .border_radius(theme::ui_radius_pill())
-    .into();
+    .boxed();
 
     // -------------------------------------------------------------------------
     // Library-filter trigger + popover (icon button + dropdown panel)
@@ -705,7 +705,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
         iced::widget::row![trigger, popover]
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
     };
 
     // Layout: `[hamburger] [library] [divider] [tab] [tab] ... [tab]`.
@@ -725,7 +725,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     } else {
         Length::Shrink
     };
-    let mut left_section: iced::widget::Row<'static, NavBarMessage> = {
+    let mut left_section: iced::widget::Row<Element<'static, NavBarMessage>> = {
         let mut tabs = row![hamburger, library_trigger_slot, tab_separator(true)]
             .spacing(tab_spacing)
             .height(Length::Fill)
@@ -835,9 +835,9 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // space. Otherwise keep the historical Fill spacer that absorbs
             // the lane.
             if tabs_expand {
-                Space::new().into()
+                Space::new().boxed()
             } else {
-                Space::new().width(Length::Fill).into()
+                Space::new().width(Length::Fill).boxed()
             }
         } else if !is_playing {
             // Stopped state - no track loaded
@@ -852,7 +852,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .height(Length::Fill)
             .center_x(Length::Fill)
             .center_y(Length::Fill)
-            .into()
+            .boxed()
         } else {
             // Playing or paused - build nav-bar-specific track info
             let title = data.track_title.clone();
@@ -861,7 +861,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             let info_sep = info_separator;
 
-            let mut info_row = iced::widget::Row::new()
+            let mut info_row = iced::widget::Row::<Element<'_, _>>::new()
                 .spacing(6)
                 .align_y(Alignment::Center)
                 .height(Length::Fill);
@@ -873,7 +873,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             if !is_merged_layout {
                 // Fill spacer → center the metadata fields
-                info_row = info_row.push(Space::new().width(Length::Fill));
+                info_row = info_row.push(Space::new().width(Length::Fill).boxed());
             }
 
             // Progressive metadata: each field independently toggleable
@@ -896,7 +896,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     // Merged radio: single marquee containing station + ICY fields,
                     // bracketed by separators with the radio-tower icon prepended.
                     info_row = info_row.push(info_sep());
-                    info_row = info_row.push(radio_icon());
+                    info_row = info_row.push(radio_icon().boxed());
 
                     let merged = super::track_info_strip::merged_radio_strip_string(
                         radio_name,
@@ -916,7 +916,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                                     .align_x(iced::alignment::Horizontal::Center),
                             ]
                             .align_y(Alignment::Center)
-                            .width(Length::Fill),
+                            .width(Length::Fill)
+                            .boxed(),
                         );
                     }
                     info_row = info_row.push(info_sep());
@@ -955,7 +956,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                                 .align_x(iced::alignment::Horizontal::Center),
                         ]
                         .align_y(Alignment::Center)
-                        .width(Length::Fill),
+                        .width(Length::Fill)
+                        .boxed(),
                     );
                 }
             } else {
@@ -990,7 +992,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             if !is_merged_layout {
                 // Fill spacer → push format info away
-                info_row = info_row.push(Space::new().width(Length::Fill));
+                info_row = info_row.push(Space::new().width(Length::Fill).boxed());
             }
 
             let clickable = container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
@@ -1000,7 +1002,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             let wrapped: Element<'static, NavBarMessage> =
                 super::context_menu::wrap_strip_context_menu(
-                    clickable,
+                    clickable.boxed(),
                     data.radio_name.is_some(),
                     !data.local_music_path.is_empty(),
                     data.is_current_starred,
@@ -1059,12 +1061,12 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         bottom: 0.0,
                         left: 0.0,
                     })
-                    .into()
+                    .boxed()
             } else {
-                Space::new().width(Length::Shrink).into()
+                Space::new().width(Length::Shrink).boxed()
             }
         } else {
-            Space::new().width(Length::Shrink).into()
+            Space::new().width(Length::Shrink).boxed()
         };
 
     // -------------------------------------------------------------------------
@@ -1123,7 +1125,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             background: Some(theme::border().into()),
             ..Default::default()
         })
-        .into();
+        .boxed();
 
     // Total bar height comes from `theme::nav_bar_height()` (32 px flat /
     // 44 px rounded) — the 1 px bottom separator counts toward it so the
@@ -1133,7 +1135,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
     container(column![nav_content, bottom_separator])
         .height(Length::Fixed(total_height))
-        .into()
+        .boxed()
 }
 
 // iced only implements its null renderer `()` under `debug_assertions`, so
@@ -1161,9 +1163,9 @@ mod layout_invariants {
     //! These tests pin that contract by running iced's actual layout against
     //! the null renderer (`()`) on a structure that mirrors the nav bar.
     use iced::{
-        Element, Length, Size,
+        Element, Length, Size, Widget as _,
         advanced::{
-            layout::{Limits, Node},
+            layout::Limits,
             widget::{Tree, Widget},
         },
         widget::{Container, Row, Space},
@@ -1180,37 +1182,43 @@ mod layout_invariants {
         outer_width: Length,
         left_w: f32,
         right_w: f32,
-    ) -> Row<'static, TestMessage, iced::Theme, NullRenderer> {
+    ) -> Row<Element<'static, TestMessage, iced::Theme, NullRenderer>> {
         let left: Element<'static, TestMessage, iced::Theme, NullRenderer> = Space::new()
             .width(Length::Fixed(left_w))
             .height(Length::Fill)
-            .into();
+            .boxed();
         let center: Element<'static, TestMessage, iced::Theme, NullRenderer> =
             Container::new(Space::new().width(Length::Fill).height(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into();
+                .boxed();
         let right: Element<'static, TestMessage, iced::Theme, NullRenderer> = Space::new()
             .width(Length::Fixed(right_w))
             .height(Length::Fill)
-            .into();
+            .boxed();
         Row::with_children([left, center, right])
             .spacing(0)
             .width(outer_width)
             .height(Length::Fill)
     }
 
-    /// Run `Widget::layout` against the null renderer and return the node.
-    fn layout_row(row: Row<'static, TestMessage, iced::Theme, NullRenderer>, max_w: f32) -> Node {
-        let mut tree = Tree::new(&row as &dyn Widget<TestMessage, iced::Theme, NullRenderer>);
+    /// Run `Widget::layout` against the null renderer and return the laid-out
+    /// tree (each child's size and offset live in `tree.children`).
+    fn layout_row(
+        mut row: Row<Element<'static, TestMessage, iced::Theme, NullRenderer>>,
+        max_w: f32,
+    ) -> Tree {
+        let mut tree = Tree::new::<TestMessage, iced::Theme, NullRenderer>(&row);
         let renderer: NullRenderer = ();
         let limits = Limits::new(Size::ZERO, Size::new(max_w, 100.0));
-        let mut row_owned = row;
-        // iced's `Tree::new` no longer populates children, so reconcile before
+        // iced's `Tree::new` doesn't populate children, so reconcile before
         // layout (matching the runtime's diff-then-layout order) — otherwise
         // `Row::layout` zips against an empty child-state tree.
-        tree.diff(&mut row_owned as &mut dyn Widget<TestMessage, iced::Theme, NullRenderer>);
-        row_owned.layout(&mut tree, &renderer, &limits)
+        tree.diff::<TestMessage, iced::Theme, NullRenderer>(&mut row);
+        Widget::<TestMessage, iced::Theme, NullRenderer>::layout(
+            &mut row, &mut tree, &renderer, &limits,
+        );
+        tree
     }
 
     #[test]
@@ -1219,11 +1227,10 @@ mod layout_invariants {
         // true. The Fill center container resolves to its content's intrinsic,
         // which for a Space::Fill is 0 — exactly the bug the fix addresses.
         let row = build_three_child_row(Length::Shrink, 100.0, 50.0);
-        let node = layout_row(row, 1000.0);
-        let center = &node.children()[1];
+        let tree = layout_row(row, 1000.0);
+        let center = &tree.children[1];
         assert_eq!(
-            center.bounds().width,
-            0.0,
+            center.size.width, 0.0,
             "Shrink outer row leaves Fill center at 0 (intrinsic of Space::Fill)"
         );
     }
@@ -1234,12 +1241,12 @@ mod layout_invariants {
         // (inherited). main_compress=false routes the Fill center through
         // pass 3, which awards it remaining = max - non_fill_widths.
         let row = build_three_child_row(Length::Fill, 100.0, 50.0);
-        let node = layout_row(row, 1000.0);
-        let center = &node.children()[1];
+        let tree = layout_row(row, 1000.0);
+        let center = &tree.children[1];
         assert!(
-            (center.bounds().width - 850.0).abs() < 0.5,
+            (center.size.width - 850.0).abs() < 0.5,
             "Fill outer row gives Fill center the visible lane (1000 - 100 - 50 = 850), got {}",
-            center.bounds().width
+            center.size.width
         );
     }
 
@@ -1276,13 +1283,13 @@ mod layout_invariants {
         // recomputes correctly at every width.
         for window_w in [600.0_f32, 800.0, 1200.0, 1600.0] {
             let row = build_three_child_row(Length::Fill, 100.0, 50.0);
-            let node = layout_row(row, window_w);
-            let center = &node.children()[1];
+            let tree = layout_row(row, window_w);
+            let center = &tree.children[1];
             let expected = window_w - 100.0 - 50.0;
             assert!(
-                (center.bounds().width - expected).abs() < 0.5,
+                (center.size.width - expected).abs() < 0.5,
                 "window={window_w} expected lane={expected}, got {}",
-                center.bounds().width,
+                center.size.width,
             );
         }
     }

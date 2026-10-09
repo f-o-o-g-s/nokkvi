@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{container, image},
 };
 use nokkvi_data::{
@@ -214,7 +214,7 @@ impl PlaylistsPage {
                 data.overlay.column_dropdown_open,
                 data.overlay.column_dropdown_trigger_bounds,
             )
-            .into();
+            .boxed();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
@@ -320,7 +320,7 @@ impl PlaylistsPage {
                         create_open,
                         create_bounds,
                     );
-                    btns.push(HeaderButton::Trailing(create_menu.into()));
+                    btns.push(HeaderButton::Trailing(create_menu.boxed()));
                 } else {
                     btns.push(HeaderButton::Add(
                         "New Playlist",
@@ -522,7 +522,8 @@ impl PlaylistsPage {
                             .size(14)
                             .color(theme::fg2())
                             .font(theme::ui_font())
-                            .center(),
+                            .center()
+                            .boxed(),
                     );
                 }
 
@@ -543,7 +544,7 @@ impl PlaylistsPage {
                     col = col.push(row);
                 }
 
-                col.into()
+                col.boxed()
             });
 
         use crate::widgets::base_slot_list_layout::{
@@ -788,10 +789,9 @@ impl PlaylistsPage {
             )
         });
 
-        // Smart-badge glyph slot — always pushed so the row's widget tree
-        // shape stays identical between smart/regular states (the same
-        // discipline as the lock slot below). Regular renders a zero-width
-        // Space; smart renders a sparkles SVG tinted via the shared
+        // Smart-badge glyph slot. Regular renders `void()`, which the row
+        // drops (a zero-width `Space` would stay a child and add the row's
+        // spacing); smart renders a sparkles SVG tinted via the shared
         // static-icon helper so it stays legible on loud-fill rows.
         columns.push(if playlist.is_smart {
             let badge_color = crate::widgets::slot_list::slot_list_static_icon_color(
@@ -817,23 +817,17 @@ impl PlaylistsPage {
             )
             .gap(4)
             .style(crate::theme::container_tooltip)
-            .into()
+            .boxed()
         } else {
-            iced::widget::Space::new()
-                .width(Length::Fixed(0.0))
-                .height(Length::Fixed(14.0))
-                .into()
+            iced::widget::void().boxed()
         });
 
-        // Visibility glyph slot — always pushed so the row's widget tree
-        // shape stays identical between public/private states. Public renders
-        // a zero-width Space; private renders a lock SVG whose tint tracks
-        // the row's text color (dark on selected/expanded rows, fg3 otherwise).
+        // Visibility glyph slot. Public renders `void()`, which the row drops
+        // (as with the smart badge above); private renders a lock SVG whose
+        // tint tracks the row's text color (dark on selected/expanded rows,
+        // fg3 otherwise).
         columns.push(if playlist.public {
-            iced::widget::Space::new()
-                .width(Length::Fixed(0.0))
-                .height(Length::Fixed(14.0))
-                .into()
+            iced::widget::void().boxed()
         } else {
             let lock_color = crate::widgets::slot_list::slot_list_static_icon_color(
                 style,
@@ -858,7 +852,7 @@ impl PlaylistsPage {
             )
             .gap(4)
             .style(crate::theme::container_tooltip)
-            .into()
+            .boxed()
         });
 
         if show_song_count_col {
@@ -943,7 +937,7 @@ impl PlaylistsPage {
                 None => PlaylistsMessage::SetOpenMenu(None),
             },
         )
-        .into()
+        .boxed()
     }
 
     /// Render a child track row in the slot list (indented, simpler layout)

@@ -23,7 +23,7 @@
 //! scene moves identically with the player stopped, paused, or playing. Only
 //! the night LIGHT follows the music (`harbour_light::HarbourMusic`).
 
-use iced::{Color, Element, Length, Point, Rectangle, Size, widget::canvas};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Widget as _, widget::canvas};
 
 use crate::widgets::{
     boat::{BoatState, LineGeometry, boat_overlay, parse_hex_color, sample_line_height},
@@ -1835,10 +1835,11 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
                     iced::Padding::new(0.0)
                         .left((MOON_X * w - moon_r).max(0.0))
                         .top((MOON_Y * h - moon_r).max(0.0)),
-                ),
+                )
+                .boxed(),
             );
         }
-        layers.push(boat_el).into()
+        layers.push(boat_el).boxed()
     };
 
     if crate::theme::artwork_column_mode().is_stretched() {
@@ -1853,7 +1854,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         ]
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .boxed()
     } else {
         // Auto / native: the sibling square contract — resolve to a
         // `min(w, h)` square via Shrink so the artwork column sizes off
@@ -1871,12 +1872,12 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
                 .width(Length::Fixed(s))
                 .height(Length::Fixed(s)),
             )
-            .into();
+            .boxed();
             panel
         })
         .width(Length::Shrink)
         .height(Length::Shrink)
-        .into()
+        .boxed()
     }
 }
 

@@ -9,7 +9,8 @@
 //! eventually walks the focused row out of view (undershoot on tall rows,
 //! overshoot on short ones).
 //!
-//! The scrollable reports its frame and content bounds first, then traverses
+//! The scrollable reports its frame (`scrollable`) and its content bounds (a
+//! `container` under the scrollable's own id) first, then traverses
 //! its children in the same walk (and `button` / `column` / `container` all
 //! forward `operation.traverse`), so both bounds land in one pass. Child
 //! layouts are reported pre-translation, so the target's offset within the
@@ -17,7 +18,7 @@
 //! position.
 
 use iced::{
-    Rectangle, Task, Vector,
+    Rectangle, Size, Task, Vector,
     advanced::widget::{Id, Operation, operate, operation},
     widget::scrollable::AbsoluteOffset,
 };
@@ -42,8 +43,10 @@ fn center_offset_y(frame: Rectangle, content: Rectangle, target: Rectangle) -> f
 struct CenterInScrollable {
     scrollable_id: Id,
     target_id: Id,
-    /// (viewport bounds, content bounds) of the matched scrollable.
-    frame: Option<(Rectangle, Rectangle)>,
+    /// Viewport bounds of the matched scrollable.
+    frame: Option<Rectangle>,
+    /// Content bounds of the matched scrollable.
+    content: Option<Rectangle>,
     /// Bounds of the matched target widget.
     target: Option<Rectangle>,
 }
@@ -57,23 +60,28 @@ impl<T: 'static> Operation<T> for CenterInScrollable {
         &mut self,
         id: Option<&Id>,
         bounds: Rectangle,
-        content_bounds: Rectangle,
+        _content: Size,
         _translation: Vector,
         _state: &mut dyn operation::Scrollable,
     ) {
         if id == Some(&self.scrollable_id) {
-            self.frame = Some((bounds, content_bounds));
+            self.frame = Some(bounds);
         }
     }
 
     fn container(&mut self, id: Option<&Id>, bounds: Rectangle, _viewport: &Rectangle) {
-        if id == Some(&self.target_id) {
+        // A scrollable reports its content's bounds as a container under its
+        // own id, right after `scrollable`.
+        if id == Some(&self.scrollable_id) {
+            self.content = Some(bounds);
+        } else if id == Some(&self.target_id) {
             self.target = Some(bounds);
         }
     }
 
     fn finish(&self) -> operation::Outcome<T> {
-        let (Some((frame, content)), Some(target)) = (self.frame, self.target) else {
+        let (Some(frame), Some(content), Some(target)) = (self.frame, self.content, self.target)
+        else {
             // Either id absent from the current tree (empty list, target not
             // rendered) — leave the scroll position untouched.
             return operation::Outcome::None;
@@ -86,6 +94,8 @@ impl<T: 'static> Operation<T> for CenterInScrollable {
                 x: None,
                 y: Some(y),
             },
+            // Keyboard focus moves land at once, as they always have.
+            operation::Animation::Instant,
         )))
     }
 }
@@ -103,6 +113,7 @@ pub(crate) fn center_in_scrollable<T: Send + 'static>(
         scrollable_id: scrollable_id.into(),
         target_id: target_id.into(),
         frame: None,
+        content: None,
         target: None,
     })
 }

@@ -15,9 +15,9 @@
 use std::slice;
 
 use iced::{
-    Element, Event, Length, Point, Rectangle, Size, Theme, Vector,
+    Element, Event, Length, Point, Rectangle, Size, Theme, Vector, Widget as _,
     advanced::{
-        Layout, Shell, Widget, layout, overlay, renderer,
+        Layout, Renderer as _, Shell, Widget, layout, overlay, renderer,
         widget::{self, tree},
     },
     mouse, touch,
@@ -27,10 +27,7 @@ use iced::{
 use crate::{
     theme,
     widgets::{
-        menu_constants::{
-            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
-            visible_menu_layout,
-        },
+        menu_constants::{MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, menu_layer_bounds},
         menu_dismiss,
     },
 };
@@ -634,7 +631,7 @@ pub(crate) fn panel_menu_open_state<M>(
 /// - `on_open_change` — emitted with `Some(cursor_pos)` to request open or
 ///   `None` to request close
 pub(crate) fn context_menu<'a, T, Message>(
-    base: impl Into<Element<'a, Message>>,
+    base: Element<'a, Message>,
     entries: Vec<T>,
     entry_view: impl Fn(T, Length) -> Element<'a, Message> + 'a,
     is_open: bool,
@@ -642,7 +639,7 @@ pub(crate) fn context_menu<'a, T, Message>(
     on_open_change: impl Fn(Option<Point>) -> Message + 'a,
 ) -> ContextMenu<'a, T, Message> {
     ContextMenu {
-        base: base.into(),
+        base,
         entries,
         entry_view: Box::new(entry_view),
         on_open_change: Box::new(on_open_change),
@@ -663,7 +660,7 @@ pub(crate) fn context_menu<'a, T, Message>(
 pub(crate) fn wrap_library_row<'a, Message>(
     view: crate::View,
     item_index: usize,
-    base: impl Into<Element<'a, Message>>,
+    base: Element<'a, Message>,
     entries: Vec<LibraryContextEntry>,
     open_menu: Option<&'a crate::app_message::OpenMenu>,
     on_context_action: impl Fn(usize, LibraryContextEntry) -> Message + 'a,
@@ -690,14 +687,14 @@ where
             None => on_set_open_menu(None),
         },
     )
-    .into()
+    .boxed()
 }
 
 /// Like [`wrap_library_row`] for Similar/TopSongs rows, which use
 /// `ContextMenuId::SimilarRow` instead of `LibraryRow`.
 pub(crate) fn wrap_similar_row<'a, Message>(
     item_index: usize,
-    base: impl Into<Element<'a, Message>>,
+    base: Element<'a, Message>,
     entries: Vec<LibraryContextEntry>,
     open_menu: Option<&'a crate::app_message::OpenMenu>,
     on_context_action: impl Fn(usize, LibraryContextEntry) -> Message + 'a,
@@ -724,7 +721,7 @@ where
             None => on_set_open_menu(None),
         },
     )
-    .into()
+    .boxed()
 }
 
 /// Wrap a now-playing strip with the strip context menu (Go to Queue/Album/
@@ -741,7 +738,7 @@ where
 /// / `*Message::SetOpenMenu`); loosen to `impl Fn + Clone` only if a future
 /// caller needs captures.
 pub(crate) fn wrap_strip_context_menu<'a, Message: Clone + 'a>(
-    base: impl Into<Element<'a, Message>>,
+    base: Element<'a, Message>,
     is_radio: bool,
     has_local_path: bool,
     is_starred: bool,
@@ -749,7 +746,6 @@ pub(crate) fn wrap_strip_context_menu<'a, Message: Clone + 'a>(
     on_action: fn(StripContextEntry) -> Message,
     on_set_open_menu: fn(Option<crate::app_message::OpenMenu>) -> Message,
 ) -> Element<'a, Message> {
-    let base = base.into();
     if is_radio {
         return base;
     }
@@ -768,14 +764,14 @@ pub(crate) fn wrap_strip_context_menu<'a, Message: Clone + 'a>(
             None => on_set_open_menu(None),
         },
     )
-    .into()
+    .boxed()
 }
 
 // ============================================================================
 // Widget
 // ============================================================================
 
-pub struct ContextMenu<'a, T, Message> {
+pub(crate) struct ContextMenu<'a, T, Message> {
     base: Element<'a, Message>,
     entries: Vec<T>,
     entry_view: Box<dyn Fn(T, Length) -> Element<'a, Message> + 'a>,
@@ -807,6 +803,8 @@ impl State {
     }
 }
 
+impl<T, Message> iced::advanced::widget::Meta for ContextMenu<'_, T, Message> {}
+
 impl<'a, T, Message> Widget<Message, Theme, iced::Renderer> for ContextMenu<'a, T, Message>
 where
     T: Clone + 'a,
@@ -825,18 +823,20 @@ where
     }
 
     fn size(&self) -> Size<Length> {
-        self.base.as_widget().size()
+        self.base.size()
     }
 
+    // The base fills our bounds exactly (zero translation, same size), so it
+    // shares our `Layout` everywhere below.
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        self.base
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+    ) {
+        self.base.layout(&mut tree.children[0], renderer, limits);
+
+        tree.size = tree.children[0].size;
     }
 
     fn draw(
@@ -845,11 +845,11 @@ where
         renderer: &mut iced::Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.base.as_widget().draw(
+        self.base.draw(
             &tree.children[0],
             renderer,
             theme,
@@ -864,7 +864,7 @@ where
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -887,7 +887,7 @@ where
         }
 
         // Forward to child
-        self.base.as_widget_mut().update(
+        self.base.update(
             &mut tree.children[0],
             event,
             layout,
@@ -901,27 +901,23 @@ where
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        self.base.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        self.base
+            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut widget::Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         // Let the child provide its overlays first
         let Some(base_state) = tree.children.first_mut() else {
@@ -929,8 +925,7 @@ where
         };
         let mut overlays =
             self.base
-                .as_widget_mut()
-                .overlay(base_state, layout, renderer, viewport, translation);
+                .overlay(base_state, layout, renderer, viewport, translation, window);
 
         let state = tree.state.downcast_mut::<State>();
         let our_overlay = if self.is_open
@@ -942,8 +937,9 @@ where
                 &self.entries,
                 &self.entry_view,
                 &*self.on_open_change,
-                position,
-                translation,
+                position + translation,
+                renderer,
+                window,
             )
         } else {
             // Drop cached menu element + reset persisted tree so next open
@@ -956,12 +952,6 @@ where
         // The menu goes last so it draws above the base's own overlays.
         overlays.extend(our_overlay);
         overlays
-    }
-}
-
-impl<'a, T: Clone + 'a, Message: 'a> From<ContextMenu<'a, T, Message>> for Element<'a, Message> {
-    fn from(menu: ContextMenu<'a, T, Message>) -> Self {
-        Element::new(menu)
     }
 }
 
@@ -983,9 +973,13 @@ where
     ))
     .padding(4)
     .style(super::menu_chrome::container_style)
-    .into()
+    .boxed()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "called once, from overlay(), with the widget's fields borrowed separately"
+)]
 fn build_overlay<'a, 'b, T, Message>(
     state: &'b mut State,
     menu: &'b mut Option<Element<'a, Message>>,
@@ -993,7 +987,8 @@ fn build_overlay<'a, 'b, T, Message>(
     entry_view: &(dyn Fn(T, Length) -> Element<'a, Message> + 'a),
     on_open_change: &'b dyn Fn(Option<Point>) -> Message,
     position: Point,
-    translation: Vector,
+    renderer: &iced::Renderer,
+    window: Size,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
     T: Clone + 'a,
@@ -1015,12 +1010,14 @@ where
     state.menu_tree.diff(&mut *m as &mut Element<'a, Message>);
 
     menu.as_mut().map(|m| {
-        overlay::Element::new(Box::new(MenuOverlay {
-            menu: m,
+        overlay::Element::new(Box::new(MenuOverlay::new(
+            m,
             state,
             on_open_change,
-            position: position + translation,
-        }))
+            position,
+            renderer,
+            window,
+        )))
     })
 }
 
@@ -1032,26 +1029,34 @@ struct MenuOverlay<'a, 'b, Message> {
     menu: &'b mut Element<'a, Message>,
     state: &'b mut State,
     on_open_change: &'b dyn Fn(Option<Point>) -> Message,
-    position: Point,
+    /// The menu content's layout: the visible menu, in window coordinates.
+    layout: Layout,
 }
 
-impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, '_, Message> {
-    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
-        let limits = layout::Limits::new(Size::ZERO, bounds)
+impl<'a, 'b, Message> MenuOverlay<'a, 'b, Message> {
+    /// Lays the menu out at `position` (window coordinates), clamped inside
+    /// the `window` with a small inset.
+    fn new(
+        menu: &'b mut Element<'a, Message>,
+        state: &'b mut State,
+        on_open_change: &'b dyn Fn(Option<Point>) -> Message,
+        position: Point,
+        renderer: &iced::Renderer,
+        window: Size,
+    ) -> Self {
+        let limits = layout::Limits::new(Size::ZERO, window)
             .width(Length::Shrink)
             .height(Length::Shrink);
 
-        let menu_node =
-            self.menu
-                .as_widget_mut()
-                .layout(&mut self.state.menu_tree, renderer, &limits);
+        menu.layout(&mut state.menu_tree, renderer, &limits);
+        let menu_size = state.menu_tree.size;
 
         let padding = 5.0;
         let viewport = Rectangle::new(
             Point::new(padding, padding),
-            Size::new(bounds.width - 2.0 * padding, bounds.height - 2.0 * padding),
+            Size::new(window.width - 2.0 * padding, window.height - 2.0 * padding),
         );
-        let mut menu_bounds = Rectangle::new(self.position, menu_node.size());
+        let mut menu_bounds = Rectangle::new(position, menu_size);
 
         // Clamp to viewport
         if menu_bounds.x < viewport.x {
@@ -1066,18 +1071,24 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             menu_bounds.y = viewport.y + viewport.height - menu_bounds.height;
         }
 
-        inflate_for_shadow_around_child(menu_node, menu_bounds.position())
+        Self {
+            menu,
+            state,
+            on_open_change,
+            layout: Layout::new(menu_size).move_to(menu_bounds.position()),
+        }
     }
+}
 
+impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, '_, Message> {
     fn update(
         &mut self,
         event: &Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let menu_layout = visible_menu_layout(layout);
+        let menu_layout = self.layout;
         let cursor_over = cursor.position_over(menu_layout.bounds());
 
         // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
@@ -1093,7 +1104,7 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         }
 
         // Delegate to the menu content (buttons handle their own clicks)
-        self.menu.as_widget_mut().update(
+        self.menu.update(
             &mut self.state.menu_tree,
             event,
             menu_layout,
@@ -1123,29 +1134,32 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         renderer: &mut iced::Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let menu_layout = visible_menu_layout(layout);
-        self.menu.as_widget().draw(
-            &self.state.menu_tree,
-            renderer,
-            theme,
-            style,
-            menu_layout,
-            cursor,
-            &menu_layout.bounds(),
-        );
+        let menu_layout = self.layout;
+
+        // The menu draws in its own layer (above the widgets under it), grown
+        // so the drop shadow isn't scissored.
+        renderer.with_layer(menu_layer_bounds(menu_layout.bounds()), |renderer| {
+            self.menu.draw(
+                &self.state.menu_tree,
+                renderer,
+                theme,
+                style,
+                menu_layout,
+                cursor,
+                &menu_layout.bounds(),
+            );
+        });
     }
 
     fn mouse_interaction(
         &self,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        let menu_layout = visible_menu_layout(layout);
-        self.menu.as_widget().mouse_interaction(
+        let menu_layout = self.layout;
+        self.menu.mouse_interaction(
             &self.state.menu_tree,
             menu_layout,
             cursor,
@@ -1184,13 +1198,13 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center)
-        .into()
+        .boxed()
     } else {
         text(label.to_string())
             .size(MENU_TEXT_SIZE)
             .font(theme::ui_font())
             .color(theme::fg0())
-            .into()
+            .boxed()
     };
 
     button(
@@ -1229,7 +1243,7 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
             ..Default::default()
         }
     })
-    .into()
+    .boxed()
 }
 
 /// Render a separator line for grouping menu items.
@@ -1251,7 +1265,7 @@ pub(crate) fn menu_separator<'a, Message: 'a>() -> Element<'a, Message> {
             top: 2.0,
             bottom: 2.0,
         })
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

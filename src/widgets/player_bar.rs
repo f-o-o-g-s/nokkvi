@@ -4,7 +4,7 @@
 //! Receives pure view data and emits actions for root to process.
 
 use iced::{
-    Alignment, Color, Element, Length, Theme,
+    Alignment, Color, Element, Length, Theme, Widget as _,
     advanced::svg::Handle,
     font::Weight,
     mouse::ScrollDelta,
@@ -912,7 +912,7 @@ fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> 
         .height(Length::Fixed(height))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Wrap a section child in a fixed-width, full-height, vertically-centered
@@ -921,21 +921,22 @@ fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> 
 /// the width-flex pattern lives in one place. A free fn (not a closure) so each
 /// arm can call it with its own moved widgets without unifying borrow lifetimes.
 fn fixed_section<'a>(
-    child: impl Into<Element<'a, PlayerBarMessage>>,
+    child: impl iced::Widget<PlayerBarMessage> + 'a,
     width: f32,
     align_x: Alignment,
-) -> iced::widget::Container<'a, PlayerBarMessage> {
+) -> Element<'a, PlayerBarMessage> {
     container(child)
         .width(Length::Fixed(width))
         .height(Length::Fill)
         .align_x(align_x)
         .center_y(Length::Fill)
+        .boxed()
 }
 
 /// A 1 px `theme::border()`-colored hairline (used for the player-bar top
 /// separator, the MiniPlayer capsule scrub separators, and the compact-cluster
 /// vertical divider). Single home for the shared fill style.
-fn hairline(width: Length, height: Length) -> iced::widget::Container<'static, PlayerBarMessage> {
+fn hairline(width: Length, height: Length) -> Element<'static, PlayerBarMessage> {
     container(iced::widget::Space::new())
         .width(width)
         .height(height)
@@ -943,6 +944,7 @@ fn hairline(width: Length, height: Length) -> iced::widget::Container<'static, P
             background: Some(theme::border().into()),
             ..Default::default()
         })
+        .boxed()
 }
 
 /// Active transport-button side length — a constant 40 px in every display
@@ -967,7 +969,7 @@ fn player_control_button(
 ) -> Element<'static, PlayerBarMessage> {
     let size = transport_button_size();
     let icon = svg_icon(icon_path, transport_icon_size(), icon_color);
-    let inner = fixed_centered(icon.into(), size, size);
+    let inner = fixed_centered(icon.boxed(), size, size);
     let btn = button(inner)
         .padding(0)
         .style(transport_button_style(active))
@@ -975,7 +977,7 @@ fn player_control_button(
     HoverOverlay::new(btn)
         .border_radius(theme::ui_radius_pill_player())
         .on_accent_surface(active)
-        .into()
+        .boxed()
 }
 
 /// Build a flat text-labeled mode toggle (used by EQ / SFX inline buttons).
@@ -994,7 +996,11 @@ fn mode_text_toggle(
     if !enabled {
         label_widget = label_widget.color(theme::fg4());
     }
-    let inner = fixed_centered(label_widget.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
+    let inner = fixed_centered(
+        label_widget.boxed(),
+        mode_button_width(),
+        MODE_BUTTON_HEIGHT,
+    );
     let mut btn = button(inner)
         .padding(0)
         .style(mode_toggle_style(active && enabled));
@@ -1017,7 +1023,7 @@ fn mode_text_toggle(
     )
     .border_radius(theme::ui_radius_sm_player())
     .on_accent_surface(active)
-    .into()
+    .boxed()
 }
 
 /// Build a flat icon-based mode toggle (repeat / shuffle / consume / crossfade
@@ -1043,7 +1049,7 @@ fn mode_toggle_button<'a>(
         theme::fg0()
     };
     let icon = svg_icon(icon_path, 18.0, icon_color);
-    let inner = fixed_centered(icon.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
+    let inner = fixed_centered(icon.boxed(), mode_button_width(), MODE_BUTTON_HEIGHT);
     let mut btn = button(inner)
         .padding(0)
         .style(mode_toggle_style(active && enabled));
@@ -1061,7 +1067,7 @@ fn mode_toggle_button<'a>(
     )
     .border_radius(theme::ui_radius_sm_player())
     .on_accent_surface(active)
-    .into()
+    .boxed()
 }
 
 /// Compose the `MiniPlayer` capsule scrub's two end-cap labels, tucking the
@@ -1155,7 +1161,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
                 },
                 ..Default::default()
             })
-            .into()
+            .boxed()
         } else if data.is_radio {
             container(svg_icon(
                 super::track_info_strip::RADIO_TOWER_ICON_PATH,
@@ -1174,7 +1180,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
                 },
                 ..Default::default()
             })
-            .into()
+            .boxed()
         } else {
             container(iced::widget::Space::new())
                 .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
@@ -1187,7 +1193,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
                     },
                     ..Default::default()
                 })
-                .into()
+                .boxed()
         };
 
     // MiniPlayer metadata lines truncate with a trailing ellipsis (no marquee
@@ -1203,7 +1209,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
                 .width(Length::Fill)
                 .wrapping(iced::widget::text::Wrapping::None)
                 .ellipsis(iced::widget::text::Ellipsis::End)
-                .into()
+                .boxed()
         };
 
     // Slot mapping
@@ -1259,7 +1265,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
 
     mouse_area(inner)
         .on_press(PlayerBarMessage::StripClicked)
-        .into()
+        .boxed()
 }
 
 /// Build the player bar view.
@@ -1326,7 +1332,7 @@ pub(crate) fn player_bar<'a>(
             next_button,
         ]
         .spacing(4)
-        .into()
+        .boxed()
     };
 
     // Progress bar section
@@ -1416,7 +1422,8 @@ pub(crate) fn player_bar<'a>(
                 },
                 data.player_modes_open,
             ))
-            .border_radius(theme::ui_radius_sm_player()),
+            .border_radius(theme::ui_radius_sm_player())
+            .boxed(),
         ));
     }
 
@@ -1444,7 +1451,9 @@ pub(crate) fn player_bar<'a>(
         )
         .player_bar_style();
         mode_toggles_row = mode_toggles_row.push(Element::from(
-            HoverOverlay::new(hamburger).border_radius(theme::ui_radius_sm_player()),
+            HoverOverlay::new(hamburger)
+                .border_radius(theme::ui_radius_sm_player())
+                .boxed(),
         ));
     }
 
@@ -1469,7 +1478,7 @@ pub(crate) fn player_bar<'a>(
     if is_horizontal {
         vol = vol.thickness(stacked_thickness);
     }
-    let vol_slider: Element<'_, PlayerBarMessage> = vol.into();
+    let vol_slider: Element<'_, PlayerBarMessage> = vol.boxed();
 
     let mut sfx = widgets::volume_slider(sfx_volume, PlayerBarMessage::SfxVolumeChanged)
         .variant(widgets::SliderVariant::Sfx)
@@ -1478,7 +1487,7 @@ pub(crate) fn player_bar<'a>(
     if stacked {
         sfx = sfx.thickness(stacked_thickness);
     }
-    let sfx_slider: Element<'_, PlayerBarMessage> = sfx.into();
+    let sfx_slider: Element<'_, PlayerBarMessage> = sfx.boxed();
 
     let volume_control: Element<'_, PlayerBarMessage> = if is_horizontal {
         // Horizontal mode: stack sliders vertically (SFX on top, volume below),
@@ -1487,26 +1496,26 @@ pub(crate) fn player_bar<'a>(
             column![sfx_slider, vol_slider]
                 .spacing(stacked_spacing)
                 .align_x(Alignment::Center)
-                .into()
+                .boxed()
         } else {
-            column![vol_slider].align_x(Alignment::Center).into()
+            column![vol_slider].align_x(Alignment::Center).boxed()
         };
         container(stacked_el)
             .height(Length::Fill)
             .center_y(Length::Fill)
-            .into()
+            .boxed()
     } else {
         // Vertical mode (default): side-by-side in a row
         if sound_effects_enabled && show_sfx_slider {
             row![vol_slider, sfx_slider]
                 .spacing(4)
                 .align_y(Alignment::Center)
-                .into()
+                .boxed()
         } else {
             row![vol_slider]
                 .spacing(4)
                 .align_y(Alignment::Center)
-                .into()
+                .boxed()
         }
     };
 
@@ -1542,7 +1551,7 @@ pub(crate) fn player_bar<'a>(
     // single-cluster row from them (no Length::Fixed section wrappers).
     let has_hamburger = crate::theme::is_none_nav();
 
-    let mut main_row = iced::widget::Row::new()
+    let mut main_row = iced::widget::Row::<Element<'_, _>>::new()
         .spacing(MAIN_ROW_INNER_GAP)
         .padding(outer_padding)
         .align_y(Alignment::Center);
@@ -1612,9 +1621,10 @@ pub(crate) fn player_bar<'a>(
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_x(Alignment::Start)
-                    .center_y(Length::Fill),
+                    .center_y(Length::Fill)
+                    .boxed(),
             );
-            main_row = main_row.push(transports_section);
+            main_row = main_row.push(transports_section.boxed());
             let show_modes = theme::mini_player_show_modes();
             let show_volume = theme::mini_player_show_volume();
             if show_modes || show_volume {
@@ -1624,11 +1634,11 @@ pub(crate) fn player_bar<'a>(
                 // Fill siblings are what center the transports; a Fixed wrapper
                 // would shift the center as modes cull. No divider here (the
                 // centered Fill gaps are the seam).
-                let mut cluster = iced::widget::Row::new()
+                let mut cluster = iced::widget::Row::<Element<'_, _>>::new()
                     .spacing(MAIN_ROW_INNER_GAP)
                     .align_y(Alignment::Center);
                 if show_modes {
-                    cluster = cluster.push(mode_toggles);
+                    cluster = cluster.push(mode_toggles.boxed());
                 }
                 if show_volume {
                     cluster = cluster.push(volume_control);
@@ -1638,12 +1648,13 @@ pub(crate) fn player_bar<'a>(
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .center_y(Length::Fill),
+                        .center_y(Length::Fill)
+                        .boxed(),
                 );
             } else {
                 // Both controls hidden: a Fill placeholder holds the right half so
                 // the lone metadata Fill doesn't shove the transports off-center.
-                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill));
+                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill).boxed());
             }
         } else {
             // --- COMPACT single-cluster row (the current MiniPlayer look) ---
@@ -1668,12 +1679,13 @@ pub(crate) fn player_bar<'a>(
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .align_x(Alignment::Start)
-                        .center_y(Length::Fill),
+                        .center_y(Length::Fill)
+                        .boxed(),
                 );
             } else {
-                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill));
+                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill).boxed());
             }
-            main_row = main_row.push(transports_section);
+            main_row = main_row.push(transports_section.boxed());
             // The mode menu and volume each show per their own setting. Order is
             // [divider | kebab | volume] so the volume control is the rightmost
             // control in BOTH regimes (matches the wide [modes | volume] cluster),
@@ -1682,12 +1694,12 @@ pub(crate) fn player_bar<'a>(
             let show_modes = theme::mini_player_show_modes();
             let show_volume = theme::mini_player_show_volume();
             if show_modes || show_volume {
-                main_row = main_row.push(divider);
+                main_row = main_row.push(divider.boxed());
                 if show_modes {
-                    main_row = main_row.push(mode_toggles);
+                    main_row = main_row.push(mode_toggles.boxed());
                 }
                 if show_volume {
-                    main_row = main_row.push(volume_section);
+                    main_row = main_row.push(volume_section.boxed());
                 }
             }
         }
@@ -1700,7 +1712,7 @@ pub(crate) fn player_bar<'a>(
         column![scrub_separator(), capscrub, scrub_separator(), main_row]
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .boxed()
     } else if let Some(strip) = info_strip {
         // --- TRACK DISPLAY (PlayerBar strip) MODE ---
         // Main row on top, info strip below (separator built into the
@@ -1715,7 +1727,7 @@ pub(crate) fn player_bar<'a>(
         let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
         main_row = main_row
             .push(transports_section)
-            .push(progress_row)
+            .push(progress_row.boxed())
             .push(mode_toggles)
             .push(volume_control);
         column![
@@ -1725,7 +1737,7 @@ pub(crate) fn player_bar<'a>(
                 .center_y(Length::Fill),
             strip,
         ]
-        .into()
+        .boxed()
     } else {
         // --- NORMAL MODE ---
         let transports_section =
@@ -1734,10 +1746,10 @@ pub(crate) fn player_bar<'a>(
         let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
         main_row
             .push(transports_section)
-            .push(progress_row)
+            .push(progress_row.boxed())
             .push(mode_toggles)
             .push(volume_control)
-            .into()
+            .boxed()
     };
 
     // Bar body. Non-mini modes draw a 1 px top separator (the chrome divider
@@ -1749,10 +1761,10 @@ pub(crate) fn player_bar<'a>(
             .width(Length::Fill)
             .height(Length::Fill)
             .style(theme::container_bg0_hard)
-            .into()
+            .boxed()
     } else {
         let top_separator: Element<'_, PlayerBarMessage> =
-            hairline(Length::Fill, Length::Fixed(1.0)).into();
+            hairline(Length::Fill, Length::Fixed(1.0));
         column![
             top_separator,
             container(main_content)
@@ -1761,7 +1773,7 @@ pub(crate) fn player_bar<'a>(
                 .center_y(Length::Fill)
                 .style(theme::container_bg0_hard),
         ]
-        .into()
+        .boxed()
     };
 
     // Wrapped in a mouse_area so scrolling anywhere on the bar adjusts volume.
@@ -1775,7 +1787,7 @@ pub(crate) fn player_bar<'a>(
             };
             PlayerBarMessage::ScrollVolume(y)
         })
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

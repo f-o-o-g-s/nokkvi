@@ -18,7 +18,7 @@
 //! them. The queue view re-exports them for its existing unit tests.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Row, column, container},
 };
 use nokkvi_data::backend::queue::QueueSongUIViewData;
@@ -299,7 +299,7 @@ where
             //    Genre only → genre at album-size font, vertically centered.
             if show_album_column || show_genre_column {
                 content_row = content_row.push(
-                    container({
+                    (container({
                         let links_enabled = crate::theme::is_slot_text_links();
                         let click_album = on_event(SongListRowEvent::NavAlbum(album_id.clone()));
                         let click_genre = on_event(SongListRowEvent::NavGenre(genre.clone()));
@@ -316,7 +316,7 @@ where
                                     .hover_color(style.hover_text_color)
                                     .font(crate::theme::ui_font())
                                     .on_press(if links_enabled { Some(click) } else { None })
-                                    .into()
+                                    .boxed()
                             };
                         // Metadata size, matching the same column in the Songs
                         // view and every other info column — the queue briefly
@@ -329,7 +329,7 @@ where
                                     make_link(genre_label, m.genre_stack_size, click_genre);
                                 column![album_widget, genre_widget]
                                     .spacing(crate::widgets::slot_list::SLOT_LIST_STACK_SPACING)
-                                    .into()
+                                    .boxed()
                             }
                             (true, false) => make_link(album, m.metadata_size, click_album),
                             (false, true) => make_link(genre_label, m.metadata_size, click_genre),
@@ -340,7 +340,8 @@ where
                     .width(Length::FillPortion(30))
                     .height(Length::Fill)
                     .clip(true)
-                    .align_y(Alignment::Center),
+                    .align_y(Alignment::Center))
+                    .boxed(),
                 );
             }
 
@@ -367,7 +368,8 @@ where
                     container(slot_list_text(duration, duration_size, style.subtext_color))
                         .width(Length::FillPortion(10))
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
+                        .align_y(Alignment::Center)
+                        .boxed(),
                 );
             }
 
@@ -382,7 +384,8 @@ where
                     ))
                     .width(Length::FillPortion(10))
                     .align_x(Alignment::End)
-                    .align_y(Alignment::Center),
+                    .align_y(Alignment::Center)
+                    .boxed(),
                 );
             }
 
@@ -409,7 +412,8 @@ where
                         ..Default::default()
                     })
                     .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
+                    .align_y(Alignment::Center)
+                    .boxed(),
                 );
             }
 
@@ -464,7 +468,7 @@ where
                     SlotListPageMessage::SelectionToggle(idx),
                 ))
             },
-            responsive_row.into(),
+            responsive_row.boxed(),
         )
     };
 

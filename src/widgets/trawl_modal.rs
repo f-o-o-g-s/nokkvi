@@ -12,6 +12,7 @@
 //! [`build_trawl_rows`] — so a centered index always resolves to the row the
 //! user sees.
 
+use iced::Widget as _;
 use nokkvi_data::types::{
     library_search::LibrarySearchResults,
     trawl::{TrawlCrate, TrawlSeed},
@@ -359,7 +360,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
     .padding(Padding::new(2.0));
 
     let seed_count: iced::Element<'a, TrawlModalMessage> = if mix.is_empty() {
-        Space::new().width(Length::Shrink).into()
+        Space::new().width(Length::Shrink).boxed()
     } else {
         let n = mix.len();
         let noun = if n == 1 { "seed" } else { "seeds" };
@@ -367,7 +368,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg3())
-            .into()
+            .boxed()
     };
 
     let title_row = row![
@@ -424,7 +425,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
         .height(Length::Fill)
         .center(Length::Fill)
         .padding(Padding::new(0.0).left(32.0).right(32.0))
-        .into()
+        .boxed()
     } else {
         let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
         let total = rows.len();
@@ -471,7 +472,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
     .align_y(Alignment::Center);
 
     let scaffold = theme::modal_scaffold(
-        modal_row.into(),
+        modal_row.boxed(),
         TrawlModalMessage::Close,
         theme::MODAL_BACKDROP_ALPHA,
     );
@@ -491,7 +492,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
                 TrawlModalMessage::SlotListDown
             }
         })
-        .into()
+        .boxed()
 }
 
 /// One results row: passive group divider, seed hit, or centered hint.
@@ -516,7 +517,7 @@ fn render_trawl_slot<'a>(
             .height(Length::Fixed(row_height))
             .align_y(Alignment::End)
             .padding(Padding::new(0.0).left(12.0).bottom(6.0))
-            .into()
+            .boxed()
         }
         TrawlRow::Hint(msg) => container(
             text(msg.clone())
@@ -527,7 +528,7 @@ fn render_trawl_slot<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(row_height))
         .center(Length::Fill)
-        .into(),
+        .boxed(),
         TrawlRow::Result {
             seed,
             art_album_id,
@@ -569,7 +570,7 @@ fn render_trawl_slot<'a>(
                     },
                     ..Default::default()
                 })
-                .into(),
+                .boxed(),
                 None => {
                     let tint = seed_type_tint(&seed.item);
                     container(
@@ -589,7 +590,7 @@ fn render_trawl_slot<'a>(
                         },
                         ..Default::default()
                     })
-                    .into()
+                    .boxed()
                 }
             };
 
@@ -658,7 +659,7 @@ fn render_trawl_slot<'a>(
             mouse_area(body)
                 .on_press(TrawlModalMessage::ClickRow(item_index))
                 .interaction(iced::mouse::Interaction::Pointer)
-                .into()
+                .boxed()
         }
     }
 }
@@ -737,7 +738,7 @@ fn tray_picker<'a, T: PartialEq + Clone + 'a>(
         .padding([4, 8])
         .style(move |_theme, status| tray_pick_list_style(status, focused))
         .menu_style(|_theme| tray_pick_list_menu_style())
-        .into()
+        .boxed()
 }
 
 /// The fixed-height crate tray: chip band, controls row, hint line.
@@ -767,7 +768,7 @@ fn render_tray<'a>(
         .height(Length::Fixed(CHIP_BAND_HEIGHT))
         .align_y(Alignment::Center)
         .padding(Padding::new(0.0).left(4.0))
-        .into()
+        .boxed()
     } else {
         let weighted = mix.blend == TrawlBlend::Weighted;
         let mut chips = row![].spacing(6.0).align_y(Alignment::Center);
@@ -800,7 +801,7 @@ fn render_tray<'a>(
             };
             TrawlModalMessage::ChipsScrolled(-y)
         })
-        .into()
+        .boxed()
     };
 
     // ── Controls row ──
@@ -1061,7 +1062,7 @@ fn render_tray<'a>(
     )
     .width(Length::Fill)
     .height(Length::Fixed(TRAY_HEIGHT))
-    .into()
+    .boxed()
 }
 
 /// One crate chip: type glyph, 2-line label (sublabel disambiguates duplicate
@@ -1094,7 +1095,7 @@ fn render_chip<'a>(
     let mut chip = row![glyph, labels].spacing(7.0).align_y(Alignment::Center);
 
     if weighted {
-        chip = chip.push(Space::new().width(Length::Fixed(2.0)));
+        chip = chip.push(Space::new().width(Length::Fixed(2.0)).boxed());
         chip = chip.push(stepper_button(
             "assets/icons/chevron-left.svg",
             seed.weight > TRAWL_WEIGHT_MIN,
@@ -1104,7 +1105,8 @@ fn render_chip<'a>(
             text(seed.weight.to_string())
                 .size(12.0)
                 .font(theme::weighted_ui_font(Weight::Bold))
-                .color(theme::fg0()),
+                .color(theme::fg0())
+                .boxed(),
         );
         chip = chip.push(stepper_button(
             "assets/icons/chevron-right.svg",
@@ -1124,7 +1126,7 @@ fn render_chip<'a>(
     .on_press(TrawlModalMessage::RemoveSeed(index))
     .style(theme::transparent_button_style)
     .padding(2.0);
-    chip = chip.push(remove);
+    chip = chip.push(remove.boxed());
 
     container(chip)
         .padding(Padding::new(5.0).left(10.0).right(6.0))
@@ -1137,7 +1139,7 @@ fn render_chip<'a>(
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 /// `‹ n ›` stepper chevron — the settings numeric-row `arrow_button` recipe.
@@ -1175,7 +1177,7 @@ fn stepper_button<'a>(
     if enabled {
         btn = btn.on_press(on_press);
     }
-    btn.into()
+    btn.boxed()
 }
 
 /// Character-capped label with an ellipsis — chips have no width to spare.

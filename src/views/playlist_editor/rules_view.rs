@@ -16,7 +16,7 @@
 //! colors, no new radii.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{Space, column, container, mouse_area, row, text, text_input},
 };
 use nokkvi_data::types::{
@@ -165,7 +165,7 @@ impl PlaylistEditorState {
                 background: Some(theme::bg0().into()),
                 ..Default::default()
             })
-            .into();
+            .boxed();
 
         // Root type stays `Stack` in EVERY state (a single-child stack when
         // no overlay is up) — flipping Container↔Stack rebuilds the base
@@ -178,7 +178,7 @@ impl PlaylistEditorState {
         } else if session.confirm_discard {
             layers = layers.push(discard_confirm_overlay());
         }
-        layers.into()
+        layers.boxed()
     }
 
     /// The edit-bar band — cursor row 0 of the form's keyboard ring:
@@ -217,7 +217,7 @@ impl PlaylistEditorState {
                     .width(Length::Fill)
                     .padding([2, 4])
                     .style(bar_input_style)
-                    .into(),
+                    .boxed(),
                 cell_ring(FormCell::Name) && cursor_mode,
             ),
         );
@@ -232,7 +232,7 @@ impl PlaylistEditorState {
                     .width(Length::Fill)
                     .padding([2, 4])
                     .style(bar_input_style)
-                    .into(),
+                    .boxed(),
                 cell_ring(FormCell::Comment) && cursor_mode,
             ),
         );
@@ -309,7 +309,7 @@ impl PlaylistEditorState {
             .padding([6, 10]),
         )
         .width(Length::Fill)
-        .into()
+        .boxed()
     }
 }
 
@@ -359,7 +359,7 @@ fn results_pane<'a>(
         column_dropdown_open,
         column_dropdown_trigger_bounds,
     )
-    .into();
+    .boxed();
 
     // A persistent "PREVIEW" eyebrow (mirrors the rules pane's eyebrow) so a
     // populated pane can't be mistaken for the saved playlist's tracks — these
@@ -402,7 +402,7 @@ fn results_pane<'a>(
             .center_x(Length::Fill)
             .padding(8),
         ]
-        .into(),
+        .boxed(),
         PreviewPhase::Failed if session.preview.rows.is_empty() => {
             empty_copy("Couldn't read the matches — Re-evaluate to retry")
         }
@@ -434,7 +434,8 @@ fn results_pane<'a>(
                             .font(theme::ui_font())
                             .color(theme::warning()),
                     )
-                    .padding(8),
+                    .padding(8)
+                    .boxed(),
                 );
             }
             iced::widget::scrollable(rows_col)
@@ -442,11 +443,11 @@ fn results_pane<'a>(
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(theme::settings_scrollable_style)
-                .into()
+                .boxed()
         }
     };
 
-    column![header, theme::horizontal_separator(1.0), body].into()
+    column![header, theme::horizontal_separator(1.0), body].boxed()
 }
 
 fn preview_row<'a>(
@@ -460,7 +461,7 @@ fn preview_row<'a>(
         Some(handle) => iced::widget::image(handle.clone())
             .width(Length::Fixed(32.0))
             .height(Length::Fixed(32.0))
-            .into(),
+            .boxed(),
         None => container(Space::new())
             .width(Length::Fixed(32.0))
             .height(Length::Fixed(32.0))
@@ -468,7 +469,7 @@ fn preview_row<'a>(
                 background: Some(theme::bg1().into()),
                 ..Default::default()
             })
-            .into(),
+            .boxed(),
     };
     // Wrapping::None + Ellipsis::End lets iced's text layout truncate a long
     // title/artist with "…" at the (clipped, bounded) column edge instead of
@@ -535,9 +536,9 @@ fn preview_row<'a>(
     if centered {
         row_container
             .id(iced::widget::Id::new(RULES_PREVIEW_CURSOR_ID))
-            .into()
+            .boxed()
     } else {
-        row_container.into()
+        row_container.boxed()
     }
 }
 
@@ -577,7 +578,7 @@ fn preview_stars_cell<'a>(rating: Option<u32>) -> Element<'a, Message> {
     ))
     .width(Length::Fixed(PREVIEW_STARS_W))
     .align_y(Alignment::Center)
-    .into()
+    .boxed()
 }
 
 /// A filled heart when loved, else a dim outline heart. Display-only.
@@ -592,7 +593,7 @@ fn preview_love_cell<'a>(starred: bool) -> Element<'a, Message> {
     .width(Length::Fixed(PREVIEW_LOVE_W))
     .align_x(iced::alignment::Horizontal::Center)
     .align_y(Alignment::Center)
-    .into()
+    .boxed()
 }
 
 /// Right-aligned play count labeled "N plays" (`0 plays` when unknown) — the
@@ -609,7 +610,7 @@ fn preview_plays_cell<'a>(play_count: Option<u32>) -> Element<'a, Message> {
     .width(Length::Fixed(PREVIEW_PLAYS_W))
     .align_x(iced::alignment::Horizontal::Right)
     .align_y(Alignment::Center)
-    .into()
+    .boxed()
 }
 
 /// Genre text, ellipsized to a fixed width (no wrap, no row-height jitter).
@@ -625,7 +626,7 @@ fn preview_genre_cell<'a>(genre: &'a str) -> Element<'a, Message> {
     .width(Length::Fixed(PREVIEW_GENRE_W))
     .align_y(Alignment::Center)
     .clip(true)
-    .into()
+    .boxed()
 }
 
 /// Right-aligned duration in a fixed-width cell (fits H:MM:SS) so it doesn't
@@ -641,7 +642,7 @@ fn preview_duration_cell<'a>(duration: &'a str) -> Element<'a, Message> {
     .width(Length::Fixed(PREVIEW_DURATION_W))
     .align_x(iced::alignment::Horizontal::Right)
     .align_y(Alignment::Center)
-    .into()
+    .boxed()
 }
 
 // =========================================================================
@@ -683,7 +684,8 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
                 text(format!("Parse error: {err}"))
                     .size(11)
                     .font(theme::ui_font())
-                    .color(theme::warning()),
+                    .color(theme::warning())
+                    .boxed(),
             );
         }
         if json.revert_offer {
@@ -700,10 +702,11 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
                         Message::RulesEditor(RulesEditorMessage::JsonRevertToLastGood),
                     ),
                 ]
-                .spacing(8),
+                .spacing(8)
+                .boxed(),
             );
         }
-        return col.into();
+        return col.boxed();
     }
 
     // Create empty state: the preset list + Start empty + Import from
@@ -726,7 +729,7 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
         return iced::widget::scrollable(col)
             .height(Length::Fill)
             .style(theme::settings_scrollable_style)
-            .into();
+            .boxed();
     }
 
     let locked = !session.form_editable();
@@ -750,9 +753,9 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
         // `session.rows`, never these inserted children.
         let section = form_section(form_row);
         if prev_section.is_some_and(|p| p != section) {
-            col = col.push(Space::new().height(Length::Fixed(6.0)));
+            col = col.push(Space::new().height(Length::Fixed(6.0)).boxed());
             col = col.push(theme::horizontal_separator(1.0));
-            col = col.push(Space::new().height(Length::Fixed(6.0)));
+            col = col.push(Space::new().height(Length::Fixed(6.0)).boxed());
         }
         prev_section = Some(section);
         let cursor_here =
@@ -786,7 +789,7 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
     iced::widget::scrollable(col)
         .height(Length::Fill)
         .style(theme::settings_scrollable_style)
-        .into()
+        .boxed()
 }
 
 fn render_form_row<'a>(
@@ -801,7 +804,7 @@ fn render_form_row<'a>(
         |cell: FormCell| Message::RulesEditor(RulesEditorMessage::ClickCell { row: row_idx, cell });
 
     let content: Element<'a, Message> = match form_row {
-        FormRow::EditBar => Space::new().into(), // rendered above the panes
+        FormRow::EditBar => Space::new().boxed(), // rendered above the panes
         FormRow::Match => {
             let conj = session
                 .rules
@@ -831,7 +834,7 @@ fn render_form_row<'a>(
             ]
             .spacing(8)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
         FormRow::GroupHeader(path) => {
             let conj = match session.node_at(path) {
@@ -854,19 +857,19 @@ fn render_form_row<'a>(
             ]
             .spacing(8)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
         FormRow::Rule(path) => render_rule_row(session, path, cursor_here, locked, row_idx),
         FormRow::AddRule(path) => {
             let indent = if path.is_empty() { 0.0 } else { 16.0 };
             row![
-                Space::new().width(Length::Fixed(indent)),
+                indent_gap(indent),
                 ring_wrap(
                     cursor_here,
                     dim_action("+ Add rule", click(FormCell::RowAction)),
                 ),
             ]
-            .into()
+            .boxed()
         }
         FormRow::AddGroup => ring_wrap(
             cursor_here,
@@ -875,7 +878,7 @@ fn render_form_row<'a>(
         FormRow::SortKey(i) => {
             let keys = session.rules.effective_sort_keys();
             let Some(key) = keys.get(*i).cloned() else {
-                return Space::new().into();
+                return Space::new().boxed();
             };
             row![
                 text(if *i == 0 { "Sort by" } else { "then" })
@@ -907,7 +910,7 @@ fn render_form_row<'a>(
             ]
             .spacing(8)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
         FormRow::AddSortKey => ring_wrap(
             cursor_here,
@@ -967,7 +970,7 @@ fn render_form_row<'a>(
             ]
             .spacing(8)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
         FormRow::Refresh => {
             let delay_text = session.rules.refresh_delay.clone().unwrap_or_default();
@@ -995,7 +998,7 @@ fn render_form_row<'a>(
             ]
             .spacing(8)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
         FormRow::JsonToggle => ring_wrap(
             cursor_here,
@@ -1007,7 +1010,14 @@ fn render_form_row<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(ROW_H))
         .padding([2, 4])
-        .into()
+        .boxed()
+}
+
+/// A form row's leading indent: an `indent`-wide gap, or `None` at the top
+/// level, which the row drops — a zero-width `Space` would stay a child and
+/// open the row on an empty slot plus the row's spacing.
+fn indent_gap(indent: f32) -> Option<Space> {
+    (indent > 0.0).then(|| Space::new().width(Length::Fixed(indent)))
 }
 
 fn render_rule_row<'a>(
@@ -1030,7 +1040,7 @@ fn render_rule_row<'a>(
                 .operator
                 .value_shape(session.field_class_of(&leaf.field));
 
-            let mut cells = row![Space::new().width(Length::Fixed(indent))]
+            let mut cells = row![indent_gap(indent)]
                 .spacing(6)
                 .align_y(Alignment::Center);
             cells = cells.push(ring_wrap(
@@ -1086,7 +1096,8 @@ fn render_rule_row<'a>(
                         text("to")
                             .size(11)
                             .font(theme::ui_font())
-                            .color(theme::fg3()),
+                            .color(theme::fg3())
+                            .boxed(),
                     );
                     cells = cells.push(ring_wrap(
                         cell_ring(FormCell::Value2),
@@ -1110,7 +1121,8 @@ fn render_rule_row<'a>(
                         text("days")
                             .size(11)
                             .font(theme::ui_font())
-                            .color(theme::fg3()),
+                            .color(theme::fg3())
+                            .boxed(),
                     );
                 }
                 ValueShape::Date => {
@@ -1135,7 +1147,7 @@ fn render_rule_row<'a>(
                     ));
                 }
             }
-            cells = cells.push(Space::new().width(Length::Fill));
+            cells = cells.push(Space::new().width(Length::Fill).boxed());
             if !locked {
                 cells = cells.push(ring_wrap(
                     cell_ring(FormCell::Remove),
@@ -1146,13 +1158,13 @@ fn render_rule_row<'a>(
                     ),
                 ));
             }
-            cells.into()
+            cells.boxed()
         }
         Some(CriteriaNode::Unknown(value)) => {
             // Read-only raw pill — never dropped, edit-as-JSON reaches it.
             let raw = serde_json::to_string(value).unwrap_or_default();
             row![
-                Space::new().width(Length::Fixed(indent)),
+                indent_gap(indent),
                 container(
                     text(raw)
                         .size(11)
@@ -1182,9 +1194,9 @@ fn render_rule_row<'a>(
             ]
             .spacing(6)
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         }
-        _ => Space::new().into(),
+        _ => Space::new().boxed(),
     }
 }
 
@@ -1224,7 +1236,7 @@ fn sub_picker_overlay<'a>(
         // The dim right column only when it says something new — a tag-value
         // entry's value IS its label, so it would otherwise print twice.
         let content: Element<'a, Message> = if value == label {
-            label_el.into()
+            label_el.boxed()
         } else {
             row![
                 label_el,
@@ -1235,7 +1247,7 @@ fn sub_picker_overlay<'a>(
                     .color(theme::fg4()),
             ]
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         };
         let mut cell = container(content)
             .padding([6, 10])
@@ -1276,7 +1288,7 @@ fn sub_picker_overlay<'a>(
     .style(theme::modal_frame_style);
 
     theme::modal_scaffold(
-        panel.into(),
+        panel.boxed(),
         Message::RulesEditor(RulesEditorMessage::SubPickerCancel),
         theme::MODAL_BACKDROP_ALPHA,
     )
@@ -1338,10 +1350,10 @@ fn date_picker_overlay<'a>(year: i32, month: u32, focused_day: usize) -> Element
             .height(Length::Fixed(CELL_H))
     };
     let mut grid_col = column![].spacing(2);
-    let mut week = row![].spacing(2);
+    let mut week = iced::widget::Row::<Element<'_, _>>::new().spacing(2);
     let mut col = 0u32;
     for _ in 0..grid.leading_blanks {
-        week = week.push(blank());
+        week = week.push(blank().boxed());
         col += 1;
     }
     for day in 1..=grid.days_in_month {
@@ -1357,7 +1369,7 @@ fn date_picker_overlay<'a>(year: i32, month: u32, focused_day: usize) -> Element
     }
     if col > 0 {
         for _ in col..7 {
-            week = week.push(blank());
+            week = week.push(blank().boxed());
         }
         grid_col = grid_col.push(week);
     }
@@ -1374,7 +1386,7 @@ fn date_picker_overlay<'a>(year: i32, month: u32, focused_day: usize) -> Element
             .style(theme::modal_frame_style);
 
     theme::modal_scaffold(
-        panel.into(),
+        panel.boxed(),
         Message::RulesEditor(RulesEditorMessage::SubPickerCancel),
         theme::MODAL_BACKDROP_ALPHA,
     )
@@ -1405,7 +1417,7 @@ fn date_nav_button<'a>(glyph: &'a str, msg: Message) -> Element<'a, Message> {
         .border_radius(theme::ui_radius_sm()),
     )
     .on_press(msg)
-    .into()
+    .boxed()
 }
 
 /// One day cell in the calendar grid. `focused` = the accent-filled day that
@@ -1448,7 +1460,7 @@ fn day_cell<'a>(day: u32, focused: bool, today: bool, w: f32, h: f32) -> Element
         .on_press(Message::RulesEditor(RulesEditorMessage::DatePickerPickDay(
             day,
         )))
-        .into()
+        .boxed()
 }
 
 /// Scrollable id for the results/preview pane + the id tagged onto the
@@ -1507,7 +1519,7 @@ fn discard_confirm_overlay<'a>() -> Element<'a, Message> {
     .padding(16)
     .style(theme::modal_frame_style);
     theme::modal_scaffold(
-        panel.into(),
+        panel.boxed(),
         Message::RulesEditor(RulesEditorMessage::CancelDiscard),
         theme::MODAL_BACKDROP_ALPHA,
     )
@@ -1541,7 +1553,7 @@ fn conflict_banner<'a>() -> Element<'a, Message> {
         background: Some(theme::bg1().into()),
         ..Default::default()
     })
-    .into()
+    .boxed()
 }
 
 fn target_gone_banner<'a>() -> Element<'a, Message> {
@@ -1567,7 +1579,7 @@ fn target_gone_banner<'a>() -> Element<'a, Message> {
         background: Some(theme::bg1().into()),
         ..Default::default()
     })
-    .into()
+    .boxed()
 }
 
 /// The pane duo re-rendered under a banner (kept as a helper so both banner
@@ -1603,7 +1615,7 @@ fn panes_placeholder<'a>(
             .height(Length::Fill),
     ]
     .height(Length::Fill)
-    .into()
+    .boxed()
 }
 
 /// Which visual band a form row belongs to — matching (0) / sort (1) /
@@ -1632,7 +1644,7 @@ fn pane_divider<'a>() -> Element<'a, Message> {
             background: Some(theme::border().into()),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 // =========================================================================
@@ -1674,7 +1686,7 @@ fn chip<'a>(label: &str, accent: bool, on_press: Message) -> Element<'a, Message
         .border_radius(theme::ui_radius_pill()),
     )
     .on_press(on_press)
-    .into()
+    .boxed()
 }
 
 /// A dimmed full-width action row (add-rows, the JSON toggle).
@@ -1693,7 +1705,7 @@ fn dim_action<'a>(label: &str, on_press: Message) -> Element<'a, Message> {
         .border_radius(theme::ui_radius_sm()),
     )
     .on_press(on_press)
-    .into()
+    .boxed()
 }
 
 /// An activatable empty-state row (preset list) — the Harbour-anchor-row
@@ -1766,7 +1778,7 @@ fn action_row<'a>(
         .border_radius(theme::ui_radius_sm()),
     )
     .on_press(on_press)
-    .into()
+    .boxed()
 }
 
 /// A value cell: the live `text_input` when this exact cell is in Editing
@@ -1804,7 +1816,7 @@ fn value_cell<'a>(
             .padding([3, 6])
             .width(Length::Fixed(110.0))
             .style(value_input_style)
-            .into()
+            .boxed()
     } else {
         let shown = if committed.is_empty() {
             placeholder.to_owned()
@@ -1827,9 +1839,9 @@ fn value_cell<'a>(
                 super::cover::edit_affordance()
             ]
             .align_y(Alignment::Center)
-            .into()
+            .boxed()
         } else {
-            label.into()
+            label.boxed()
         };
         mouse_area(
             HoverOverlay::new(
@@ -1852,7 +1864,7 @@ fn value_cell<'a>(
             row: row_idx,
             cell,
         }))
-        .into()
+        .boxed()
     }
 }
 
@@ -1875,7 +1887,7 @@ fn ring_wrap<'a>(on: bool, inner: Element<'a, Message>) -> Element<'a, Message> 
             ..Default::default()
         })
         .padding(1)
-        .into()
+        .boxed()
 }
 
 /// Wrap an edit-bar input, appending the pencil affordance when its cell is
@@ -1888,7 +1900,7 @@ fn edit_bar_field<'a>(input: Element<'a, Message>, show_pencil: bool) -> Element
             super::cover::edit_affordance()
         ]
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
     } else {
         input
     }
@@ -1902,7 +1914,7 @@ fn form_hint<'a>(copy: &str) -> Element<'a, Message> {
             .color(theme::fg4()),
     )
     .padding([2, 4])
-    .into()
+    .boxed()
 }
 
 fn empty_copy<'a>(copy: &'static str) -> Element<'a, Message> {
@@ -1915,7 +1927,7 @@ fn empty_copy<'a>(copy: &'static str) -> Element<'a, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .center(Length::Fill)
-    .into()
+    .boxed()
 }
 
 fn diag_line<'a>(
@@ -1946,7 +1958,11 @@ fn diag_line<'a>(
             }),
         );
     }
-    if any { col.into() } else { Space::new().into() }
+    if any {
+        col.boxed()
+    } else {
+        Space::new().boxed()
+    }
 }
 
 fn bar_input_style(

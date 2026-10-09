@@ -85,10 +85,10 @@ nokkvi-data = { path = "data" }
 nokkvi-ipc = { path = "nokkvi-ipc" }
 anyhow = "1.0.102"
 bytemuck = { version = "1.25", features = ["derive"] }
-# Pinned to iced-rs/iced master @ 0e911834 (2026-09-20): the last master commit
-# before the 0.15 widget API redesign (generic `impl Widget` content, layout kept in
-# the widget tree, self-laid-out overlays) and the move to wgpu 30.
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "0e911834a42a749197758a52885935ce31c0322e", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper", "fira-sans"] }
+# Pinned to iced-rs/iced master @ a8231fd9 (2026-10-07), on the 0.15 widget API
+# (generic `impl Widget` content, layout kept in the widget tree, self-laid-out
+# overlays) and wgpu 30.
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "a8231fd9ddf3570f95affba2d45a9be092007f71", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper", "fira-sans"] }
 lru = "0.18"
 image = "0.25.10"
 reqwest = { version = "0.13.2", features = ["json", "blocking", "stream"] }
@@ -117,15 +117,15 @@ libc = "0.2"
 # gtk3 link-time dependency. The async dialog future is runtime-agnostic and is
 # awaited inside iced `Task::perform` closures on the tokio runtime.
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
-# MilkDrop visualizer mode: the `particle-milkdrop` renderer (wgpu 29.0.3, the same wgpu iced pins)
+# MilkDrop visualizer mode: the `particle-milkdrop` renderer (wgpu 30.0.1, the same wgpu iced pins)
 # and its `particle-audio` analyzer, from the project's fork of sho-run/ojodrop: upstream 093e4098
-# plus five patches (branch nokkvi-warp-alpha): the custom warp pipeline fits in two bind
-# groups (all iced's device granted until iced-rs/iced#3457), `set_named_texture` lets nokkvi feed a
-# preset the playing album's cover in place (512 px atlas cells), EEL names match
-# case-insensitively as in MilkDrop (`FLen` is `flen`), and a COMP can read its own previous
-# frame (`sampler_prev_comp`, fjord's echo and depth of field), and a custom warp can write the
-# feedback's alpha (`ret_alpha`, starfield nebula's star trails). `default-features = false`
-# drops the standalone player (winit/cpal) and the C++ .milk converter: presets load from
-# Butterchurn's pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
-particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "a25224f455e5ba890bc533429e4f78fede1d236d", default-features = false }
-particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "a25224f455e5ba890bc533429e4f78fede1d236d", default-features = false }
+# plus six patches (branch nokkvi-wgpu30): the move to wgpu 30, the custom warp pipeline fits in two
+# bind groups (all iced's device granted until iced-rs/iced#3457), `set_named_texture` lets nokkvi
+# feed a preset the playing album's cover in place (512 px atlas cells), EEL names match
+# case-insensitively as in MilkDrop (`FLen` is `flen`), and a COMP can read its own previous frame
+# (`sampler_prev_comp`, fjord's echo and depth of field), and a custom warp can write the feedback's
+# alpha (`ret_alpha`, starfield nebula's star trails). `default-features = false` drops the
+# standalone player (winit/cpal) and the C++ .milk converter: presets load from Butterchurn's
+# pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
+particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
+particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }

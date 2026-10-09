@@ -14,7 +14,7 @@ use iced::{
         overlay, renderer,
         widget::{Operation, Tree, Widget, tree},
     },
-    alignment::{self, Alignment},
+    alignment::Alignment,
     event::Event,
     mouse,
 };
@@ -60,8 +60,17 @@ impl EdgeZone {
     }
 }
 
-#[derive(Debug, Clone)]
+/// The column's tree state: the drag gesture plus the flex layout cache iced's
+/// `Column` keeps (it reuses the per-child bookkeeping between layouts).
+#[derive(Debug, Default)]
+struct State {
+    drag: DragState,
+    flex: layout::flex::Cache,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) enum DragState {
+    #[default]
     Idle,
     Picking {
         index: usize,
@@ -97,18 +106,10 @@ pub enum DragEvent {
     },
 }
 
-#[expect(
-    missing_debug_implementations,
-    reason = "holds a boxed drag callback, which has no Debug"
-)]
-pub struct DragColumn<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+pub(crate) struct DragColumn<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     spacing: f32,
-    padding: Padding,
     width: Length,
     height: Length,
-    max_width: f32,
-    align: Alignment,
-    clip: bool,
     children: Vec<Element<'a, Message, Theme, Renderer>>,
     on_drag: Option<Box<dyn Fn(DragEvent) -> Message + 'a>>,
 }
@@ -117,76 +118,52 @@ impl<'a, Message, Theme, Renderer> DragColumn<'a, Message, Theme, Renderer>
 where
     Renderer: renderer::Renderer,
 {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::from_vec(Vec::new())
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self::from_vec(Vec::with_capacity(capacity))
     }
 
-    pub fn with_children(
+    pub(crate) fn with_children(
         children: impl IntoIterator<Item = Element<'a, Message, Theme, Renderer>>,
     ) -> Self {
         let iterator = children.into_iter();
         Self::with_capacity(iterator.size_hint().0).extend(iterator)
     }
 
-    pub fn from_vec(children: Vec<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub(crate) fn from_vec(children: Vec<Element<'a, Message, Theme, Renderer>>) -> Self {
         Self {
             spacing: 0.0,
-            padding: Padding::ZERO,
             width: Length::Shrink,
             height: Length::Shrink,
-            max_width: f32::INFINITY,
-            align: Alignment::Start,
-            clip: false,
             children,
             on_drag: None,
         }
     }
 
-    pub fn spacing(mut self, amount: impl Into<Pixels>) -> Self {
+    pub(crate) fn spacing(mut self, amount: impl Into<Pixels>) -> Self {
         self.spacing = amount.into().0;
         self
     }
 
-    pub fn padding<P: Into<Padding>>(mut self, padding: P) -> Self {
-        self.padding = padding.into();
-        self
-    }
-
-    pub fn width(mut self, width: impl Into<Length>) -> Self {
+    pub(crate) fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
     }
 
-    pub fn height(mut self, height: impl Into<Length>) -> Self {
+    pub(crate) fn height(mut self, height: impl Into<Length>) -> Self {
         self.height = height.into();
         self
     }
 
-    pub fn max_width(mut self, max_width: impl Into<Pixels>) -> Self {
-        self.max_width = max_width.into().0;
-        self
-    }
-
-    pub fn align_x(mut self, align: impl Into<alignment::Horizontal>) -> Self {
-        self.align = Alignment::from(align.into());
-        self
-    }
-
-    pub fn clip(mut self, clip: bool) -> Self {
-        self.clip = clip;
-        self
-    }
-
-    pub fn push(mut self, child: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub(crate) fn push(mut self, child: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         self.children.push(child.into());
         self
     }
 
-    pub fn extend(
+    pub(crate) fn extend(
         self,
         children: impl IntoIterator<Item = Element<'a, Message, Theme, Renderer>>,
     ) -> Self {
@@ -194,7 +171,7 @@ where
     }
 
     /// Set the callback for drag events. When `None`, the widget acts as a normal column.
-    pub fn on_drag(mut self, on_drag: impl Fn(DragEvent) -> Message + 'a) -> Self {
+    pub(crate) fn on_drag(mut self, on_drag: impl Fn(DragEvent) -> Message + 'a) -> Self {
         self.on_drag = Some(Box::new(on_drag));
         self
     }
@@ -202,7 +179,8 @@ where
     fn compute_target_index(
         &self,
         cursor_position: Point,
-        layout: Layout<'_>,
+        layout: Layout,
+        children: &[Tree],
         dragged_index: usize,
     ) -> usize {
         let cursor_y = cursor_position.y;
@@ -215,7 +193,7 @@ where
             return self.children.len();
         }
 
-        for (i, child_layout) in layout.children().enumerate() {
+        for (i, (child_layout, _)) in layout.iter(children).enumerate() {
             let child_bounds = child_layout.bounds();
             let y = child_bounds.y;
             let height = child_bounds.height;
@@ -256,17 +234,22 @@ impl<'a, Message, Theme, Renderer: renderer::Renderer>
     }
 }
 
+impl<Message, Theme, Renderer> iced::advanced::widget::Meta
+    for DragColumn<'_, Message, Theme, Renderer>
+{
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for DragColumn<'_, Message, Theme, Renderer>
 where
     Renderer: renderer::Renderer + iced::advanced::text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<DragState>()
+        tree::Tag::of::<State>()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(DragState::Idle)
+        tree::State::new(State::default())
     }
 
     fn diff(&mut self, tree: &mut Tree) {
@@ -276,7 +259,7 @@ where
         // the column `Fill`), exactly as iced's own `Column::diff` does.
         if self.width.is_fit() || self.height.is_fit() {
             for child in &self.children {
-                let size = child.as_widget().size();
+                let size = child.size();
 
                 self.width = self.width.cross(size.width);
                 self.height = self.height.stack(size.height);
@@ -291,36 +274,28 @@ where
         }
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        let limits = if self.max_width.is_finite() {
-            limits.width(Length::Fill.max(self.max_width))
-        } else {
-            *limits
-        };
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
+        let state = tree.state.downcast_mut::<State>();
 
-        layout::flex::resolve(
+        tree.size = layout::flex::resolve(
             layout::flex::Axis::Vertical,
             renderer,
-            &limits,
+            limits,
             self.width,
             self.height,
-            self.padding,
+            Padding::ZERO,
             self.spacing,
-            self.align,
-            &mut self.children,
+            Alignment::Start,
             &mut tree.children,
-        )
+            &mut self.children,
+            &mut state.flex,
+        );
     }
 
     fn operate(
         &mut self,
         _tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         viewport: &Rectangle,
         _renderer: &Renderer,
         operation: &mut dyn Operation,
@@ -332,7 +307,7 @@ where
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
@@ -340,14 +315,14 @@ where
     ) {
         // Only handle drag logic when on_drag is set
         if self.on_drag.is_some() {
-            let action = tree.state.downcast_mut::<DragState>();
+            let action = &mut tree.state.downcast_mut::<State>().drag;
 
             match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     let bounds = layout.bounds();
                     if let Some(cursor_position) = cursor.position_over(bounds) {
                         // Find which child was clicked
-                        for (index, child_layout) in layout.children().enumerate() {
+                        for (index, (child_layout, _)) in layout.iter(&tree.children).enumerate() {
                             if child_layout.bounds().contains(cursor_position) {
                                 *action = DragState::Picking {
                                     index,
@@ -406,8 +381,12 @@ where
                                         bounds.height,
                                         DRAG_EDGE_ZONE_PX,
                                     );
-                                    let target_slot =
-                                        self.compute_target_index(clamped_cursor, layout, index);
+                                    let target_slot = self.compute_target_index(
+                                        clamped_cursor,
+                                        layout,
+                                        &tree.children,
+                                        index,
+                                    );
                                     shell.publish(on_drag(DragEvent::Dragged {
                                         cursor: cursor_position,
                                         edge,
@@ -426,8 +405,12 @@ where
                         DragState::Dragging {
                             index, last_cursor, ..
                         } => {
-                            let target_index =
-                                self.compute_target_index(last_cursor, layout, index);
+                            let target_index = self.compute_target_index(
+                                last_cursor,
+                                layout,
+                                &tree.children,
+                                index,
+                            );
                             debug!(
                                 "🖱️ [DRAG] Dropped child {} → target {}",
                                 index, target_index
@@ -453,7 +436,7 @@ where
             // When actively dragging, do NOT forward events to children.
             // This prevents accidental star/heart clicks mid-drag.
             if matches!(
-                tree.state.downcast_ref::<DragState>(),
+                tree.state.downcast_ref::<State>().drag,
                 DragState::Dragging { .. }
             ) {
                 return;
@@ -463,26 +446,22 @@ where
         // Forward events to children (normal column behavior)
         self.children
             .iter_mut()
-            .zip(&mut tree.children)
-            .zip(layout.children())
-            .for_each(|((child, tree), layout)| {
-                child
-                    .as_widget_mut()
-                    .update(tree, event, layout, cursor, renderer, shell, viewport);
+            .zip(layout.iter_mut(&mut tree.children))
+            .for_each(|(child, (layout, tree))| {
+                child.update(tree, event, layout, cursor, renderer, shell, viewport);
             });
     }
 
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
         if self.on_drag.is_some() {
-            let action = tree.state.downcast_ref::<DragState>();
-            match action {
+            match tree.state.downcast_ref::<State>().drag {
                 DragState::Dragging { .. } | DragState::Picking { .. } => {
                     return mouse::Interaction::Grabbing;
                 }
@@ -492,12 +471,9 @@ where
 
         self.children
             .iter()
-            .zip(&tree.children)
-            .zip(layout.children())
-            .map(|((child, state), layout)| {
-                child
-                    .as_widget()
-                    .mouse_interaction(state, layout, cursor, viewport, renderer)
+            .zip(layout.iter(&tree.children))
+            .map(|(child, (layout, state))| {
+                child.mouse_interaction(state, layout, cursor, viewport, renderer)
             })
             .max()
             .unwrap_or_default()
@@ -509,7 +485,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         defaults: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -524,25 +500,19 @@ where
         // by the drop-indicator line (`slot_list_view_with_drag`'s
         // `drop_indicator_slot`, fed by the live `DragEvent::Dragged.target_slot`).
         // So the widget never translates a child, and nothing cycles.
-        for ((child, state), layout) in self
-            .children
-            .iter()
-            .zip(&tree.children)
-            .zip(layout.children())
-        {
-            child
-                .as_widget()
-                .draw(state, renderer, theme, defaults, layout, cursor, viewport);
+        for (child, (layout, state)) in self.children.iter().zip(layout.iter(&tree.children)) {
+            child.draw(state, renderer, theme, defaults, layout, cursor, viewport);
         }
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
+        window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
         overlay::from_children(
             &mut self.children,
@@ -551,19 +521,8 @@ where
             renderer,
             viewport,
             translation,
+            window,
         )
-    }
-}
-
-impl<'a, Message, Theme, Renderer> From<DragColumn<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: renderer::Renderer + iced::advanced::text::Renderer + 'a,
-{
-    fn from(column: DragColumn<'a, Message, Theme, Renderer>) -> Self {
-        Self::new(column)
     }
 }
 

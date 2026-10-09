@@ -1,5 +1,5 @@
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     font::Weight,
     widget::{container, mouse_area, stack, text_input},
 };
@@ -96,7 +96,7 @@ pub(crate) fn search_bar<'a, Message: Clone + 'a>(
                 .align_x(Alignment::Start)
         ])
         .width(Length::Fill)
-        .into()
+        .boxed()
     } else {
         // Right clear icon button
         let clear_icon = crate::embedded_svg::svg_widget("assets/icons/x.svg")
@@ -129,6 +129,6 @@ pub(crate) fn search_bar<'a, Message: Clone + 'a>(
                 .align_x(Alignment::End)
         ])
         .width(Length::Fill)
-        .into()
+        .boxed()
     }
 }

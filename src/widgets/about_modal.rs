@@ -10,7 +10,7 @@
 //!   - "Copy All" and "Close" buttons
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Widget as _,
     widget::{column, container, mouse_area, row, space, svg, text},
 };
 
@@ -226,7 +226,7 @@ pub(crate) fn about_modal_overlay<'a>(
     )
     .on_press(AboutModalMessage::OpenKofi)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into();
+    .boxed();
 
     let kofi_container = container(kofi_row)
         .width(Length::Fill)
@@ -254,7 +254,7 @@ pub(crate) fn about_modal_overlay<'a>(
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────
     Some(theme::modal_scaffold(
-        dialog_box.into(),
+        dialog_box.boxed(),
         AboutModalMessage::Close,
         theme::MODAL_BACKDROP_ALPHA,
     ))
@@ -298,7 +298,7 @@ fn info_row<'a>(label: &str, value: &str) -> Element<'a, AboutModalMessage> {
     ]
     .align_y(Alignment::Center)
     .width(Length::Fill)
-    .into()
+    .boxed()
 }
 
 /// Borderless icon-only button that uses the canonical

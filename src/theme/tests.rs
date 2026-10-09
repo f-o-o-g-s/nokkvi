@@ -3,7 +3,7 @@
 
 use std::{sync::atomic::Ordering, time::Instant};
 
-use iced::Color;
+use iced::{Color, Widget as _};
 use nokkvi_data::types::player_settings::{
     ArtworkColumnMode, ArtworkStretchFit, NavDisplayMode, NavLayout, RoundedMode, SlotRowHeight,
     StripClickAction, StripSeparator, TrackInfoDisplay,
@@ -666,7 +666,7 @@ fn modal_scaffold_threads_message_type_through() {
         Closed,
     }
     let dialog: iced::Element<'_, FakeMsg> =
-        iced::Element::from(Space::new().width(100.0).height(60.0));
+        iced::Element::from(Space::new().width(100.0).height(60.0).boxed());
     let _scaffold: iced::Element<'_, FakeMsg> =
         modal_scaffold(dialog, FakeMsg::Closed, MODAL_BACKDROP_ALPHA);
 }

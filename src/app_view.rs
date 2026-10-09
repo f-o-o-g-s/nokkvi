@@ -3,7 +3,7 @@
 //! Contains all rendering logic: view(), login_view(), home_view(), navigation_bar(), main_content()
 
 use iced::{
-    Element, Length,
+    Element, Length, Widget as _,
     widget::{Stack, column, container},
 };
 
@@ -687,20 +687,21 @@ impl Nokkvi {
                 ..iced::Padding::ZERO
             });
         let chrome_width = lowered_width.map_or(Length::Fill, Length::Fixed);
-        let mut chrome_layer = iced::widget::Column::new();
+        let mut chrome_layer = iced::widget::Column::<Element<'a, Message>>::new();
         if let Some(strip) = top_strip {
-            chrome_layer = chrome_layer.push(container(strip).width(chrome_width));
+            chrome_layer = chrome_layer.push(container(strip).width(chrome_width).boxed());
         }
         let chrome_layer = chrome_layer
             .push(
                 iced::widget::Space::new()
                     .width(Length::Fill)
-                    .height(Length::Fill),
+                    .height(Length::Fill)
+                    .boxed(),
             )
-            .push(container(player_bar).width(chrome_width))
+            .push(container(player_bar).width(chrome_width).boxed())
             .width(Length::Fill)
             .height(Length::Fill);
-        Stack::new().push(base).push(chrome_layer).into()
+        iced::widget::stack![base, chrome_layer].boxed()
     }
 
     /// Root view dispatcher.
@@ -721,7 +722,7 @@ impl Nokkvi {
 
     /// Login screen view - delegates to LoginPage component
     fn login_view(&self) -> Element<'_, Message> {
-        self.login_page.view().map(Message::Login)
+        self.login_page.view().map(Message::Login).boxed()
     }
 
     /// Home screen layout (nav bar + content + player bar)
@@ -936,7 +937,7 @@ impl Nokkvi {
             if with_separator_above {
                 Some(wrapped)
             } else {
-                Some(column![wrapped, crate::theme::horizontal_separator::<Message>(1.0),].into())
+                Some(column![wrapped, crate::theme::horizontal_separator::<Message>(1.0),].boxed())
             }
         };
 
@@ -947,14 +948,17 @@ impl Nokkvi {
         // were).
         if self.theater.active {
             return self.theater_view(
-                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+                widgets::player_bar(&player_bar_data, player_strip)
+                    .map(Message::PlayerBar)
+                    .boxed(),
             );
         }
 
         // Docked with the top strip row around `main_content` by `dock_chrome`
         // in every layout.
-        let player_bar =
-            widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar);
+        let player_bar = widgets::player_bar(&player_bar_data, player_strip)
+            .map(Message::PlayerBar)
+            .boxed();
 
         let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
             || crate::theme::is_none_nav()
@@ -1005,7 +1009,8 @@ impl Nokkvi {
                         widgets::side_nav_bar(side_data).map(map_nav_bar_message),
                         right_col,
                     ]
-                    .height(Length::Fill),
+                    .height(Length::Fill)
+                    .boxed(),
                 );
             } else {
                 // None mode: no sidebar — strip (if any), content, player
@@ -1019,7 +1024,7 @@ impl Nokkvi {
             }
 
             // Fill the window height so the player bar sits flush at the bottom.
-            outer.height(Length::Fill).into()
+            outer.height(Length::Fill).boxed()
         } else {
             // Top-nav layout — always wrap in `Stack` with the same column
             // shape underneath, even when elevation is off. Switching the
@@ -1064,7 +1069,8 @@ impl Nokkvi {
                 .push(
                     iced::widget::Space::new()
                         .width(Length::Fill)
-                        .height(Length::Fixed(outer_space_height)),
+                        .height(Length::Fixed(outer_space_height))
+                        .boxed(),
                 )
                 .push(Self::dock_chrome(
                     self.main_content(bleed),
@@ -1085,7 +1091,7 @@ impl Nokkvi {
             .width(Length::Fill)
             .height(Length::Fill);
 
-            Stack::new().push(base).push(nav_overlay).into()
+            Stack::new().push(base).push(nav_overlay).boxed()
         };
 
         // In side-nav mode the sidebar is the full-height leftmost band; the
@@ -1096,7 +1102,7 @@ impl Nokkvi {
             widgets::player_bar::player_bar_height(),
             self.side_nav_inset(),
         )
-        .into()
+        .boxed()
     }
 
     /// Theater Mode's layout (see `update/theater.rs`). A fixed four-layer
@@ -1137,7 +1143,7 @@ impl Nokkvi {
             },
         );
 
-        let stack = self.bottom_band_layers(Stack::new().push(panel), 0.0, 0.0);
+        let stack = self.bottom_band_layers(Stack::new().push(panel.boxed()), 0.0, 0.0);
 
         // The chrome is translated, never resized: a `Column` spacer would
         // squash a `Fixed`-height bar instead of moving it (and `pin` has the
@@ -1188,11 +1194,15 @@ impl Nokkvi {
         let chrome = column![corner_row, bar].width(Length::Fill);
         let offset = crate::update::theater::slide_offset(self.theater.chrome, now);
         stack
-            .push(OverflowPin::new(chrome).position(iced::Point::new(
-                0.0,
-                self.window.height - chrome_h + offset * chrome_h,
-            )))
-            .into()
+            .push(
+                OverflowPin::new(chrome)
+                    .position(iced::Point::new(
+                        0.0,
+                        self.window.height - chrome_h + offset * chrome_h,
+                    ))
+                    .boxed(),
+            )
+            .boxed()
     }
 
     /// Theater Mode's now-playing panel: the shared artwork panel helper fed
@@ -1274,10 +1284,10 @@ impl Nokkvi {
     /// the width kept free on the left (the side nav).
     fn bottom_band_layers<'a>(
         &'a self,
-        mut stack: Stack<'a, Message>,
+        mut stack: Stack<Element<'a, Message>>,
         bar_reserved: f32,
         inset: f32,
-    ) -> Stack<'a, Message> {
+    ) -> Stack<Element<'a, Message>> {
         let mut pushed = 0;
 
         // Add the bottom-band visualizer overlay. `resolve_placement` decides
@@ -1338,7 +1348,7 @@ impl Nokkvi {
             .width(Length::Fill)
             .height(Length::Fill);
 
-            stack = stack.push(visualizer_overlay);
+            stack = stack.push(visualizer_overlay.boxed());
             pushed += 1;
 
             // Surfing-boat overlay (lines mode only). Mirrors the spacer
@@ -1373,7 +1383,7 @@ impl Nokkvi {
                 .width(Length::Fill)
                 .height(Length::Fill);
 
-                stack = stack.push(boat_overlay_col);
+                stack = stack.push(boat_overlay_col.boxed());
                 pushed += 1;
             }
         }
@@ -1384,7 +1394,7 @@ impl Nokkvi {
         // `Stack::push` drops only a child with a `Fixed(0.0)` side, so the
         // default (`Shrink`) `Space::new()` is kept as a placeholder.
         for _ in pushed..BOTTOM_BAND_LAYERS {
-            stack = stack.push(iced::widget::Space::new());
+            stack = stack.push(iced::widget::Space::new().boxed());
         }
         stack
     }
@@ -1409,7 +1419,7 @@ impl Nokkvi {
         for modal in ActiveModal::STACK.into_iter().rev() {
             stack = stack.push(
                 self.modal_overlay(modal)
-                    .unwrap_or_else(|| iced::widget::Space::new().into()),
+                    .unwrap_or_else(|| iced::widget::Space::new().boxed()),
             );
         }
 
@@ -1470,7 +1480,7 @@ impl Nokkvi {
                 left: left_inset,
             });
 
-            stack = stack.push(toast_bar);
+            stack = stack.push(toast_bar.boxed());
         }
 
         // Add floating drag indicator during cross-pane drag — renders a copy
@@ -1506,7 +1516,7 @@ impl Nokkvi {
                 bottom: 0.0,
             });
 
-            stack = stack.push(drag_overlay);
+            stack = stack.push(drag_overlay.boxed());
             // The drop indicator is rendered inside the queue's own slot
             // list area (see `slot_list_view_with_drag`) using the slot
             // index recorded by per-slot `mouse_area::on_enter`, so its
@@ -1521,7 +1531,7 @@ impl Nokkvi {
             stack = stack.push(ghost);
         }
 
-        stack.into()
+        stack.boxed()
     }
 
     /// `modal`'s overlay, or `None` while it is closed.
@@ -1531,7 +1541,7 @@ impl Nokkvi {
                 crate::widgets::text_input_dialog::text_input_dialog_overlay(
                     &self.text_input_dialog,
                 )
-                .map(|overlay| overlay.map(Message::TextInputDialog))
+                .map(|overlay| overlay.map(Message::TextInputDialog).boxed())
             }
             ActiveModal::Eq => {
                 // When EQ is disabled, show flat gains in the UI so sliders read 0 —
@@ -1555,7 +1565,7 @@ impl Nokkvi {
                     self.eq_modal.save_mode,
                     &self.eq_modal.save_name,
                 )
-                .map(|overlay| overlay.map(Message::EqModal))
+                .map(|overlay| overlay.map(Message::EqModal).boxed())
             }
             ActiveModal::About => crate::widgets::about_modal::about_modal_overlay(
                 &self.about_modal,
@@ -1565,9 +1575,9 @@ impl Nokkvi {
                     server_version: self.server_version.as_deref(),
                 },
             )
-            .map(|overlay| overlay.map(Message::AboutModal)),
+            .map(|overlay| overlay.map(Message::AboutModal).boxed()),
             ActiveModal::Info => crate::widgets::info_modal::info_modal_overlay(&self.info_modal)
-                .map(|overlay| overlay.map(Message::InfoModal)),
+                .map(|overlay| overlay.map(Message::InfoModal).boxed()),
             ActiveModal::DefaultPlaylistPicker => {
                 self.default_playlist_picker.as_ref().map(|picker_state| {
                     crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
@@ -1576,6 +1586,7 @@ impl Nokkvi {
                         &self.artwork.playlist.mini.snapshot,
                     )
                     .map(Message::DefaultPlaylistPicker)
+                    .boxed()
                 })
             }
             // Over the visualizer it previews into.
@@ -1589,6 +1600,7 @@ impl Nokkvi {
                     },
                 )
                 .map(Message::MilkdropPicker)
+                .boxed()
             }),
             ActiveModal::Trawl => self.trawl.modal.as_ref().map(|trawl_state| {
                 crate::widgets::trawl_modal::trawl_modal_overlay(
@@ -1598,6 +1610,7 @@ impl Nokkvi {
                     &self.artwork.album_art.snapshot,
                 )
                 .map(Message::TrawlModal)
+                .boxed()
             }),
         }
     }
@@ -2335,7 +2348,9 @@ impl Nokkvi {
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message
-        widgets::nav_bar(nav_bar_data).map(map_nav_bar_message)
+        widgets::nav_bar(nav_bar_data)
+            .map(map_nav_bar_message)
+            .boxed()
     }
 
     /// Main content area - dispatches to current view's page
@@ -2455,11 +2470,14 @@ impl Nokkvi {
                         drop_indicator_slot: self.drop_indicator_slot(),
                         open_menu: self.open_menu.as_ref(),
                     };
-                    editor.view(editor_data).map(Message::Editor)
+                    editor.view(editor_data).map(Message::Editor).boxed()
                 }
                 _ => {
                     let queue_view_data = self.build_queue_view_data(ArtworkBleed::NONE);
-                    self.queue_page.view(queue_view_data).map(Message::Queue)
+                    self.queue_page
+                        .view(queue_view_data)
+                        .map(Message::Queue)
+                        .boxed()
                 }
             };
             let queue_focused = self.pane_focus == crate::state::PaneFocus::Queue;
@@ -2523,20 +2541,29 @@ impl Nokkvi {
                         // (click to highlight, not play); `in_browsing_panel =
                         // true` suppresses the "Center on Playing" header button.
                         let view_data = self.build_albums_view_data(true, true, ArtworkBleed::NONE);
-                        self.albums_page.view(view_data).map(Message::Albums)
+                        self.albums_page
+                            .view(view_data)
+                            .map(Message::Albums)
+                            .boxed()
                     }
                     views::BrowsingView::Songs => {
                         let view_data = self.build_songs_view_data(true, true, ArtworkBleed::NONE);
-                        self.songs_page.view(view_data).map(Message::Songs)
+                        self.songs_page.view(view_data).map(Message::Songs).boxed()
                     }
                     views::BrowsingView::Artists => {
                         let view_data =
                             self.build_artists_view_data(true, true, ArtworkBleed::NONE);
-                        self.artists_page.view(view_data).map(Message::Artists)
+                        self.artists_page
+                            .view(view_data)
+                            .map(Message::Artists)
+                            .boxed()
                     }
                     views::BrowsingView::Genres => {
                         let view_data = self.build_genres_view_data(true, true, ArtworkBleed::NONE);
-                        self.genres_page.view(view_data).map(Message::Genres)
+                        self.genres_page
+                            .view(view_data)
+                            .map(Message::Genres)
+                            .boxed()
                     }
                     views::BrowsingView::Similar => {
                         let (songs, source, loading) = match self.similar_songs.as_ref() {
@@ -2564,15 +2591,18 @@ impl Nokkvi {
                                 open_menu: self.open_menu.as_ref(),
                             },
                         };
-                        self.similar_page.view(view_data).map(Message::Similar)
+                        self.similar_page
+                            .view(view_data)
+                            .map(Message::Similar)
+                            .boxed()
                     }
                 };
 
-                col![tab_bar, view_content].into()
+                col![tab_bar, view_content].boxed()
             } else {
                 container(iced::widget::text("No library browser").font(crate::theme::ui_font()))
                     .center(Length::Fill)
-                    .into()
+                    .boxed()
             };
 
             let browser_container = container(browser_content)
@@ -2582,7 +2612,7 @@ impl Nokkvi {
 
             return r![queue_container, browser_container]
                 .height(Length::Fill)
-                .into();
+                .boxed();
         }
 
         // =====================================================================
@@ -2598,30 +2628,39 @@ impl Nokkvi {
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
-            .into(),
+            .boxed(),
             View::Albums => {
                 let view_data =
                     self.build_albums_view_data(false, self.settings.stable_viewport, bleed);
-                self.albums_page.view(view_data).map(Message::Albums)
+                self.albums_page
+                    .view(view_data)
+                    .map(Message::Albums)
+                    .boxed()
             }
             View::Queue => {
                 let view_data = self.build_queue_view_data(bleed);
-                self.queue_page.view(view_data).map(Message::Queue)
+                self.queue_page.view(view_data).map(Message::Queue).boxed()
             }
             View::Artists => {
                 let view_data =
                     self.build_artists_view_data(false, self.settings.stable_viewport, bleed);
-                self.artists_page.view(view_data).map(Message::Artists)
+                self.artists_page
+                    .view(view_data)
+                    .map(Message::Artists)
+                    .boxed()
             }
             View::Songs => {
                 let view_data =
                     self.build_songs_view_data(false, self.settings.stable_viewport, bleed);
-                self.songs_page.view(view_data).map(Message::Songs)
+                self.songs_page.view(view_data).map(Message::Songs).boxed()
             }
             View::Genres => {
                 let view_data =
                     self.build_genres_view_data(false, self.settings.stable_viewport, bleed);
-                self.genres_page.view(view_data).map(Message::Genres)
+                self.genres_page
+                    .view(view_data)
+                    .map(Message::Genres)
+                    .boxed()
             }
             View::Playlists => {
                 let (column_dropdown_open, column_dropdown_trigger_bounds) =
@@ -2653,12 +2692,16 @@ impl Nokkvi {
                         open_menu: self.open_menu.as_ref(),
                     },
                 };
-                self.playlists_page.view(view_data).map(Message::Playlists)
+                self.playlists_page
+                    .view(view_data)
+                    .map(Message::Playlists)
+                    .boxed()
             }
             View::Settings => self
                 .settings_page
                 .view(self.window.width, self.window.height)
-                .map(Message::Settings),
+                .map(Message::Settings)
+                .boxed(),
             View::Harbour => {
                 let chrome = self.library_page_chrome(LibraryPage::Harbour);
                 self.harbour_page
@@ -2684,6 +2727,7 @@ impl Nokkvi {
                         harbour_music: &self.harbour_scene.music,
                     })
                     .map(Message::Harbour)
+                    .boxed()
             }
             View::Radios => {
                 let filtered_stations = self.filter_radio_stations();
@@ -2720,7 +2764,10 @@ impl Nokkvi {
                     over_art_visualizer,
                     over_art_boat,
                 };
-                self.radios_page.view(view_data).map(Message::Radios)
+                self.radios_page
+                    .view(view_data)
+                    .map(Message::Radios)
+                    .boxed()
             }
         }
     }

@@ -5,7 +5,7 @@
 //! (`EQ_GAIN_DB_MIN..=EQ_GAIN_DB_MAX`), with a center detent line at 0 dB.
 
 use iced::{
-    Element, Event, Length, Rectangle, Size, Theme,
+    Event, Length, Rectangle, Size, Theme,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -30,7 +30,7 @@ pub(crate) struct State {
     drag: SliderDragState,
 }
 
-pub struct EqSlider<'a, Message> {
+pub(crate) struct EqSlider<'a, Message> {
     gain: f32,
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
     width: f32,
@@ -38,7 +38,7 @@ pub struct EqSlider<'a, Message> {
 }
 
 impl<'a, Message> EqSlider<'a, Message> {
-    pub fn new<F>(gain: f32, on_change: F) -> Self
+    pub(crate) fn new<F>(gain: f32, on_change: F) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
@@ -62,6 +62,8 @@ impl<'a, Message> EqSlider<'a, Message> {
     }
 }
 
+impl<Message> iced::advanced::widget::Meta for EqSlider<'_, Message> {}
+
 impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Message> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
@@ -80,18 +82,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
+        tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::atomic(limits, self.width, self.height)
+    ) {
+        tree.size = layout::atomic(limits, self.width, self.height);
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -157,7 +159,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -243,19 +245,13 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
         slider_drag::grab_interaction(state.drag.is_dragging(), cursor.is_over(layout.bounds()))
-    }
-}
-
-impl<'a, Message: Clone + 'a> From<EqSlider<'a, Message>> for Element<'a, Message> {
-    fn from(slider: EqSlider<'a, Message>) -> Self {
-        Element::new(slider)
     }
 }
 

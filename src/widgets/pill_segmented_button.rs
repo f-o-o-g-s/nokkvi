@@ -22,7 +22,7 @@
 //! `IMPLEMENTATION_PLAN.md` §5 (L5) for design rationale.
 
 use iced::{
-    Alignment, Border, Color, Element, Length, Padding,
+    Alignment, Border, Color, Element, Length, Padding, Widget as _,
     font::Weight,
     widget::{button, container, row, text, text::Wrapping},
 };
@@ -101,7 +101,7 @@ where
     container(chip_row)
         .height(Length::Shrink)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
 }
 
 /// Single chip — sized for ~11 px label text, 5 px vertical / 14 px horizontal
@@ -229,7 +229,7 @@ where
                     ..Default::default()
                 }
             })
-            .into()
+            .boxed()
     } else {
         // Non-center rows: static chip painted by a styled container —
         // no hover/press feedback (clicks bubble to the slot-list row).
@@ -246,7 +246,7 @@ where
                 },
                 ..Default::default()
             })
-            .into()
+            .boxed()
     }
 }
 

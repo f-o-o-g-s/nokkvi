@@ -3,7 +3,7 @@
 //! A translucent dark chip behind the glyph keeps it legible over any cover.
 
 use iced::{
-    Color, Element, Length,
+    Color, Element, Length, Widget as _,
     widget::{container, mouse_area, svg},
 };
 
@@ -56,14 +56,14 @@ pub(crate) fn corner_button<'a, Message: Clone + 'a>(
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// Lay `button` in the bottom-right corner of a `Fill` layer, `CORNER_INSET`
 /// from the edges. Only the button is interactive; the rest of the layer is
 /// empty and event-transparent.
 pub(crate) fn bottom_right<'a, Message: 'a>(
-    button: impl Into<Element<'a, Message>>,
+    button: impl iced::Widget<Message> + 'a,
 ) -> Element<'a, Message> {
     container(button)
         .width(Length::Fill)
@@ -71,5 +71,5 @@ pub(crate) fn bottom_right<'a, Message: 'a>(
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom)
         .padding(CORNER_INSET)
-        .into()
+        .boxed()
 }
