@@ -330,6 +330,7 @@ mod tests {
                 vkeys::SCOPE_BEAM,
                 vkeys::SCOPE_TRAILS,
                 vkeys::SCOPE_ECHO,
+                vkeys::SCOPE_TUNNEL,
             ],
         );
         assert_section_keys(
@@ -346,9 +347,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 7 + 4 + 25 + 5 + 5 + 16 + 17 + 6 = 85. Catches an item landing OUTSIDE
+        // 7 + 4 + 25 + 5 + 5 + 16 + 18 + 6 = 86. Catches an item landing OUTSIDE
         // the pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 85);
+        assert_eq!(count_items(&entries), 86);
     }
 
     /// Every dispatchable Visualizer-table key renders exactly one UI row —

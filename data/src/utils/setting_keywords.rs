@@ -551,6 +551,16 @@ keyword_table! {
         "visualizer.scope.particle_speed" => &["sparks", "dust", "drift", "flow speed"],
         "visualizer.scope.glow_intensity" => &["neon", "halo", "bloom", "glow", "luminous"],
         "visualizer.scope.beam" => &["beam", "neon", "glow", "halo", "trace glow"],
+        "visualizer.scope.tunnel" => &[
+            "vortex",
+            "wormhole",
+            "spiral",
+            "depth",
+            "history",
+            "3d",
+            "perspective",
+            "spectrum",
+        ],
         "visualizer.scope.style" => &["smooth", "angular", "curve", "interpolation"],
         // "Scope" is shorter than "oscilloscope", so the needle can never match
         // the label or section header — every Scope row has to carry the word.

@@ -207,10 +207,10 @@ impl VisualizerPipeline {
                     },
                     count: None,
                 },
-                // Peak data
+                // Peak data (in Scope, the Tunnel's rings, read per fragment)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -472,6 +472,35 @@ impl VisualizerPipeline {
             wgpu::PrimitiveTopology::TriangleList,
             true,
             "visualizer horizon pipeline (MSAA 4x)",
+            format,
+            horizon_blend,
+        );
+
+        // Scope Tunnel (tunnel.wgsl): the receding past rings behind the ring,
+        // one fullscreen triangle, premultiplied like the Horizon.
+        let tunnel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer tunnel shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/tunnel.wgsl"
+            ))),
+        });
+        let tunnel_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &tunnel_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            false,
+            "visualizer tunnel pipeline",
+            format,
+            horizon_blend,
+        );
+        let tunnel_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &tunnel_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            true,
+            "visualizer tunnel pipeline (MSAA 4x)",
             format,
             horizon_blend,
         );
@@ -920,6 +949,8 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             scope_pipeline_beam_msaa,
             horizon_pipeline,
             horizon_pipeline_msaa,
+            tunnel_pipeline,
+            tunnel_pipeline_msaa,
             uniform_buffer,
             bar_buffer,
             particle_buffer,

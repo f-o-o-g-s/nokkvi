@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A Tunnel setting for Scope spirals about the last second of the spectrum down into the cover behind the ring.
+- Scope's Tunnel lights up the rings kept on a kick, so beats fall away down it.
+- With Echo on, Scope's Tunnel stays sharp while the ring's echo swirls over it.
+
 ### Changed
 
 - The queue's "Playing From" header now sits on the toolbar's plain background, without its accent stripe and tint.
@@ -15,6 +19,9 @@ All notable changes to this project will be documented in this file.
 - With thumbnails shown, the "Playing From" header's playlist name now starts in line with the song titles below it.
 - The "Playing From" header's save and edit buttons are now larger.
 - The "Playing From" header's playlist name no longer jumps sideways when the cover finishes loading.
+- Scope now shows the Tunnel by default.
+- Scope's Echo now defaults to off.
+- Scope's Fill setting has no effect while the Tunnel is on.
 
 ### Fixed
 

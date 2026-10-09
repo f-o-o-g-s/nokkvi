@@ -7,6 +7,8 @@
 //! the CPU half: on each beat onset it drops a ripple under the bar that
 //! jumped hardest, which the shader spreads sideways across the water by age.
 
+use super::onset::BeatTrigger;
+
 /// Where the waterline sits, as a fraction of the visualizer height from the
 /// top: the bars or the line stand above it, the reflection fills the band
 /// below. The boat reads it too, to ride the line instead of the water.
@@ -20,10 +22,6 @@ pub(crate) const REFLECTION_STRETCH: f32 = 1.35;
 /// Ripple slots the shader reads (`ReflectionParams::ripples`).
 pub(crate) const RIPPLE_SLOTS: usize = 4;
 
-/// A beat pulse above this drops a ripple...
-const TRIGGER: f32 = 0.6;
-/// ...and the next one waits for the pulse to fall below this.
-const REARM: f32 = 0.35;
 /// Seconds a ripple lives (the shader has faded it out well before).
 const LIFE_SECS: f32 = 3.0;
 /// FFT ticks per second (`VisualizerTiming::TICK_RATE_HZ`).
@@ -34,7 +32,7 @@ const TICK_SECS: f32 = 1.0 / 60.0;
 pub(crate) struct KickRipples {
     events: [[f32; 4]; RIPPLE_SLOTS],
     prev: Vec<f32>,
-    armed: bool,
+    onset: BeatTrigger,
 }
 
 impl KickRipples {
@@ -42,7 +40,7 @@ impl KickRipples {
         Self {
             events: [[0.0; 4]; RIPPLE_SLOTS],
             prev: Vec::new(),
-            armed: true,
+            onset: BeatTrigger::new(),
         }
     }
 
@@ -50,7 +48,7 @@ impl KickRipples {
     pub(crate) fn clear(&mut self) {
         self.events = [[0.0; 4]; RIPPLE_SLOTS];
         self.prev.clear();
-        self.armed = true;
+        self.onset.reset();
     }
 
     pub(crate) fn events(&self) -> [[f32; 4]; RIPPLE_SLOTS] {
@@ -82,11 +80,7 @@ impl KickRipples {
                 best = (i, rise);
             }
         }
-        if beat < REARM {
-            self.armed = true;
-        }
-        if self.armed && beat > TRIGGER && n > 0 {
-            self.armed = false;
+        if self.onset.fire(beat) && n > 0 {
             let x = (best.0 as f32 + 0.5) / n as f32;
             let strength = (0.45 + 1.1 * bass + 2.0 * best.1).min(1.5);
             // An empty slot, else the oldest ripple.

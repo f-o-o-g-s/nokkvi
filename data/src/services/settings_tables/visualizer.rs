@@ -1246,6 +1246,21 @@ define_settings! {
                 read_field: |d| d.scope_echo,
             },
         },
+        ScopeTunnel {
+            key: "visualizer.scope.tunnel",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.with_visualizer(|vz| vz.scope.tunnel = v),
+            toml_apply: |_ts, _p| {},
+            read: |_src, _out| {},
+            write: |_ps, _ts| {},
+            ui_meta: {
+                label: "Tunnel",
+                category: "Scope",
+                subtitle: Some("About the last second of the spectrum spirals down into the cover behind the ring, kicks lit as they fall away. Replaces the Fill"),
+                default: crate::types::visualizer_config::VisualizerConfig::default().scope.tunnel,
+                read_field: |d| d.scope_tunnel,
+            },
+        },
         // -- MilkDrop ------------------------------------------------------------
         MilkdropPresetIntervalSecs {
             key: "visualizer.milkdrop.preset_interval_secs",

@@ -264,6 +264,7 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::SCOPE_BEAM));
     e.push(m.take(keys::SCOPE_TRAILS));
     e.push(m.take(keys::SCOPE_ECHO));
+    e.push(m.take(keys::SCOPE_TUNNEL));
 
     // --- MilkDrop section (preset switching + render resolution) ---
     e.push(SettingsEntry::Header {

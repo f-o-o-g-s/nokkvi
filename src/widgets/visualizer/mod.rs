@@ -5,12 +5,14 @@
 mod flash;
 mod horizon;
 pub(crate) mod milkdrop;
+mod onset;
 mod particles;
 mod pipeline;
 mod reflection;
 pub(crate) use reflection::WATER_LINE;
 pub(crate) mod shader;
 pub(crate) mod state;
+mod tunnel;
 
 use iced::{Color, Element, Length};
 pub(crate) use shader::{ShaderParams, ShaderVisualizer};
@@ -722,7 +724,12 @@ impl Visualizer {
                 cfg.scope.outline_opacity,
                 cfg.scope.animation_speed,
                 cfg.scope.get_gradient_mode_value(),
-                cfg.scope.fill_opacity,
+                // The Tunnel is the ring's interior; the radial fill would veil it.
+                if cfg.scope.tunnel {
+                    0.0
+                } else {
+                    cfg.scope.fill_opacity
+                },
                 cfg.scope.glow_intensity,
                 cfg.scope.get_style_value(),
                 false,
@@ -777,6 +784,7 @@ impl Visualizer {
             scope_sensitivity: cfg.scope.sensitivity,
             scope_particles: cfg.scope.particles,
             scope_beam: cfg.scope.beam,
+            scope_tunnel: cfg.scope.tunnel,
             bars_flash_intensity: cfg.bars.flash_intensity,
             bloom_enabled: cfg.bloom,
             bloom_intensity: cfg.bloom_intensity,
@@ -1191,6 +1199,12 @@ mod wgsl_config_identity_tests {
             "WGSL Config block in horizon.wgsl must declare identical fields to bars.wgsl. \
              It binds the same uniform buffer; a drift reinterprets memory."
         );
+        let tunnel_cfg = extract_config_block(include_str!("shaders/tunnel.wgsl"));
+        assert_eq!(
+            bars_cfg, tunnel_cfg,
+            "WGSL Config block in tunnel.wgsl must declare identical fields to bars.wgsl. \
+             It binds the same uniform buffer; a drift reinterprets memory."
+        );
         assert_eq!(
             bars_cfg, lines_cfg,
             "WGSL Config blocks in bars.wgsl + lines.wgsl must declare identical fields. \
@@ -1388,6 +1402,39 @@ mod wgsl_config_identity_tests {
             );
         }
     }
+
+    /// The Tunnel sizes and centres its rings exactly as scope.wgsl sizes the
+    /// live ring, so the tunnel's mouth stays under the ring at every Radius,
+    /// Glow and Line Thickness. tunnel.wgsl copies the helpers verbatim.
+    #[test]
+    fn wgsl_tunnel_ring_geometry_matches_scope() {
+        const SCOPE: &str = include_str!("shaders/scope.wgsl");
+        const TUNNEL: &str = include_str!("shaders/tunnel.wgsl");
+        for name in [
+            "lines_glow_radius",
+            "lines_glow_extent",
+            "ring_available_radius",
+        ] {
+            assert_eq!(
+                extract_fn(SCOPE, name),
+                extract_fn(TUNNEL, name),
+                "WGSL helper `fn {name}` drifted between scope.wgsl and tunnel.wgsl."
+            );
+        }
+        for name in [
+            "SCOPE_RADIUS_MIN",
+            "SCOPE_RADIUS_MAX",
+            "LINES_GLOW_MIN_RADIUS",
+            "LINES_GLOW_MAX_RADIUS",
+            "LINES_GLOW_EXTENT_MULT",
+        ] {
+            assert_eq!(
+                extract_const(SCOPE, name),
+                extract_const(TUNNEL, name),
+                "WGSL constant `{name}` drifted between scope.wgsl and tunnel.wgsl."
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1452,6 +1499,7 @@ mod wgsl_compile_tests {
         "scope",
         "particles",
         "horizon",
+        "tunnel",
         "reflection",
         "bloom",
         "echo",
@@ -1500,6 +1548,11 @@ mod wgsl_compile_tests {
     #[test]
     fn horizon_wgsl_compiles() {
         validate_wgsl("horizon.wgsl", include_str!("shaders/horizon.wgsl"));
+    }
+
+    #[test]
+    fn tunnel_wgsl_compiles() {
+        validate_wgsl("tunnel.wgsl", include_str!("shaders/tunnel.wgsl"));
     }
 
     #[test]
@@ -1623,6 +1676,28 @@ mod build_shader_params_tests {
         assert!(params.peak_enabled);
         assert!((params.peak_alpha - 1.0).abs() < 1e-6);
         assert_eq!(params.peak_color, iced::Color::TRANSPARENT);
+    }
+
+    /// Scope's Tunnel rides `scope_tunnel`, and while it is on the ring's
+    /// radial Fill is dropped (the tunnel is the ring's interior); off, the
+    /// Fill passes through.
+    #[test]
+    fn scope_tunnel_routes_and_hides_the_fill() {
+        let mut cfg = VisualizerConfig::default();
+        cfg.scope.fill_opacity = 0.6;
+        cfg.scope.tunnel = true;
+        let shared = Arc::new(RwLock::new(cfg.clone()));
+        let colors = ThemeBarColors::default();
+        let scope = Visualizer::new(64, shared, Default::default()).mode(VisualizationMode::Scope);
+
+        let on = scope.build_shader_params(&cfg, &colors);
+        assert!(on.scope_tunnel);
+        assert_eq!(on.lines_fill_opacity, 0.0, "the tunnel replaces the fill");
+
+        cfg.scope.tunnel = false;
+        let off = scope.build_shader_params(&cfg, &colors);
+        assert!(!off.scope_tunnel);
+        assert!((off.lines_fill_opacity - 0.6).abs() < 1e-6);
     }
 }
 

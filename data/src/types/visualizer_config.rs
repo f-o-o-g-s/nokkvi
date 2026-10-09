@@ -518,9 +518,16 @@ pub struct ScopeConfig {
 
     /// Echo (Milkdrop-style zoom/rotate feedback): the ring spirals and tunnels
     /// inward, swirling with the bass/beat (0.0 = off, 1.0 = strong persistence).
-    /// A psychedelic feedback layer; takes over the display when on.
-    /// Default: 0.25 (a subtle feedback swirl)
+    /// A psychedelic feedback layer; takes over the display when on (the
+    /// Tunnel stays out of it).
+    /// Default: 0.0 (off, so the Tunnel reads clean)
     pub echo: f32,
+
+    /// Tunnel: about the last second of the spectrum spirals down into the
+    /// cover behind the ring, kicks lit as they fall away
+    /// (`widgets/visualizer/tunnel.rs`). Hides the ring's Fill while on.
+    /// Default: true
+    pub tunnel: bool,
 }
 
 impl Default for ScopeConfig {
@@ -542,7 +549,8 @@ impl Default for ScopeConfig {
             particle_speed: 0.5,
             beam: true,
             trails: 0.0,
-            echo: 1.0,
+            echo: 0.0,
+            tunnel: true,
         }
     }
 }
@@ -726,6 +734,7 @@ pub mod keys {
     pub const SCOPE_BEAM: &str = "visualizer.scope.beam";
     pub const SCOPE_TRAILS: &str = "visualizer.scope.trails";
     pub const SCOPE_ECHO: &str = "visualizer.scope.echo";
+    pub const SCOPE_TUNNEL: &str = "visualizer.scope.tunnel";
 
     // MilkDrop section
     pub const MILKDROP_PRESET_INTERVAL_SECS: &str = "visualizer.milkdrop.preset_interval_secs";
@@ -808,6 +817,7 @@ pub mod keys {
         SCOPE_BEAM,
         SCOPE_TRAILS,
         SCOPE_ECHO,
+        SCOPE_TUNNEL,
         MILKDROP_PRESET_INTERVAL_SECS,
         MILKDROP_PRESET_CROSSFADE_SECS,
         MILKDROP_SWITCH_ON_TRACK_CHANGE,

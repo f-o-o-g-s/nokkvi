@@ -24,6 +24,7 @@ use super::{
     milkdrop::MilkdropShared,
     particles::ParticleSystem,
     reflection::{KickRipples, RIPPLE_SLOTS},
+    tunnel::TunnelRings,
 };
 use crate::visualizer_config::VisualizerConfig;
 
@@ -208,6 +209,8 @@ struct DisplayBuffers {
     /// Bars / Lines Horizon rows snapshot (see `horizon.rs`), empty while the
     /// Horizon is off. Independent of `bar_count`, like `particles`.
     horizon: Vec<[f32; 8]>,
+    /// Scope Tunnel snapshot (see `tunnel.rs`), empty while the Tunnel is off.
+    tunnel: Vec<f32>,
     /// Peak bar values (0.0-1.0 normalized) - tracks recent maximums
     peak_bars: Vec<f64>,
     /// Alpha values for each peak (1.0 = visible, 0.0 = hidden) - for fade mode
@@ -225,6 +228,7 @@ impl DisplayBuffers {
             waveform: vec![0.0; bar_count],
             particles: Vec::new(),
             horizon: Vec::new(),
+            tunnel: Vec::new(),
             peak_bars: vec![0.0; bar_count],
             peak_alphas: vec![1.0; bar_count],
             flash_intensities: vec![0.0; bar_count],
@@ -258,6 +262,7 @@ impl DisplayBuffers {
         }
         self.particles.clear();
         self.horizon.clear();
+        self.tunnel.clear();
         for peak in self.peak_bars.iter_mut() {
             *peak = 0.0;
         }
@@ -562,6 +567,9 @@ pub(crate) struct VisualizerState {
     /// Bars / Lines Horizon rows (horizon.rs), stepped each `tick()` while
     /// the active mode's Horizon is on; snapshotted into `display.horizon`.
     horizon: Arc<Mutex<HorizonRows>>,
+    /// Scope Tunnel rings (tunnel.rs), stepped each `tick()` while Scope's
+    /// Tunnel is on; snapshotted into `display.tunnel`.
+    tunnel: Arc<Mutex<TunnelRings>>,
     /// Bars / Lines Reflection kick ripples (reflection.rs), stepped each
     /// `tick()` while the active mode's Reflection is on.
     ripples: Arc<Mutex<KickRipples>>,
@@ -791,6 +799,7 @@ impl VisualizerState {
                 instance_id as u32,
             ))),
             horizon: Arc::new(Mutex::new(HorizonRows::new())),
+            tunnel: Arc::new(Mutex::new(TunnelRings::new())),
             ripples: Arc::new(Mutex::new(KickRipples::new())),
             // Feed gate — on by default; the handler flips it off when Off
             feed_active: Arc::new(AtomicBool::new(true)),
@@ -1043,6 +1052,7 @@ impl VisualizerState {
                     cfg.scope.particle_count,
                     cfg.scope.particle_speed,
                 );
+                let tunnel_on = mode == VisualizationMode::Scope && cfg.scope.tunnel;
                 let (reflection_on, horizon_on) = match mode {
                     VisualizationMode::Bars => (cfg.bars.reflection, cfg.bars.horizon),
                     VisualizationMode::Lines => (cfg.lines.reflection, cfg.lines.horizon),
@@ -1088,6 +1098,18 @@ impl VisualizerState {
                         wave,
                         scope_sensitivity,
                     );
+                }
+
+                // The Scope Tunnel keeps this tick's spectrum as a ring. Reads
+                // last tick's beat / bass like the dust. Off, its history is
+                // dropped so switching it back on never shows stale rings.
+                if let Some(mut rings) = self.tunnel.try_lock() {
+                    if tunnel_on {
+                        let (bass, _, _) = self.current_bands();
+                        rings.update(&output, self.current_beat_pulse(), bass);
+                    } else if !rings.is_empty() {
+                        rings.clear();
+                    }
                 }
 
                 // Horizon rows and the Reflection's kick ripples. Like the Scope
@@ -1209,6 +1231,12 @@ impl VisualizerState {
                     if horizon_on && let Some(rows) = self.horizon.try_lock() {
                         display.horizon.clear();
                         display.horizon.extend_from_slice(rows.gpu_data());
+                    }
+                    if !tunnel_on {
+                        display.tunnel.clear();
+                    } else if let Some(rings) = self.tunnel.try_lock() {
+                        display.tunnel.clear();
+                        display.tunnel.extend_from_slice(rings.gpu_data());
                     }
                     display.dirty = true;
                     // Re-arm the trail drain budget while audio is live; when it
@@ -1405,6 +1433,17 @@ impl VisualizerState {
             return Vec::new();
         }
         self.display.lock().horizon.clone()
+    }
+
+    /// The Scope Tunnel snapshot (see `tunnel.rs`). Empty mid-clear, like
+    /// the Horizon.
+    pub(crate) fn get_tunnel(&self) -> Vec<f32> {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return Vec::new();
+        }
+        self.display.lock().tunnel.clone()
     }
 
     /// Scope particle-field snapshot (two `vec4`s per particle). Empty mid-clear
@@ -1756,6 +1795,7 @@ impl VisualizerState {
         self.sample_buffer.lock().clear();
         self.display.lock().clear();
         self.horizon.lock().clear();
+        self.tunnel.lock().clear();
         self.ripples.lock().clear();
         self.effects.lock().clear(bar_count);
         self.processing.lock().clear(bar_count);
@@ -2334,6 +2374,42 @@ mod tests {
             state.sample_buffer.lock().len() < before,
             "an active tick() must drain at least one chunk"
         );
+    }
+
+    /// The Scope Tunnel keeps rings only while Scope's Tunnel is on: a Scope
+    /// tick fills the snapshot, switching it off drops it (so switching back
+    /// on never shows stale rings), and Bars never fills it.
+    #[test]
+    fn the_scope_tunnel_fills_only_while_on_in_scope() {
+        let state = test_state();
+        let cb = state.audio_callback();
+        let tick_with_audio = |state: &VisualizerState| {
+            cb(&stereo_tone(220.0, 44_100, 0.05), 44_100);
+            state.tick();
+        };
+
+        state.set_mode(VisualizationMode::Scope);
+        state.config.write().scope.tunnel = true;
+        tick_with_audio(&state);
+        let snapshot = state.get_tunnel();
+        assert_eq!(
+            snapshot.first().copied(),
+            Some(1.0),
+            "one ring kept on the first Scope tick"
+        );
+
+        state.config.write().scope.tunnel = false;
+        tick_with_audio(&state);
+        assert!(state.get_tunnel().is_empty(), "off: no snapshot");
+        assert!(
+            state.tunnel.lock().is_empty(),
+            "off: the history is dropped"
+        );
+
+        state.config.write().scope.tunnel = true;
+        state.set_mode(VisualizationMode::Bars);
+        tick_with_audio(&state);
+        assert!(state.get_tunnel().is_empty(), "the Tunnel is Scope's alone");
     }
 
     /// Build a thread-free state in MilkDrop mode plus the audio callback that

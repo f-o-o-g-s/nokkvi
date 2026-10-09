@@ -223,6 +223,10 @@ pub(crate) struct VisualizerPrimitive {
     /// drawn from `horizon_data` (uploaded into the particle buffer, which
     /// only Scope's dust uses otherwise). Empty when the Horizon is off.
     pub horizon_data: Vec<[f32; 8]>,
+    /// Scope: the Tunnel's receding rings (tunnel.wgsl), drawn behind the ring
+    /// from this snapshot (uploaded into the peak buffer, which Scope never
+    /// reads otherwise). Empty when the Tunnel is off.
+    pub tunnel_data: Vec<f32>,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -302,6 +306,8 @@ pub(crate) struct ShaderParams {
     pub scope_particles: bool,
     /// Scope mode: luminous-beam look — render the ring with additive blending
     pub scope_beam: bool,
+    /// Scope mode: the Tunnel of receding past rings behind the ring
+    pub scope_tunnel: bool,
     /// Bars mode: peak-flash bloom strength (0.0 = disabled, 1.0 = max)
     pub bars_flash_intensity: f32,
     /// Bloom post-processing enabled (soft additive glow over the whole scene)
@@ -495,6 +501,11 @@ impl VisualizerPrimitive {
             Vec::new()
         };
         let particle_count = particle_data.len() as u32;
+        let tunnel_data = if mode == VisualizationMode::Scope && params.scope_tunnel {
+            state.get_tunnel()
+        } else {
+            Vec::new()
+        };
 
         Self {
             gradient_colors: gradient,
@@ -521,6 +532,7 @@ impl VisualizerPrimitive {
             scope_beam: params.scope_beam,
             reflection,
             horizon_data,
+            tunnel_data,
         }
     }
 }
@@ -540,6 +552,9 @@ pub(crate) struct VisualizerPipeline {
     /// Horizon rows (horizon.wgsl), drawn behind the bars / line.
     pub(super) horizon_pipeline: wgpu::RenderPipeline,
     pub(super) horizon_pipeline_msaa: wgpu::RenderPipeline,
+    /// Scope Tunnel (tunnel.wgsl), drawn behind the ring.
+    pub(super) tunnel_pipeline: wgpu::RenderPipeline,
+    pub(super) tunnel_pipeline_msaa: wgpu::RenderPipeline,
     pub(super) uniform_buffer: wgpu::Buffer,
     pub(super) bar_buffer: wgpu::Buffer,
     pub(super) particle_buffer: wgpu::Buffer,
@@ -737,7 +752,27 @@ impl VisualizerPrimitive {
     }
 
     /// The Horizon rows' pipeline, when they are on.
-    fn horizon_pipe<'a>(
+    /// The fullscreen backdrop drawn behind the bars / line / ring: the Scope
+    /// Tunnel, else the Horizon, else none.
+    fn backdrop_pipe<'a>(
+        &self,
+        pipeline: &'a VisualizerPipeline,
+        msaa: bool,
+    ) -> Option<&'a wgpu::RenderPipeline> {
+        if !self.tunnel_data.is_empty() {
+            return Some(if msaa {
+                &pipeline.tunnel_pipeline_msaa
+            } else {
+                &pipeline.tunnel_pipeline
+            });
+        }
+        self.echo_backdrop_pipe(pipeline, msaa)
+    }
+
+    /// The backdrop in echo's ring-only scene: the Horizon warps with the
+    /// bars, but the Tunnel stays out of the feedback (it would smear into
+    /// the warp) and is drawn fresh under the displayed scene instead.
+    fn echo_backdrop_pipe<'a>(
         &self,
         pipeline: &'a VisualizerPipeline,
         msaa: bool,
@@ -766,16 +801,17 @@ impl VisualizerPrimitive {
         bars_pipeline: &wgpu::RenderPipeline,
         lines_pipeline: &wgpu::RenderPipeline,
         scope_pipeline: &wgpu::RenderPipeline,
-        horizon: Option<&wgpu::RenderPipeline>,
+        backdrop: Option<&wgpu::RenderPipeline>,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) {
         let bar_count = config.bar_count;
 
         render_pass.set_bind_group(0, bind_group, &[]);
 
-        // The Horizon rows sit behind the bars / line.
-        if let Some(horizon) = horizon {
-            render_pass.set_pipeline(horizon);
+        // The backdrop (Horizon rows / Scope Tunnel) sits behind the bars /
+        // line / ring: one fullscreen triangle.
+        if let Some(backdrop) = backdrop {
+            render_pass.set_pipeline(backdrop);
             render_pass.draw(0..3, 0..1);
         }
 
@@ -830,6 +866,48 @@ impl VisualizerPrimitive {
             // primitive carries it.
             VisualizationMode::Milkdrop => {}
         }
+    }
+
+    /// A pass straight onto the display target over the widget's area
+    /// (loads what is there), for the layers drawn fresh after echo.
+    fn begin_overlay_pass<'e>(
+        encoder: &'e mut wgpu::CommandEncoder,
+        target: &'e wgpu::TextureView,
+        clip_bounds: &Rectangle<u32>,
+        (tex_w, tex_h): (u32, u32),
+        label: &'static str,
+    ) -> wgpu::RenderPass<'e> {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_viewport(
+            clip_bounds.x as f32,
+            clip_bounds.y as f32,
+            tex_w as f32,
+            tex_h as f32,
+            0.0,
+            1.0,
+        );
+        pass.set_scissor_rect(
+            clip_bounds.x,
+            clip_bounds.y,
+            clip_bounds.width,
+            clip_bounds.height,
+        );
+        pass
     }
 
     /// Draw the Scope particle field (instanced glowing quads, additive). No-op
@@ -904,7 +982,7 @@ impl VisualizerPrimitive {
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
             scope_pipe,
-            self.horizon_pipe(pipeline, false),
+            self.backdrop_pipe(pipeline, false),
             &mut render_pass,
         );
         Self::draw_particles(
@@ -949,7 +1027,12 @@ impl shader::Primitive for VisualizerPrimitive {
         } else {
             fresh_bars.iter().map(|&v| v as f32).collect()
         };
-        let peak_data: Vec<f32> = fresh_peaks.iter().map(|&v| v as f32).collect();
+        // Scope never reads peaks, so its Tunnel rides the peak buffer.
+        let peak_data: Vec<f32> = if self.tunnel_data.is_empty() {
+            fresh_peaks.iter().map(|&v| v as f32).collect()
+        } else {
+            self.tunnel_data.clone()
+        };
         let peak_alpha_data: Vec<f32> = fresh_peak_alphas.iter().map(|&v| v as f32).collect();
 
         // Clear dirty flag since we've read the current state
@@ -1444,7 +1527,7 @@ impl shader::Primitive for VisualizerPrimitive {
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
             scope_pipe,
-            self.horizon_pipe(pipeline, false),
+            self.backdrop_pipe(pipeline, false),
             render_pass,
         );
         Self::draw_particles(
@@ -1522,7 +1605,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.bars_pipeline_msaa,
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
-                self.horizon_pipe(pipeline, true),
+                self.backdrop_pipe(pipeline, true),
                 &mut render_pass,
             );
             Self::draw_particles(
@@ -1577,7 +1660,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.bars_pipeline_msaa,
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
-                self.horizon_pipe(pipeline, true),
+                self.echo_backdrop_pipe(pipeline, true),
                 &mut ring_pass,
             );
         }
@@ -1814,6 +1897,23 @@ impl shader::Primitive for VisualizerPrimitive {
             },
         };
 
+        // Echo keeps the Scope Tunnel out of its feedback (see
+        // `echo_backdrop_pipe`), so draw it fresh here, under the displayed
+        // scene, where the main pass would have put it. Like the fresh dust it
+        // skips the CRT composite.
+        if self.echo_enabled && !self.tunnel_data.is_empty() {
+            let mut tunnel_pass = Self::begin_overlay_pass(
+                encoder,
+                target,
+                clip_bounds,
+                pipeline.msaa_size,
+                "visualizer echo fresh-tunnel pass",
+            );
+            tunnel_pass.set_pipeline(&pipeline.tunnel_pipeline);
+            tunnel_pass.set_bind_group(0, &pipeline.bind_group, &[]);
+            tunnel_pass.draw(0..3, 0..1);
+        }
+
         // Pass 2: Blit the displayed scene onto the framebuffer with premultiplied alpha blending
         {
             let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1867,33 +1967,13 @@ impl shader::Primitive for VisualizerPrimitive {
         // bloom composites over). Gated on echo so the non-echo path is untouched
         // (particles already ride the resolve into the blit there).
         if self.echo_enabled && self.particle_count > 0 {
-            let mut particle_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("visualizer echo fresh-particle pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            let (tex_w, tex_h) = pipeline.msaa_size;
-            particle_pass.set_viewport(
-                clip_bounds.x as f32,
-                clip_bounds.y as f32,
-                tex_w as f32,
-                tex_h as f32,
-                0.0,
-                1.0,
+            let mut particle_pass = Self::begin_overlay_pass(
+                encoder,
+                target,
+                clip_bounds,
+                pipeline.msaa_size,
+                "visualizer echo fresh-particle pass",
             );
-            particle_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
             // Non-MSAA particle pipeline (targets the surface format) — the dust
             // is soft radial falloff, so it needs no multisampling.
             Self::draw_particles(
