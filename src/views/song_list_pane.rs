@@ -35,6 +35,10 @@ use crate::widgets::{
 /// correctly in split-view where the queue is roughly half the window.
 pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
+/// Gap between a song row's columns (index, thumbnail, title, …). The queue's
+/// "Playing From" banner reads it too, to line its name up with the titles.
+pub(crate) const SONG_ROW_COLUMN_SPACING: f32 = 6.0;
+
 /// Pure decision: should the queue's stars rating column be rendered?
 ///
 /// Two independent gates: the user toggle (always wins when off) and the
@@ -249,7 +253,9 @@ where
             let title_portion: u16 = if show_rating_column { 35 } else { 40 };
 
             // Layout: [Index?] [Thumbnail?] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
-            let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
+            let mut content_row = Row::new()
+                .spacing(SONG_ROW_COLUMN_SPACING)
+                .align_y(Alignment::Center);
             if column_visibility.index {
                 content_row = content_row.push(slot_list_index_column(
                     ctx.item_index,

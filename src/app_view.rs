@@ -1796,6 +1796,8 @@ impl Nokkvi {
                 .map(|ctx| ctx.comment.as_str()),
             strip_expanded: self.queue_page.playlist_strip_expanded,
             select_visible: self.queue_page.column_visibility.select,
+            index_visible: self.queue_page.column_visibility.index,
+            thumbnail_visible: self.queue_page.column_visibility.thumbnail,
         }
     }
 

@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The queue's "Playing From" header now sits on the toolbar's plain background, without its accent stripe and tint.
+- The "Playing From" header's label now reads "Playing from playlist" in sentence case, after a small playlist icon.
+- The "Playing From" header's cover now sits directly above the queue rows' artwork.
+- The "Playing From" header's cover now matches the size of the queue rows' artwork, up to 48 pixels.
+- With thumbnails shown, the "Playing From" header's playlist name now starts in line with the song titles below it.
+- The "Playing From" header's save and edit buttons are now larger.
+- The "Playing From" header's playlist name no longer jumps sideways when the cover finishes loading.
+
 ### Fixed
 
 - The Lines Horizon now keeps its receding waves as dim contour lines where the music is quiet, instead of leaving the cover bare.

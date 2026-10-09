@@ -225,7 +225,7 @@ mod queue_resync_parity {
         (400..=2000).step_by(7)
     }
 
-    /// A: the "Playing From" banner (46 px) and its 1 px separator.
+    /// A: the "Playing From" banner (56 px) and its 1 px separator.
     #[test]
     fn resync_counts_the_playing_from_banner() {
         let _g = lock_and_reset();
@@ -356,7 +356,7 @@ mod queue_resync_parity {
 
         // The hairline is 1 px, so compare the render's chrome with and
         // without that pixel rather than through an input toggle. The
-        // collapsed banner alone is 46 px + its 1 px separator; anything more
+        // collapsed banner alone is 56 px + its 1 px separator; anything more
         // is the hairline.
         let hairline_matters = heights().any(|h| {
             use crate::views::queue::view::{PLAYLIST_STRIP_COMPACT_H, queue_chrome_height};

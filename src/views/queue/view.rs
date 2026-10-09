@@ -33,7 +33,80 @@ enum QueueSyncAction {
 }
 
 /// Compact height of the read-only playlist "Playing From" banner.
-pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
+pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 56.0;
+/// Largest the banner's cover (2×2 quad or single cover) gets, so it fits the
+/// compact band. Below this it matches the queue rows' art.
+const PLAYLIST_STRIP_COVER_MAX: f32 = 48.0;
+/// Right padding of the banner and its detail block, and the gap between the
+/// name column and the save/edit actions.
+const PLAYLIST_STRIP_PAD_X: f32 = 16.0;
+/// Bottom padding of the hover-expanded detail block. Shared by its render and
+/// its height in [`playlist_strip_detail`].
+const PLAYLIST_STRIP_DETAIL_BOTTOM_PAD: f32 = 12.0;
+
+/// Where the banner's cover and name sit so they line up with the queue rows
+/// below: the cover over the rows' thumbnail column, the name over their
+/// titles. See [`playlist_strip_geometry`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PlaylistStripGeometry {
+    /// Left edge of the cover: where the rows' thumbnails start.
+    cover_x: f32,
+    /// Cover edge: the rows' art size, capped at [`PLAYLIST_STRIP_COVER_MAX`].
+    cover: f32,
+    /// Left edge of the name column: where the rows' titles start. The
+    /// hover-expanded detail block is indented to it too.
+    name_x: f32,
+}
+
+/// Line the banner up with the queue rows, which lay out as
+/// `[select?] pad [index?] [thumbnail?] [title …]` (`song_list_pane`).
+///
+/// The row size comes from the collapsed banner's chrome even while the detail
+/// block is open: opening it shrinks the rows, and following them would move
+/// the cover and the name every time the cursor enters the band. Reading the
+/// collapsed chrome also keeps this out of a loop, since the expanded chrome's
+/// height depends on the detail indent computed here.
+fn playlist_strip_geometry(inputs: &QueueChromeInputs<'_>) -> PlaylistStripGeometry {
+    use crate::{
+        views::song_list_pane::SONG_ROW_COLUMN_SPACING,
+        widgets::slot_list::{
+            SLOT_LIST_INDEX_WIDTH, SLOT_LIST_SELECT_WIDTH, SLOT_LIST_SLOT_PADDING, SlotListConfig,
+            SlotListRowMetrics,
+        },
+    };
+
+    let collapsed = QueueChromeInputs {
+        strip_expanded: false,
+        ..*inputs
+    };
+    let row_height = SlotListConfig::with_dynamic_slots(
+        inputs.window_height,
+        queue_effective_chrome(&collapsed),
+    )
+    .row_height();
+    let row_art = SlotListRowMetrics::from_row(row_height, 1.0).artwork_size;
+
+    let mut cover_x = SLOT_LIST_SLOT_PADDING;
+    if inputs.select_visible {
+        cover_x += SLOT_LIST_SELECT_WIDTH;
+    }
+    if inputs.index_visible {
+        cover_x += SLOT_LIST_INDEX_WIDTH + SONG_ROW_COLUMN_SPACING;
+    }
+    let cover = row_art.min(PLAYLIST_STRIP_COVER_MAX);
+    // With the thumbnail column hidden the titles start where the art would,
+    // so the name can only clear the banner's own cover.
+    let art_column = if inputs.thumbnail_visible {
+        row_art
+    } else {
+        cover
+    };
+    PlaylistStripGeometry {
+        cover_x,
+        cover,
+        name_x: cover_x + art_column + SONG_ROW_COLUMN_SPACING,
+    }
+}
 /// Resolve the artwork layout the queue's slot list will render for the given
 /// window — shared by the playlist strip's width math and its top-separator
 /// gate. `resolve_artwork_layout` reads only the window dimensions, the
@@ -71,7 +144,7 @@ fn playlist_strip_band_width(window_width: f32, window_height: f32) -> f32 {
 /// Whether the read-only "Playing From" banner needs a top hairline separating
 /// it from a large album-artwork column stacked directly above it.
 ///
-/// The banner is a full-bleed accent wash with no top margin, so in the
+/// The banner is a full-bleed bar with no top margin, so in the
 /// Auto-mode portrait fallback it runs flush against the artwork panel above it
 /// with no visual break — that's the case this hairline fixes. Every other
 /// layout already reads as separated: Horizontal / hidden artwork places the
@@ -114,7 +187,7 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     const CHAR_W: f32 = 7.3;
     const META_ROW_H: f32 = 20.0;
     const ROW_GAP: f32 = 8.0;
-    const BOTTOM_PAD: f32 = 9.0;
+    const BOTTOM_PAD: f32 = PLAYLIST_STRIP_DETAIL_BOTTOM_PAD;
     const MAX_LINES: f32 = 5.0;
     // No description (empty or whitespace-only): collapse the phantom comment
     // line + its 8px gap so the meta row rides up flush under the identity row.
@@ -141,10 +214,13 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
 }
 
 /// Width the expanded strip's comment wraps within: the band width minus the
-/// strip padding. Shared by the detail block's render and its height in
-/// [`queue_chrome_height`].
-fn playlist_strip_comment_width(window_width: f32, window_height: f32) -> f32 {
-    (playlist_strip_band_width(window_width, window_height) - 73.0).max(120.0)
+/// detail block's indent (the name column) and right padding. Shared by the
+/// detail block's render and its height in [`queue_chrome_height`].
+fn playlist_strip_comment_width(inputs: &QueueChromeInputs<'_>) -> f32 {
+    (playlist_strip_band_width(inputs.pane_width, inputs.window_height)
+        - playlist_strip_geometry(inputs).name_x
+        - PLAYLIST_STRIP_PAD_X)
+        .max(120.0)
 }
 
 /// Every input the queue's slot-list chrome depends on, derived once per read
@@ -167,6 +243,12 @@ pub struct QueueChromeInputs<'a> {
     pub strip_expanded: bool,
     /// Whether the multi-select column's select-all bar is showing.
     pub select_visible: bool,
+    /// Whether the rows show their index column. With `select_visible` and
+    /// `thumbnail_visible`, places the banner's cover and name over the rows'
+    /// art and titles ([`playlist_strip_geometry`]).
+    pub index_visible: bool,
+    /// Whether the rows show their thumbnail column.
+    pub thumbnail_visible: bool,
 }
 
 /// Total slot-list chrome for the queue view, before the vertical artwork:
@@ -183,7 +265,7 @@ pub(crate) fn queue_chrome_height(inputs: &QueueChromeInputs<'_>) -> f32 {
     let mut chrome = chrome_height_with_header(inputs.toolbar_collapsed);
     if let Some(comment) = inputs.playlist_comment {
         let strip = if inputs.strip_expanded {
-            let width = playlist_strip_comment_width(inputs.pane_width, inputs.window_height);
+            let width = playlist_strip_comment_width(inputs);
             PLAYLIST_STRIP_COMPACT_H + playlist_strip_detail(comment, width).1
         } else {
             PLAYLIST_STRIP_COMPACT_H
@@ -419,9 +501,7 @@ impl QueuePage {
             data.playlist_context_info.as_ref().map_or_else(
                 || (String::new(), 0.0),
                 |ctx| {
-                    let content_width =
-                        playlist_strip_comment_width(data.window_width, data.window_height);
-                    playlist_strip_detail(&ctx.comment, content_width)
+                    playlist_strip_detail(&ctx.comment, playlist_strip_comment_width(&data.chrome))
                 },
             );
 
@@ -433,30 +513,35 @@ impl QueuePage {
         // `header`, the trailing child) stable across the playlist-context /
         // read-only / orientation toggles.
         let extra: Element<'a, QueueMessage> = if let Some(ref ctx) = data.playlist_context_info {
-            // Read-only "Playing From" banner (Direction 2). Renders only while a
-            // playlist is loaded for playback. Hovering the band reveals a detail
+            // Read-only "Playing From" banner. Renders only while a playlist is
+            // loaded for playback. It sits on the header's own `bg0_hard()`
+            // surface with no accent wash, so the playing row stays the only
+            // accent-filled thing in the list; the theme shows through the
+            // eyebrow's playlist glyph. Hovering the band reveals a detail
             // block; the banner grows in flow and the slot-list chrome height
             // tracks it. Editing happens in the decoupled `PlaylistEditor` view.
             use iced::widget::svg;
 
             let accent = crate::theme::accent();
             let expanded = data.chrome.strip_expanded;
+            let geometry = playlist_strip_geometry(&data.chrome);
 
             // Icon action button — mouse_area + HoverOverlay(container) so the
             // press scale fires; the inner press is independent of the band's
             // hover-enter/exit so save/edit clicks don't toggle the panel.
+            // 16 px glyph + 6 px padding = a 28 px square target.
             let icon_btn =
                 |icon_path: &'static str, msg: QueueMessage| -> Element<'a, QueueMessage> {
                     let icon = crate::embedded_svg::svg_widget(icon_path)
-                        .width(Length::Fixed(14.0))
-                        .height(Length::Fixed(14.0))
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
                         .style(|_theme, _status| svg::Style {
                             color: Some(crate::theme::fg2()),
                         });
                     mouse_area(
                         HoverOverlay::new(
                             container(icon)
-                                .padding([4, 6])
+                                .padding(6)
                                 .style(|_theme| container::Style {
                                     background: None,
                                     border: iced::Border {
@@ -475,70 +560,60 @@ impl QueuePage {
                     .into()
                 };
 
-            // Accent stripe — 3px, full banner height.
-            let stripe = container(Space::new())
-                .width(Length::Fixed(3.0))
-                .height(Length::Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(accent.into()),
-                    ..Default::default()
-                });
-
             // Eyebrow + name stack; clip so a long name can't shove the right
             // cluster off-screen (same overflow guard the old bar relied on).
-            let eyebrow = iced::widget::text("PLAYING FROM PLAYLIST")
-                .font(crate::theme::weighted_ui_font(iced::font::Weight::Semibold))
-                .size(9.5)
-                .color(accent)
-                .wrapping(iced::widget::text::Wrapping::None);
+            // The eyebrow is a quiet sentence-case hint led by the accent-tinted
+            // playlist glyph, so the name carries the band.
+            let eyebrow = row![
+                crate::embedded_svg::svg_widget("assets/icons/list-music.svg")
+                    .width(Length::Fixed(12.0))
+                    .height(Length::Fixed(12.0))
+                    .style(move |_theme, _status| svg::Style {
+                        color: Some(accent),
+                    }),
+                iced::widget::text("Playing from playlist")
+                    .font(crate::theme::ui_font())
+                    .size(12)
+                    .color(crate::theme::fg3())
+                    .wrapping(iced::widget::text::Wrapping::None),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center);
             let name = iced::widget::text(ctx.name.clone())
                 .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
                 .size(14)
                 .color(crate::theme::fg0())
                 .wrapping(iced::widget::text::Wrapping::None);
-            let name_stack = container(column![eyebrow, name].spacing(1))
+            let name_stack = container(column![eyebrow, name].spacing(2))
                 .width(Length::Fill)
                 .clip(true);
 
             let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
 
-            // Compact row. The cover is pushed only when its handle is cached so
-            // an absent cover leaves no phantom leading gap. A 2×2 quad of the
-            // queue's first distinct album covers is preferred — it reads as
-            // "a playlist", not "the song playing now" — with the single
-            // first-album cover as the warm-up fallback.
-            let mut compact = Row::new()
-                .spacing(10)
-                .align_y(Alignment::Center)
-                .width(Length::Fill)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 13.0,
-                    bottom: 0.0,
-                    left: 11.0,
-                });
-            if let Some(tiles) = &data.playlist_quad {
-                compact = compact.push(
-                    container(crate::widgets::base_slot_list_layout::quad_artwork_grid(
-                        tiles, 34.0, 1.0,
-                    ))
-                    .width(Length::Fixed(34.0))
-                    .height(Length::Fixed(34.0))
-                    .clip(true),
-                );
+            // Cover, sized and placed over the rows' art (see
+            // `playlist_strip_geometry`). A 2×2 quad of the queue's first
+            // distinct album covers is preferred — it reads as "a playlist", not
+            // "the song playing now" — with the single first-album cover as the
+            // warm-up fallback, and a blank square (as a row shows before its art
+            // arrives) until either is cached, so the name never shifts when the
+            // art lands. Square in every mode, like the rows' art.
+            use crate::widgets::base_slot_list_layout::quad_artwork_grid;
+            let cover_edge = Length::Fixed(geometry.cover);
+            let cover: Element<'a, QueueMessage> = if let Some(tiles) = &data.playlist_quad {
+                quad_artwork_grid(tiles, geometry.cover, 1.0)
             } else if let Some(handle) = data.playlist_cover {
-                compact = compact.push(
-                    container(
-                        iced::widget::image(handle.clone())
-                            .width(Length::Fixed(34.0))
-                            .height(Length::Fixed(34.0))
-                            .content_fit(iced::ContentFit::Cover),
-                    )
-                    .width(Length::Fixed(34.0))
-                    .height(Length::Fixed(34.0))
-                    .clip(true),
-                );
-            }
+                iced::widget::image(handle.clone())
+                    .width(cover_edge)
+                    .height(cover_edge)
+                    .content_fit(iced::ContentFit::Cover)
+                    .into()
+            } else {
+                quad_artwork_grid(&[], geometry.cover, 1.0)
+            };
+            let cover = container(cover)
+                .width(cover_edge)
+                .height(cover_edge)
+                .clip(true);
             // Identity on the left (cover + eyebrow/name); actions grouped on the
             // right. All metadata (count / duration / updated / visibility) lives
             // in the hover-expanded detail block — keeping the compact band from
@@ -555,14 +630,14 @@ impl QueuePage {
             let mut actions = Row::new().spacing(2).align_y(Alignment::Center);
             if data.playlist_context_is_smart {
                 let smart_icon = crate::embedded_svg::svg_widget("assets/icons/sparkles.svg")
-                    .width(Length::Fixed(14.0))
-                    .height(Length::Fixed(14.0))
+                    .width(Length::Fixed(16.0))
+                    .height(Length::Fixed(16.0))
                     .style(move |_theme, _status| svg::Style {
                         color: Some(accent),
                     });
                 let smart_badge = iced::widget::tooltip(
                     container(smart_icon)
-                        .padding([4, 6])
+                        .padding(6)
                         .style(|_theme| container::Style {
                             background: None,
                             border: iced::Border {
@@ -591,7 +666,23 @@ impl QueuePage {
                 ));
             }
             let actions = actions.push(edit_btn);
-            let compact = compact.push(name_stack).push(actions);
+            let compact = row![
+                cover,
+                Space::new().width(Length::Fixed(
+                    geometry.name_x - geometry.cover_x - geometry.cover
+                )),
+                name_stack,
+                Space::new().width(Length::Fixed(PLAYLIST_STRIP_PAD_X)),
+                actions,
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: PLAYLIST_STRIP_PAD_X,
+                bottom: 0.0,
+                left: geometry.cover_x,
+            });
             let compact = container(compact)
                 .center_y(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))
                 .width(Length::Fill);
@@ -708,9 +799,9 @@ impl QueuePage {
                     .height(Length::Fixed(playlist_detail_h))
                     .padding(iced::Padding {
                         top: 0.0,
-                        right: 13.0,
-                        bottom: 9.0,
-                        left: 57.0,
+                        right: PLAYLIST_STRIP_PAD_X,
+                        bottom: PLAYLIST_STRIP_DETAIL_BOTTOM_PAD,
+                        left: geometry.name_x,
                     })
                     .clip(true);
 
@@ -719,23 +810,15 @@ impl QueuePage {
                 compact.into()
             };
 
-            // Faint accent wash over bg0_soft (flat blend — reads correctly on
-            // every theme without gradient-API risk). Shares the single
-            // accent-wash recipe with the hover overlay via `theme::accent_wash`.
-            let wash =
-                crate::theme::accent_wash(crate::theme::bg0_soft(), crate::theme::HEADER_WASH);
-
-            let banner = container(
-                row![stripe, body]
-                    .width(Length::Fill)
-                    .height(Length::Fixed(total_h)),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(total_h))
-            .style(move |_theme| container::Style {
-                background: Some(wash.into()),
-                ..Default::default()
-            });
+            // The view header's own surface, so the banner and the header
+            // below it read as one bar of chrome split by a hairline.
+            let banner = container(body)
+                .width(Length::Fill)
+                .height(Length::Fixed(total_h))
+                .style(|_theme| container::Style {
+                    background: Some(crate::theme::bg0_hard().into()),
+                    ..Default::default()
+                });
 
             mouse_area(banner)
                 .on_enter(QueueMessage::PlaylistStripHoverEnter)
@@ -1162,7 +1245,8 @@ impl QueuePage {
 #[cfg(test)]
 mod tests {
     use super::{
-        cover_shows_now_playing, playlist_strip_band_width, playlist_strip_detail,
+        PLAYLIST_STRIP_COVER_MAX, QueueChromeInputs, cover_shows_now_playing,
+        playlist_strip_band_width, playlist_strip_detail, playlist_strip_geometry,
         playlist_strip_needs_top_separator,
     };
 
@@ -1237,13 +1321,13 @@ mod tests {
         guard
     }
 
-    // 1 line: 1*16 + 8 (gap) + 20 (meta) + 9 (bottom) = 53.
-    const ONE_LINE_H: f32 = 53.0;
-    // 5 lines (MAX_LINES): 5*16 + 8 + 20 + 9 = 117.
-    const MAX_LINES_H: f32 = 117.0;
+    // 1 line: 1*16 + 8 (gap) + 20 (meta) + 12 (bottom) = 56.
+    const ONE_LINE_H: f32 = 56.0;
+    // 5 lines (MAX_LINES): 5*16 + 8 + 20 + 12 = 120.
+    const MAX_LINES_H: f32 = 120.0;
     // No description: the phantom comment line + its 8px gap collapse away, so
-    // the block is just the meta row + bottom pad = 20 + 9 = 29.
-    const META_ONLY_H: f32 = 29.0;
+    // the block is just the meta row + bottom pad = 20 + 12 = 32.
+    const META_ONLY_H: f32 = 32.0;
 
     #[test]
     fn short_comment_renders_verbatim_at_one_line() {
@@ -1366,5 +1450,106 @@ mod tests {
             (vertical - 530.0).abs() < 1e-3,
             "vertical artwork leaves the strip full-width, got {vertical}"
         );
+    }
+
+    /// A banner showing a long comment, every leading row column off but the
+    /// thumbnail (the default queue layout).
+    fn banner_inputs(window_height: f32) -> QueueChromeInputs<'static> {
+        QueueChromeInputs {
+            pane_width: 1400.0,
+            window_height,
+            toolbar_collapsed: false,
+            playlist_comment: Some(
+                "A long description that wraps onto several lines of the detail block. ",
+            ),
+            strip_expanded: false,
+            select_visible: false,
+            index_visible: false,
+            thumbnail_visible: true,
+        }
+    }
+
+    /// The rows' art size for these inputs' collapsed chrome, as the slot
+    /// list renders it.
+    fn row_art(inputs: &QueueChromeInputs<'_>) -> f32 {
+        use crate::widgets::slot_list::{SlotListConfig, SlotListRowMetrics};
+        let collapsed = QueueChromeInputs {
+            strip_expanded: false,
+            ..*inputs
+        };
+        let row_height = SlotListConfig::with_dynamic_slots(
+            inputs.window_height,
+            super::queue_effective_chrome(&collapsed),
+        )
+        .row_height();
+        SlotListRowMetrics::from_row(row_height, 1.0).artwork_size
+    }
+
+    #[test]
+    fn strip_cover_and_name_sit_over_the_row_art_and_titles() {
+        let _g = with_auto_artwork_mode();
+        for height in (500..=1600).step_by(37) {
+            let inputs = banner_inputs(height as f32);
+            let g = playlist_strip_geometry(&inputs);
+            let art = row_art(&inputs);
+            // Row: 8 px padding, then the art, a 6 px gap, then the title.
+            assert!(
+                (g.cover_x - 8.0).abs() < 1e-3,
+                "cover over the art, got {g:?}"
+            );
+            assert!(
+                (g.name_x - (8.0 + art + 6.0)).abs() < 1e-3,
+                "name over the titles at height {height}, art {art}, got {g:?}"
+            );
+            assert!(
+                (g.cover - art.min(PLAYLIST_STRIP_COVER_MAX)).abs() < 1e-3,
+                "cover matches the art up to the band's cap, got {g:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strip_geometry_follows_the_leading_row_columns() {
+        let _g = with_auto_artwork_mode();
+        let base = playlist_strip_geometry(&banner_inputs(900.0));
+
+        // The checkbox column (40 px) sits outside the row padding, the index
+        // column (60 px + a 6 px gap) inside it, both ahead of the art.
+        let with_columns = playlist_strip_geometry(&QueueChromeInputs {
+            select_visible: true,
+            index_visible: true,
+            ..banner_inputs(900.0)
+        });
+        assert!((with_columns.cover_x - (base.cover_x + 40.0 + 66.0)).abs() < 1e-3);
+
+        // No thumbnails: the titles start where the art would, so the name
+        // clears the banner's own cover instead.
+        let no_thumbs = playlist_strip_geometry(&QueueChromeInputs {
+            thumbnail_visible: false,
+            ..banner_inputs(900.0)
+        });
+        assert!(
+            (no_thumbs.name_x - (no_thumbs.cover_x + no_thumbs.cover + 6.0)).abs() < 1e-3,
+            "got {no_thumbs:?}"
+        );
+    }
+
+    #[test]
+    fn strip_geometry_holds_still_while_the_detail_block_is_open() {
+        // Opening the detail block shrinks the rows; the banner must not chase
+        // them, or the cover and name jump whenever the cursor enters the band.
+        let _g = with_auto_artwork_mode();
+        for height in (500..=1600).step_by(37) {
+            let collapsed = banner_inputs(height as f32);
+            let expanded = QueueChromeInputs {
+                strip_expanded: true,
+                ..collapsed
+            };
+            assert_eq!(
+                playlist_strip_geometry(&collapsed),
+                playlist_strip_geometry(&expanded),
+                "geometry moved on hover at height {height}"
+            );
+        }
     }
 }

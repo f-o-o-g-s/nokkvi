@@ -88,7 +88,7 @@ pub(crate) struct SlotListRowMetrics {
 
 impl SlotListRowMetrics {
     /// Compute all metrics from layout parameters.
-    fn from_row(row_height: f32, scale_factor: f32) -> Self {
+    pub(crate) fn from_row(row_height: f32, scale_factor: f32) -> Self {
         use nokkvi_data::utils::scale::calculate_font_size;
         Self {
             artwork_size: (row_height - 16.0).max(32.0) * scale_factor,

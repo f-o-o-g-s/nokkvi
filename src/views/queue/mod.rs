@@ -149,7 +149,7 @@ pub struct QueueViewData<'a> {
     pub playlist_context_is_smart: bool,
     /// Resolved cover handle for the active playlist's strip thumbnail (collage
     /// first tile, falling back to the mini cover). `None` when no playlist is
-    /// active or its artwork isn't cached yet — the strip omits the cover.
+    /// active or its artwork isn't cached yet — the strip shows a blank square.
     pub playlist_cover: Option<&'a iced::widget::image::Handle>,
     /// 2×2 quad tiles for the strip thumbnail: the first ≤4 distinct album
     /// covers of the unfiltered queue, present only when every tile is warm
