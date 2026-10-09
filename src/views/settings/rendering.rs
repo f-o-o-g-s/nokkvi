@@ -181,7 +181,7 @@ fn render_hex_editor<'a>(
     font_size: f32,
     swatch_size: f32,
 ) -> Element<'a, SettingsMessage> {
-    let input = text_input("e.g. #458588", hex_input)
+    let input = text_input("e.g. #458588", hex_input.to_owned())
         .id(super::HEX_EDITOR_INPUT_ID)
         .on_input(SettingsMessage::HexInputChanged)
         .on_submit(SettingsMessage::HexInputSubmit)

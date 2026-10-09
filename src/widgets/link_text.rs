@@ -95,20 +95,20 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
         let state = tree.state.downcast_mut::<State>();
 
         layout::sized(limits, Length::Shrink, Length::Shrink, |limits| {
-            let bounds = limits.max();
+            let bounds = limits.bounds();
 
             let text = Text {
                 content: self.content.as_str(),
                 bounds,
                 size: self.size,
-                line_height: advanced_text::LineHeight::default(),
+                line_height: crate::theme::UI_LINE_HEIGHT,
                 font: self.font,
                 align_x: advanced_text::Alignment::Left,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: Shaping::Advanced,
                 wrapping: Wrapping::None,
                 ellipsis: advanced_text::Ellipsis::End,
-                hint_factor: AdvancedRenderer::scale_factor(renderer),
+                hint_factor: AdvancedRenderer::hint_factor(renderer),
             };
             state.constrained.update(text);
 

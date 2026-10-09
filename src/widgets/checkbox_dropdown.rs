@@ -868,9 +868,11 @@ where
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        let trigger_state = tree.children.first_mut()?;
-        let trigger_overlay = self.trigger.as_widget_mut().overlay(
+    ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+        let Some(trigger_state) = tree.children.first_mut() else {
+            return Vec::new();
+        };
+        let mut overlays = self.trigger.as_widget_mut().overlay(
             trigger_state,
             layout,
             renderer,
@@ -900,16 +902,9 @@ where
             None
         };
 
-        if trigger_overlay.is_none() && our_overlay.is_none() {
-            None
-        } else {
-            Some(
-                overlay::Group::with_children(
-                    trigger_overlay.into_iter().chain(our_overlay).collect(),
-                )
-                .overlay(),
-            )
-        }
+        // The menu goes last so it draws above the trigger's own overlays.
+        overlays.extend(our_overlay);
+        overlays
     }
 }
 

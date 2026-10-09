@@ -922,10 +922,12 @@ where
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        // Let the child provide its overlay first
-        let base_state = tree.children.first_mut()?;
-        let base_overlay =
+    ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+        // Let the child provide its overlays first
+        let Some(base_state) = tree.children.first_mut() else {
+            return Vec::new();
+        };
+        let mut overlays =
             self.base
                 .as_widget_mut()
                 .overlay(base_state, layout, renderer, viewport, translation);
@@ -951,16 +953,9 @@ where
             None
         };
 
-        if base_overlay.is_none() && our_overlay.is_none() {
-            None
-        } else {
-            Some(
-                overlay::Group::with_children(
-                    base_overlay.into_iter().chain(our_overlay).collect(),
-                )
-                .overlay(),
-            )
-        }
+        // The menu goes last so it draws above the base's own overlays.
+        overlays.extend(our_overlay);
+        overlays
     }
 }
 

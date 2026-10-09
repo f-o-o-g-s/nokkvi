@@ -305,9 +305,9 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+    ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         if !self.is_open {
-            return None;
+            return Vec::new();
         }
 
         let bounds = layout.bounds();
@@ -318,13 +318,13 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
             bounds.y + translation.y,
         );
 
-        Some(overlay::Element::new(Box::new(MenuOverlay {
+        vec![overlay::Element::new(Box::new(MenuOverlay {
             on_open_change: &self.on_open_change,
             check_handle: &self.check_handle,
             rows: &self.rows,
             menu_inner_height: self.menu_inner_height(),
             anchor,
-        })))
+        }))]
     }
 }
 
@@ -573,7 +573,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                             content: item.label.clone(),
                             bounds: text_bounds_size,
                             size: MENU_TEXT_SIZE.into(),
-                            line_height: iced::advanced::text::LineHeight::default(),
+                            line_height: crate::theme::UI_LINE_HEIGHT,
                             font: theme::weighted_ui_font(iced::font::Weight::Medium),
                             align_x: alignment::Horizontal::Left.into(),
                             align_y: alignment::Vertical::Center,

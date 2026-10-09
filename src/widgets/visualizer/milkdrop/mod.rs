@@ -336,8 +336,8 @@ mod tests {
 
     /// A device with the limits iced's compositor requests
     /// (`iced_wgpu::window::compositor`: `Limits::default()` with
-    /// `max_bind_groups: 2`, `max_non_sampler_bindings: 2048`), so a preset
-    /// that needs more than iced grants fails here instead of on screen.
+    /// `max_non_sampler_bindings: 2048`), so a preset that needs more than
+    /// iced grants fails here instead of on screen.
     fn iced_like_gpu() -> Option<GpuHandles> {
         let instance = wgpu::Instance::default();
         let adapter = futures::executor::block_on(
@@ -345,7 +345,6 @@ mod tests {
         )
         .ok()?;
         let limits = wgpu::Limits {
-            max_bind_groups: 2,
             max_non_sampler_bindings: 2048,
             ..wgpu::Limits::default().using_resolution(adapter.limits())
         };

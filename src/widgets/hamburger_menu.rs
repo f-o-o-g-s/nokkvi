@@ -255,9 +255,9 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+    ) -> Vec<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         if !self.is_open {
-            return None;
+            return Vec::new();
         }
 
         let bounds = layout.bounds();
@@ -267,12 +267,12 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
             bounds.y + bounds.height + translation.y,
         );
 
-        Some(overlay::Element::new(Box::new(MenuOverlay {
+        vec![overlay::Element::new(Box::new(MenuOverlay {
             position,
             on_action: &self.on_action,
             on_open_change: &self.on_open_change,
             is_light_mode: self.is_light_mode,
-        })))
+        }))]
     }
 }
 
@@ -530,7 +530,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     content: label.to_string(),
                     bounds: Size::new(item_bounds.width, item_bounds.height),
                     size: MENU_TEXT_SIZE.into(),
-                    line_height: iced::advanced::text::LineHeight::default(),
+                    line_height: crate::theme::UI_LINE_HEIGHT,
                     font: theme::weighted_ui_font(iced::font::Weight::Medium),
                     align_x: alignment::Horizontal::Left.into(),
                     align_y: alignment::Vertical::Center,

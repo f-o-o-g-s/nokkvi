@@ -567,7 +567,6 @@ fn dialog_input_style(_theme: &iced::Theme, status: text_input::Status) -> text_
             width: 2.0,
             radius: theme::ui_border_radius(),
         },
-        icon: theme::fg4(),
         placeholder: theme::fg4(),
         value: theme::fg0(),
         selection: theme::selection_color(),

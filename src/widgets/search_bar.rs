@@ -35,7 +35,6 @@ pub(crate) fn flat_search_input_style(
             width: 1.0,
             radius: theme::ui_radius_pill(),
         },
-        icon: theme::fg4(),
         placeholder: theme::fg4(),
         value: theme::fg0(),
         selection: theme::selection_color(),
@@ -46,8 +45,8 @@ pub(crate) fn flat_search_input_style(
 /// on the left and a conditional clear button on the right inside the input bounds,
 /// preserving native focus borders and styles.
 pub(crate) fn search_bar<'a, Message: Clone + 'a>(
-    query: &str,
-    placeholder: &str,
+    query: &'a str,
+    placeholder: &'a str,
     input_id: &'static str,
     on_change: impl Fn(String) -> Message + 'a,
     style: Option<

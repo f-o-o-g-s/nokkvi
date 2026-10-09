@@ -68,7 +68,7 @@ pub(crate) fn press_began(event: &Event) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use iced::{Point, keyboard::key};
+    use iced::{Point, advanced::shell::Bus, keyboard::key};
 
     use super::*;
 
@@ -92,15 +92,21 @@ mod tests {
     }
 
     /// Builds a throwaway `Shell` for exercising `handle_dismiss`. iced's
-    /// `Shell::new` now takes a window handle + waker; a headless window and a
-    /// no-op waker are inert here (the tests only assert on capture/messages).
-    fn test_shell(messages: &mut Vec<Close>) -> Shell<'_, Close> {
+    /// `Shell::new` takes a window handle, a waker and the message `Bus`; a
+    /// headless window and a no-op waker are inert here (the tests only
+    /// assert on capture/messages).
+    fn test_shell(bus: &mut Bus<Close>) -> Shell<'_, Close> {
         static WINDOW: iced::window::Headless = iced::window::Headless;
         Shell::new(
             &WINDOW,
             iced::advanced::graphics::core::shell::Waker::noop(),
-            messages,
+            bus,
         )
+    }
+
+    /// The messages the shell published, in order.
+    fn published(bus: &mut Bus<Close>) -> Vec<Close> {
+        bus.drain().map(|(message, _receipt)| message).collect()
     }
 
     #[test]
@@ -133,47 +139,47 @@ mod tests {
     /// menu's trigger in the widget tree (click-to-switch UX).
     #[test]
     fn outside_press_closes_without_capturing() {
-        let mut messages: Vec<Close> = Vec::new();
-        let mut shell = test_shell(&mut messages);
+        let mut bus = Bus::new();
+        let mut shell = test_shell(&mut bus);
         let event = left_press();
 
         let handled = handle_dismiss(&event, &mut shell, || true, || Close);
 
         assert!(handled);
         assert!(!shell.is_event_captured());
-        assert_eq!(messages, vec![Close]);
+        assert_eq!(published(&mut bus), vec![Close]);
     }
 
     #[test]
     fn inside_press_is_not_handled() {
-        let mut messages: Vec<Close> = Vec::new();
-        let mut shell = test_shell(&mut messages);
+        let mut bus = Bus::new();
+        let mut shell = test_shell(&mut bus);
         let event = left_press();
 
         let handled = handle_dismiss(&event, &mut shell, || false, || Close);
 
         assert!(!handled);
         assert!(!shell.is_event_captured());
-        assert!(messages.is_empty());
+        assert!(bus.is_empty());
     }
 
     #[test]
     fn escape_closes_and_captures() {
-        let mut messages: Vec<Close> = Vec::new();
-        let mut shell = test_shell(&mut messages);
+        let mut bus = Bus::new();
+        let mut shell = test_shell(&mut bus);
         let event = escape_event();
 
         let handled = handle_dismiss(&event, &mut shell, || false, || Close);
 
         assert!(handled);
         assert!(shell.is_event_captured());
-        assert_eq!(messages, vec![Close]);
+        assert_eq!(published(&mut bus), vec![Close]);
     }
 
     #[test]
     fn unrelated_event_with_false_predicate_is_ignored() {
-        let mut messages: Vec<Close> = Vec::new();
-        let mut shell = test_shell(&mut messages);
+        let mut bus = Bus::new();
+        let mut shell = test_shell(&mut bus);
         let event = Event::Mouse(mouse::Event::CursorMoved {
             position: Point::ORIGIN,
         });
@@ -182,6 +188,6 @@ mod tests {
 
         assert!(!handled);
         assert!(!shell.is_event_captured());
-        assert!(messages.is_empty());
+        assert!(bus.is_empty());
     }
 }

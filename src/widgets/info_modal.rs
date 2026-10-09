@@ -604,7 +604,7 @@ pub(crate) fn info_modal_overlay<'a>(
     // ui_radius_lg corners. Five overlay modals route through this helper.
     let dialog_box = container(content)
         .style(theme::modal_frame_style)
-        .max_height(MODAL_MAX_HEIGHT)
+        .height(Length::Fit.max(MODAL_MAX_HEIGHT))
         .width(Length::Shrink);
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────

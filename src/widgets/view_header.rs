@@ -346,7 +346,7 @@ pub(crate) fn view_header_with_identity<
                 .ellipsis(iced::widget::text::Ellipsis::End),
         )
         .padding([0, 14])
-        .max_width(300.0)
+        .width(Length::Fit.max(300.0))
         .align_y(Alignment::Center)
         .height(Length::Fixed(HEADER_HEIGHT))
         .into()

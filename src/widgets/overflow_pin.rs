@@ -98,15 +98,21 @@ where
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
+        viewport: &Rectangle,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        // The child is clipped to our bounds when drawn, so operations see the
+        // same clipped viewport (as iced's clipping `container` does).
+        let clipped_viewport = layout.bounds().intersection(viewport).unwrap_or_default();
+
         self.content.as_widget_mut().operate(
             tree,
             layout
                 .children()
                 .next()
                 .expect("OverflowPin always lays out exactly one child"),
+            &clipped_viewport,
             renderer,
             operation,
         );
@@ -207,7 +213,7 @@ where
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
         self.content.as_widget_mut().overlay(
             tree,
             layout

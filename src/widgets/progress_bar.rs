@@ -503,7 +503,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 content,
                 bounds: bounds.size(),
                 size: Pixels(11.0),
-                line_height: text::LineHeight::default(),
+                line_height: crate::theme::UI_LINE_HEIGHT,
                 font,
                 align_x,
                 align_y: alignment::Vertical::Center,
@@ -599,7 +599,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
+    ) -> Vec<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
         let state = tree.state.downcast_ref::<State>();
 
         if state.is_dragging {
@@ -607,7 +607,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             let effective_width = bounds.width - HANDLE_SIZE;
             let handle_x = bounds.x + state.drag_progress * effective_width;
 
-            Some(iced::advanced::overlay::Element::new(Box::new(
+            vec![iced::advanced::overlay::Element::new(Box::new(
                 TooltipOverlay {
                     handle_x: handle_x + translation.x,
                     handle_width: HANDLE_SIZE,
@@ -615,9 +615,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                     drag_progress: state.drag_progress,
                     duration: self.duration,
                 },
-            )))
+            ))]
         } else {
-            None
+            Vec::new()
         }
     }
 }
@@ -754,7 +754,7 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
                 content: time_text,
                 bounds: tooltip_bounds.size(),
                 size: text_size,
-                line_height: text::LineHeight::default(),
+                line_height: crate::theme::UI_LINE_HEIGHT,
                 font,
                 align_x: text::Alignment::Center,
                 align_y: alignment::Vertical::Center,

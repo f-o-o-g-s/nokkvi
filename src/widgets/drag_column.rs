@@ -182,13 +182,7 @@ where
     }
 
     pub fn push(mut self, child: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
-        let child = child.into();
-        let child_size = child.as_widget().size();
-
-        self.width = self.width.enclose(child_size.width);
-        self.height = self.height.enclose(child_size.height);
-
-        self.children.push(child);
+        self.children.push(child.into());
         self
     }
 
@@ -265,7 +259,7 @@ impl<'a, Message, Theme, Renderer: renderer::Renderer>
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for DragColumn<'_, Message, Theme, Renderer>
 where
-    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<DragState>()
@@ -277,6 +271,17 @@ where
 
     fn diff(&mut self, tree: &mut Tree) {
         tree.diff_children(&mut self.children);
+
+        // A `Fit` axis takes on its children's sizing (a `Fill` child makes
+        // the column `Fill`), exactly as iced's own `Column::diff` does.
+        if self.width.is_fit() || self.height.is_fit() {
+            for child in &self.children {
+                let size = child.as_widget().size();
+
+                self.width = self.width.cross(size.width);
+                self.height = self.height.stack(size.height);
+            }
+        }
     }
 
     fn size(&self) -> Size<Length> {
@@ -292,7 +297,11 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let limits = limits.max_width(self.max_width);
+        let limits = if self.max_width.is_finite() {
+            limits.width(Length::Fill.max(self.max_width))
+        } else {
+            *limits
+        };
 
         layout::flex::resolve(
             layout::flex::Axis::Vertical,
@@ -312,10 +321,11 @@ where
         &mut self,
         _tree: &mut Tree,
         layout: Layout<'_>,
+        viewport: &Rectangle,
         _renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        operation.container(None, layout.bounds());
+        operation.container(None, layout.bounds(), viewport);
     }
 
     fn update(
@@ -533,7 +543,7 @@ where
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
         overlay::from_children(
             &mut self.children,
             tree,
@@ -550,7 +560,7 @@ impl<'a, Message, Theme, Renderer> From<DragColumn<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Theme: 'a,
-    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font> + 'a,
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer + 'a,
 {
     fn from(column: DragColumn<'a, Message, Theme, Renderer>) -> Self {
         Self::new(column)

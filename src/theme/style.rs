@@ -266,7 +266,6 @@ pub(crate) fn settings_search_input_style(
             width: 1.0,
             radius: ui_border_radius(),
         },
-        icon: fg4(),
         placeholder: fg4(),
         value: fg0(),
         selection: selection_color(),

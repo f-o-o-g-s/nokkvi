@@ -101,7 +101,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     eq_gains: [f32; 10],
     custom_presets: &[nokkvi_data::audio::eq::CustomEqPreset],
     save_mode: bool,
-    save_name: &str,
+    save_name: &'a str,
 ) -> Option<Element<'a, EqModalMessage>> {
     if !visible {
         return None;
@@ -333,7 +333,6 @@ pub(crate) fn eq_modal_overlay<'a>(
                     width: 1.0,
                     radius: theme::ui_border_radius(),
                 },
-                icon: theme::fg3(),
                 placeholder: theme::fg4(),
                 value: theme::fg0(),
                 selection: theme::selection_color(),

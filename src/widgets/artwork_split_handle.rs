@@ -205,7 +205,7 @@ where
     }
 
     fn layout(&mut self, _tree: &mut Tree, _renderer: &Renderer, limits: &Limits) -> layout::Node {
-        layout::Node::new(self.axis.layout_size(limits.max(), self.thickness))
+        layout::Node::new(self.axis.layout_size(limits.bounds(), self.thickness))
     }
 
     fn update(

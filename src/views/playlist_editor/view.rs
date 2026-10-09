@@ -343,7 +343,7 @@ impl PlaylistEditorState {
             .color(accent)
             .wrapping(iced::widget::text::Wrapping::None);
 
-        let name_input = iced::widget::text_input("Playlist name", &data.name)
+        let name_input = iced::widget::text_input("Playlist name", data.name.clone())
             .id(EDITOR_NAME_INPUT_ID)
             .on_input(EditorMessage::NameChanged)
             .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
@@ -357,13 +357,12 @@ impl PlaylistEditorState {
                     width: 0.0,
                     radius: crate::theme::ui_border_radius(),
                 },
-                icon: crate::theme::fg0(),
                 placeholder: crate::theme::fg2(),
                 value: crate::theme::fg0(),
                 selection: crate::theme::selection_color(),
             });
 
-        let comment_input = iced::widget::text_input("Comment", &data.comment)
+        let comment_input = iced::widget::text_input("Comment", data.comment.clone())
             .on_input(EditorMessage::CommentChanged)
             .font(crate::theme::ui_font())
             .size(11)
@@ -376,7 +375,6 @@ impl PlaylistEditorState {
                     width: 0.0,
                     radius: crate::theme::ui_border_radius(),
                 },
-                icon: crate::theme::fg2(),
                 placeholder: crate::theme::fg2(),
                 value: crate::theme::fg2(),
                 selection: crate::theme::selection_color(),

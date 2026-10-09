@@ -1777,7 +1777,7 @@ fn value_cell<'a>(
     cell: FormCell,
     row_idx: usize,
     committed: &str,
-    placeholder: &str,
+    placeholder: &'a str,
     cursor_here: bool,
 ) -> Element<'a, Message> {
     // Match the EXACT editing cell (row AND cell): two Value cells on
@@ -1795,7 +1795,7 @@ fn value_cell<'a>(
             .as_ref()
             .map(|e| e.buffer.clone())
             .unwrap_or_default();
-        text_input(placeholder, &buffer)
+        text_input(placeholder, buffer)
             .on_input(|s| Message::RulesEditor(RulesEditorMessage::EditingInput(s)))
             .on_submit(Message::RulesEditor(RulesEditorMessage::CommitEditing))
             .id(RULES_VALUE_INPUT_ID)
@@ -1960,7 +1960,6 @@ fn bar_input_style(
             width: 0.0,
             radius: theme::ui_border_radius(),
         },
-        icon: theme::fg0(),
         placeholder: theme::fg2(),
         value: theme::fg0(),
         selection: theme::selection_color(),
@@ -1986,7 +1985,6 @@ fn value_input_style(
             width: 1.0,
             radius: theme::ui_radius_sm(),
         },
-        icon: theme::fg4(),
         placeholder: theme::fg4(),
         value: theme::fg0(),
         selection: theme::selection_color(),

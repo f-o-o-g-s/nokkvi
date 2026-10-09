@@ -1403,7 +1403,13 @@ pub fn main() -> iced::Result {
         theme::set_font_family(settings.font_family);
     }
 
+    // `.settings()` replaces the whole struct, so it comes before the
+    // builders below that fill in fonts and antialiasing.
     iced::daemon(boot, Nokkvi::update, Nokkvi::view)
+        .settings(iced::Settings {
+            line_height: theme::UI_LINE_HEIGHT,
+            ..iced::Settings::default()
+        })
         .title(Nokkvi::title)
         .default_font(theme::ui_font())
         .font(include_bytes!("../assets/fonts/FiraSans-Medium.ttf").as_slice())

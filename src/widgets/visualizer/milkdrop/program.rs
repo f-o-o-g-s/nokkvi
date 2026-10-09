@@ -539,8 +539,7 @@ impl shader::Pipeline for MilkdropPipeline {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("milkdrop blit pipeline layout"),
-            // Group 0 the incoming preset, group 1 the outgoing: exactly iced's
-            // `max_bind_groups: 2`.
+            // Group 0 the incoming preset, group 1 the outgoing.
             bind_group_layouts: &[Some(&layout), Some(&layout)],
             immediate_size: 0,
         });

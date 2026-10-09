@@ -168,20 +168,20 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
         // Length::Fill/Shrink against limits, then we build the paragraph with
         // the resolved bounds and return min_bounds().
         layout::sized(limits, Length::Fill, Length::Shrink, |limits| {
-            let bounds = limits.max();
+            let bounds = limits.bounds();
 
             let text = Text {
                 content: self.content.as_str(),
                 bounds,
                 size: self.size,
-                line_height: advanced_text::LineHeight::default(),
+                line_height: crate::theme::UI_LINE_HEIGHT,
                 font: self.font,
                 align_x: advanced_text::Alignment::Left,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: Shaping::Advanced,
                 wrapping: Wrapping::None,
                 ellipsis: advanced_text::Ellipsis::None,
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
             };
             state.constrained.update(text);
 

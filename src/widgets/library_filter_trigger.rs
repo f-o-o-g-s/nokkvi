@@ -329,7 +329,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
                         content: label,
                         bounds: Size::new(text_bounds.width, text_bounds.height),
                         size: COUNT_TEXT_SIZE.into(),
-                        line_height: iced::advanced::text::LineHeight::default(),
+                        line_height: crate::theme::UI_LINE_HEIGHT,
                         font: theme::weighted_ui_font(iced::font::Weight::Bold),
                         align_x: alignment::Horizontal::Left.into(),
                         align_y: alignment::Vertical::Center,

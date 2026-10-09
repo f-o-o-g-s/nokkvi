@@ -66,7 +66,7 @@ impl<T: 'static> Operation<T> for CenterInScrollable {
         }
     }
 
-    fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+    fn container(&mut self, id: Option<&Id>, bounds: Rectangle, _viewport: &Rectangle) {
         if id == Some(&self.target_id) {
             self.target = Some(bounds);
         }

@@ -612,7 +612,7 @@ impl QueuePage {
                         .ellipsis(iced::widget::text::Ellipsis::End);
                     identity_row = identity_row
                         .push(Space::new().width(Length::Fixed(name_gap)))
-                        .push(container(name).max_width(name_w));
+                        .push(container(name).width(Length::Fit.max(name_w)));
                     if smart_mark {
                         // The Playlists view's smart mark, kept quiet so the
                         // playing row stays the list's only accent.

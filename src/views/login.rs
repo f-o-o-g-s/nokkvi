@@ -350,7 +350,6 @@ fn login_input_appearance(status: text_input::Status, error: bool) -> text_input
             width: 1.0,
             radius: theme::ui_radius_sm(),
         },
-        icon: theme::fg1(),
         placeholder: theme::fg4(),
         value: theme::fg0(),
         selection: theme::selection_color(),

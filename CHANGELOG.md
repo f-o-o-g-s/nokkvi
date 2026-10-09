@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Text fields now undo and redo with Ctrl+Z and Ctrl+Y.
+- The raw rules JSON editor now deletes a whole word with Ctrl+Backspace or Ctrl+Delete.
+
 ### Changed
 
 - Beside the artwork column, the player bar now spans only the list.
@@ -15,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - The artwork column's resize handle is now invisible, marked only by the resize cursor at the column's left edge.
 
 ### Fixed
+
+- Typing in a text field no longer briefly maxes out a CPU core after each keystroke.
 
 ### Removed
 

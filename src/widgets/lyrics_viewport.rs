@@ -512,13 +512,13 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let bounds = limits.max();
+        let bounds = limits.bounds();
         let state = tree.state.downcast_mut::<State>();
 
         // (Re-)shape the paragraphs when the doc or the panel width changes.
         let text_scale = self.text_scale(bounds);
         let text_width = (bounds.width - 2.0 * H_PAD * text_scale).max(1.0);
-        let scale = renderer.scale_factor();
+        let scale = renderer.hint_factor();
         let scale_key = (text_scale * 100.0).round() as u32;
         let key = (doc_hash(self.data.lines), text_width as u32, scale_key);
         if state.cache_key != key {
@@ -580,7 +580,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                     shaping: advanced_text::Shaping::Advanced,
                     wrapping: Wrapping::Word,
                     ellipsis: advanced_text::Ellipsis::None,
-                    hint_factor: renderer.scale_factor(),
+                    hint_factor: renderer.hint_factor(),
                 };
                 let paragraph = <iced::Renderer as TextRenderer>::Paragraph::with_text(text);
                 let text_h = paragraph.min_bounds().height;

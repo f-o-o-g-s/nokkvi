@@ -65,7 +65,7 @@ paths:
 
 ## MilkDrop
 
-- **iced's device grants `max_bind_groups: 2`** (`iced_wgpu` compositor). The upstream engine's custom-warp pipeline needed 3; the fork pin fixes it. A new engine pin must pass the ignored `bundled_pack_builds_on_icedlike_limits` test on a real GPU before it ships. nokkvi's own blit uses both groups (incoming + outgoing for the preset crossfade): nothing else can bind there.
+- **iced's device takes `wgpu::Limits::default()`** (`iced_wgpu` compositor; 4 bind groups since iced-rs/iced#3457 dropped its old `max_bind_groups: 2` cap). The upstream engine's custom-warp pipeline needed 3, which the fork pin still squeezes into 2. A new engine pin must pass the ignored `bundled_pack_builds_on_icedlike_limits` test on a real GPU before it ships; `iced_like_gpu()` mirrors the compositor's limits, so keep it in step with iced. nokkvi's own blit uses two groups (incoming + outgoing for the preset crossfade).
 - **The blit shader and its pipeline layout change in one commit.** naga passes a shader that declares `@group(1)` against a one-group layout; `create_render_pipeline` then panics at first paint. The ignored `blit_pipeline_builds_on_icedlike_limits` test (GPU) catches the mismatch; run it after any `blit.wgsl` or layout edit.
 - **A lost outgoing renderer is never a failure**: by the time it fails, the name on screen is the incoming's, so storing `slot_lost` would blame the wrong preset. Only a lost incoming stores its generation.
 - **`MilkdropRenderer` is `Send` but not `Sync`** (a `RefCell` in its EEL program), so it lives in a `parking_lot::Mutex` inside iced's pipeline storage. Only `prepare` and `trim` touch it.

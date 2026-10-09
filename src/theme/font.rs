@@ -18,6 +18,15 @@ static FONT_FAMILY: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(Stri
 static FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
     LazyLock::new(|| RwLock::new((String::new(), Font::DEFAULT)));
 
+/// The line height of every text site. iced's own widgets read it from the
+/// daemon `Settings` (set in `main`); nokkvi's custom text widgets name it
+/// directly, because iced's `LineHeight::default()` no longer follows it.
+///
+/// iced 0.15 raised its default line height to `1.375`. nokkvi keeps `1.3`,
+/// the value its row heights and text metrics are tuned against.
+pub(crate) const UI_LINE_HEIGHT: iced::widget::text::LineHeight =
+    iced::widget::text::LineHeight::Relative(1.3);
+
 /// Get the UI font - loaded from config.toml (hot-reloadable)
 /// Default: System sans-serif font (works on all systems)
 #[inline]
