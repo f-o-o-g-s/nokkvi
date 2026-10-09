@@ -618,7 +618,9 @@ fn cover_layer<'a, Message: 'a>(
 ///    panel edges instead of being scissored at a sub-square. Bars and Lines
 ///    honor the Visualizer Height setting instead: they occupy `height_percent`
 ///    of the height, bottom-anchored (cover art shows above), the same knob the
-///    bottom band uses.
+///    bottom band uses. With the Horizon on, the layer reaches higher by
+///    `Visualizer::horizon_headroom` so its far rows crest over the cover;
+///    the bars / line keep the band.
 /// 4. The surfing boat, confined to the Lines band so it rides the rendered
 ///    waveform.
 /// 5. The haloed lyric text, topmost.
@@ -659,13 +661,14 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
             (h * *height_percent).clamp(0.0, h)
         };
         let top_pad = (h - band_h).max(0.0);
-        // A `band_h`-tall layer resting on the panel's bottom edge.
-        let bottom_band = |content: Element<'a, Message>| -> Element<'a, Message> {
+        // A layer resting on the panel's bottom edge: the `band_h` band plus
+        // `lift` px above it.
+        let bottom_band = |content: Element<'a, Message>, lift: f32| -> Element<'a, Message> {
             column![
-                container(Space::new()).height(Length::Fixed(top_pad)),
+                container(Space::new()).height(Length::Fixed(top_pad - lift)),
                 container(content)
                     .width(Length::Fixed(w))
-                    .height(Length::Fixed(band_h)),
+                    .height(Length::Fixed(band_h + lift)),
             ]
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
@@ -680,14 +683,16 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
         if mode == VisualizationMode::Bars {
             configured = configured.width(w);
         }
-        let ring = configured.view::<Message>();
+        // The Horizon's far rows crest above the band, over the cover.
+        let headroom = configured.horizon_headroom(band_h).min(top_pad);
+        let ring = configured.headroom(headroom).view::<Message>();
         let ring_layer: Element<'a, Message> = if fills_panel {
             container(ring)
                 .width(Length::Fixed(w))
                 .height(Length::Fixed(h))
                 .boxed()
         } else {
-            bottom_band(ring)
+            bottom_band(ring, headroom)
         };
         layers = layers.push(ring_layer);
         if lyrics.is_some() && milkdrop_over_art {
@@ -709,7 +714,7 @@ fn compose_cover_panel<'a, Message: 'a + 'static>(
                 // Lines over-cover boat keeps the drop-anchor doodad.
                 None,
             );
-            layers = layers.push(bottom_band(boat_el));
+            layers = layers.push(bottom_band(boat_el, 0.0));
         }
     }
     let panel: Element<'a, Message> = layers.boxed();

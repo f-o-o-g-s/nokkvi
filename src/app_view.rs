@@ -1333,11 +1333,17 @@ impl Nokkvi {
                 height_percent,
             );
             let spacer_height = (self.window.height - bar_reserved - visualizer_height).max(0.0);
+            // The Horizon's far rows crest above the band, over the view; the
+            // bars / line (and the boat below, which keeps this spacer) stay put.
+            let headroom = viz_with_mode
+                .horizon_headroom(visualizer_height)
+                .min(spacer_height);
             let visualizer_inner = column![
-                container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
-                container(viz_with_mode.view())
+                container(iced::widget::Space::new())
+                    .height(Length::Fixed(spacer_height - headroom)),
+                container(viz_with_mode.headroom(headroom).view())
                     .width(Length::Fill)
-                    .height(Length::Fixed(visualizer_height))
+                    .height(Length::Fixed(visualizer_height + headroom))
             ]
             .width(Length::Fill)
             .height(Length::Fill);

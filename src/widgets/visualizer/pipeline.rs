@@ -6,7 +6,7 @@
 use iced::wgpu;
 
 use super::shader::{
-    BloomParams, CrtParams, EchoParams, ReflectionParams, TRAIL_FORMAT, Uniforms,
+    BandLayout, BloomParams, CrtParams, EchoParams, ReflectionParams, TRAIL_FORMAT, Uniforms,
     VisualizerPipeline,
 };
 
@@ -966,6 +966,8 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             blit_bind_group_layout,
             sampler,
             msaa_size: (0, 0),
+            band: BandLayout::default(),
+            canvas_px: [0.0; 4],
             format,
             bloom_bright_pipeline,
             bloom_blur_v_pipeline,

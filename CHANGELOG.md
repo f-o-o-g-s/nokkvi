@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 - Typing in a text field no longer briefly maxes out a CPU core after each keystroke.
 - Resizing the window no longer crashes the app while the rules JSON editor's cursor is scrolled out of view.
+- The Horizon's receding waves and bars now crest above the visualizer instead of being cut off along a straight line at its top.
 
 ### Removed
 

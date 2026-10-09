@@ -15,10 +15,12 @@
 // over a dark lip (Lines) or a row of stubs (Bars), thin enough that the cover
 // shows through instead of a slab. The newest row sits on the live bars / line.
 //
-// Drawn behind the bars / line, as one fullscreen triangle per frame. The rows
-// come from horizon.rs through the particle storage buffer (binding 4):
-// vec4 0 = (rows, samples, phase, margin), vec4 1 = (core bars, group,
-// stepped, _), the heights from vec4 2 on, newest row first.
+// Drawn behind the bars / line, as one fullscreen triangle per frame over the
+// band plus the headroom above it (horizon.rs HEADROOM), where the far rows
+// crest. The rows come from horizon.rs through the particle storage buffer
+// (binding 4): vec4 0 = (rows, samples, phase, margin), vec4 1 = (core bars,
+// group, stepped, lift), the heights from vec4 2 on, newest row first. `lift`
+// is the headroom in the viewport uniform's px; the uniform itself is the band.
 //
 // ⚠️  Config struct layout MUST match VisualizerConfig in shader.rs byte-for-byte
 //     (same block as bars.wgsl / lines.wgsl / scope.wgsl).
@@ -138,6 +140,7 @@ const FLAT_LIP: f32 = 0.03;        // its depth (fraction of the band)
 const FLAT_HAZE: f32 = 0.05;       // the faint ground below the lip
 const FLAT_BAR_BODY: f32 = 0.6;    // a quiet row bar's stub vs a loud bar's body
 const BAR_STUB_PX: f32 = 3.0;      // a row bar's least height (px) without LEDs
+const TOP_FADE: f32 = 0.1;         // guard fade under the canvas top (scene heights)
 
 fn ridge_value(r: u32, samples: u32, i: u32) -> f32 {
     let f = r * samples + i;
@@ -185,13 +188,17 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let core = head2.x;
     let group = max(head2.y, 1.0);
     let stepped = head2.z > 0.5;
+    let lift = max(head2.w, 0.0);
     if (rows < 2u || samples < 2u) {
         return vec4<f32>(0.0);
     }
     let vp = uniforms.viewport;
-    let px = in.uv * vp.zw;
+    // This pass covers the headroom too: px.y runs from -lift at the canvas
+    // top to the band's bottom, y past 1 above the band.
+    let px = vec2<f32>(in.uv.x * vp.z, in.uv.y * (vp.w + lift) - lift);
     let uh = usable_height();
     let y = (top_margin() + uh - px.y) / uh;
+    let ceiling = (top_margin() + uh + lift) / uh;
     // Field position: Bars span the bar field, Lines the full width (point i
     // of n at i / (n - 1), as lines.wgsl lays them out).
     var u = px.x / max(vp.z, 1.0);
@@ -280,7 +287,9 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
             let crest_gate = max(relief, FLAT_CREST * span);
             let fill_a = fill * mix(0.92, 0.55, fog) * vanish * max(thin * ground, floor_a) * cov;
             let line_a = clamp(line, 0.0, 1.0) * vanish * (1.0 - 0.55 * fog) * crest_gate * cov;
-            let top_fade = ss(1.0, 0.82, y) * uniforms.config.global_opacity;
+            // The headroom holds the farthest crest; this only softens the
+            // canvas edge where the layout had no room for it.
+            let top_fade = ss(ceiling, ceiling - TOP_FADE, y) * uniforms.config.global_opacity;
             let a = clamp(fill_a + line_a * (1.0 - fill_a), 0.0, 1.0) * top_fade;
             let col = (body * fill_a * (1.0 - line_a) + crest * line_a * 1.3) * top_fade;
             // Front to back: what this row leaves uncovered shows the next.

@@ -11,13 +11,19 @@
 //!
 //! GPU snapshot (it rides the particle storage buffer, which only Scope's dust
 //! uses otherwise): entry 0 = `(rows, samples, phase, margin, core, group,
-//! stepped, _)`, then the rows flattened, 8 heights to an entry. `margin` is
-//! a field fraction for smooth rows and a bar count for stepped ones.
+//! stepped, lift)`, then the rows flattened, 8 heights to an entry. `margin` is
+//! a field fraction for smooth rows and a bar count for stepped ones; `lift`
+//! is the canvas headroom above the band (px), filled in by the primitive.
 
 use std::collections::VecDeque;
 
 use super::state::catmull_rom_1d;
 
+/// Canvas above the band the rows may crest into, as a share of the scene
+/// height: the far rows' baselines climb to `RIDGE_HORIZON` and their crests
+/// stand on top, so the farthest loud crest reaches about 1.14 scenes
+/// (`headroom_holds_the_farthest_crest` pins it against horizon.wgsl).
+pub(crate) const HEADROOM: f32 = 0.25;
 /// Rows kept (the oldest is about `ROWS * ROW_EVERY / 60` seconds back).
 pub(crate) const ROWS: usize = 14;
 /// FFT ticks between rows.
@@ -217,6 +223,51 @@ fn smooth_row(values: &[f64]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `const <name>: f32 = <value>;` from horizon.wgsl.
+    fn wgsl_f32(name: &str) -> f32 {
+        let src = include_str!("shaders/horizon.wgsl");
+        let decl = format!("const {name}: f32 =");
+        let start = src.find(&decl).unwrap_or_else(|| panic!("missing {decl}")) + decl.len();
+        let end = start
+            + src[start..]
+                .find(';')
+                .unwrap_or_else(|| panic!("{name} has no `;`"));
+        src[start..end]
+            .trim()
+            .parse()
+            .unwrap_or_else(|e| panic!("{name}: {e}"))
+    }
+
+    /// The farthest full-height crest stays under the guard fade at the top
+    /// of the canvas, so no row is ever cut flat by the canvas edge. Mirrors
+    /// the shader's row geometry: baseline `RIDGE_HORIZON * (1 - 1/d) /
+    /// (1 - 1/dmax)`, crest `RIDGE_AMP * h / d` above it, `d = 1 + z * DEPTH`.
+    #[test]
+    fn headroom_holds_the_farthest_crest() {
+        let (horizon, depth, amp, fade) = (
+            wgsl_f32("RIDGE_HORIZON"),
+            wgsl_f32("RIDGE_DEPTH"),
+            wgsl_f32("RIDGE_AMP"),
+            wgsl_f32("TOP_FADE"),
+        );
+        let dmax = 1.0 + ROWS as f32 * depth;
+        let highest = (0..=ROWS * 10)
+            .map(|i| {
+                let d = 1.0 + i as f32 / 10.0 * depth;
+                horizon * (1.0 - 1.0 / d) / (1.0 - 1.0 / dmax) + amp / d
+            })
+            .fold(0.0f32, f32::max);
+        assert!(
+            highest > 1.0,
+            "the far crests rise above the band, which is why the headroom exists"
+        );
+        assert!(
+            highest <= 1.0 + HEADROOM - fade,
+            "a crest at {highest} scenes reaches the top fade (starts at {})",
+            1.0 + HEADROOM - fade
+        );
+    }
 
     #[test]
     fn stepped_rows_mirror_past_both_edges_and_ease_down() {

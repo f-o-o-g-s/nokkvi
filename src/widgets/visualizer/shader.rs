@@ -19,6 +19,58 @@ use super::{
 };
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
+/// Where the visualizer stands in its canvas, in fractions of the canvas
+/// height from the top: the Horizon's headroom, then the scene (the bars /
+/// line), then with Reflection on the water below the waterline.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct BandLayout {
+    /// The headroom above the band (0 without the Horizon).
+    top: f32,
+    /// The scene: the band, or its part above the waterline.
+    scene: f32,
+}
+
+impl BandLayout {
+    /// A canvas `headroom` px of whose `canvas_h` px sit above the band.
+    pub(super) fn new(headroom: f32, canvas_h: f32, reflection: bool) -> Self {
+        let top = (headroom / canvas_h.max(1.0)).clamp(0.0, 1.0);
+        let band = 1.0 - top;
+        Self {
+            top,
+            scene: if reflection { band * WATER_LINE } else { band },
+        }
+    }
+
+    /// The scene's bottom edge: the waterline when Reflection is on.
+    pub(super) fn water_line(self) -> f32 {
+        (self.top + self.scene).min(1.0)
+    }
+
+    /// Inside a canvas rect `[x, y, w, h]`: the backdrop's rect (headroom +
+    /// scene, so the Horizon's far rows can crest above the band) and the
+    /// scene's (where the bars / line lay out).
+    pub(super) fn rects(self, [x, y, w, h]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
+        (
+            [x, y, w, h * self.water_line()],
+            [x, y + h * self.top, w, h * self.scene],
+        )
+    }
+
+    /// Texture rows of a `tex_h`-row canvas the backdrop and scene cover.
+    fn rows(self, tex_h: u32) -> u32 {
+        ((tex_h as f32 * self.water_line()).round() as u32).clamp(1, tex_h.max(1))
+    }
+}
+
+impl Default for BandLayout {
+    fn default() -> Self {
+        Self {
+            top: 0.0,
+            scene: 1.0,
+        }
+    }
+}
+
 fn get_elapsed_time() -> f32 {
     let start = START_TIME.get_or_init(Instant::now);
     start.elapsed().as_secs_f32()
@@ -223,6 +275,9 @@ pub(crate) struct VisualizerPrimitive {
     /// drawn from `horizon_data` (uploaded into the particle buffer, which
     /// only Scope's dust uses otherwise). Empty when the Horizon is off.
     pub horizon_data: Vec<[f32; 8]>,
+    /// Logical px of the canvas above the band (`ShaderParams::headroom`,
+    /// clamped to the canvas).
+    pub headroom: f32,
     /// Scope: the Tunnel's receding rings (tunnel.wgsl), drawn behind the ring
     /// from this snapshot (uploaded into the peak buffer, which Scope never
     /// reads otherwise). Empty when the Tunnel is off.
@@ -327,6 +382,9 @@ pub(crate) struct ShaderParams {
     pub reflection: bool,
     /// Bars / Lines Horizon (the active mode's `horizon`).
     pub horizon: bool,
+    /// Logical px of the canvas above the band, room for the Horizon's far
+    /// rows (`Visualizer::horizon_headroom`); 0 without it.
+    pub headroom: f32,
 }
 
 impl VisualizerPrimitive {
@@ -485,6 +543,11 @@ impl VisualizerPrimitive {
         let horizon_data = if !mode.uses_waveform() && params.horizon {
             let mut rows = state.get_horizon();
             rows.truncate(VisualizerPipeline::MAX_PARTICLES);
+            // The header's free slot carries the headroom, so the rows can
+            // crest above the band (horizon.wgsl `lift`).
+            if let Some(head) = rows.first_mut() {
+                head[7] = params.headroom;
+            }
             rows
         } else {
             Vec::new()
@@ -532,6 +595,7 @@ impl VisualizerPrimitive {
             scope_beam: params.scope_beam,
             reflection,
             horizon_data,
+            headroom: params.headroom,
             tunnel_data,
         }
     }
@@ -577,6 +641,10 @@ pub(crate) struct VisualizerPipeline {
     pub(super) blit_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) sampler: wgpu::Sampler,
     pub(super) msaa_size: (u32, u32),
+    /// The last prepared primitive's band within its canvas (`prepare`).
+    pub(super) band: BandLayout,
+    /// Its canvas in target px (the viewport iced sets for `draw`).
+    pub(super) canvas_px: [f32; 4],
     pub(super) format: wgpu::TextureFormat,
     // --- Bloom post-processing ---
     /// resolve_texture -> half-res bloom (horizontal blur + soft-knee threshold)
@@ -741,17 +809,6 @@ unsafe impl bytemuck::Pod for Uniforms {}
 unsafe impl bytemuck::Zeroable for Uniforms {}
 
 impl VisualizerPrimitive {
-    /// Texture rows the visualizer draws into: the band above the waterline
-    /// when the Reflection is on, else all of it.
-    fn scene_tex_h(&self, tex_h: u32) -> u32 {
-        if self.reflection {
-            ((tex_h as f32 * WATER_LINE).round() as u32).clamp(1, tex_h)
-        } else {
-            tex_h
-        }
-    }
-
-    /// The Horizon rows' pipeline, when they are on.
     /// The fullscreen backdrop drawn behind the bars / line / ring: the Scope
     /// Tunnel, else the Horizon, else none.
     fn backdrop_pipe<'a>(
@@ -802,18 +859,25 @@ impl VisualizerPrimitive {
         lines_pipeline: &wgpu::RenderPipeline,
         scope_pipeline: &wgpu::RenderPipeline,
         backdrop: Option<&wgpu::RenderPipeline>,
+        (backdrop_rect, scene_rect): ([f32; 4], [f32; 4]),
         render_pass: &mut wgpu::RenderPass<'_>,
     ) {
         let bar_count = config.bar_count;
+        let set_viewport = |pass: &mut wgpu::RenderPass<'_>, [x, y, w, h]: [f32; 4]| {
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        };
 
         render_pass.set_bind_group(0, bind_group, &[]);
 
         // The backdrop (Horizon rows / Scope Tunnel) sits behind the bars /
-        // line / ring: one fullscreen triangle.
+        // line / ring: one fullscreen triangle over the headroom + scene, so
+        // the Horizon's far rows crest above the band.
         if let Some(backdrop) = backdrop {
+            set_viewport(render_pass, backdrop_rect);
             render_pass.set_pipeline(backdrop);
             render_pass.draw(0..3, 0..1);
         }
+        set_viewport(render_pass, scene_rect);
 
         match mode {
             VisualizationMode::Bars => {
@@ -954,15 +1018,6 @@ impl VisualizerPrimitive {
             multiview_mask: None,
         });
 
-        render_pass.set_viewport(
-            clip_bounds.x as f32,
-            clip_bounds.y as f32,
-            clip_bounds.width as f32,
-            clip_bounds.height as f32,
-            0.0,
-            1.0,
-        );
-
         render_pass.set_scissor_rect(
             clip_bounds.x,
             clip_bounds.y,
@@ -983,6 +1038,12 @@ impl VisualizerPrimitive {
             &pipeline.lines_pipeline,
             scope_pipe,
             self.backdrop_pipe(pipeline, false),
+            pipeline.band.rects([
+                clip_bounds.x as f32,
+                clip_bounds.y as f32,
+                clip_bounds.width as f32,
+                clip_bounds.height as f32,
+            ]),
             &mut render_pass,
         );
         Self::draw_particles(
@@ -1038,16 +1099,26 @@ impl shader::Primitive for VisualizerPrimitive {
         // Clear dirty flag since we've read the current state
         self.state.clear_dirty();
 
-        // Reflection: the visualizer stands in the band above the waterline.
-        let scene_h = if self.reflection {
-            bounds.height * WATER_LINE
-        } else {
-            bounds.height
-        };
+        // The scene stands in the band below the Horizon's headroom, above
+        // the waterline when the Reflection is on.
+        let band = BandLayout::new(self.headroom, bounds.height, self.reflection);
+        pipeline.band = band;
+        let scale = _viewport.scale_factor();
+        pipeline.canvas_px = [
+            bounds.x * scale,
+            bounds.y * scale,
+            bounds.width * scale,
+            bounds.height * scale,
+        ];
 
         // Update uniforms
         let uniforms = Uniforms {
-            viewport: [bounds.x, bounds.y, bounds.width, scene_h],
+            viewport: [
+                bounds.x,
+                bounds.y + self.headroom,
+                bounds.width,
+                band.scene * bounds.height,
+            ],
             gradient_colors: self.gradient_colors,
             peak_gradient_colors: self.peak_gradient_colors,
             peak_color: self.peak_color,
@@ -1067,7 +1138,7 @@ impl shader::Primitive for VisualizerPrimitive {
             let (bass, _, _) = self.state.current_bands();
             let params = ReflectionParams {
                 surface: [
-                    WATER_LINE,
+                    band.water_line(),
                     self.config.time,
                     self.state.current_beat_pulse() * self.beat_reactivity,
                     bass,
@@ -1140,7 +1211,6 @@ impl shader::Primitive for VisualizerPrimitive {
             || self.crt_enabled
             || self.reflection
         {
-            let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
             let h = (bounds.height * scale).ceil() as u32;
 
@@ -1528,6 +1598,7 @@ impl shader::Primitive for VisualizerPrimitive {
             &pipeline.lines_pipeline,
             scope_pipe,
             self.backdrop_pipe(pipeline, false),
+            pipeline.band.rects(pipeline.canvas_px),
             render_pass,
         );
         Self::draw_particles(
@@ -1587,11 +1658,9 @@ impl shader::Primitive for VisualizerPrimitive {
                 multiview_mask: None,
             });
 
-            // Viewport covers the full widget-sized texture (0,0 origin)
+            // The widget-sized texture (0,0 origin) down to the waterline.
             let (tex_w, tex_h) = pipeline.msaa_size;
-            let scene_tex_h = self.scene_tex_h(tex_h);
-            render_pass.set_viewport(0.0, 0.0, tex_w as f32, scene_tex_h as f32, 0.0, 1.0);
-            render_pass.set_scissor_rect(0, 0, tex_w, scene_tex_h);
+            render_pass.set_scissor_rect(0, 0, tex_w, pipeline.band.rows(tex_h));
 
             let scope_pipe = if self.scope_beam {
                 &pipeline.scope_pipeline_beam_msaa
@@ -1606,6 +1675,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
                 self.backdrop_pipe(pipeline, true),
+                pipeline.band.rects([0.0, 0.0, tex_w as f32, tex_h as f32]),
                 &mut render_pass,
             );
             Self::draw_particles(
@@ -1643,9 +1713,7 @@ impl shader::Primitive for VisualizerPrimitive {
             });
 
             let (tex_w, tex_h) = pipeline.msaa_size;
-            let scene_tex_h = self.scene_tex_h(tex_h);
-            ring_pass.set_viewport(0.0, 0.0, tex_w as f32, scene_tex_h as f32, 0.0, 1.0);
-            ring_pass.set_scissor_rect(0, 0, tex_w, scene_tex_h);
+            ring_pass.set_scissor_rect(0, 0, tex_w, pipeline.band.rows(tex_h));
 
             let scope_pipe = if self.scope_beam {
                 &pipeline.scope_pipeline_beam_msaa
@@ -1661,6 +1729,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.lines_pipeline_msaa,
                 scope_pipe,
                 self.echo_backdrop_pipe(pipeline, true),
+                pipeline.band.rects([0.0, 0.0, tex_w as f32, tex_h as f32]),
                 &mut ring_pass,
             );
         }
@@ -2119,7 +2188,10 @@ impl<Message> shader::Program<Message> for ShaderVisualizer {
     ) -> Self::Primitive {
         // Convert thickness ratios to pixels and create adjusted params
         let mut adjusted_params = self.params.clone();
-        adjusted_params.line_thickness = self.params.line_thickness * bounds.height;
+        // Sized off the band, not the canvas the Horizon's headroom adds to.
+        adjusted_params.headroom = self.params.headroom.clamp(0.0, bounds.height);
+        adjusted_params.line_thickness =
+            self.params.line_thickness * (bounds.height - adjusted_params.headroom);
         // peak_thickness is a ratio (e.g., 0.66 = 66% of bar_width).
         // The WGSL shader multiplies by bar_width to get pixel height,
         // so we pass the ratio through directly (no bounds.height scaling).
@@ -2144,5 +2216,45 @@ mod layout_tests {
     fn flash_data_is_sixteen_byte_aligned() {
         assert_eq!(core::mem::offset_of!(VisualizerConfig, scope_radius), 136);
         assert_eq!(core::mem::offset_of!(VisualizerConfig, flash_data) % 16, 0);
+    }
+
+    fn close(a: [f32; 4], b: [f32; 4]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3)
+    }
+
+    #[test]
+    fn a_band_without_headroom_or_water_is_the_whole_canvas() {
+        let canvas = [10.0, 20.0, 300.0, 100.0];
+        let (backdrop, scene) = BandLayout::new(0.0, 100.0, false).rects(canvas);
+        assert!(close(backdrop, canvas) && close(scene, canvas));
+        assert_eq!(BandLayout::default(), BandLayout::new(0.0, 100.0, false));
+        assert_eq!(BandLayout::default().rows(57), 57);
+    }
+
+    /// The scene sits under the headroom and above the waterline; the
+    /// backdrop (Horizon) covers both, down to the same waterline the
+    /// Reflection mirrors about.
+    #[test]
+    fn headroom_lifts_the_backdrop_above_the_scene() {
+        let canvas = [0.0, 0.0, 400.0, 125.0];
+        let band = BandLayout::new(25.0, 125.0, true);
+        let (backdrop, scene) = band.rects(canvas);
+        let scene_h = 100.0 * WATER_LINE;
+        assert!(close(scene, [0.0, 25.0, 400.0, scene_h]));
+        assert!(close(backdrop, [0.0, 0.0, 400.0, 25.0 + scene_h]));
+        assert!((band.water_line() - (25.0 + scene_h) / 125.0).abs() < 1e-6);
+        assert_eq!(band.rows(125), (25.0 + scene_h).round() as u32);
+
+        let dry = BandLayout::new(25.0, 125.0, false);
+        assert!(close(dry.rects(canvas).1, [0.0, 25.0, 400.0, 100.0]));
+        assert!((dry.water_line() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn headroom_never_exceeds_the_canvas() {
+        let band = BandLayout::new(500.0, 100.0, false);
+        let (backdrop, scene) = band.rects([0.0, 0.0, 50.0, 100.0]);
+        assert!(scene[3].abs() < 1e-6 && backdrop[3] <= 100.0);
+        assert_eq!(band.rows(100), 100);
     }
 }

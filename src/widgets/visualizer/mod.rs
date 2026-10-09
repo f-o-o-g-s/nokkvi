@@ -221,6 +221,18 @@ mod placement_tests {
     }
 }
 
+/// `(reflection, horizon)` for `mode`: Bars / Lines only.
+fn reflection_and_horizon(
+    cfg: &crate::visualizer_config::VisualizerConfig,
+    mode: VisualizationMode,
+) -> (bool, bool) {
+    match mode {
+        VisualizationMode::Bars => (cfg.bars.reflection, cfg.bars.horizon),
+        VisualizationMode::Lines => (cfg.lines.reflection, cfg.lines.horizon),
+        VisualizationMode::Scope | VisualizationMode::Milkdrop => (false, false),
+    }
+}
+
 /// Default bar width in pixels (fallback when dynamic calculation fails)
 const BAR_WIDTH: f32 = 4.0;
 
@@ -372,6 +384,8 @@ pub struct Visualizer {
     // Dynamic bars
     dynamic_bars: bool,
     max_bars: usize, // Maximum bar count to try when calculating
+    /// Logical px of the canvas above the band (`horizon_headroom`).
+    headroom: f32,
     /// Refcount-keyed kill switch for the FFT worker.
     /// See [`state::FftShutdownGuard`] for the lifecycle invariant.
     _shutdown_guard: std::sync::Arc<state::FftShutdownGuard>,
@@ -419,11 +433,38 @@ impl Visualizer {
             line_thickness, // From config
             // Dynamic bars enabled
             dynamic_bars: true,
+            headroom: 0.0,
             _shutdown_guard: shutdown_guard,
         }
     }
 
     /// Set window height for scaling
+    /// Logical px the Horizon needs above a `band_h`-tall band: its far rows
+    /// crest past the band's top, by up to [`horizon::HEADROOM`] of the scene
+    /// (the band, or its part above the waterline with Reflection on). The
+    /// layout makes the canvas that much taller, upward, and passes it to
+    /// [`Self::headroom`]; the bars / line keep the band. 0 when this mode's
+    /// Horizon is off.
+    pub(crate) fn horizon_headroom(&self, band_h: f32) -> f32 {
+        let (reflection, horizon) = reflection_and_horizon(&self.config.read(), self.mode);
+        if !horizon {
+            return 0.0;
+        }
+        let scene = if reflection {
+            band_h * WATER_LINE
+        } else {
+            band_h
+        };
+        scene * horizon::HEADROOM
+    }
+
+    /// The canvas's top `px` are headroom above the band (see
+    /// [`Self::horizon_headroom`]).
+    pub(crate) fn headroom(mut self, px: f32) -> Self {
+        self.headroom = px.max(0.0);
+        self
+    }
+
     pub fn window_height(mut self, height: f32) -> Self {
         self.window_height = height;
         self
@@ -703,12 +744,7 @@ impl Visualizer {
             // No shader params for MilkDrop; `view()` returns before this runs.
             VisualizationMode::Milkdrop => (0.0, 0.0),
         };
-        // Reflection and Horizon are Bars / Lines only.
-        let (reflection, horizon) = match self.mode {
-            VisualizationMode::Bars => (cfg.bars.reflection, cfg.bars.horizon),
-            VisualizationMode::Lines => (cfg.lines.reflection, cfg.lines.horizon),
-            VisualizationMode::Scope | VisualizationMode::Milkdrop => (false, false),
-        };
+        let (reflection, horizon) = reflection_and_horizon(cfg, self.mode);
 
         let (
             outline_thickness,
@@ -795,6 +831,7 @@ impl Visualizer {
             crt: cfg.crt,
             reflection,
             horizon,
+            headroom: self.headroom,
         }
     }
 
@@ -1677,6 +1714,41 @@ mod build_shader_params_tests {
         assert!(params.peak_enabled);
         assert!((params.peak_alpha - 1.0).abs() < 1e-6);
         assert_eq!(params.peak_color, iced::Color::TRANSPARENT);
+        assert!(params.headroom.abs() < 1e-6, "no headroom unless asked");
+        let lifted = Visualizer::new(64, Arc::new(RwLock::new(cfg.clone())), Default::default())
+            .headroom(12.0)
+            .build_shader_params(&cfg, &colors);
+        assert!((lifted.headroom - 12.0).abs() < 1e-6);
+    }
+
+    /// The Horizon's headroom follows the active mode's own toggles: the
+    /// scene's share of the band, none without the Horizon or outside
+    /// Bars / Lines.
+    #[test]
+    fn horizon_headroom_sizes_off_the_active_modes_scene() {
+        let mut cfg = VisualizerConfig::default();
+        cfg.lines.horizon = true;
+        cfg.lines.reflection = true;
+        cfg.bars.horizon = true;
+        cfg.scope.tunnel = true;
+        let shared = Arc::new(RwLock::new(cfg));
+        let viz = |mode| Visualizer::new(64, shared.clone(), Default::default()).mode(mode);
+
+        let bars = viz(VisualizationMode::Bars).horizon_headroom(200.0);
+        assert!((bars - 200.0 * horizon::HEADROOM).abs() < 1e-4);
+        let lines = viz(VisualizationMode::Lines).horizon_headroom(200.0);
+        assert!(
+            (lines - 200.0 * WATER_LINE * horizon::HEADROOM).abs() < 1e-4,
+            "Reflection leaves the scene only the band above the waterline"
+        );
+        assert_eq!(viz(VisualizationMode::Scope).horizon_headroom(200.0), 0.0);
+        assert_eq!(
+            viz(VisualizationMode::Milkdrop).horizon_headroom(200.0),
+            0.0
+        );
+
+        shared.write().bars.horizon = false;
+        assert_eq!(viz(VisualizationMode::Bars).horizon_headroom(200.0), 0.0);
     }
 
     /// Scope's Tunnel rides `scope_tunnel`, and while it is on the ring's
