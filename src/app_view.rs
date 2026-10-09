@@ -12,6 +12,7 @@ use crate::{
     app_message::{Message, NavigationMessage},
     update::modals::ActiveModal,
     views, widgets,
+    widgets::base_slot_list_layout::ArtworkBleed,
 };
 
 /// Layers [`Nokkvi::bottom_band_layers`] always pushes: the bottom-band
@@ -478,6 +479,25 @@ impl Nokkvi {
         }
     }
 
+    /// Left and right insets of the toast strip, which rides just above the
+    /// player bar: it starts clear of the sidebar (`side_nav_inset`) and,
+    /// while the bar is lowered beside the artwork column, ends where the bar
+    /// does, so the toast sits over the slot list instead of across the
+    /// artwork. Resolves the lowered width the way `home_view` does.
+    pub(crate) fn toast_insets(&self) -> (f32, f32) {
+        let left = self.side_nav_inset();
+        // Theater Mode and the login screen draw no lowered bar.
+        if self.screen != Screen::Home || self.theater.active {
+            return (left, 0.0);
+        }
+        let right = self
+            .lowered_player_bar_width(self.elevated_artwork_extent().is_some())
+            .map_or(0.0, |bar_width| {
+                (self.window.width - left - bar_width).max(0.0)
+            });
+        (left, right)
+    }
+
     /// Width of the artwork *column* (the `bg0_soft` image container) when
     /// elevation is active, or `None` when it does not apply.
     ///
@@ -510,14 +530,14 @@ impl Nokkvi {
     /// real left edge and the stripe peeks through above the nav.
     ///
     /// The returned extent is the artwork's **inner column width** —
-    /// excluding the 1 px `border()` stripe (Auto/Always) and the 6 px drag
-    /// handle (Always only). `home_view` computes
+    /// excluding the 1 px `border()` stripe (the Always modes' drag handle
+    /// takes no width; it overlays the column). `home_view` computes
     /// `nav_visual_width = content_pane_width - extent`, which makes the
     /// nav-overlay's right edge align with the inner artwork's LEFT edge:
-    /// the stripe/handle sit *underneath* the nav-bar band in the top
-    /// `NAV_BAR_HEIGHT` strip, then become visible as designed below it.
-    /// Subtracting the stripe/handle from `nav_visual_width` would invert
-    /// that — the stripe would peek through above the nav.
+    /// the stripe sits *underneath* the nav-bar band in the top
+    /// `NAV_BAR_HEIGHT` strip, then becomes visible as designed below it.
+    /// Subtracting the stripe from `nav_visual_width` would invert that —
+    /// the stripe would peek through above the nav.
     pub(crate) fn elevated_artwork_extent(&self) -> Option<f32> {
         if !crate::theme::is_artwork_elevated()
             || !crate::theme::is_top_nav()
@@ -547,7 +567,7 @@ impl Nokkvi {
             window_height,
             show_artwork_column: true,
             slot_list_chrome: 0.0,
-            elevated: false,
+            bleed: ArtworkBleed::NONE,
         };
         // Step 1 — does the view actually render Horizontal artwork?
         //          The view's call uses raw `window.height`, so we must too.
@@ -569,6 +589,118 @@ impl Nokkvi {
             ArtworkOrientation::Horizontal => Some(adjusted_layout.extent),
             ArtworkOrientation::Vertical => None,
         }
+    }
+
+    /// Whether the top-area metadata strip row shows in the current nav
+    /// layout: `TopBar` above the content in side / none nav, `TopBarUnder`
+    /// beneath the nav in top nav. `home_view` docks it with
+    /// [`Self::dock_chrome`].
+    fn top_strip_row_shown() -> bool {
+        if crate::theme::is_top_nav() {
+            crate::theme::show_top_bar_under_strip()
+        } else {
+            crate::theme::show_top_bar_strip()
+        }
+    }
+
+    /// Width of the lowered player bar, or `None` when the bar spans the
+    /// whole content column as usual.
+    ///
+    /// Lowered, the current view's Horizontal artwork column runs from the
+    /// nav bar (or the window's top edge) down to its bottom edge, and the
+    /// player bar and the top metadata strip row sit beside it, over the slot
+    /// list only. The returned width is the slot list's: `home_view` sizes the
+    /// bar and the strip to it and the view pins its slot-list column to it
+    /// (`ArtworkBleed::bottom`), so the edges meet.
+    ///
+    /// Applies when the view renders a Horizontal artwork column, resolved
+    /// from the same config the view builds (raw `window.height`, like
+    /// `elevated_artwork_extent`'s first pass); never in split-view.
+    pub(crate) fn lowered_player_bar_width(&self, elevated: bool) -> Option<f32> {
+        use crate::widgets::base_slot_list_layout::{
+            ArtworkOrientation, BaseSlotListLayoutConfig, horizontal_artwork_side_width,
+            resolve_artwork_layout,
+        };
+        if self.split_view_active()
+            || !self
+                .view_page(self.current_view)
+                .is_some_and(|p| p.uses_horizontal_artwork_column())
+        {
+            return None;
+        }
+        let pane_width = self.content_pane_width();
+        let layout = resolve_artwork_layout(&BaseSlotListLayoutConfig {
+            window_width: pane_width,
+            window_height: self.window.height,
+            show_artwork_column: true,
+            slot_list_chrome: 0.0,
+            bleed: ArtworkBleed::NONE,
+        })?;
+        match layout.orientation {
+            ArtworkOrientation::Horizontal => {}
+            ArtworkOrientation::Vertical => return None,
+        }
+        // The artwork column spans everything below the top nav's band (none
+        // when elevated); the strip row and the player bar overlay the list.
+        let nav_band = if crate::theme::is_top_nav() && !elevated {
+            crate::theme::nav_bar_height()
+        } else {
+            0.0
+        };
+        let column_height = (self.window.height - nav_band).max(0.0);
+        let side = horizontal_artwork_side_width(&layout, pane_width, column_height);
+        Some((pane_width - side).max(0.0))
+    }
+
+    /// Dock the top metadata strip row (when shown) above `content` and the
+    /// player bar below it. Normally each spans the content column and
+    /// `content` is padded clear of both. With the bar lowered
+    /// (`lowered_width`), both sit at the slot list's width over the bands
+    /// the view keeps empty for them (`ArtworkBleed`), and `content` runs the
+    /// full height. One shape either way (the strip and the bar keep their
+    /// tree positions, so their slider and marquee state survive a flip, and
+    /// `content` keeps its own).
+    fn dock_chrome<'a>(
+        content: Element<'a, Message>,
+        top_strip: Option<Element<'a, Message>>,
+        player_bar: Element<'a, Message>,
+        lowered_width: Option<f32>,
+    ) -> Element<'a, Message> {
+        use crate::widgets::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR;
+        let (top_pad, bottom_pad) = match lowered_width {
+            Some(_) => (0.0, 0.0),
+            None => (
+                if top_strip.is_some() {
+                    STRIP_HEIGHT_WITH_SEPARATOR
+                } else {
+                    0.0
+                },
+                widgets::player_bar::player_bar_height(),
+            ),
+        };
+        let base = container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: top_pad,
+                bottom: bottom_pad,
+                ..iced::Padding::ZERO
+            });
+        let chrome_width = lowered_width.map_or(Length::Fill, Length::Fixed);
+        let mut chrome_layer = iced::widget::Column::new();
+        if let Some(strip) = top_strip {
+            chrome_layer = chrome_layer.push(container(strip).width(chrome_width));
+        }
+        let chrome_layer = chrome_layer
+            .push(
+                iced::widget::Space::new()
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .push(container(player_bar).width(chrome_width))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        Stack::new().push(base).push(chrome_layer).into()
     }
 
     /// Root view dispatcher.
@@ -594,13 +726,27 @@ impl Nokkvi {
 
     /// Home screen layout (nav bar + content + player bar)
     fn home_view(&self) -> Element<'_, Message> {
-        // Resolve elevation once per frame; the result threads through
-        // `main_content` into each view's `*ViewData.elevated` which
-        // `BaseSlotListLayoutConfig.elevated` then carries into
-        // `horizontal_layout`. Both the elevated and non-elevated top-nav
-        // branches below produce the same `Stack[base, nav_overlay]`
-        // shape — see the branch comment for why.
+        // Resolve elevation and the lowered player bar once per frame; the
+        // result threads through `main_content` into each view's
+        // `*ViewData.bleed`, which `BaseSlotListLayoutConfig.bleed` then
+        // carries into `horizontal_layout`. Both the elevated and
+        // non-elevated top-nav branches below produce the same
+        // `Stack[base, nav_overlay]` shape — see the branch comment for why.
         let elevated_extent = self.elevated_artwork_extent();
+        let lowered_bar_width = self.lowered_player_bar_width(elevated_extent.is_some());
+        // The list's top band: the elevated nav bar, or the strip row docked
+        // over the list beside the lowered artwork (top-nav elevation never
+        // coexists with a strip row).
+        let bleed = ArtworkBleed {
+            top: if elevated_extent.is_some() {
+                Some(crate::theme::nav_bar_height())
+            } else if lowered_bar_width.is_some() && Self::top_strip_row_shown() {
+                Some(crate::widgets::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR)
+            } else {
+                None
+            },
+            bottom: lowered_bar_width,
+        };
 
         // Optional radio metadata mapping
         let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
@@ -640,7 +786,10 @@ impl Nokkvi {
             lyrics_enabled: self.settings.lyrics_enabled,
             bit_perfect_mode: self.settings.bit_perfect,
             visualization_mode: self.settings.visualization_mode,
-            window_width: self.window.width,
+            // The lowered bar lays out against its own width: its modes cull
+            // into the kebab from the window-width layout, and the width gates
+            // (SFX slider, MiniPlayer sections) read the bar's width too.
+            window_width: lowered_bar_width.unwrap_or(self.window.width),
             // MiniPlayer remaps per the width-driven regime: the wide
             // three-section layout passes the mode-cull count through (modes
             // expand + cull individually like the normal bar), while the compact
@@ -648,7 +797,11 @@ impl Nokkvi {
             // uses the raw width-driven layout. `compute_layout` still owns
             // `self.player_bar_layout` — `effective_player_bar_layout` is a
             // render-only override.
-            layout: crate::widgets::player_bar::effective_player_bar_layout(self.player_bar_layout),
+            layout: crate::widgets::player_bar::effective_player_bar_layout(
+                lowered_bar_width.map_or(self.player_bar_layout, |width| {
+                    crate::widgets::player_bar::compute_layout(width, self.player_bar_layout)
+                }),
+            ),
             is_light_mode: crate::theme::is_light_mode(),
             // For radio playback the station name lives on `radio_name` and
             // ICY values fill the title/artist slots — empty when no ICY has
@@ -736,6 +889,9 @@ impl Nokkvi {
         //              are pushed RIGHT of the sidebar to match the flat
         //              redesign mockups)
         //   None mode: [strip?] + content + player_bar  (no sidebar)
+        //   Lowered (any mode): the strip row and player_bar sit over the slot
+        //              list only and the artwork runs between them
+        //              (`dock_chrome`)
 
         // Helper: build the optional top-area metadata strip as a single
         // Element. Returns `None` when the strip is hidden.
@@ -795,6 +951,11 @@ impl Nokkvi {
             );
         }
 
+        // Docked with the top strip row around `main_content` by `dock_chrome`
+        // in every layout.
+        let player_bar =
+            widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar);
+
         let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
             || crate::theme::is_none_nav()
         {
@@ -832,17 +993,12 @@ impl Nokkvi {
                 // right column so the sidebar is the visual leftmost band
                 // across every row of chrome (matches the flat-redesign
                 // side-nav mockups).
-                let mut right_col = iced::widget::Column::new();
-                if let Some(strip_el) = build_top_strip(false) {
-                    right_col = right_col.push(strip_el);
-                }
-                right_col = right_col.push(self.main_content(false));
-                right_col = right_col.push(
-                    widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+                let right_col = Self::dock_chrome(
+                    self.main_content(bleed),
+                    build_top_strip(false),
+                    player_bar,
+                    lowered_bar_width,
                 );
-                // Fill the window height so the player bar sits flush at the
-                // window's bottom edge (no gap below it).
-                let right_col = right_col.height(Length::Fill);
 
                 outer = outer.push(
                     iced::widget::row![
@@ -854,13 +1010,12 @@ impl Nokkvi {
             } else {
                 // None mode: no sidebar — strip (if any), content, player
                 // bar all span the full window width.
-                if let Some(strip_el) = build_top_strip(false) {
-                    outer = outer.push(strip_el);
-                }
-                outer = outer.push(self.main_content(false));
-                outer = outer.push(
-                    widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-                );
+                outer = outer.push(Self::dock_chrome(
+                    self.main_content(bleed),
+                    build_top_strip(false),
+                    player_bar,
+                    lowered_bar_width,
+                ));
             }
 
             // Fill the window height so the player bar sits flush at the bottom.
@@ -884,10 +1039,14 @@ impl Nokkvi {
             // `nav_visual_width` is the horizontal extent the nav-bar
             // occupies — full window width when not elevated, only the
             // slot-list area when elevated (the artwork pane underneath
-            // shows through to the right of the nav).
+            // shows through to the right of the nav). With the player bar
+            // lowered too, the nav matches the bar's width, so the artwork
+            // column's stripe runs the full window height between them.
             let (outer_space_height, nav_visual_width) =
                 if let Some(artwork_extent) = elevated_extent {
-                    (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
+                    let width = lowered_bar_width
+                        .unwrap_or_else(|| (self.content_pane_width() - artwork_extent).max(0.0));
+                    (0.0, width)
                 } else {
                     // Use the live nav-bar height (32 flat / 44 rounded)
                     // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
@@ -897,27 +1056,22 @@ impl Nokkvi {
                     // the bottom of the nav bar.
                     (crate::theme::nav_bar_height(), self.window.width)
                 };
-            let is_elevated = elevated_extent.is_some();
-
-            // `TopBarUnder` mode in top-nav: insert the player-bar-styled
-            // strip between the nav-band Space and `main_content` so it
-            // renders directly beneath the nav row and pushes the main
-            // content down by the strip's height. The nav overlay sits
-            // ABOVE the Space; the strip occupies the next column slot,
-            // so nav → strip → content stacks naturally.
-            let top_under_strip = build_top_strip(true);
-
-            let mut base_col = iced::widget::Column::new().push(
-                iced::widget::Space::new()
-                    .width(Length::Fill)
-                    .height(Length::Fixed(outer_space_height)),
-            );
-            if let Some(strip_el) = top_under_strip {
-                base_col = base_col.push(strip_el);
-            }
-            base_col = base_col.push(self.main_content(is_elevated));
-            base_col = base_col
-                .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
+            // `TopBarUnder` mode in top-nav: `dock_chrome` puts the
+            // player-bar-styled strip directly beneath the nav band, above
+            // `main_content` (over the slot list only when the bar is
+            // lowered, so the artwork starts right under the nav).
+            let base_col = iced::widget::Column::new()
+                .push(
+                    iced::widget::Space::new()
+                        .width(Length::Fill)
+                        .height(Length::Fixed(outer_space_height)),
+                )
+                .push(Self::dock_chrome(
+                    self.main_content(bleed),
+                    build_top_strip(true),
+                    player_bar,
+                    lowered_bar_width,
+                ));
             // Fill the window so `main_content` (Length::Fill) expands and pins
             // the player bar flush to the window's bottom edge (no gap below it).
             let base = base_col.height(Length::Fill);
@@ -1291,6 +1445,7 @@ impl Nokkvi {
                 12.0 // Just a bit of margin from bottom
             };
 
+            let (left_inset, right_inset) = self.toast_insets();
             let toast_bar = container(
                 container(toast_text)
                     .padding([4, 12])
@@ -1310,9 +1465,9 @@ impl Nokkvi {
             .align_y(iced::alignment::Vertical::Bottom)
             .padding(iced::Padding {
                 top: 0.0,
-                right: 0.0,
+                right: right_inset,
                 bottom: bottom_padding,
-                left: self.side_nav_inset(),
+                left: left_inset,
             });
 
             stack = stack.push(toast_bar);
@@ -1571,7 +1726,7 @@ impl Nokkvi {
         &self,
         in_browsing_panel: bool,
         stable_viewport: bool,
-        elevated: bool,
+        bleed: ArtworkBleed,
     ) -> views::AlbumsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Albums);
@@ -1589,7 +1744,7 @@ impl Nokkvi {
             loading: self.library.albums.is_loading(),
             stable_viewport,
             in_browsing_panel,
-            elevated,
+            bleed,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1604,7 +1759,7 @@ impl Nokkvi {
         &self,
         in_browsing_panel: bool,
         stable_viewport: bool,
-        elevated: bool,
+        bleed: ArtworkBleed,
     ) -> views::ArtistsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Artists);
@@ -1624,7 +1779,7 @@ impl Nokkvi {
             loading: self.library.artists.is_loading(),
             stable_viewport,
             in_browsing_panel,
-            elevated,
+            bleed,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1639,7 +1794,7 @@ impl Nokkvi {
         &self,
         in_browsing_panel: bool,
         stable_viewport: bool,
-        elevated: bool,
+        bleed: ArtworkBleed,
     ) -> views::SongsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Songs);
@@ -1657,7 +1812,7 @@ impl Nokkvi {
             loading: self.library.songs.is_loading(),
             stable_viewport,
             in_browsing_panel,
-            elevated,
+            bleed,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1672,7 +1827,7 @@ impl Nokkvi {
         &self,
         in_browsing_panel: bool,
         stable_viewport: bool,
-        elevated: bool,
+        bleed: ArtworkBleed,
     ) -> views::GenresViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Genres);
@@ -1691,7 +1846,7 @@ impl Nokkvi {
             loading: self.library.genres.is_loading(),
             stable_viewport,
             in_browsing_panel,
-            elevated,
+            bleed,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1979,9 +2134,9 @@ impl Nokkvi {
 
     /// Build `QueueViewData` from current app state. Shared by the
     /// browsing-panel split-view branch and the normal single-view branch.
-    /// The pane width comes from [`Self::queue_chrome_inputs`]; `elevated`
+    /// The pane width comes from [`Self::queue_chrome_inputs`]; `bleed`
     /// differs between the two call sites, so it is the parameter.
-    pub(crate) fn build_queue_view_data(&self, elevated: bool) -> views::QueueViewData<'_> {
+    pub(crate) fn build_queue_view_data(&self, bleed: ArtworkBleed) -> views::QueueViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Queue);
         let (sync_menu_open, sync_menu_trigger_bounds) = queue_sync_menu_state(&self.open_menu);
@@ -2013,7 +2168,7 @@ impl Nokkvi {
                 .queue_loading_total()
                 .unwrap_or(self.library.queue_songs.len()),
             stable_viewport: self.settings.stable_viewport,
-            elevated,
+            bleed,
             playlist_context_info: self.active_playlist_info.clone(),
             playlist_context_is_smart: self.active_playlist_is_smart(),
             playlist_custom_cover: self.active_playlist_custom_cover(),
@@ -2184,7 +2339,7 @@ impl Nokkvi {
     }
 
     /// Main content area - dispatches to current view's page
-    fn main_content(&self, elevated: bool) -> Element<'_, Message> {
+    fn main_content(&self, bleed: ArtworkBleed) -> Element<'_, Message> {
         // Borrow the pre-computed large_artwork snapshot (refreshed after each LRU mutation).
         // This avoids re-creating the HashMap on every render frame.
         let large_artwork = &self.artwork.large_artwork.snapshot;
@@ -2303,7 +2458,7 @@ impl Nokkvi {
                     editor.view(editor_data).map(Message::Editor)
                 }
                 _ => {
-                    let queue_view_data = self.build_queue_view_data(false);
+                    let queue_view_data = self.build_queue_view_data(ArtworkBleed::NONE);
                     self.queue_page.view(queue_view_data).map(Message::Queue)
                 }
             };
@@ -2367,19 +2522,20 @@ impl Nokkvi {
                         // Browser pane: stable_viewport hardcoded `true`
                         // (click to highlight, not play); `in_browsing_panel =
                         // true` suppresses the "Center on Playing" header button.
-                        let view_data = self.build_albums_view_data(true, true, false);
+                        let view_data = self.build_albums_view_data(true, true, ArtworkBleed::NONE);
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
                     views::BrowsingView::Songs => {
-                        let view_data = self.build_songs_view_data(true, true, false);
+                        let view_data = self.build_songs_view_data(true, true, ArtworkBleed::NONE);
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
                     views::BrowsingView::Artists => {
-                        let view_data = self.build_artists_view_data(true, true, false);
+                        let view_data =
+                            self.build_artists_view_data(true, true, ArtworkBleed::NONE);
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
                     views::BrowsingView::Genres => {
-                        let view_data = self.build_genres_view_data(true, true, false);
+                        let view_data = self.build_genres_view_data(true, true, ArtworkBleed::NONE);
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
                     views::BrowsingView::Similar => {
@@ -2401,7 +2557,7 @@ impl Nokkvi {
                             modifiers: self.window.keyboard_modifiers,
                             source,
                             loading,
-                            elevated: false,
+                            bleed: ArtworkBleed::NONE,
                             overlay: views::OverlayMenuViewData {
                                 column_dropdown_open,
                                 column_dropdown_trigger_bounds,
@@ -2445,26 +2601,26 @@ impl Nokkvi {
             .into(),
             View::Albums => {
                 let view_data =
-                    self.build_albums_view_data(false, self.settings.stable_viewport, elevated);
+                    self.build_albums_view_data(false, self.settings.stable_viewport, bleed);
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
-                let view_data = self.build_queue_view_data(elevated);
+                let view_data = self.build_queue_view_data(bleed);
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {
                 let view_data =
-                    self.build_artists_view_data(false, self.settings.stable_viewport, elevated);
+                    self.build_artists_view_data(false, self.settings.stable_viewport, bleed);
                 self.artists_page.view(view_data).map(Message::Artists)
             }
             View::Songs => {
                 let view_data =
-                    self.build_songs_view_data(false, self.settings.stable_viewport, elevated);
+                    self.build_songs_view_data(false, self.settings.stable_viewport, bleed);
                 self.songs_page.view(view_data).map(Message::Songs)
             }
             View::Genres => {
                 let view_data =
-                    self.build_genres_view_data(false, self.settings.stable_viewport, elevated);
+                    self.build_genres_view_data(false, self.settings.stable_viewport, bleed);
                 self.genres_page.view(view_data).map(Message::Genres)
             }
             View::Playlists => {
@@ -2486,7 +2642,7 @@ impl Nokkvi {
                     total_playlist_count: self.library.counts.playlists,
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
-                    elevated,
+                    bleed,
                     default_playlist_name: &self.settings.default_playlist_name,
                     session_user_id: &self.session_user_id,
                     smart_available: self.rules_editor.caps_state.smart_available(),
@@ -2519,7 +2675,7 @@ impl Nokkvi {
                         window_height: chrome.pane_height,
                         chrome,
                         modifiers: self.window.keyboard_modifiers,
-                        elevated,
+                        bleed,
                         stable_viewport: self.settings.stable_viewport,
                         harbour_boat: &self.harbour_scene.boat,
                         harbour_sea_bars: &self.harbour_scene.sea_bars,
@@ -2544,7 +2700,7 @@ impl Nokkvi {
                     loading: false, // TODO: add loading state for radio stations
                     total_station_count: self.library.radio_stations.len(),
                     stable_viewport: self.settings.stable_viewport,
-                    elevated,
+                    bleed,
                     modifiers: self.window.keyboard_modifiers,
                     open_menu: self.open_menu.as_ref(),
                     // Prefer the LIBRARY copy of the playing station (fresh

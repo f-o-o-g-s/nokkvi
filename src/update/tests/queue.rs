@@ -1296,33 +1296,38 @@ async fn queue_perf_probe() {
 // build_queue_view_data helper (app_view.rs)
 //
 // The split-pane and single-view branches share one builder; these pin the
-// pane width it derives, the `elevated` parameter, and the non-parametrized
+// pane width it derives, the `bleed` parameter, and the non-parametrized
 // field wiring, so a future field re-order/mis-wire in the single helper is
 // caught.
 // ============================================================================
 
 #[test]
-fn build_queue_view_data_wires_pane_width_and_elevated() {
+fn build_queue_view_data_wires_pane_width_and_bleed() {
+    use crate::widgets::base_slot_list_layout::ArtworkBleed;
     let mut app = test_app();
     app.window.width = 1400.0;
     let full = app.content_pane_width();
 
-    let vd = app.build_queue_view_data(true);
+    let bleed = ArtworkBleed {
+        top: Some(44.0),
+        bottom: Some(640.0),
+    };
+    let vd = app.build_queue_view_data(bleed);
     assert_eq!(vd.window_width, full, "single view renders the full pane");
     assert_eq!(vd.chrome.pane_width, vd.window_width);
-    assert!(vd.elevated);
+    assert_eq!(vd.bleed, bleed);
 
     // Browsing panel open, no editor session: the queue renders in the
     // split view's left pane.
     app.browsing_panel = Some(crate::views::BrowsingPanel::new());
-    let vd2 = app.build_queue_view_data(false);
+    let vd2 = app.build_queue_view_data(ArtworkBleed::NONE);
     assert_eq!(
         vd2.window_width,
         full * crate::app_view::QUEUE_PANE_FRACTION,
         "split view renders the queue pane"
     );
     assert_eq!(vd2.chrome.pane_width, vd2.window_width);
-    assert!(!vd2.elevated);
+    assert_eq!(vd2.bleed, ArtworkBleed::NONE);
 }
 
 #[test]
@@ -1335,7 +1340,7 @@ fn build_queue_view_data_matches_settings_and_counts() {
     app.settings.queue_show_default_playlist = false;
     app.library.start_progressive_queue_load(7);
 
-    let vd = app.build_queue_view_data(false);
+    let vd = app.build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE);
     assert!(
         vd.stable_viewport,
         "stable_viewport must wire from settings.stable_viewport"
@@ -2986,7 +2991,7 @@ fn rendered_slot_count(app: &crate::Nokkvi) -> usize {
 
 fn rendered_slot_config(app: &crate::Nokkvi) -> crate::widgets::slot_list::SlotListConfig {
     use crate::{views::queue::view::queue_effective_chrome, widgets::slot_list::SlotListConfig};
-    let vd = app.build_queue_view_data(false);
+    let vd = app.build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE);
     SlotListConfig::with_dynamic_slots(vd.window_height, queue_effective_chrome(&vd.chrome))
 }
 

@@ -91,15 +91,59 @@ pub(crate) struct BaseSlotListLayoutConfig {
     /// expected, producing a partial slot at the bottom. Horizontal /
     /// Always-mode layouts ignore this field.
     pub slot_list_chrome: f32,
-    /// Whether artwork-elevation is in effect for this frame. Set by
-    /// `home_view` (the only caller that resolves elevation) and threaded
+    /// Where the artwork column runs past the surrounding chrome this frame.
+    /// Set by `home_view` (the only caller that resolves it) and threaded
     /// through every `*ViewData` so each view forwards it into the config it
-    /// builds. `horizontal_layout` reads this to push the slot-list column
-    /// down by `theme::nav_bar_height()` so the overlaid nav bar lands on
-    /// an empty band. Always `false` in side-nav / none-nav layouts and in
-    /// the internal probe configs that `Nokkvi::elevated_artwork_extent`
-    /// uses before elevation is decided.
-    pub elevated: bool,
+    /// builds; `horizontal_layout` is the only reader. `NONE` in split-view
+    /// and in the probe configs `home_view` resolves it from.
+    pub bleed: ArtworkBleed,
+}
+
+/// How far the Horizontal artwork column runs past the chrome around the
+/// view. Each edge's chrome (the top nav bar, the player bar) is then drawn
+/// by `home_view` over the slot-list column only, on a band the column keeps
+/// empty for it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ArtworkBleed {
+    /// `Some(band)`: the artwork column reaches past the chrome above the
+    /// view and the slot-list column starts `band` lower, where `home_view`
+    /// draws that chrome over it — the nav bar under top-nav elevation
+    /// (`theme::nav_bar_height()`), or the metadata strip row beside the
+    /// lowered artwork.
+    pub top: Option<f32>,
+    /// Lowered player bar: `Some(list_width)` pins the slot-list column to
+    /// `list_width` and ends it with a `player_bar_height()` band, while the
+    /// artwork column takes the rest of the row down to the bottom edge.
+    /// `home_view` draws the player bar over that band at the same width.
+    pub bottom: Option<f32>,
+}
+
+impl ArtworkBleed {
+    /// No bleed: the artwork column sits between the chrome like the list.
+    pub(crate) const NONE: Self = Self {
+        top: None,
+        bottom: None,
+    };
+}
+
+/// Width of the Horizontal artwork column — stripe and panel — when the
+/// column is `column_height` tall. Mirrors what `horizontal_layout` renders:
+/// Auto's panel is a `min(w, h)` square beside a 1 px stripe; the Always
+/// modes' panel has a fixed width (their drag handle overlays the column and
+/// adds none).
+pub(crate) fn horizontal_artwork_side_width(
+    layout: &ArtworkLayout,
+    pane_width: f32,
+    column_height: f32,
+) -> f32 {
+    if theme::artwork_column_mode().is_always_horizontal() {
+        HORIZONTAL_ARTWORK_STRIPE + layout.extent
+    } else {
+        HORIZONTAL_ARTWORK_STRIPE
+            + (pane_width - HORIZONTAL_ARTWORK_STRIPE)
+                .min(column_height)
+                .max(0.0)
+    }
 }
 
 /// How the image renders inside the artwork column.
@@ -1102,15 +1146,25 @@ where
     F: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
 {
     let is_always = theme::artwork_column_mode().is_always_horizontal();
+    let lowered_list_width = config.bleed.bottom;
 
     // In Auto mode, pass the artwork through directly so the row sizes
     // itself to the panel's natural square (the panel's responsive
     // returns a Fixed-size square via Length::Shrink). In always modes,
     // wrap with Length::Fixed(extent) so the user-tuned width is
     // authoritative — the panel inside will square or stretch to fit.
-    let artwork_side_inner: Element<'a, Message> = if is_always {
+    //
+    // With the player bar lowered, the slot-list column's width is pinned
+    // instead (it must meet the bar `home_view` draws at that width), so the
+    // panel fills whatever the row leaves, centered on the artwork backdrop
+    // in both modes.
+    let artwork_side_inner: Element<'a, Message> = if is_always || lowered_list_width.is_some() {
         container(artwork)
-            .width(Length::Fixed(layout.extent))
+            .width(if lowered_list_width.is_some() {
+                Length::Fill
+            } else {
+                Length::Fixed(layout.extent)
+            })
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
@@ -1135,41 +1189,36 @@ where
         None
     };
 
+    // The handle takes no width of its own: it lies invisibly over the
+    // column's left edge (the stripe and the panel's first pixels), so the
+    // list meets the stripe directly and only the resize cursor marks the
+    // grab zone. Topmost in the `Stack`, it takes the press before the panel.
     let artwork_side: Element<'a, Message> = if let Some(handle_elem) = handle {
-        row![
-            handle_elem,
-            container(iced::widget::Space::new())
-                .width(Length::Fixed(HORIZONTAL_ARTWORK_STRIPE))
-                .height(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(theme::border().into()),
-                    ..Default::default()
-                }),
-            artwork_side_inner
-        ]
-        .spacing(0)
-        .height(Length::Fill)
-        .into()
+        iced::widget::Stack::new()
+            .push(with_left_stripe(artwork_side_inner))
+            .push(handle_elem)
+            .into()
     } else {
         with_left_stripe(artwork_side_inner)
     };
 
     // In elevated mode the home view stretches main_content up over the
     // top-nav row and overlays the nav-bar back on top of the slot-list
-    // column. Stack a transparent spacer matching the live nav-bar height
-    // above the header so the overlaid nav-bar lands on an unoccupied
-    // band rather than on top of the view header. The artwork column
-    // intentionally has no top padding so it fills the row all the way to
-    // the top of the window.
+    // column (beside the lowered artwork it does the same with the
+    // metadata strip row). Stack a transparent spacer matching that
+    // chrome's height (`bleed.top`) above the header so the overlay lands
+    // on an unoccupied band rather than on top of the view header. The
+    // artwork column intentionally has no top padding so it fills the row
+    // all the way up.
     //
-    // Use `theme::nav_bar_height()` (32 flat / 44 rounded), not the
+    // `home_view` passes `theme::nav_bar_height()` (32 flat / 44 rounded), not the
     // legacy `slot_list::NAV_BAR_HEIGHT` const (pinned at 32) — in
     // rounded mode the live nav is 44 px, so a 32 px spacer lets the
     // overlay eat the view-header pill's 12 px top margin and pushes the
     // pill flush against the bottom of the nav bar. Mirrors the
     // non-elevated fix in `app_view.rs::home_view`.
     //
-    // `config.elevated` is plumbed by `home_view` through each view's
+    // `config.bleed` is plumbed by `home_view` through each view's
     // `*ViewData` — the only frame-level signal authoritative enough to
     // gate this branch. Reading a theme-only predicate would also fire in
     // split-view, where home_view does *not* elevate, leaving the slot
@@ -1180,8 +1229,13 @@ where
     // painting the row's residual right-side allocation with an unintended
     // grey rect when the artwork column sits next to it. A plain `Space`
     // sibling has no draw surface at all, so the band stays transparent.
-    let spacer_height = if config.elevated {
-        crate::theme::nav_bar_height()
+    let spacer_height = config.bleed.top.unwrap_or(0.0);
+    // The lowered player bar's band: the same `Space` treatment at the
+    // bottom, last in the column so the header and list keep their tree
+    // positions when the bar moves. The slot-count chrome still counts
+    // `player_bar_height()`, so the list keeps its rows.
+    let bottom_band_height = if lowered_list_width.is_some() {
+        crate::widgets::player_bar::player_bar_height()
     } else {
         0.0
     };
@@ -1191,8 +1245,11 @@ where
             .height(Length::Fixed(spacer_height)),
         header,
         slot_list_content,
+        iced::widget::Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(bottom_band_height)),
     ]
-    .width(Length::Fill)
+    .width(lowered_list_width.map_or(Length::Fill, Length::Fixed))
     .height(Length::Fill)
     .spacing(0)
     .into();
@@ -1350,7 +1407,7 @@ mod tests {
             // don't care about the slot-list rect — they exercise the
             // artwork-resolution math only.
             slot_list_chrome: 0.0,
-            elevated: false,
+            bleed: ArtworkBleed::NONE,
         }
     }
 

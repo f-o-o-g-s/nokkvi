@@ -1177,7 +1177,7 @@ pub(crate) struct HarbourViewData<'a> {
     /// rendered one. `window_width` / `window_height` above carry its pane size.
     pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub modifiers: iced::keyboard::Modifiers,
-    pub elevated: bool,
+    pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     pub stable_viewport: bool,
     /// The trawling-longship state the centered Trawl row's animated scene
     /// renders from (stepped per frame by `update::boat::step_harbour_scene`).
@@ -1254,7 +1254,7 @@ impl HarbourPage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome,
-            elevated: data.elevated,
+            bleed: data.bleed,
         };
 
         // While the very first shelf load is still in flight (no data yet, no

@@ -82,7 +82,7 @@ fn resync_slot_counts_uses_collapsed_header_under_active_autohide() {
             window_height: h,
             show_artwork_column: true,
             slot_list_chrome: chrome_height_with_header(false),
-            elevated: false,
+            bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
         })
     };
     let sc = |h: f32, collapsed: bool| {
@@ -177,7 +177,10 @@ mod queue_resync_parity {
     /// The slot count the queue renders for the app's current state: the
     /// `with_dynamic_slots` input `QueuePage::view` reads off its view data.
     fn rendered(app: &Nokkvi) -> usize {
-        count(&app.build_queue_view_data(false).chrome)
+        count(
+            &app.build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE)
+                .chrome,
+        )
     }
 
     /// Heights in `heights` where the render's inputs with the term under test
@@ -191,7 +194,11 @@ mod queue_resync_parity {
             .into_iter()
             .filter(|&h| {
                 app.window.height = h as f32;
-                let inputs = app.build_queue_view_data(false).chrome;
+                let inputs = app
+                    .build_queue_view_data(
+                        crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
+                    )
+                    .chrome;
                 let mut without = inputs;
                 without_term(&mut without);
                 count(&without) != count(&inputs)
@@ -237,7 +244,11 @@ mod queue_resync_parity {
         for autohide in [false, true] {
             theme::set_autohide_toolbar(autohide);
             assert_eq!(
-                app.build_queue_view_data(false).chrome.toolbar_collapsed,
+                app.build_queue_view_data(
+                    crate::widgets::base_slot_list_layout::ArtworkBleed::NONE
+                )
+                .chrome
+                .toolbar_collapsed,
                 autohide,
                 "setup invariant: an unfocused auto-hide toolbar is collapsed"
             );
@@ -262,7 +273,9 @@ mod queue_resync_parity {
         with_playlist(&mut app, LONG_COMMENT);
         app.queue_page.playlist_strip_expanded = true;
 
-        let chrome = app.build_queue_view_data(false).chrome;
+        let chrome = app
+            .build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE)
+            .chrome;
         assert!(chrome.toolbar_collapsed, "setup invariant: collapsed");
         assert!(
             !chrome.strip_expanded,
@@ -355,7 +368,7 @@ mod queue_resync_parity {
                 window_height: h as f32,
                 show_artwork_column: true,
                 slot_list_chrome: 0.0,
-                elevated: false,
+                bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
             })
             .map(|layout| layout.orientation)
         };
@@ -388,7 +401,9 @@ mod queue_resync_parity {
             trigger_bounds: iced::Rectangle::default(),
         });
         assert!(
-            !app.build_queue_view_data(false).chrome.toolbar_collapsed,
+            !app.build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE)
+                .chrome
+                .toolbar_collapsed,
             "setup invariant: the open columns menu holds the header expanded"
         );
 

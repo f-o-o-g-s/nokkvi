@@ -8,6 +8,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Beside the artwork column, the player bar now spans only the list.
+- The artwork column beside the list now runs down to the window's bottom edge.
+- With the Metadata Strip on Top Bar or Top Bar Under, the strip now spans only the list beside the artwork column.
+- Toasts now sit over the list instead of across the artwork column.
+- The artwork column's resize handle is now invisible, marked only by the resize cursor at the column's left edge.
+
 ### Fixed
 
 ### Removed

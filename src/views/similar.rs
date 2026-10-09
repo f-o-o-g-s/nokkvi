@@ -55,10 +55,10 @@ pub struct SimilarViewData<'a> {
     pub source: Option<&'a crate::state::SimilarSource>,
     /// Whether an API call is in flight
     pub loading: bool,
-    /// Whether artwork-elevation is in effect for this frame. Forwarded into
-    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
-    /// side-nav / none-nav.
-    pub elevated: bool,
+    /// Where the artwork column runs past the chrome this frame (top-nav
+    /// elevation, the lowered player bar). Forwarded into
+    /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
+    pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,
@@ -360,7 +360,7 @@ impl SimilarPage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome,
-            elevated: data.elevated,
+            bleed: data.bleed,
         };
 
         // Loading state

@@ -1540,7 +1540,7 @@ impl SlotListChrome {
         };
 
         let chrome = self.height();
-        // `elevated` and `slot_list_chrome` don't reach the vertical term
+        // `bleed` and `slot_list_chrome` don't reach the vertical term
         // (`resolve_artwork_layout` reads only the pane size, the show flag, and
         // the theme atomics), so the render's elevation is moot here.
         chrome
@@ -1549,7 +1549,7 @@ impl SlotListChrome {
                 window_height: self.pane_height,
                 show_artwork_column: true,
                 slot_list_chrome: chrome,
-                elevated: false,
+                bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
             })
     }
 

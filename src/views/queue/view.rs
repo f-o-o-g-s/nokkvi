@@ -119,7 +119,7 @@ fn count_cell_width(label: &str) -> f32 {
 /// window — used by the playlist identity's width math.
 /// `resolve_artwork_layout` reads only the window dimensions, the
 /// show-artwork flag, and the display-mode atomics, so `slot_list_chrome` /
-/// `elevated` are irrelevant here and neutral values are fine.
+/// `bleed` are irrelevant here and neutral values are fine.
 fn playlist_strip_artwork_layout(
     window_width: f32,
     window_height: f32,
@@ -130,7 +130,7 @@ fn playlist_strip_artwork_layout(
         window_height,
         show_artwork_column: true,
         slot_list_chrome: 0.0,
-        elevated: false,
+        bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
     })
 }
 
@@ -267,14 +267,14 @@ pub(crate) fn queue_effective_chrome(inputs: &QueueChromeInputs<'_>) -> f32 {
     };
 
     let chrome = queue_chrome_height(inputs);
-    // `elevated` and `slot_list_chrome` don't reach the vertical term (see
+    // `bleed` and `slot_list_chrome` don't reach the vertical term (see
     // `playlist_strip_artwork_layout`), so the render's elevation is moot here.
     let layout = BaseSlotListLayoutConfig {
         window_width: inputs.pane_width,
         window_height: inputs.window_height,
         show_artwork_column: true,
         slot_list_chrome: chrome,
-        elevated: false,
+        bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
     };
     chrome + vertical_artwork_chrome(&layout)
 }
@@ -815,7 +815,7 @@ impl QueuePage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome: chrome_height,
-            elevated: data.elevated,
+            bleed: data.bleed,
         };
 
         // If no songs in filtered results, show appropriate message (like albums view)

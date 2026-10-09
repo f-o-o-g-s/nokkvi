@@ -140,10 +140,10 @@ pub struct QueueViewData<'a> {
     pub milkdrop_favorite: bool,
     pub total_queue_count: usize, // Total count before filtering (for empty state detection)
     pub stable_viewport: bool,
-    /// Whether artwork-elevation is in effect for this frame. Forwarded into
-    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
-    /// side-nav / none-nav.
-    pub elevated: bool,
+    /// Where the artwork column runs past the chrome this frame (top-nav
+    /// elevation, the lowered player bar). Forwarded into
+    /// `BaseSlotListLayoutConfig.bleed`. Always `NONE` in split-view.
+    pub bleed: crate::widgets::base_slot_list_layout::ArtworkBleed,
     /// When a playlist is loaded for playback (editing happens in the
     /// decoupled `PlaylistEditor` view, never in the queue).
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,

@@ -79,7 +79,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 | Search Bar | `search_bar.rs` | Centralized search input with integrated clear |
 | Link Text | `link_text.rs` | Hover-underlined clickable text (tight hitbox, accent on hover) |
 | Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders |
-| Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
+| Artwork Split Handle | `artwork_split_handle.rs` | Artwork-column resize handle. Horizontal: an invisible grab zone stacked over the column's left edge (the resize cursor is its only affordance; `None` interaction off it so the panel's own cursor shows). Vertical: a visible bar between the artwork and the list |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Picker Modal | `picker_modal.rs` | Shared shell of the two root picker modals: `PickerList<T>` (all / search query / filtered / `SlotListView`; `refilter(keep)` keeps the centered entry centered while it still passes, else starts at the top) and `picker_modal(PickerChrome, &list, render_row)` (title bar with optional `after_title` / `before_close` slots + X, search bar, slot list or empty text, modal frame + scaffold, wheel → Up/Down). A new searchable root picker builds on these |
 | Default Playlist Picker | `default_playlist_picker.rs` | Picker-modal entries + row look for choosing the default playlist; state lives on `Nokkvi.default_playlist_picker` |

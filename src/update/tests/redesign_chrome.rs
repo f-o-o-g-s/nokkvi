@@ -365,3 +365,51 @@ fn side_nav_inset_follows_the_drawn_sidebar() {
         "login has no sidebar"
     );
 }
+
+#[test]
+fn toast_insets_follow_the_lowered_player_bar() {
+    // The toast rides just above the player bar. Lowered, the bar spans the
+    // slot list only and the artwork column runs down beside it, so a toast
+    // at the full content width would cross the artwork.
+    use nokkvi_data::types::player_settings::ArtworkColumnMode;
+
+    use crate::theme::{artwork_column_mode, set_artwork_column_mode};
+
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let saved_artwork = artwork_column_mode();
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = crate::View::Queue;
+    app.window.width = 1600.0;
+    app.window.height = 700.0;
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+
+    for layout in [NavLayout::Side, NavLayout::Top, NavLayout::None] {
+        set_nav_layout(layout);
+        let bar = app
+            .lowered_player_bar_width(app.elevated_artwork_extent().is_some())
+            .expect("setup invariant: the queue's artwork column lowers the bar");
+        let (left, right) = app.toast_insets();
+        assert!(
+            (left - app.side_nav_inset()).abs() < f32::EPSILON,
+            "{layout:?}: the toast starts clear of the sidebar",
+        );
+        assert!(
+            (app.window.width - left - right - bar).abs() < 0.5,
+            "{layout:?}: the toast must span the lowered bar ({bar}), got {left}..{right}",
+        );
+    }
+
+    // No artwork column: the bar spans the content column, and so does the toast.
+    set_nav_layout(NavLayout::Side);
+    set_artwork_column_mode(ArtworkColumnMode::Never);
+    assert!(app.toast_insets().1.abs() < f32::EPSILON);
+
+    // Theater Mode draws its own full-width bar.
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+    app.theater.active = true;
+    assert!(app.toast_insets().1.abs() < f32::EPSILON);
+
+    set_artwork_column_mode(saved_artwork);
+}

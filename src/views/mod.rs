@@ -749,7 +749,7 @@ pub struct OverlayMenuViewData<'a> {
 // Why there is no `ViewportLayoutViewData` sub-struct.
 //
 // The slot-list `*ViewData` structs also share a viewport/layout scalar group
-// (`window_width`, `window_height`, `scale_factor`, `modifiers`, `elevated`,
+// (`window_width`, `window_height`, `scale_factor`, `modifiers`, `bleed`,
 // plus `stable_viewport` on most). A 2026-06 audit follow-up considered folding
 // these into a sub-struct mirroring `OverlayMenuViewData`; it is intentionally
 // left inlined because it does not earn its keep:

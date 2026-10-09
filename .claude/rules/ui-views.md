@@ -119,6 +119,10 @@ The per-frame tick (`update/frame.rs`) is the SINGLE publisher of the column cen
 
 **The wheel** is the one event the viewport captures, and only over a non-empty plain sheet with a non-zero converted delta; it publishes a LINE delta (`QueueMessage::LyricsWheel`) that returns from `handle_queue`'s pointer-motion fast-path block. Everything else stays event-transparent — see widgets.md.
 
+## Artwork Bleed (Lowered Player Bar)
+
+When the current view renders its artwork column beside the list (Horizontal; never in split-view or Theater Mode), `home_view` lowers the player bar: `Nokkvi::lowered_player_bar_width` resolves the list's width from the same config the view builds (`horizontal_artwork_side_width` mirrors the render), and `dock_chrome` stacks the top Metadata Strip row and the player bar over `main_content` at that width, so the artwork runs the full height beside them. The view leaves room through `ArtworkBleed` (`*ViewData.bleed` → `BaseSlotListLayoutConfig.bleed`): `top` is the band the list keeps empty for chrome drawn over it (the elevated nav bar, or the strip row beside the lowered artwork), `bottom` pins the list column's width and ends it with a `player_bar_height()` band. The slot-count chrome still counts the bar, so the list keeps its rows. `dock_chrome` has one widget-tree shape lowered or not, so the bar's slider and marquee state survive a flip. The lowered bar lays out against its own width (mode culling, width gates), and `toast_insets` ends toasts where it ends. Probe configs and split-view pass `ArtworkBleed::NONE`.
+
 ## Theater Mode
 
 A now-playing layout (`update/theater.rs`, state `src/state/theater.rs`, `Message::Theater(TheaterMessage)`): the window shows only the playing subject's panel (cover, over-cover visualizer, lyrics) and the player bar slides in over it. Transient: never persisted, never entered on Login.

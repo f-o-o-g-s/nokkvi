@@ -33,9 +33,10 @@ use iced::{
     mouse,
 };
 
-/// Default visual thickness of the drag affordance (px). Applies to the
-/// handle's *constrained* axis: width for [`Axis::Horizontal`], height for
-/// [`Axis::Vertical`].
+/// Thickness of the drag affordance (px) on the handle's *constrained* axis.
+/// [`Axis::Horizontal`]: the width of an invisible grab zone laid over the
+/// artwork column's left edge. [`Axis::Vertical`]: the height of a visible bar
+/// between the artwork and the slot list.
 pub(crate) const HANDLE_THICKNESS: f32 = 6.0;
 
 /// Drag orientation — which side of the artwork the handle sits on and which
@@ -284,9 +285,13 @@ where
         let bounds = layout.bounds();
         let hovered = cursor.position_over(bounds).is_some();
 
+        // `None` (not `Idle`) off the handle: the horizontal handle is a
+        // `Stack` layer over the artwork panel, and a `Stack` reports its
+        // topmost non-`None` layer, so `Idle` would mask the panel's own
+        // cursor (the Theater corner button's pointer).
         match (state, hovered) {
             (HandleState::Dragging { .. }, _) | (_, true) => self.axis.cursor_icon(),
-            _ => mouse::Interaction::Idle,
+            _ => mouse::Interaction::None,
         }
     }
 
@@ -300,6 +305,12 @@ where
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
+        // The horizontal handle is invisible: it overlays the artwork
+        // column's left edge, and the resize cursor is its only affordance.
+        if self.axis == Axis::Horizontal {
+            return;
+        }
+
         let state = tree.state.downcast_ref::<HandleState>();
         let bounds = layout.bounds();
 

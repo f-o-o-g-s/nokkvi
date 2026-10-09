@@ -135,7 +135,7 @@ impl ArtistsPage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome,
-            elevated: data.elevated,
+            bleed: data.bleed,
         };
 
         // If loading, show header with loading message

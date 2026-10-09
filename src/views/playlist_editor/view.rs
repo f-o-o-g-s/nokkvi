@@ -89,7 +89,7 @@ pub(crate) fn editor_effective_chrome(
         window_height,
         show_artwork_column: true,
         slot_list_chrome: chrome,
-        elevated: false,
+        bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
     };
     chrome + vertical_artwork_chrome(&layout)
 }
@@ -130,7 +130,7 @@ impl PlaylistEditorState {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome: chrome_height,
-            elevated: false,
+            bleed: crate::widgets::base_slot_list_layout::ArtworkBleed::NONE,
         };
 
         // Empty state: keep the same root widget type as the populated path
