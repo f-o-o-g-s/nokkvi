@@ -1836,8 +1836,6 @@ impl Nokkvi {
             // The detail block renders only under the revealed toolbar.
             strip_expanded: self.queue_page.playlist_strip_expanded && !toolbar_collapsed,
             select_visible: self.queue_page.column_visibility.select,
-            index_visible: self.queue_page.column_visibility.index,
-            thumbnail_visible: self.queue_page.column_visibility.thumbnail,
         }
     }
 

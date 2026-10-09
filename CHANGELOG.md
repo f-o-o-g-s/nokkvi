@@ -13,17 +13,17 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - The queue's "Playing From" playlist now sits inside the toolbar instead of on its own bar above it.
-- The "Playing From" playlist's cover now sits centered above the queue rows' artwork.
+- The "Playing From" cover now sits at the queue list's left edge.
 - The "Playing From" cover is now a small collage: 16 pixels in the slim toolbar strip, 32 in the full toolbar.
-- With thumbnails shown, the "Playing From" playlist name now starts in line with the song titles below it.
 - The "Playing From" playlist's save and edit buttons are now regular toolbar buttons.
+- The "Playing From" playlist's save and edit buttons now sit right after its name.
 - The "Playing From" playlist name no longer jumps sideways when the cover finishes loading.
 - Scope now shows the Tunnel by default.
 - Scope's Echo now defaults to off.
 - Scope's Fill setting has no effect while the Tunnel is on.
 - With the toolbar hidden, the slim strip now shows the playing playlist's cover and name beside the sort label and song count.
 - The "Playing from playlist" label now appears as the cover's tooltip.
-- A smart playlist's sparkles mark now follows its name in the toolbar.
+- A smart playlist's sparkles mark now follows its name in the full toolbar.
 - The "Playing From" playlist's details now open after a brief hover on its cover or name.
 - The "Playing From" playlist's details now open only while the toolbar is revealed.
 - In narrow windows, the "Playing From" name shrinks first, then the toolbar's song count hides, then only the cover remains.

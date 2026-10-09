@@ -38,161 +38,72 @@ enum QueueSyncAction {
 const PLAYLIST_COVER_AT_REST: f32 = 16.0;
 /// Edge of the cover in the revealed 50 px toolbar: the search field's height.
 const PLAYLIST_COVER_REVEALED: f32 = 32.0;
-/// Width of the playlist name column. A fixed width keeps the sort dropdown at
-/// one x for every playlist; a narrow pane shrinks it (see [`identity_fit`]).
-const PLAYLIST_NAME_W: f32 = 200.0;
-/// Narrowest the name column gets beside the revealed count cell; below it the
-/// count cell goes.
+/// Gap between the cover and the name in the Count strip.
+const PLAYLIST_NAME_GAP_AT_REST: f32 = 8.0;
+/// Gap between the cover and the name in the revealed toolbar.
+const PLAYLIST_NAME_GAP_REVEALED: f32 = 10.0;
+/// Widest the playlist name gets before it ellipsizes; a shorter name hugs
+/// its text.
+const PLAYLIST_NAME_MAX_W: f32 = 240.0;
+/// Narrowest the name gets beside the revealed count cell; below it the count
+/// cell goes.
 const PLAYLIST_NAME_MIN_W: f32 = 120.0;
-/// Narrowest the name column gets at all; below it the revealed toolbar shows
-/// the cover alone, with the name in its tooltip.
+/// Narrowest the name gets at all; below it the identity shows the cover
+/// alone, with the name in its tooltip.
 const PLAYLIST_NAME_FLOOR_W: f32 = 96.0;
 /// Width the revealed toolbar keeps for the search field when fitting the name.
 const PLAYLIST_SEARCH_MIN_W: f32 = 180.0;
-/// Right padding of the identity cell: the toolbar's cell padding.
-const PLAYLIST_IDENTITY_PAD_R: f32 = 14.0;
+/// Side padding of the identity cell: the toolbar's cell padding.
+const PLAYLIST_IDENTITY_PAD: f32 = 14.0;
 /// Width of the smart-playlist mark and its gap after the name.
-const PLAYLIST_SMART_MARK_W: f32 = 16.0;
+const PLAYLIST_SMART_MARK_W: f32 = 18.0;
 /// Right padding of the hover detail block.
 const PLAYLIST_STRIP_PAD_X: f32 = 16.0;
+/// Top padding of the hover detail block, below its hairline. Shared by its
+/// render and its height in [`playlist_strip_detail`].
+const PLAYLIST_STRIP_DETAIL_TOP_PAD: f32 = 10.0;
 /// Bottom padding of the hover-expanded detail block. Shared by its render and
 /// its height in [`playlist_strip_detail`].
 const PLAYLIST_STRIP_DETAIL_BOTTOM_PAD: f32 = 12.0;
 
-/// Where the merged toolbar's cover and name sit so they line up with the
-/// queue rows below: the cover centered over the rows' thumbnail column, the
-/// name over their titles. See [`playlist_strip_geometry`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PlaylistStripGeometry {
-    /// Left edge of the rows' thumbnail column.
-    art_x: f32,
-    /// Width of the column the cover centers in: the rows' art, or the
-    /// revealed cover's edge when the rows show no thumbnails.
-    art_w: f32,
-    /// Left edge of the name column: where the rows' titles start. The detail
-    /// block is indented to it too.
-    name_x: f32,
-}
-
-impl PlaylistStripGeometry {
-    /// The cover's edge in the toolbar: its size for the state, no wider than
-    /// the column it centers in.
-    fn cover_size(&self, toolbar_collapsed: bool) -> f32 {
-        let size = if toolbar_collapsed {
-            PLAYLIST_COVER_AT_REST
-        } else {
-            PLAYLIST_COVER_REVEALED
-        };
-        size.min(self.art_w)
-    }
-
-    /// Left edge of a `size` cover centered in the thumbnail column, floored
-    /// to a whole pixel so the image stays sharp.
-    fn cover_x(&self, size: f32) -> f32 {
-        self.art_x + ((self.art_w - size) / 2.0).floor()
-    }
-}
-
-/// Line the identity up with the queue rows, which lay out as
-/// `[select?] pad [index?] [thumbnail?] [title …]` (`song_list_pane`).
-///
-/// The row size comes from the chrome with the detail block closed even while
-/// it is open: opening it shrinks the rows, and following them would move the
-/// cover and the name every time it opens. Reading the closed chrome also
-/// keeps this out of a loop, since the open chrome's height depends on the
-/// detail indent computed here.
-fn playlist_strip_geometry(inputs: &QueueChromeInputs<'_>) -> PlaylistStripGeometry {
-    use crate::{
-        views::song_list_pane::SONG_ROW_COLUMN_SPACING,
-        widgets::slot_list::{
-            SLOT_LIST_INDEX_WIDTH, SLOT_LIST_SELECT_WIDTH, SLOT_LIST_SLOT_PADDING, SlotListConfig,
-            SlotListRowMetrics,
-        },
-    };
-
-    let closed = QueueChromeInputs {
-        strip_expanded: false,
-        ..*inputs
-    };
-    let row_height =
-        SlotListConfig::with_dynamic_slots(inputs.window_height, queue_effective_chrome(&closed))
-            .row_height();
-    let row_art = SlotListRowMetrics::from_row(row_height, 1.0).artwork_size;
-
-    let mut art_x = SLOT_LIST_SLOT_PADDING;
-    if inputs.select_visible {
-        art_x += SLOT_LIST_SELECT_WIDTH;
-    }
-    if inputs.index_visible {
-        art_x += SLOT_LIST_INDEX_WIDTH + SONG_ROW_COLUMN_SPACING;
-    }
-    // With the thumbnail column hidden the titles start where the art would,
-    // so the name clears the revealed cover instead, in both states, so it
-    // holds still on reveal.
-    let art_w = if inputs.thumbnail_visible {
-        row_art
-    } else {
-        PLAYLIST_COVER_REVEALED
-    };
-    PlaylistStripGeometry {
-        art_x,
-        art_w,
-        name_x: art_x + art_w + SONG_ROW_COLUMN_SPACING,
-    }
-}
+/// Left edge of the identity's cover: the queue rows' own left padding,
+/// so the cover lines up with the row thumbnails' left edge.
+const PLAYLIST_COVER_INSET: f32 = crate::widgets::slot_list::SLOT_LIST_SLOT_PADDING;
+/// Indent of the identity's detail block: where the revealed name starts.
+const PLAYLIST_DETAIL_INDENT: f32 =
+    PLAYLIST_COVER_INSET + PLAYLIST_COVER_REVEALED + PLAYLIST_NAME_GAP_REVEALED;
 
 /// How the playlist identity fits the revealed toolbar.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct IdentityFit {
-    /// The name column's width; `None` shows the cover alone.
+    /// The name's widest allowance; `None` shows the cover alone.
     name_w: Option<f32>,
     /// Whether the revealed toolbar keeps its count cell.
     show_count: bool,
 }
 
-/// Fit the identity into a revealed toolbar `band` px wide while keeping
-/// [`PLAYLIST_SEARCH_MIN_W`] for the search field: the name column shrinks
-/// first, then the count cell goes, then the name. `toolbar_cells` and
-/// `action_cells` count the 44 px icon cells (each with its divider) beside
-/// the sort dropdown and after the count; `count_w` is the count cell's width.
-fn identity_fit(
-    band: f32,
-    name_x: f32,
-    toolbar_cells: usize,
-    action_cells: usize,
-    count_w: f32,
-) -> IdentityFit {
-    use crate::widgets::view_header::{ICON_CELL_WIDTH, SORT_CELL_MIN_WIDTH};
-    let cells = (toolbar_cells + action_cells) as f32 * (ICON_CELL_WIDTH + 1.0);
-    let room = band
-        - (name_x + PLAYLIST_IDENTITY_PAD_R + 1.0)
-        - (SORT_CELL_MIN_WIDTH + 1.0)
-        - cells
-        - PLAYLIST_SEARCH_MIN_W;
+/// The name's widest allowance in `room` px, capped at
+/// [`PLAYLIST_NAME_MAX_W`]; `None` below [`PLAYLIST_NAME_FLOOR_W`].
+fn name_allowance(room: f32) -> Option<f32> {
+    (room >= PLAYLIST_NAME_FLOOR_W).then(|| room.min(PLAYLIST_NAME_MAX_W))
+}
+
+/// Fit the identity's name into `room` px of the revealed toolbar (what
+/// its controls and [`PLAYLIST_SEARCH_MIN_W`] of search leave), beside a count
+/// cell `count_w` wide: the name shrinks first, then the count cell goes, then
+/// the name.
+fn identity_fit(room: f32, count_w: f32) -> IdentityFit {
     if room - count_w >= PLAYLIST_NAME_MIN_W {
         IdentityFit {
-            name_w: Some((room - count_w).min(PLAYLIST_NAME_W)),
+            name_w: Some((room - count_w).min(PLAYLIST_NAME_MAX_W)),
             show_count: true,
-        }
-    } else if room >= PLAYLIST_NAME_FLOOR_W {
-        IdentityFit {
-            name_w: Some(room.min(PLAYLIST_NAME_W)),
-            show_count: false,
         }
     } else {
         IdentityFit {
-            name_w: None,
+            name_w: name_allowance(room),
             show_count: false,
         }
     }
-}
-
-/// The name column's width in the Count strip beside `strip_w` of the strip's
-/// own cells and action hints, capped at [`PLAYLIST_NAME_W`]; `None` shows the
-/// cover alone.
-fn rest_name_w(band: f32, name_x: f32, strip_w: f32) -> Option<f32> {
-    let room = band - (name_x + PLAYLIST_IDENTITY_PAD_R + 1.0) - strip_w;
-    (room >= PLAYLIST_NAME_FLOOR_W).then(|| room.min(PLAYLIST_NAME_W))
 }
 
 /// Width of the revealed toolbar's count cell showing `label`: the 12 px
@@ -254,7 +165,7 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     const CHAR_W: f32 = 7.3;
     const META_ROW_H: f32 = 20.0;
     const ROW_GAP: f32 = 8.0;
-    const BOTTOM_PAD: f32 = PLAYLIST_STRIP_DETAIL_BOTTOM_PAD;
+    const PADS: f32 = PLAYLIST_STRIP_DETAIL_TOP_PAD + PLAYLIST_STRIP_DETAIL_BOTTOM_PAD;
     const MAX_LINES: f32 = 5.0;
     // No description (empty or whitespace-only): collapse the phantom comment
     // line + its 8px gap so the meta row rides up flush under the identity row.
@@ -263,7 +174,7 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     // Only the emptiness *decision* is trimmed; a real comment still renders
     // verbatim below.
     if comment.trim().is_empty() {
-        return (String::new(), META_ROW_H + BOTTOM_PAD);
+        return (String::new(), META_ROW_H + PADS);
     }
     let cols = (content_width / CHAR_W).floor().max(1.0);
     let char_count = comment.chars().count();
@@ -277,15 +188,15 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
         let truncated: String = comment.chars().take(keep).collect();
         (format!("{}…", truncated.trim_end()), MAX_LINES)
     };
-    (display, lines * LINE_H + ROW_GAP + META_ROW_H + BOTTOM_PAD)
+    (display, lines * LINE_H + ROW_GAP + META_ROW_H + PADS)
 }
 
-/// Width the expanded strip's comment wraps within: the band width minus the
-/// detail block's indent (the name column) and right padding. Shared by the
+/// Width the detail block's comment wraps within: the band minus the block's
+/// indent (where the revealed name starts) and right padding. Shared by the
 /// detail block's render and its height in [`queue_chrome_height`].
 fn playlist_strip_comment_width(inputs: &QueueChromeInputs<'_>) -> f32 {
     (playlist_strip_band_width(inputs.pane_width, inputs.window_height)
-        - playlist_strip_geometry(inputs).name_x
+        - PLAYLIST_DETAIL_INDENT
         - PLAYLIST_STRIP_PAD_X)
         .max(120.0)
 }
@@ -313,12 +224,6 @@ pub struct QueueChromeInputs<'a> {
     pub strip_expanded: bool,
     /// Whether the multi-select column's select-all bar is showing.
     pub select_visible: bool,
-    /// Whether the rows show their index column. With `select_visible` and
-    /// `thumbnail_visible`, places the identity's cover and name over the
-    /// rows' art and titles ([`playlist_strip_geometry`]).
-    pub index_visible: bool,
-    /// Whether the rows show their thumbnail column.
-    pub thumbnail_visible: bool,
 }
 
 /// Total slot-list chrome for the queue view, before the vertical artwork:
@@ -575,17 +480,16 @@ impl QueuePage {
                 use iced::widget::svg;
 
                 use crate::widgets::view_header::{
-                    HeaderAction, HeaderIdentity, ICON_CELL_WIDTH, count_label, count_strip_width,
+                    HeaderAction, HeaderIdentity, ICON_CELL_WIDTH, SORT_CELL_MIN_WIDTH,
+                    count_label, count_strip_width,
                 };
 
                 let accent = crate::theme::accent();
                 let collapsed = data.chrome.toolbar_collapsed;
                 let smart = data.playlist_context_is_smart;
-                let geometry = playlist_strip_geometry(&data.chrome);
-
                 // Smart playlists derive their tracks from rules, so saving the
-                // queue over one is meaningless; their name carries the smart
-                // mark instead of a save action.
+                // queue over one is meaningless; the revealed name carries the
+                // smart mark instead of a save action.
                 let mut actions = Vec::with_capacity(2);
                 if !smart {
                     actions.push(HeaderAction {
@@ -600,36 +504,46 @@ impl QueuePage {
                     on_press: QueueMessage::EditPlaylist,
                 });
 
-                // The Count strip always has room for the whole name column; the
-                // revealed toolbar fits it beside its controls.
+                // Fit the name beside everything else in the bar; every cell
+                // width here includes its 1 px divider.
+                let (cover_size, name_gap) = if collapsed {
+                    (PLAYLIST_COVER_AT_REST, PLAYLIST_NAME_GAP_AT_REST)
+                } else {
+                    (PLAYLIST_COVER_REVEALED, PLAYLIST_NAME_GAP_REVEALED)
+                };
+                let smart_mark = smart && !collapsed;
+                let smart_w = if smart_mark {
+                    PLAYLIST_SMART_MARK_W
+                } else {
+                    0.0
+                };
+                // The identity cell around its name: the cover side, the far
+                // side's padding, and the cell's divider.
+                let cell_chrome = PLAYLIST_COVER_INSET
+                    + cover_size
+                    + name_gap
+                    + smart_w
+                    + PLAYLIST_IDENTITY_PAD
+                    + 1.0;
                 let band = playlist_strip_band_width(data.chrome.pane_width, data.window_height);
                 let fit = if collapsed {
-                    // The Count strip keeps its count; the name fits beside the
-                    // strip's own cells and the action hints.
+                    // The Count strip keeps its count; the name takes what the
+                    // strip's own cells leave.
                     IdentityFit {
-                        name_w: rest_name_w(
-                            band,
-                            geometry.name_x,
-                            count_strip_width(&header_config)
-                                + actions.len() as f32 * (ICON_CELL_WIDTH + 1.0),
+                        name_w: name_allowance(
+                            band - cell_chrome - count_strip_width(&header_config),
                         ),
                         show_count: true,
                     }
                 } else {
-                    identity_fit(
-                        band,
-                        geometry.name_x,
-                        header_cells,
-                        actions.len(),
-                        count_cell_width(&count_label(
-                            data.queue_songs.len(),
-                            data.total_queue_count,
-                            "songs",
-                        )),
-                    )
+                    let count =
+                        count_label(data.queue_songs.len(), data.total_queue_count, "songs");
+                    let controls = (SORT_CELL_MIN_WIDTH + 1.0)
+                        + (header_cells + actions.len()) as f32 * (ICON_CELL_WIDTH + 1.0)
+                        + PLAYLIST_SEARCH_MIN_W;
+                    identity_fit(band - cell_chrome - controls, count_cell_width(&count))
                 };
 
-                // Cover, centered over the rows' art (see `playlist_strip_geometry`).
                 // The playlist's uploaded cover wins, as on every other playlist
                 // surface. Otherwise a 2×2 quad of the queue's first distinct album
                 // covers — it reads as "a playlist", not "the song playing now" —
@@ -637,8 +551,6 @@ impl QueuePage {
                 // blank square (as a row shows before its art arrives) until any of
                 // them is cached, so the name never shifts when the art lands.
                 use crate::widgets::base_slot_list_layout::quad_artwork_grid;
-                let cover_size = geometry.cover_size(collapsed);
-                let cover_x = geometry.cover_x(cover_size);
                 let cover_edge = Length::Fixed(cover_size);
                 let single = |handle: &iced::widget::image::Handle| -> Element<'a, QueueMessage> {
                     iced::widget::image(handle.clone())
@@ -682,18 +594,25 @@ impl QueuePage {
                 .gap(4)
                 .style(crate::theme::container_tooltip);
 
-                let mut identity_row = Row::new()
-                    .align_y(Alignment::Center)
-                    .push(Space::new().width(Length::Fixed(cover_x)))
-                    .push(cover);
+                let mut identity_row = Row::new().align_y(Alignment::Center).push(cover);
                 if let Some(name_w) = fit.name_w {
+                    // At rest the name sits on the Count strip's line; revealed,
+                    // it matches the sort control's size and weight.
+                    let (size, color) = if collapsed {
+                        (11.0, crate::theme::fg1())
+                    } else {
+                        (12.0, crate::theme::fg0())
+                    };
                     let name = iced::widget::text(ctx.name.clone())
                         .font(crate::theme::weighted_ui_font(iced::font::Weight::Medium))
-                        .size(12)
-                        .color(crate::theme::fg0())
+                        .size(size)
+                        .color(color)
                         .wrapping(iced::widget::text::Wrapping::None)
                         .ellipsis(iced::widget::text::Ellipsis::End);
-                    let name: Element<'a, QueueMessage> = if smart {
+                    identity_row = identity_row
+                        .push(Space::new().width(Length::Fixed(name_gap)))
+                        .push(container(name).max_width(name_w));
+                    if smart_mark {
                         // The Playlists view's smart mark, kept quiet so the
                         // playing row stays the list's only accent.
                         let mark = iced::widget::tooltip(
@@ -708,29 +627,18 @@ impl QueuePage {
                         )
                         .gap(4)
                         .style(crate::theme::container_tooltip);
-                        row![
-                            container(name).max_width(name_w - PLAYLIST_SMART_MARK_W),
-                            mark
-                        ]
-                        .spacing(4)
-                        .align_y(Alignment::Center)
-                        .into()
-                    } else {
-                        name.into()
-                    };
-                    identity_row = identity_row
-                        .push(
-                            Space::new()
-                                .width(Length::Fixed(geometry.name_x - cover_x - cover_size)),
-                        )
-                        .push(container(name).width(Length::Fixed(name_w)).clip(true));
+                        identity_row = identity_row
+                            .push(Space::new().width(Length::Fixed(PLAYLIST_SMART_MARK_W - 12.0)))
+                            .push(mark);
+                    }
                 }
                 // Hovering the identity (not the controls beside it) opens the
                 // detail block after a dwell; see `PlaylistStripHoverSettled`.
-                let leading = mouse_area(
+                let cell = mouse_area(
                     container(identity_row)
                         .padding(iced::Padding {
-                            right: PLAYLIST_IDENTITY_PAD_R,
+                            left: PLAYLIST_COVER_INSET,
+                            right: PLAYLIST_IDENTITY_PAD,
                             ..iced::Padding::ZERO
                         })
                         .height(Length::Fill)
@@ -844,19 +752,19 @@ impl QueuePage {
                             column![comment_text, meta_row].spacing(8).into()
                         };
 
+                    // Under the toolbar across the band, indented to where the
+                    // revealed name starts. It keeps itself open while the
+                    // cursor moves between it and the identity.
                     let detail = container(detail_body)
                         .width(Length::Fill)
                         .height(Length::Fixed(playlist_detail_h))
                         .padding(iced::Padding {
-                            top: 0.0,
+                            top: PLAYLIST_STRIP_DETAIL_TOP_PAD,
                             right: PLAYLIST_STRIP_PAD_X,
                             bottom: PLAYLIST_STRIP_DETAIL_BOTTOM_PAD,
-                            left: geometry.name_x,
+                            left: PLAYLIST_DETAIL_INDENT,
                         })
                         .clip(true);
-
-                    // The block keeps itself open while the cursor moves down into
-                    // it from the identity.
                     Some(
                         mouse_area(detail)
                             .on_enter(QueueMessage::PlaylistStripHoverEnter(
@@ -872,7 +780,7 @@ impl QueuePage {
                 };
 
                 Some(HeaderIdentity {
-                    leading: leading.into(),
+                    cell: cell.into(),
                     actions,
                     hide_count: !fit.show_count,
                     below,
@@ -1266,10 +1174,9 @@ impl QueuePage {
 #[cfg(test)]
 mod tests {
     use super::{
-        IdentityFit, PLAYLIST_COVER_REVEALED, PLAYLIST_IDENTITY_PAD_R, PLAYLIST_NAME_FLOOR_W,
-        PLAYLIST_NAME_MIN_W, PLAYLIST_NAME_W, QueueChromeInputs, cover_shows_now_playing,
-        identity_fit, playlist_strip_band_width, playlist_strip_detail, playlist_strip_geometry,
-        rest_name_w,
+        IdentityFit, PLAYLIST_NAME_FLOOR_W, PLAYLIST_NAME_MAX_W, PLAYLIST_NAME_MIN_W,
+        cover_shows_now_playing, identity_fit, name_allowance, playlist_strip_band_width,
+        playlist_strip_detail,
     };
 
     #[test]
@@ -1330,7 +1237,7 @@ mod tests {
         assert!(!cover_shows_now_playing(false, false, false, None, false));
     }
 
-    /// The band-width and identity-geometry tests mutate the artwork-column-mode
+    /// The band-width test mutates the artwork-column-mode
     /// atomics that `resolve_artwork_layout` reads. Take the crate-wide theme
     /// lock so they serialize against every other atomic-mutating test family.
     fn with_auto_artwork_mode() -> parking_lot::MutexGuard<'static, ()> {
@@ -1343,13 +1250,13 @@ mod tests {
         guard
     }
 
-    // 1 line: 1*16 + 8 (gap) + 20 (meta) + 12 (bottom) = 56.
-    const ONE_LINE_H: f32 = 56.0;
-    // 5 lines (MAX_LINES): 5*16 + 8 + 20 + 12 = 120.
-    const MAX_LINES_H: f32 = 120.0;
+    // 1 line: 10 (top) + 1*16 + 8 (gap) + 20 (meta) + 12 (bottom) = 66.
+    const ONE_LINE_H: f32 = 66.0;
+    // 5 lines (MAX_LINES): 10 + 5*16 + 8 + 20 + 12 = 130.
+    const MAX_LINES_H: f32 = 130.0;
     // No description: the phantom comment line + its 8px gap collapse away, so
-    // the block is just the meta row + bottom pad = 20 + 12 = 32.
-    const META_ONLY_H: f32 = 32.0;
+    // the block is just the pads + the meta row = 10 + 20 + 12 = 42.
+    const META_ONLY_H: f32 = 42.0;
 
     #[test]
     fn short_comment_renders_verbatim_at_one_line() {
@@ -1435,145 +1342,30 @@ mod tests {
         );
     }
 
-    /// A playing playlist with a long comment, the toolbar revealed, every
-    /// leading row column off but the thumbnail (the default queue layout).
-    fn identity_inputs(window_height: f32) -> QueueChromeInputs<'static> {
-        QueueChromeInputs {
-            pane_width: 1400.0,
-            window_height,
-            toolbar_collapsed: false,
-            playlist_comment: Some(
-                "A long description that wraps onto several lines of the detail block. ",
-            ),
-            strip_expanded: false,
-            select_visible: false,
-            index_visible: false,
-            thumbnail_visible: true,
-        }
-    }
-
-    /// The rows' art size for these inputs with the detail block closed, as
-    /// the slot list renders it.
-    fn row_art(inputs: &QueueChromeInputs<'_>) -> f32 {
-        use crate::widgets::slot_list::{SlotListConfig, SlotListRowMetrics};
-        let closed = QueueChromeInputs {
-            strip_expanded: false,
-            ..*inputs
-        };
-        let row_height = SlotListConfig::with_dynamic_slots(
-            inputs.window_height,
-            super::queue_effective_chrome(&closed),
-        )
-        .row_height();
-        SlotListRowMetrics::from_row(row_height, 1.0).artwork_size
-    }
-
-    #[test]
-    fn identity_cover_centers_over_the_row_art_and_name_over_the_titles() {
-        let _g = with_auto_artwork_mode();
-        for height in (500..=1600).step_by(37) {
-            for collapsed in [false, true] {
-                let inputs = QueueChromeInputs {
-                    toolbar_collapsed: collapsed,
-                    ..identity_inputs(height as f32)
-                };
-                let g = playlist_strip_geometry(&inputs);
-                let art = row_art(&inputs);
-                // Row: 8 px padding, then the art, a 6 px gap, then the title.
-                assert!((g.art_x - 8.0).abs() < 1e-3, "art column at 8, got {g:?}");
-                assert!(
-                    (g.name_x - (8.0 + art + 6.0)).abs() < 1e-3,
-                    "name over the titles at height {height}, art {art}, got {g:?}"
-                );
-                let size = g.cover_size(collapsed);
-                let x = g.cover_x(size);
-                assert_eq!(x, x.floor(), "the cover sits on a whole pixel");
-                let centre_offset = (x + size / 2.0) - (8.0 + art / 2.0);
-                assert!(
-                    (-1.0..=0.0).contains(&centre_offset),
-                    "cover centered over the art at height {height}, got {centre_offset}"
-                );
-                assert!(size <= art + 1e-3, "the cover fits the art column");
-            }
-        }
-    }
-
-    #[test]
-    fn identity_geometry_follows_the_leading_row_columns() {
-        let _g = with_auto_artwork_mode();
-        let base = playlist_strip_geometry(&identity_inputs(900.0));
-
-        // The checkbox column (40 px) sits outside the row padding, the index
-        // column (60 px + a 6 px gap) inside it, both ahead of the art.
-        let with_columns = playlist_strip_geometry(&QueueChromeInputs {
-            select_visible: true,
-            index_visible: true,
-            ..identity_inputs(900.0)
-        });
-        assert!((with_columns.art_x - (base.art_x + 40.0 + 66.0)).abs() < 1e-3);
-
-        // No thumbnails: the titles start where the art would, so the name
-        // clears the revealed cover, and holds still on reveal.
-        for collapsed in [false, true] {
-            let no_thumbs = playlist_strip_geometry(&QueueChromeInputs {
-                thumbnail_visible: false,
-                toolbar_collapsed: collapsed,
-                ..identity_inputs(900.0)
-            });
-            assert!(
-                (no_thumbs.name_x - (no_thumbs.art_x + PLAYLIST_COVER_REVEALED + 6.0)).abs() < 1e-3,
-                "got {no_thumbs:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn identity_geometry_holds_still_while_the_detail_block_is_open() {
-        // Opening the detail block shrinks the rows; the identity must not
-        // chase them, or the cover and name jump whenever the block opens.
-        let _g = with_auto_artwork_mode();
-        for height in (500..=1600).step_by(37) {
-            let closed = identity_inputs(height as f32);
-            let open = QueueChromeInputs {
-                strip_expanded: true,
-                ..closed
-            };
-            assert_eq!(
-                playlist_strip_geometry(&closed),
-                playlist_strip_geometry(&open),
-                "geometry moved on hover at height {height}"
-            );
-        }
-    }
-
     #[test]
     fn identity_fit_shrinks_the_name_then_drops_the_count_then_the_name() {
-        // 6 toolbar cells, save + edit, a 94 px count, the name at x 67.
-        let fit = |band: f32| identity_fit(band, 67.0, 6, 2, 94.0);
-        let fixed = (67.0 + PLAYLIST_IDENTITY_PAD_R + 1.0) + 131.0 + 8.0 * 45.0 + 180.0;
+        // A 94 px count cell beside the room the controls leave for the name.
+        let fit = |room: f32| identity_fit(room, 94.0);
 
-        // Wide: the full name column beside the count.
+        // Wide: the name's full allowance beside the count.
         assert_eq!(
-            fit(1443.0),
+            fit(1000.0),
             IdentityFit {
-                name_w: Some(PLAYLIST_NAME_W),
+                name_w: Some(PLAYLIST_NAME_MAX_W),
                 show_count: true
             }
         );
-        // The name column gives way first.
-        let squeezed = fit(fixed + 94.0 + 150.0);
+        // The name gives way first.
+        let squeezed = fit(94.0 + 150.0);
         assert_eq!(squeezed.name_w, Some(150.0));
         assert!(squeezed.show_count);
         // Then the count cell, which hands its width back to the name.
-        let no_count = fit(fixed + 94.0 + PLAYLIST_NAME_MIN_W - 1.0);
+        let no_count = fit(94.0 + PLAYLIST_NAME_MIN_W - 1.0);
         assert!(!no_count.show_count);
-        assert_eq!(
-            no_count.name_w,
-            Some((94.0 + PLAYLIST_NAME_MIN_W - 1.0).min(PLAYLIST_NAME_W))
-        );
+        assert_eq!(no_count.name_w, Some(94.0 + PLAYLIST_NAME_MIN_W - 1.0));
         // Then the name: the cover alone.
         assert_eq!(
-            fit(fixed + PLAYLIST_NAME_FLOOR_W - 1.0),
+            fit(PLAYLIST_NAME_FLOOR_W - 1.0),
             IdentityFit {
                 name_w: None,
                 show_count: false
@@ -1582,14 +1374,13 @@ mod tests {
     }
 
     #[test]
-    fn rest_name_fits_beside_the_count_strip_or_leaves_the_cover_alone() {
-        // The name at x 67, 400 px of strip cells and action hints.
-        let fixed = 67.0 + PLAYLIST_IDENTITY_PAD_R + 1.0 + 400.0;
-        assert_eq!(rest_name_w(1443.0, 67.0, 400.0), Some(PLAYLIST_NAME_W));
-        assert_eq!(rest_name_w(fixed + 150.0, 67.0, 400.0), Some(150.0));
+    fn name_allowance_caps_and_floors() {
+        assert_eq!(name_allowance(1000.0), Some(PLAYLIST_NAME_MAX_W));
+        assert_eq!(name_allowance(150.0), Some(150.0));
         assert_eq!(
-            rest_name_w(fixed + PLAYLIST_NAME_FLOOR_W - 1.0, 67.0, 400.0),
-            None
+            name_allowance(PLAYLIST_NAME_FLOOR_W),
+            Some(PLAYLIST_NAME_FLOOR_W)
         );
+        assert_eq!(name_allowance(PLAYLIST_NAME_FLOOR_W - 1.0), None);
     }
 }

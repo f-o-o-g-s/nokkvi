@@ -153,9 +153,8 @@ pub(crate) const ICON_CELL_WIDTH: f32 = 44.0;
 /// `.nk-ctrl-sort { min-width: 130px }`.
 pub(crate) const SORT_CELL_MIN_WIDTH: f32 = 130.0;
 
-/// One action cell at the end of a merged [`HeaderIdentity`] toolbar: a
-/// [`header_icon_cell`] while the toolbar is revealed, and a dim hint at the
-/// same x in the Count strip.
+/// One action of a merged [`HeaderIdentity`]: a [`header_icon_cell`] beside
+/// the identity while the toolbar is revealed. The Count strip leaves it out.
 pub(crate) struct HeaderAction<Message> {
     pub icon: &'static str,
     pub tooltip: &'static str,
@@ -164,14 +163,15 @@ pub(crate) struct HeaderAction<Message> {
 
 /// An identity merged into the toolbar: the Queue's "Playing From" playlist.
 ///
-/// `leading` (cover + name, built by the caller for the current collapse
-/// state) is the first cell of both the Count strip and the revealed
-/// toolbar, at the same widget-tree path in each, so its hover `mouse_area`
-/// keeps its state across the reveal. `actions` follow the count; `below`
-/// (the hover detail block) renders under the revealed toolbar. The Hairline
-/// and Hidden appearances keep their own minimal look and show no identity.
+/// `cell` (cover + name, built by the caller for the current collapse state)
+/// leads both the Count strip and the revealed toolbar, divided from the sort
+/// control, at the same widget-tree path in each so its hover `mouse_area`
+/// keeps its state across the reveal. `actions` follow it in the revealed
+/// toolbar only; `below` (the hover detail block) renders under that toolbar.
+/// The Hairline and Hidden appearances keep their own minimal look and show
+/// no identity.
 pub(crate) struct HeaderIdentity<'a, Message> {
-    pub leading: Element<'a, Message>,
+    pub cell: Element<'a, Message>,
     pub actions: Vec<HeaderAction<Message>>,
     /// Drop the revealed toolbar's count cell to make room (narrow pane);
     /// the Count strip keeps its count.
@@ -298,15 +298,16 @@ pub(crate) fn view_header_with_identity<
                 let mut strip_row = iced::widget::Row::new()
                     .align_y(Alignment::Center)
                     .height(Length::Fill);
-                // A merged identity leads the strip, divided like the revealed
-                // toolbar's first cell.
-                let actions = match identity {
-                    Some(identity) => {
-                        strip_row = strip_row.push(wrap_header_cell(identity.leading, true));
-                        identity.actions
-                    }
-                    None => Vec::new(),
-                };
+                // A merged identity leads the strip in the same slot shape as in
+                // the revealed toolbar (a row led by the divided cell), so its
+                // hover `mouse_area` keeps its state across the reveal.
+                if let Some(identity) = identity {
+                    strip_row = strip_row.push(
+                        iced::widget::Row::new()
+                            .height(Length::Fill)
+                            .push(wrap_header_cell(identity.cell, true)),
+                    );
+                }
                 strip_row = strip_row
                     .push(strip_text(label))
                     .push(
@@ -317,20 +318,6 @@ pub(crate) fn view_header_with_identity<
                     )
                     .push(iced::widget::Space::new().width(Length::Fill))
                     .push(strip_text(count));
-                // The identity's actions as dim hints, each centered where the
-                // revealed toolbar draws its cell (a 1 px divider + an icon
-                // cell), so the real button lands under the hint on reveal.
-                for action in &actions {
-                    strip_row = strip_row
-                        .push(iced::widget::Space::new().width(Length::Fixed(1.0)))
-                        .push(
-                            container(hint_icon(action.icon))
-                                .width(Length::Fixed(ICON_CELL_WIDTH))
-                                .height(Length::Fill)
-                                .align_x(Alignment::Center)
-                                .align_y(Alignment::Center),
-                        );
-                }
                 let strip = container(strip_row)
                     .width(Length::Fill)
                     .height(Length::Fixed(COUNT_STRIP_HEIGHT))
@@ -571,29 +558,31 @@ pub(crate) fn view_header_with_identity<
     // borders touch to form the sided-divider rhythm.
     let mut header_row = row![].align_y(Alignment::Center).spacing(0.0);
 
-    let (leading, actions, hide_count, below) = match identity {
-        Some(identity) => (
-            Some(identity.leading),
-            identity.actions,
-            identity.hide_count,
-            identity.below,
-        ),
-        None => (None, Vec::new(), false, None),
+    let (lead_slot, hide_count, below): (Element<'a, Message>, _, _) = match identity {
+        // A merged identity leads the bar with its actions right after it,
+        // all in one slot, so the search input's child index (and its
+        // `text_input` state) holds when a playlist starts or stops.
+        Some(identity) => {
+            let mut slot = iced::widget::Row::new()
+                .height(Length::Fill)
+                .push(wrap_header_cell(identity.cell, true));
+            for action in identity.actions {
+                slot = slot.push(wrap_header_cell(
+                    header_icon_cell(action.icon, action.tooltip, action.on_press),
+                    true,
+                ));
+            }
+            (slot.into(), identity.hide_count, identity.below)
+        }
+        None => (iced::widget::Space::new().into(), false, None),
     };
-    // The identity's slot is always present (an empty `Space` without one),
-    // so the search input keeps its child index, and its `text_input` state,
-    // when a playlist starts or stops.
-    let leading_slot: Element<'a, Message> = match leading {
-        Some(leading) => wrap_header_cell(leading, true),
-        None => iced::widget::Space::new().into(),
-    };
-    header_row = header_row.push(leading_slot);
+    header_row = header_row.push(lead_slot);
     header_row = header_row.push(view_selector_cell);
     for cell in button_cells {
         header_row = header_row.push(wrap_header_cell(cell, true));
     }
     if let Some(search_element) = search_field {
-        header_row = header_row.push(wrap_header_cell(search_element, true));
+        header_row = header_row.push(wrap_header_cell(search_element, !hide_count));
     } else {
         // No search bar — push a flex spacer so the count cell still ends
         // up flush-right. The spacer is wrapped to provide the divider
@@ -603,20 +592,12 @@ pub(crate) fn view_header_with_identity<
                 .width(Length::Fill)
                 .height(Length::Fixed(HEADER_HEIGHT))
                 .into(),
-            true,
+            !hide_count,
         ));
     }
-    // Count cell is the row terminator (no trailing divider) unless an
-    // identity's action cells follow it.
+    // Count cell is the row terminator — no trailing divider after it.
     if !hide_count {
-        header_row = header_row.push(wrap_header_cell(count_cell, !actions.is_empty()));
-    }
-    let last_action = actions.len().saturating_sub(1);
-    for (i, action) in actions.into_iter().enumerate() {
-        header_row = header_row.push(wrap_header_cell(
-            header_icon_cell(action.icon, action.tooltip, action.on_press),
-            i < last_action,
-        ));
+        header_row = header_row.push(wrap_header_cell(count_cell, false));
     }
     // The identity's detail block sits under the toolbar on its surface,
     // split from it by a hairline.
