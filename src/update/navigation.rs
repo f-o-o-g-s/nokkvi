@@ -208,6 +208,8 @@ impl Nokkvi {
         for common in self.all_slot_list_commons_mut() {
             common.reset_reveal_locks();
         }
+        // The queue toolbar's playlist identity holds a hover of its own.
+        self.queue_page.collapse_playlist_strip();
     }
 
     /// Clear any in-progress within-list reorder drag on both the queue and the

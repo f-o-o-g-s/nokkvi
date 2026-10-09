@@ -226,7 +226,7 @@ impl Nokkvi {
         self.active_playlist_info = None;
         // Drop any stale strip expansion so it never carries into the next
         // playlist (or shows over an empty context).
-        self.queue_page.playlist_strip_expanded = false;
+        self.queue_page.collapse_playlist_strip();
         // The strip quad identity belongs to the context — drop it with the
         // context so the next playlist's `handle_queue_loaded` re-freezes it
         // from its own queue head.

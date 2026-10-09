@@ -147,11 +147,37 @@ pub(crate) const COUNT_STRIP_HEIGHT: f32 = 24.0;
 /// `.nk-ctrl-btn { width: 44px }` from the design CSS — narrower than
 /// `ICON_BUTTON_SIZE` (40 px) gets, because the divider hairlines on
 /// either side of the cell already separate it from its neighbors.
-const ICON_CELL_WIDTH: f32 = 44.0;
+pub(crate) const ICON_CELL_WIDTH: f32 = 44.0;
 
 /// Min-width of the sort-dropdown cell. Matches
 /// `.nk-ctrl-sort { min-width: 130px }`.
-const SORT_CELL_MIN_WIDTH: f32 = 130.0;
+pub(crate) const SORT_CELL_MIN_WIDTH: f32 = 130.0;
+
+/// One action cell at the end of a merged [`HeaderIdentity`] toolbar: a
+/// [`header_icon_cell`] while the toolbar is revealed, and a dim hint at the
+/// same x in the Count strip.
+pub(crate) struct HeaderAction<Message> {
+    pub icon: &'static str,
+    pub tooltip: &'static str,
+    pub on_press: Message,
+}
+
+/// An identity merged into the toolbar: the Queue's "Playing From" playlist.
+///
+/// `leading` (cover + name, built by the caller for the current collapse
+/// state) is the first cell of both the Count strip and the revealed
+/// toolbar, at the same widget-tree path in each, so its hover `mouse_area`
+/// keeps its state across the reveal. `actions` follow the count; `below`
+/// (the hover detail block) renders under the revealed toolbar. The Hairline
+/// and Hidden appearances keep their own minimal look and show no identity.
+pub(crate) struct HeaderIdentity<'a, Message> {
+    pub leading: Element<'a, Message>,
+    pub actions: Vec<HeaderAction<Message>>,
+    /// Drop the revealed toolbar's count cell to make room (narrow pane);
+    /// the Count strip keeps its count.
+    pub hide_count: bool,
+    pub below: Option<Element<'a, Message>>,
+}
 
 /// ViewHeader component - horizontal bar with view selector, sort, search, and count
 /// Generic over sort mode V to support different view enums (Albums, Queue, etc.)
@@ -162,6 +188,19 @@ pub(crate) fn view_header<
 >(
     config: ViewHeaderConfig<'a, V, Message>,
 ) -> Element<'a, Message> {
+    view_header_with_identity(config, None)
+}
+
+/// [`view_header`] with an optional [`HeaderIdentity`] merged into the bar.
+pub(crate) fn view_header_with_identity<
+    'a,
+    Message: 'a + Clone,
+    V: 'a + std::fmt::Display + Clone + PartialEq,
+>(
+    config: ViewHeaderConfig<'a, V, Message>,
+    identity: Option<HeaderIdentity<'a, Message>>,
+) -> Element<'a, Message> {
+    let count_strip = CountStripParts::new(&config);
     let ViewHeaderConfig {
         current_view,
         view_options,
@@ -181,7 +220,7 @@ pub(crate) fn view_header<
         on_hover_exit,
         on_dropdown_open,
         on_dropdown_close,
-        total_duration_secs,
+        total_duration_secs: _,
         sort_placeholder,
     } = config;
 
@@ -239,70 +278,59 @@ pub(crate) fn view_header<
             // Count strip: a slim read-only strip echoing the current sort +
             // direction (left) and the item count (right).
             CollapsedAppearance::CountStrip => {
-                let arrow = if sort_ascending { "↑" } else { "↓" };
-                // When the view supplies an unsorted placeholder (queue with no
-                // applied sort), echo it plainly — no mode, no direction arrow.
-                let label = match sort_placeholder {
-                    Some(ph) => ph.to_string(),
-                    None => format!("{current_view} {arrow}"),
+                let CountStripParts {
+                    label,
+                    hints,
+                    count,
+                } = count_strip;
+                let strip_text = |s: String| {
+                    container(
+                        text(s)
+                            .size(11.0)
+                            .font(theme::ui_font())
+                            .color(theme::fg2())
+                            .wrapping(iced::widget::text::Wrapping::None),
+                    )
+                    .padding([0, 14])
+                    .align_y(Alignment::Center)
+                    .height(Length::Fill)
                 };
-                let count = count_label(filtered_count, total_count, item_type);
-                // Append a total-duration stat ("12 songs · 47m") when the view
-                // supplies one (song / album / playlist lists).
-                let count = match total_duration_secs {
-                    Some(secs) if secs > 0 => format!("{count} · {}", format_total_duration(secs)),
-                    _ => count,
-                };
-                // Dimmed, non-interactive icon hints echoing the toolbar's
-                // controls — search + the view's action buttons — in the same
-                // left-to-right order. The sort is already shown as the `↓`
-                // text and the columns cog is an opaque `Trailing` element, so
-                // both are omitted. Hovering the strip reveals the real,
-                // interactive toolbar; these are purely a "controls live here"
-                // affordance.
-                let mut hint_icons: Vec<Element<'a, Message>> = Vec::new();
-                for btn in &buttons {
-                    let path = match btn {
-                        HeaderButton::Refresh(_) => Some("assets/icons/refresh-cw.svg"),
-                        HeaderButton::CenterOnPlaying(_) => Some("assets/icons/locate.svg"),
-                        HeaderButton::Add(_, _) => Some("assets/icons/plus.svg"),
-                        HeaderButton::Trawl(_) => Some("assets/icons/anchor.svg"),
-                        HeaderButton::SortToggle(_) | HeaderButton::Trailing(_) => None,
-                    };
-                    if let Some(p) = path {
-                        hint_icons.push(hint_icon(p));
+                let mut strip_row = iced::widget::Row::new()
+                    .align_y(Alignment::Center)
+                    .height(Length::Fill);
+                // A merged identity leads the strip, divided like the revealed
+                // toolbar's first cell.
+                let actions = match identity {
+                    Some(identity) => {
+                        strip_row = strip_row.push(wrap_header_cell(identity.leading, true));
+                        identity.actions
                     }
-                }
-                if show_search {
-                    hint_icons.push(hint_icon("assets/icons/search.svg"));
-                }
-                let strip_row = row![
-                    container(
-                        text(label)
-                            .size(11.0)
-                            .font(theme::ui_font())
-                            .color(theme::fg2())
+                    None => Vec::new(),
+                };
+                strip_row = strip_row
+                    .push(strip_text(label))
+                    .push(
+                        row(hints.into_iter().map(hint_icon))
+                            .spacing(HINT_SPACING)
+                            .align_y(Alignment::Center)
+                            .height(Length::Fill),
                     )
-                    .padding([0, 14])
-                    .align_y(Alignment::Center)
-                    .height(Length::Fill),
-                    row(hint_icons)
-                        .spacing(7.0)
-                        .align_y(Alignment::Center)
-                        .height(Length::Fill),
-                    iced::widget::Space::new().width(Length::Fill),
-                    container(
-                        text(count)
-                            .size(11.0)
-                            .font(theme::ui_font())
-                            .color(theme::fg2())
-                    )
-                    .padding([0, 14])
-                    .align_y(Alignment::Center)
-                    .height(Length::Fill),
-                ]
-                .align_y(Alignment::Center)
-                .height(Length::Fill);
+                    .push(iced::widget::Space::new().width(Length::Fill))
+                    .push(strip_text(count));
+                // The identity's actions as dim hints, each centered where the
+                // revealed toolbar draws its cell (a 1 px divider + an icon
+                // cell), so the real button lands under the hint on reveal.
+                for action in &actions {
+                    strip_row = strip_row
+                        .push(iced::widget::Space::new().width(Length::Fixed(1.0)))
+                        .push(
+                            container(hint_icon(action.icon))
+                                .width(Length::Fixed(ICON_CELL_WIDTH))
+                                .height(Length::Fill)
+                                .align_x(Alignment::Center)
+                                .align_y(Alignment::Center),
+                        );
+                }
                 let strip = container(strip_row)
                     .width(Length::Fill)
                     .height(Length::Fixed(COUNT_STRIP_HEIGHT))
@@ -543,6 +571,23 @@ pub(crate) fn view_header<
     // borders touch to form the sided-divider rhythm.
     let mut header_row = row![].align_y(Alignment::Center).spacing(0.0);
 
+    let (leading, actions, hide_count, below) = match identity {
+        Some(identity) => (
+            Some(identity.leading),
+            identity.actions,
+            identity.hide_count,
+            identity.below,
+        ),
+        None => (None, Vec::new(), false, None),
+    };
+    // The identity's slot is always present (an empty `Space` without one),
+    // so the search input keeps its child index, and its `text_input` state,
+    // when a playlist starts or stops.
+    let leading_slot: Element<'a, Message> = match leading {
+        Some(leading) => wrap_header_cell(leading, true),
+        None => iced::widget::Space::new().into(),
+    };
+    header_row = header_row.push(leading_slot);
     header_row = header_row.push(view_selector_cell);
     for cell in button_cells {
         header_row = header_row.push(wrap_header_cell(cell, true));
@@ -561,8 +606,37 @@ pub(crate) fn view_header<
             true,
         ));
     }
-    // Count cell is the row terminator — no trailing divider after it.
-    header_row = header_row.push(wrap_header_cell(count_cell, false));
+    // Count cell is the row terminator (no trailing divider) unless an
+    // identity's action cells follow it.
+    if !hide_count {
+        header_row = header_row.push(wrap_header_cell(count_cell, !actions.is_empty()));
+    }
+    let last_action = actions.len().saturating_sub(1);
+    for (i, action) in actions.into_iter().enumerate() {
+        header_row = header_row.push(wrap_header_cell(
+            header_icon_cell(action.icon, action.tooltip, action.on_press),
+            i < last_action,
+        ));
+    }
+    // The identity's detail block sits under the toolbar on its surface,
+    // split from it by a hairline.
+    let below = below.map(|detail| {
+        iced::widget::column![
+            container(iced::widget::Space::new())
+                .width(Length::Fill)
+                .height(Length::Fixed(HEADER_BOTTOM_SEPARATOR))
+                .style(|_| container::Style {
+                    background: Some(theme::border().into()),
+                    ..Default::default()
+                }),
+            container(detail)
+                .width(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(theme::bg0_hard().into()),
+                    ..Default::default()
+                }),
+        ]
+    });
 
     // A bg0_hard() strip plus a 1 px theme::border() sibling separator
     // below it. Using a sibling line instead of the container's `border`
@@ -580,6 +654,9 @@ pub(crate) fn view_header<
             background: Some(theme::bg0_hard().into()),
             ..Default::default()
         }),
+    ]
+    .push(below)
+    .push(
         container(iced::widget::Space::new())
             .width(Length::Fill)
             .height(Length::Fixed(1.0))
@@ -587,7 +664,7 @@ pub(crate) fn view_header<
                 background: Some(theme::border().into()),
                 ..Default::default()
             }),
-    ]
+    )
     .into();
 
     // When auto-hide is active (hover callbacks supplied), wrap the revealed
@@ -595,6 +672,81 @@ pub(crate) fn view_header<
     // focus / an active query keep it revealed via `toolbar_revealed()`, so
     // the toolbar won't vanish mid-type even if the cursor wanders off.
     maybe_hover_wrap(full, on_hover_enter, on_hover_exit)
+}
+
+/// Edge of a Count strip control hint.
+const HINT_ICON_SIZE: f32 = 13.0;
+/// Gap between Count strip control hints.
+const HINT_SPACING: f32 = 7.0;
+/// Advance of the Count strip's 11 px text (`ui_font()` is monospace).
+const STRIP_CHAR_W: f32 = 6.7;
+
+/// Width the Count strip's own cells take for `config`: the sort label, the
+/// control hints and the count, each text cell with its 14 px side padding.
+/// A merged identity's name column fits beside them.
+pub(crate) fn count_strip_width<V: std::fmt::Display, Message>(
+    config: &ViewHeaderConfig<'_, V, Message>,
+) -> f32 {
+    let parts = CountStripParts::new(config);
+    let text_w = |s: &str| s.chars().count() as f32 * STRIP_CHAR_W + 28.0;
+    let hints = parts.hints.len() as f32;
+    let hints_w = (hints * HINT_ICON_SIZE + (hints - 1.0) * HINT_SPACING).max(0.0);
+    text_w(&parts.label) + hints_w + text_w(&parts.count)
+}
+
+/// The Count strip's text and hints, read from the config before
+/// [`view_header_with_identity`] destructures it.
+struct CountStripParts {
+    /// The sort mode and direction, or the view's unsorted placeholder.
+    label: String,
+    /// Icon paths of the dimmed control hints.
+    hints: Vec<&'static str>,
+    /// The item count, with the total duration when the view supplies one.
+    count: String,
+}
+
+impl CountStripParts {
+    fn new<V: std::fmt::Display, Message>(config: &ViewHeaderConfig<'_, V, Message>) -> Self {
+        let arrow = if config.sort_ascending { "↑" } else { "↓" };
+        // When the view supplies an unsorted placeholder (queue with no
+        // applied sort), echo it plainly — no mode, no direction arrow.
+        let label = match config.sort_placeholder {
+            Some(ph) => ph.to_string(),
+            None => format!("{} {arrow}", config.current_view),
+        };
+        let count = count_label(config.filtered_count, config.total_count, config.item_type);
+        // Append a total-duration stat ("12 songs · 47m") when the view
+        // supplies one (song / album / playlist lists).
+        let count = match config.total_duration_secs {
+            Some(secs) if secs > 0 => format!("{count} · {}", format_total_duration(secs)),
+            _ => count,
+        };
+        // Dimmed, non-interactive icon hints echoing the toolbar's controls —
+        // search + the view's action buttons — in the same left-to-right
+        // order. The sort is already shown as the `↓` text and the columns cog
+        // is an opaque `Trailing` element, so both are omitted. Hovering the
+        // strip reveals the real, interactive toolbar; these are purely a
+        // "controls live here" affordance.
+        let mut hints: Vec<&'static str> = config
+            .buttons
+            .iter()
+            .filter_map(|btn| match btn {
+                HeaderButton::Refresh(_) => Some("assets/icons/refresh-cw.svg"),
+                HeaderButton::CenterOnPlaying(_) => Some("assets/icons/locate.svg"),
+                HeaderButton::Add(_, _) => Some("assets/icons/plus.svg"),
+                HeaderButton::Trawl(_) => Some("assets/icons/anchor.svg"),
+                HeaderButton::SortToggle(_) | HeaderButton::Trailing(_) => None,
+            })
+            .collect();
+        if config.show_search {
+            hints.push("assets/icons/search.svg");
+        }
+        Self {
+            label,
+            hints,
+            count,
+        }
+    }
 }
 
 /// Wrap `el` in a hover-reporting `mouse_area` when both reveal callbacks are
@@ -628,7 +780,7 @@ fn collapsed_separator<'a, Message: 'a>() -> Element<'a, Message> {
 /// Item-count label shared by the full header and the CountStrip collapsed
 /// appearance: `"{filtered} of {total} {item_type}"` while a search narrows
 /// the list, plain `"{total} {item_type}"` otherwise.
-fn count_label(filtered: usize, total: usize, item_type: &str) -> String {
+pub(crate) fn count_label(filtered: usize, total: usize, item_type: &str) -> String {
     if filtered > 0 && filtered < total {
         format!("{filtered} of {total} {item_type}")
     } else {
@@ -656,8 +808,8 @@ fn format_total_duration(secs: u64) -> String {
 /// the slim strip; tinted `fg4()` so it reads as an affordance, not a button.
 fn hint_icon<'a, Message: 'a>(path: &str) -> Element<'a, Message> {
     crate::embedded_svg::svg_widget(path)
-        .width(Length::Fixed(13.0))
-        .height(Length::Fixed(13.0))
+        .width(Length::Fixed(HINT_ICON_SIZE))
+        .height(Length::Fixed(HINT_ICON_SIZE))
         .style(|_theme, _status| iced::widget::svg::Style {
             color: Some(theme::fg4()),
         })

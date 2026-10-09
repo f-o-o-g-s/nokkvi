@@ -160,7 +160,7 @@ mod queue_resync_parity {
         theme::set_autohide_toolbar(false);
     }
 
-    fn with_banner(app: &mut Nokkvi, comment: &str) {
+    fn with_playlist(app: &mut Nokkvi, comment: &str) {
         app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
             "pl-1".into(),
             "Mix".into(),
@@ -225,31 +225,60 @@ mod queue_resync_parity {
         (400..=2000).step_by(7)
     }
 
-    /// A: the "Playing From" banner (56 px) and its 1 px separator.
+    /// A: a playing playlist's identity rides inside the toolbar, revealed or
+    /// collapsed to the Count strip, so it adds no chrome of its own.
     #[test]
-    fn resync_counts_the_playing_from_banner() {
+    fn playing_playlist_identity_adds_no_queue_chrome() {
         let _g = lock_and_reset();
         let mut app = test_app();
         app.window.width = 1400.0;
-        with_banner(&mut app, "");
+        with_playlist(&mut app, "");
 
-        let differs = term_matters(&mut app, sweep(), |i| i.playlist_comment = None);
+        for autohide in [false, true] {
+            theme::set_autohide_toolbar(autohide);
+            assert_eq!(
+                app.build_queue_view_data(false).chrome.toolbar_collapsed,
+                autohide,
+                "setup invariant: an unfocused auto-hide toolbar is collapsed"
+            );
+            let differs = term_matters(&mut app, sweep(), |i| i.playlist_comment = None);
+            assert!(
+                differs.is_empty(),
+                "autohide {autohide}: the identity changed the count at heights {differs:?}"
+            );
+            assert_parity(&mut app, sweep());
+        }
+        reset_atomics();
+    }
+
+    /// The detail block renders only under the revealed toolbar, so a
+    /// collapsed toolbar budgets no block even while the identity is hovered.
+    #[test]
+    fn collapsed_toolbar_budgets_no_detail_block() {
+        let _g = lock_and_reset();
+        theme::set_autohide_toolbar(true);
+        let mut app = test_app();
+        app.window.width = 1400.0;
+        with_playlist(&mut app, LONG_COMMENT);
+        app.queue_page.playlist_strip_expanded = true;
+
+        let chrome = app.build_queue_view_data(false).chrome;
+        assert!(chrome.toolbar_collapsed, "setup invariant: collapsed");
         assert!(
-            !differs.is_empty(),
-            "setup invariant: the banner must change the count at some height"
+            !chrome.strip_expanded,
+            "no detail block under a collapsed toolbar"
         );
         assert_parity(&mut app, sweep());
         reset_atomics();
     }
 
-    /// B: the banner's hover-expanded detail block, sized to a multi-line
-    /// comment.
+    /// B: the identity's hover detail block, sized to a multi-line comment.
     #[test]
-    fn resync_counts_the_hover_expanded_banner_detail() {
+    fn resync_counts_the_identity_detail_block() {
         let _g = lock_and_reset();
         let mut app = test_app();
         app.window.width = 1400.0;
-        with_banner(&mut app, LONG_COMMENT);
+        with_playlist(&mut app, LONG_COMMENT);
         app.queue_page.playlist_strip_expanded = true;
 
         let differs = term_matters(&mut app, sweep(), |i| i.strip_expanded = false);
@@ -261,7 +290,7 @@ mod queue_resync_parity {
         reset_atomics();
     }
 
-    /// C: the multi-select column's select-all bar, no banner.
+    /// C: the multi-select column's select-all bar, no playlist playing.
     #[test]
     fn resync_counts_the_select_all_bar() {
         let _g = lock_and_reset();
@@ -278,13 +307,13 @@ mod queue_resync_parity {
         reset_atomics();
     }
 
-    /// D: the select-all bar under the banner.
+    /// D: the select-all bar under a playing playlist's toolbar.
     #[test]
-    fn resync_counts_the_select_all_bar_under_the_banner() {
+    fn resync_counts_the_select_all_bar_under_a_playing_playlist() {
         let _g = lock_and_reset();
         let mut app = test_app();
         app.window.width = 1400.0;
-        with_banner(&mut app, "");
+        with_playlist(&mut app, "");
         app.queue_page.column_visibility.select = true;
 
         let differs = term_matters(&mut app, sweep(), |i| {
@@ -293,7 +322,7 @@ mod queue_resync_parity {
         });
         assert!(
             !differs.is_empty(),
-            "setup invariant: the banner + select-all bar must change the count at some height"
+            "setup invariant: the select-all bar must change the count at some height"
         );
         assert_parity(&mut app, sweep());
         reset_atomics();
@@ -344,42 +373,6 @@ mod queue_resync_parity {
         reset_atomics();
     }
 
-    /// F: the banner's 1 px top hairline under a flush Auto portrait artwork
-    /// column (a narrow, tall single-view window).
-    #[test]
-    fn resync_counts_the_banner_top_hairline() {
-        let _g = lock_and_reset();
-        let mut app = test_app();
-        app.window.width = 530.0;
-        with_banner(&mut app, "");
-        let heights = || 400..=2000;
-
-        // The hairline is 1 px, so compare the render's chrome with and
-        // without that pixel rather than through an input toggle. The
-        // collapsed banner alone is 56 px + its 1 px separator; anything more
-        // is the hairline.
-        let hairline_matters = heights().any(|h| {
-            use crate::views::queue::view::{PLAYLIST_STRIP_COMPACT_H, queue_chrome_height};
-            app.window.height = h as f32;
-            let inputs = app.build_queue_view_data(false).chrome;
-            let banner_h = queue_chrome_height(&inputs)
-                - queue_chrome_height(&QueueChromeInputs {
-                    playlist_comment: None,
-                    ..inputs
-                });
-            let hairline_shows = banner_h > PLAYLIST_STRIP_COMPACT_H + 1.0;
-            let chrome = queue_effective_chrome(&inputs);
-            let at = |c: f32| SlotListConfig::with_dynamic_slots(h as f32, c).slot_count;
-            hairline_shows && at(chrome) != at(chrome - 1.0)
-        });
-        assert!(
-            hairline_matters,
-            "setup invariant: the top hairline must show and change the count at some height"
-        );
-        assert_parity(&mut app, heights());
-        reset_atomics();
-    }
-
     /// An open header dropdown (columns cog or server sync) holds the
     /// auto-hide toolbar expanded in the render, so the resync must size the
     /// queue with the expanded header too.
@@ -410,7 +403,7 @@ mod queue_resync_parity {
     // ------------------------------------------------------------------
     // The stored count follows every message. `handle_queue` resyncs before
     // its arm runs, and several inputs change outside it (the browsing
-    // panel, the banner's playlist context, window focus), so the root
+    // panel, the active playlist context, window focus), so the root
     // `update` resyncs after each message too.
     // ------------------------------------------------------------------
 
@@ -433,7 +426,7 @@ mod queue_resync_parity {
         let _g = lock_and_reset();
         let mut app = test_app();
         app.window.width = 1400.0;
-        with_banner(&mut app, LONG_COMMENT);
+        with_playlist(&mut app, LONG_COMMENT);
         app.queue_page.playlist_strip_expanded = true;
         let differs = term_matters(&mut app, sweep(), |i| i.strip_expanded = false);
         let height = *differs
@@ -443,15 +436,36 @@ mod queue_resync_parity {
         app.queue_page.playlist_strip_expanded = false;
         app.resync_slot_counts();
 
+        let settled = |app: &Nokkvi| {
+            Message::Queue(QueueMessage::PlaylistStripHoverSettled(
+                app.queue_page.playlist_strip_hover_gen,
+            ))
+        };
         assert_parity_after(
             &mut app,
-            Message::Queue(QueueMessage::PlaylistStripHoverEnter),
-            "the banner expands",
+            Message::Queue(QueueMessage::PlaylistStripHoverEnter(
+                crate::views::queue::PlaylistStripZone::Identity,
+            )),
+            "the identity is hovered",
+        );
+        let message = settled(&app);
+        assert_parity_after(&mut app, message, "the detail block opens");
+        assert!(
+            app.queue_page.playlist_strip_expanded,
+            "setup invariant: open"
         );
         assert_parity_after(
             &mut app,
-            Message::Queue(QueueMessage::PlaylistStripHoverExit),
-            "the banner collapses",
+            Message::Queue(QueueMessage::PlaylistStripHoverExit(
+                crate::views::queue::PlaylistStripZone::Identity,
+            )),
+            "the identity is left",
+        );
+        let message = settled(&app);
+        assert_parity_after(&mut app, message, "the detail block closes");
+        assert!(
+            !app.queue_page.playlist_strip_expanded,
+            "setup invariant: closed"
         );
         reset_atomics();
     }

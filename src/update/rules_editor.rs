@@ -227,7 +227,7 @@ impl Nokkvi {
         // track mutations anyway).
         self.browsing_panel = None;
         self.pane_focus = crate::state::PaneFocus::Queue;
-        self.queue_page.playlist_strip_expanded = false;
+        self.queue_page.collapse_playlist_strip();
         self.editor_return_view = if self.current_view == View::PlaylistEditor {
             View::Playlists
         } else {

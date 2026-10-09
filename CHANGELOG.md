@@ -12,16 +12,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The queue's "Playing From" header now sits on the toolbar's plain background, without its accent stripe and tint.
-- The "Playing From" header's label now reads "Playing from playlist" in sentence case, after a small playlist icon.
-- The "Playing From" header's cover now sits directly above the queue rows' artwork.
-- The "Playing From" header's cover now matches the size of the queue rows' artwork, up to 48 pixels.
-- With thumbnails shown, the "Playing From" header's playlist name now starts in line with the song titles below it.
-- The "Playing From" header's save and edit buttons are now larger.
-- The "Playing From" header's playlist name no longer jumps sideways when the cover finishes loading.
+- The queue's "Playing From" playlist now sits inside the toolbar instead of on its own bar above it.
+- The "Playing From" playlist's cover now sits centered above the queue rows' artwork.
+- The "Playing From" cover is now a small collage: 16 pixels in the slim toolbar strip, 32 in the full toolbar.
+- With thumbnails shown, the "Playing From" playlist name now starts in line with the song titles below it.
+- The "Playing From" playlist's save and edit buttons are now regular toolbar buttons.
+- The "Playing From" playlist name no longer jumps sideways when the cover finishes loading.
 - Scope now shows the Tunnel by default.
 - Scope's Echo now defaults to off.
 - Scope's Fill setting has no effect while the Tunnel is on.
+- With the toolbar hidden, the slim strip now shows the playing playlist's cover and name beside the sort label and song count.
+- The "Playing from playlist" label now appears as the cover's tooltip.
+- A smart playlist's sparkles mark now follows its name in the toolbar.
+- The "Playing From" playlist's details now open after a brief hover on its cover or name.
+- The "Playing From" playlist's details now open only while the toolbar is revealed.
+- In narrow windows, the "Playing From" name shrinks first, then the toolbar's song count hides, then only the cover remains.
 
 ### Fixed
 
@@ -30,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - The "Playing From" header now shows a playlist's uploaded cover instead of its album collage.
 - After a restart, the "Playing From" header's details now refresh from the server without opening the Playlists view.
 - With Navigation Layout set to Side, toasts no longer cover the bottom of the sidebar's tabs.
+- The "Playing From" playlist's details no longer stay open after switching windows, switching views or entering Theater Mode.
 
 ### Removed
 

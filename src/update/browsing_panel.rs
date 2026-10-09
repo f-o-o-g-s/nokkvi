@@ -105,7 +105,7 @@ impl Nokkvi {
     /// `mouse_area`s unmount when it closes, so an open dropdown's `on_close` or
     /// a pending hover `on_exit` can't fire — leaving `toolbar_dropdown_open` /
     /// `toolbar_hovered` stranded `true` (toolbar stuck revealed) until the next
-    /// header interaction. Mirrors the `playlist_strip_expanded` reset on the
+    /// header interaction. Mirrors the `collapse_playlist_strip` reset on the
     /// same close edge. The queue pane stays mounted, so its flags are left
     /// untouched.
     fn clear_browsing_panel_reveal_locks(&mut self) {
@@ -203,7 +203,7 @@ impl Nokkvi {
         // Capture the server `updatedAt` so the save path can detect a
         // concurrent server-side edit (optimistic-concurrency guard). Prefer the
         // freshest playlists-list entry; fall back to the active-playlist context
-        // — the same object the queue-banner entry sources name/comment from —
+        // — the same object the queue toolbar's playlist identity reads its name / comment from —
         // for the case where the list is not loaded (e.g. a restored session
         // opened on Queue, never visiting Playlists). Absent in both (e.g. a
         // freshly-created empty playlist) → empty, which the staleness check
@@ -231,12 +231,12 @@ impl Nokkvi {
         // banner pointing at the edited playlist after the user discards.
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
-        // Collapse the "Playing From" banner: the view swap below unmounts its
+        // Collapse the "Playing From" identity: the view swap below unmounts its
         // hover `mouse_area`, so the `on_exit` that would normally collapse a
         // hover-expanded strip can never fire. Reset the flag here (a reset hook
-        // alongside `clear_active_playlist`) so the banner re-mounts collapsed
+        // alongside `clear_active_playlist`) so the identity re-mounts collapsed
         // rather than carrying a stale expansion onto the Queue tab.
-        self.queue_page.playlist_strip_expanded = false;
+        self.queue_page.collapse_playlist_strip();
         // Remember where the edit was launched from so discard/exit returns
         // there (mirrors `pre_settings_view`). Guard against re-entry from the
         // editor itself, which would trap the return view on the editor.
@@ -316,7 +316,7 @@ impl Nokkvi {
         self.playlist_editor = Some(crate::state::PlaylistEditorState::new_create(edit_state));
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
-        self.queue_page.playlist_strip_expanded = false;
+        self.queue_page.collapse_playlist_strip();
         self.editor_return_view = if self.current_view == View::PlaylistEditor {
             View::Playlists
         } else {
@@ -402,10 +402,10 @@ impl Nokkvi {
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
         self.clear_browsing_panel_reveal_locks();
-        // Symmetric to the enter edge: the queue banner re-mounts here with no
-        // cursor over it, so clear any expansion stranded during the session
-        // (its hover `on_exit` could not fire while the banner was unmounted).
-        self.queue_page.playlist_strip_expanded = false;
+        // Symmetric to the enter edge: the queue's playlist identity re-mounts
+        // here with no cursor over it, so clear any expansion stranded during
+        // the session (its hover `on_exit` could not fire while unmounted).
+        self.queue_page.collapse_playlist_strip();
 
         // Return to wherever the edit was launched from (mirrors closing
         // Settings). Cleared the session above first, so the switch-view guard

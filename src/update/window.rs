@@ -44,7 +44,7 @@ impl Nokkvi {
     /// library pages, `queue_chrome_inputs` for the queue, and
     /// `editor_effective_chrome` for the playlist editor. The inputs cover
     /// the header's auto-hide collapse (held expanded by an open header menu),
-    /// the select-all bar, the queue's "Playing From" banner, and the pane the
+    /// the select-all bar, the queue's playlist detail block, and the pane the
     /// page renders in, which sizes any artwork stacked above the list.
     ///
     /// The stored count is read between renders by the within-list drag
@@ -64,8 +64,8 @@ impl Nokkvi {
             self.library_page_common_mut(page).slot_list.slot_count = count;
         }
 
-        // The queue stacks its own bars above the list (the "Playing From"
-        // banner, its hover detail and hairlines, the select-all bar), renders
+        // The queue stacks its own bars above the list (the playing playlist's
+        // detail block and its hairline, the select-all bar), renders
         // at the split view's pane width while the browsing panel is open, and
         // holds its header expanded while a header menu is open. Size it from
         // the SAME chrome helper and inputs its view() reads, so the stored

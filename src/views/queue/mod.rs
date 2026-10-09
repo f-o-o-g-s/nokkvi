@@ -55,13 +55,21 @@ pub struct QueuePage {
     /// unchanged since last sort" cases. Same-length-different-content
     /// requires the caller to manually re-trigger or invalidate.
     pub last_sort_signature: Option<(QueueSortMode, bool, usize)>,
-    /// Transient: whether the read-only playlist context strip is expanded to
-    /// reveal its detail block. Driven by hover
-    /// (`PlaylistStripHoverEnter`/`Exit`); reset whenever the active playlist
-    /// changes or clears so a stale expansion never carries over. Also reset on
-    /// entering and exiting playlist edit mode, because that transition unmounts
-    /// the banner's hover `mouse_area` and the `on_exit` collapse can never fire.
+    /// Transient: whether the toolbar's playlist identity has opened its
+    /// detail block. Follows [`QueuePage::playlist_strip_hovered`] once a hover
+    /// timer settles (`PlaylistStripHoverSettled`). Cleared through
+    /// [`QueuePage::collapse_playlist_strip`] whenever the active playlist
+    /// changes or clears, and on every edge that unmounts the identity's
+    /// hover `mouse_area` (edit mode, view switch, window unfocus, Theater
+    /// Mode, session reset), where its `on_exit` can never fire.
     pub playlist_strip_expanded: bool,
+    /// Transient: whether the pointer is over the identity.
+    pub playlist_identity_hovered: bool,
+    /// Transient: whether the pointer is over the open detail block.
+    pub playlist_detail_hovered: bool,
+    /// Bumped on every hover edge; a hover timer acts only while its captured
+    /// value is still current.
+    pub playlist_strip_hover_gen: u64,
     /// Source rows for an in-progress drag-reorder, captured by per-row
     /// `entry_id` at *pick* time. The slot→item resolution depends on the live
     /// `viewport_offset`, which playback's auto-follow (or a mid-drag wheel
@@ -112,7 +120,7 @@ pub struct QueueViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     /// Inputs of the queue's slot-list chrome (pane width, header collapse,
-    /// banner comment and hover expansion, select-all bar), shared with
+    /// playlist comment and detail block, select-all bar), shared with
     /// `resync_slot_counts` so the stored `slot_count` equals the rendered one.
     /// `window_width` / `window_height` above carry the same pane width and
     /// height.
@@ -243,6 +251,15 @@ pub enum QueueContextEntry {
     TopSongs,
 }
 
+/// The two hover zones of the queue toolbar's playlist identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistStripZone {
+    /// The identity cell (cover + name) in the toolbar.
+    Identity,
+    /// The detail block open under the revealed toolbar.
+    Detail,
+}
+
 /// Messages for local queue page interactions
 #[derive(Debug, Clone)]
 pub enum QueueMessage {
@@ -303,11 +320,16 @@ pub enum QueueMessage {
     PushQueue,
     /// Header button — pull/restore the queue saved on the server.
     PullQueue,
-    /// Pointer entered the read-only playlist context strip — expand its detail
-    /// block (hover mode). Handled locally; no root action.
-    PlaylistStripHoverEnter,
-    /// Pointer left the playlist context strip — collapse the detail block.
-    PlaylistStripHoverExit,
+    /// Pointer entered the toolbar's playlist identity or its open detail
+    /// block. Starts the dwell that opens the detail block. Handled locally;
+    /// no root action.
+    PlaylistStripHoverEnter(PlaylistStripZone),
+    /// Pointer left the identity or its detail block. Starts the short grace
+    /// before the block closes, so moving between the two keeps it open.
+    PlaylistStripHoverExit(PlaylistStripZone),
+    /// A hover timer fired, carrying the hover generation it was started for:
+    /// when still current, the detail block follows where the pointer settled.
+    PlaylistStripHoverSettled(u64),
     /// Mouse wheel over a PLAIN lyrics sheet on the now-playing cover, carrying
     /// the scroll as a LINE delta (positive = forward through the sheet). A
     /// delta, never an absolute: two notches between renders would otherwise
@@ -394,6 +416,9 @@ impl Default for QueuePage {
             column_visibility: QueueColumnVisibility::default(),
             last_sort_signature: None,
             playlist_strip_expanded: false,
+            playlist_identity_hovered: false,
+            playlist_detail_hovered: false,
+            playlist_strip_hover_gen: 0,
             drag_source: None,
             drag_cursor: None,
             drag_edge: crate::widgets::drag_column::EdgeZone::None,
@@ -405,6 +430,47 @@ impl Default for QueuePage {
 impl QueuePage {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Close the playlist identity's detail block and forget the hover, dropping
+    /// any pending hover timer. Called wherever the identity's hover
+    /// `mouse_area` unmounts or the active playlist changes, since its
+    /// `on_exit` can't fire there.
+    pub fn collapse_playlist_strip(&mut self) {
+        self.playlist_strip_expanded = false;
+        self.playlist_identity_hovered = false;
+        self.playlist_detail_hovered = false;
+        self.playlist_strip_hover_gen = self.playlist_strip_hover_gen.wrapping_add(1);
+    }
+
+    /// Whether the pointer is over the identity or its open detail block.
+    pub fn playlist_strip_hovered(&self) -> bool {
+        self.playlist_identity_hovered || self.playlist_detail_hovered
+    }
+
+    /// One hover edge on the identity or its detail block: record it and start
+    /// the timer that settles the block onto it. Entering waits a dwell, so
+    /// passing over the identity on the way to the toolbar's controls opens
+    /// nothing; leaving waits a short grace. Each zone keeps its own flag, so
+    /// crossing between them in either direction (an exit and an enter in
+    /// either order) keeps the block open.
+    pub(super) fn playlist_strip_hover_edge(
+        &mut self,
+        zone: PlaylistStripZone,
+        entered: bool,
+    ) -> iced::Task<QueueMessage> {
+        const DWELL: std::time::Duration = std::time::Duration::from_millis(300);
+        const GRACE: std::time::Duration = std::time::Duration::from_millis(120);
+        match zone {
+            PlaylistStripZone::Identity => self.playlist_identity_hovered = entered,
+            PlaylistStripZone::Detail => self.playlist_detail_hovered = entered,
+        }
+        self.playlist_strip_hover_gen = self.playlist_strip_hover_gen.wrapping_add(1);
+        let generation = self.playlist_strip_hover_gen;
+        let delay = if entered { DWELL } else { GRACE };
+        iced::Task::perform(async move { tokio::time::sleep(delay).await }, move |()| {
+            QueueMessage::PlaylistStripHoverSettled(generation)
+        })
     }
 
     /// Reset all in-progress within-list drag state — called when a drag ends

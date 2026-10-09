@@ -2943,15 +2943,17 @@ fn batch_drop_through_root_past_the_end_appends() {
 //
 // The pick and drop handlers map a drag slot to a row through the stored
 // `slot_count`; the rows under the cursor come from the count the render
-// budgets. With the "Playing From" banner up, a resync that ignores the banner
-// stores a larger count, so mid-list the pick grabbed the row above the one
-// under the cursor and near the end it was off by two.
+// budgets. With extra chrome up (once the "Playing From" banner, now the
+// playing playlist's open detail block), a resync that ignores it stores a
+// larger count, so mid-list the pick grabbed the row above the one under the
+// cursor and near the end it was off by two.
 // ============================================================================
 
-/// A 40-row queue with the banner up, at a window height where the banner
-/// changes the slot count (and at least 9 rows render). Holds the theme lock
-/// for the test's lifetime so the artwork / auto-hide atomics stay put.
-fn banner_drag_app() -> (crate::Nokkvi, parking_lot::MutexGuard<'static, ()>) {
+/// A 40-row queue with the playing playlist's detail block open, at a window
+/// height where the block changes the slot count (and at least 9 rows
+/// render). Holds the theme lock for the test's lifetime so the artwork /
+/// auto-hide atomics stay put.
+fn detail_drag_app() -> (crate::Nokkvi, parking_lot::MutexGuard<'static, ()>) {
     use nokkvi_data::types::player_settings::ArtworkColumnMode;
 
     let guard = crate::theme::THEME_MODE_LOCK.lock();
@@ -2961,17 +2963,18 @@ fn banner_drag_app() -> (crate::Nokkvi, parking_lot::MutexGuard<'static, ()>) {
     let mut app = app_with_numbered_queue(40);
     app.window.width = 1400.0;
     app.active_playlist_info = Some(active_ctx(None));
+    app.queue_page.playlist_strip_expanded = true;
     let height = (400..=2000)
         .map(|h| h as f32)
         .find(|&h| {
             app.window.height = h;
-            let with_banner = rendered_slot_count(&app);
-            app.active_playlist_info = None;
-            let without_banner = rendered_slot_count(&app);
-            app.active_playlist_info = Some(active_ctx(None));
-            with_banner >= 9 && with_banner != without_banner
+            let with_detail = rendered_slot_count(&app);
+            app.queue_page.playlist_strip_expanded = false;
+            let without_detail = rendered_slot_count(&app);
+            app.queue_page.playlist_strip_expanded = true;
+            with_detail >= 9 && with_detail != without_detail
         })
-        .expect("setup invariant: a height where the banner changes the slot count");
+        .expect("setup invariant: a height where the detail block changes the slot count");
     app.window.height = height;
     (app, guard)
 }
@@ -3004,10 +3007,10 @@ fn rendered_item(app: &crate::Nokkvi, slot: usize, allow_end: bool) -> Option<us
 const DRAG_OFFSETS: [usize; 3] = [0, 20, 38];
 
 #[test]
-fn drag_pick_grabs_the_rendered_row_with_the_banner_up() {
+fn drag_pick_grabs_the_rendered_row_with_the_detail_block_open() {
     use crate::{app_message::Message, views::QueueMessage, widgets::drag_column::DragEvent};
 
-    let (mut app, _guard) = banner_drag_app();
+    let (mut app, _guard) = detail_drag_app();
     let total = app.library.queue_songs.len();
     let slots = rendered_slot_count(&app);
 
@@ -3036,10 +3039,10 @@ fn drag_pick_grabs_the_rendered_row_with_the_banner_up() {
 }
 
 #[test]
-fn drag_drop_lands_on_the_rendered_row_with_the_banner_up() {
+fn drag_drop_lands_on_the_rendered_row_with_the_detail_block_open() {
     use crate::{app_message::Message, views::QueueMessage, widgets::drag_column::DragEvent};
 
-    let (mut app, _guard) = banner_drag_app();
+    let (mut app, _guard) = detail_drag_app();
     let original = app.library.queue_songs.clone();
     let ids: Vec<u64> = original.iter().map(|s| s.entry_id).collect();
     let total = ids.len();

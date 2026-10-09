@@ -132,7 +132,7 @@ impl Nokkvi {
         // The drag mappers, the scrollbar thumb, the centered-row reads, and
         // find-and-expand read the stored slot_count between renders, so it
         // must equal what the next render draws. Its inputs (pane width,
-        // header collapse and open menus, the queue's banner and hover detail,
+        // header collapse and open menus, the queue's playlist detail block,
         // select columns) change in handlers all over the app, several of
         // them after `handle_queue`'s own resync has run, so one resync here
         // covers every writer. It reads no rows, so the pointer-motion

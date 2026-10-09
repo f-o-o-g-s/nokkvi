@@ -173,7 +173,7 @@ impl QueuePage {
                         // which `handle_queue` resyncs immediately before this
                         // update from `queue_effective_chrome`, the helper and
                         // inputs the view renders with — so it equals the
-                        // rendered count (banner, select bar, split pane,
+                        // rendered count (detail block, select bar, split pane,
                         // collapsed toolbar) and the boundary `effective_center`
                         // matches the rows on screen. A past-end /
                         // empty-area drop maps to `None`; treat it as "append at
@@ -374,12 +374,18 @@ impl QueuePage {
             QueueMessage::RefreshArtwork(album_id) => {
                 (Task::none(), QueueAction::RefreshArtwork(album_id))
             }
-            QueueMessage::PlaylistStripHoverEnter => {
-                self.playlist_strip_expanded = true;
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::PlaylistStripHoverExit => {
-                self.playlist_strip_expanded = false;
+            QueueMessage::PlaylistStripHoverEnter(zone) => (
+                self.playlist_strip_hover_edge(zone, true),
+                QueueAction::None,
+            ),
+            QueueMessage::PlaylistStripHoverExit(zone) => (
+                self.playlist_strip_hover_edge(zone, false),
+                QueueAction::None,
+            ),
+            QueueMessage::PlaylistStripHoverSettled(generation) => {
+                if generation == self.playlist_strip_hover_gen {
+                    self.playlist_strip_expanded = self.playlist_strip_hovered();
+                }
                 (Task::none(), QueueAction::None)
             }
             // Intercepted by `handle_queue`'s pointer-motion fast path, which
@@ -524,18 +530,111 @@ mod tests {
         assert!(matches!(action, QueueAction::None));
     }
 
+    const IDENTITY: super::super::PlaylistStripZone = super::super::PlaylistStripZone::Identity;
+    const DETAIL: super::super::PlaylistStripZone = super::super::PlaylistStripZone::Detail;
+
+    /// Fire the hover timer the last edge started.
+    fn settle(page: &mut QueuePage, songs: &[QueueSongUIViewData]) {
+        let generation = page.playlist_strip_hover_gen;
+        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverSettled(generation), songs);
+        assert!(matches!(action, QueueAction::None), "no root action");
+    }
+
     #[test]
-    fn playlist_strip_hover_toggles_expanded() {
+    fn playlist_strip_opens_after_the_dwell_and_closes_after_the_grace() {
         let mut page = QueuePage::default();
         let songs: Vec<QueueSongUIViewData> = Vec::new();
         assert!(!page.playlist_strip_expanded, "default is collapsed");
 
-        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverEnter, &songs);
-        assert!(page.playlist_strip_expanded, "hover-enter expands");
+        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
         assert!(matches!(action, QueueAction::None), "no root action");
+        assert!(
+            !page.playlist_strip_expanded,
+            "passing over the identity opens nothing before the dwell"
+        );
+        settle(&mut page, &songs);
+        assert!(page.playlist_strip_expanded, "the dwell opens the block");
 
-        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverExit, &songs);
-        assert!(!page.playlist_strip_expanded, "hover-exit collapses");
+        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverExit(IDENTITY), &songs);
         assert!(matches!(action, QueueAction::None), "no root action");
+        assert!(
+            page.playlist_strip_expanded,
+            "the block outlives the exit's grace"
+        );
+        settle(&mut page, &songs);
+        assert!(!page.playlist_strip_expanded, "the grace closes the block");
+    }
+
+    #[test]
+    fn playlist_strip_stays_open_moving_from_the_identity_into_the_block() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
+        settle(&mut page, &songs);
+
+        // The identity's exit and the block's enter land together; the exit's
+        // timer is stale by the time it fires.
+        let _ = page.update(QueueMessage::PlaylistStripHoverExit(IDENTITY), &songs);
+        let exit_timer = page.playlist_strip_hover_gen;
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(DETAIL), &songs);
+        let _ = page.update(QueueMessage::PlaylistStripHoverSettled(exit_timer), &songs);
+        assert!(
+            page.playlist_strip_expanded,
+            "a stale exit timer keeps it open"
+        );
+        settle(&mut page, &songs);
+        assert!(page.playlist_strip_expanded, "still hovered → still open");
+    }
+
+    #[test]
+    fn playlist_strip_stays_open_moving_from_the_block_back_onto_the_identity() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
+        settle(&mut page, &songs);
+        let _ = page.update(QueueMessage::PlaylistStripHoverExit(IDENTITY), &songs);
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(DETAIL), &songs);
+        settle(&mut page, &songs);
+
+        // Moving up, the identity (earlier in the tree) publishes its enter
+        // before the block publishes its exit.
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
+        let _ = page.update(QueueMessage::PlaylistStripHoverExit(DETAIL), &songs);
+        settle(&mut page, &songs);
+        assert!(
+            page.playlist_strip_expanded,
+            "the identity still holds it open"
+        );
+    }
+
+    #[test]
+    fn playlist_strip_passing_over_never_opens() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
+        let dwell = page.playlist_strip_hover_gen;
+        let _ = page.update(QueueMessage::PlaylistStripHoverExit(IDENTITY), &songs);
+        let _ = page.update(QueueMessage::PlaylistStripHoverSettled(dwell), &songs);
+        assert!(
+            !page.playlist_strip_expanded,
+            "the dwell went stale on exit"
+        );
+        settle(&mut page, &songs);
+        assert!(
+            !page.playlist_strip_expanded,
+            "nothing hovered → stays closed"
+        );
+    }
+
+    #[test]
+    fn collapse_playlist_strip_drops_pending_timers() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+        let _ = page.update(QueueMessage::PlaylistStripHoverEnter(IDENTITY), &songs);
+        let dwell = page.playlist_strip_hover_gen;
+        page.collapse_playlist_strip();
+        let _ = page.update(QueueMessage::PlaylistStripHoverSettled(dwell), &songs);
+        assert!(!page.playlist_strip_expanded);
+        assert!(!page.playlist_strip_hovered());
     }
 }

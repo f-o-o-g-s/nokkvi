@@ -306,6 +306,8 @@ impl Nokkvi {
         if let Some(editor) = self.playlist_editor.as_mut() {
             clear_unmounting_list_state(&mut editor.common);
         }
+        // The queue toolbar's playlist identity unmounts with the queue.
+        self.queue_page.collapse_playlist_strip();
 
         // Theater Fills the Screen: ask the window for its current mode; the
         // answer (`PriorModeKnown`) records it and goes fullscreen.

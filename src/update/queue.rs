@@ -200,7 +200,7 @@ impl Nokkvi {
         // Keep slot_count in sync with the rendered slot list so drag index
         // translation uses the correct effective_center. The resync sizes the
         // queue from `queue_effective_chrome` over the same inputs its view
-        // renders with (banner, select bar, pane width, header collapse,
+        // renders with (detail block, select bar, pane width, header collapse,
         // stacked artwork), so the stored count equals the rendered one.
         self.resync_slot_counts();
 

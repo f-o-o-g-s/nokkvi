@@ -1821,18 +1821,20 @@ impl Nokkvi {
     /// equals the count the queue renders. See
     /// [`queue_effective_chrome`](crate::views::queue::view::queue_effective_chrome).
     pub(crate) fn queue_chrome_inputs(&self) -> crate::views::queue::view::QueueChromeInputs<'_> {
+        let toolbar_collapsed = self.queue_page.common.toolbar_collapsed(
+            crate::theme::is_autohide_toolbar(),
+            self.queue_header_menu_open(),
+        );
         crate::views::queue::view::QueueChromeInputs {
             pane_width: self.queue_pane_width(),
             window_height: self.window.height,
-            toolbar_collapsed: self.queue_page.common.toolbar_collapsed(
-                crate::theme::is_autohide_toolbar(),
-                self.queue_header_menu_open(),
-            ),
+            toolbar_collapsed,
             playlist_comment: self
                 .active_playlist_info
                 .as_ref()
                 .map(|ctx| ctx.comment.as_str()),
-            strip_expanded: self.queue_page.playlist_strip_expanded,
+            // The detail block renders only under the revealed toolbar.
+            strip_expanded: self.queue_page.playlist_strip_expanded && !toolbar_collapsed,
             select_visible: self.queue_page.column_visibility.select,
             index_visible: self.queue_page.column_visibility.index,
             thumbnail_visible: self.queue_page.column_visibility.thumbnail,

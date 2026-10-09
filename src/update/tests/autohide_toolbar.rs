@@ -264,6 +264,39 @@ fn closing_browsing_panel_clears_stranded_hover() {
 }
 
 #[test]
+fn unmount_edges_close_the_queue_playlist_detail_block() {
+    // The queue toolbar's playlist identity holds its own hover. Its
+    // mouse_area unmounts (view switch) or stops getting pointer events
+    // (window unfocus) with no on_exit, so both edges must close the detail
+    // block and forget the hover, or it keeps eating rows on return.
+    let open_detail = |app: &mut crate::Nokkvi| {
+        app.queue_page.playlist_identity_hovered = true;
+        app.queue_page.playlist_strip_expanded = true;
+    };
+
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    open_detail(&mut app);
+    let _ = app.update(crate::app_message::Message::WindowUnfocused);
+    assert!(!app.queue_page.playlist_strip_expanded, "unfocus closes it");
+    assert!(
+        !app.queue_page.playlist_strip_hovered(),
+        "unfocus forgets the hover"
+    );
+
+    open_detail(&mut app);
+    let _ = app.handle_switch_view(View::Albums);
+    assert!(
+        !app.queue_page.playlist_strip_expanded,
+        "a view switch closes it"
+    );
+    assert!(
+        !app.queue_page.playlist_strip_hovered(),
+        "a view switch forgets the hover"
+    );
+}
+
+#[test]
 fn window_unfocus_clears_transient_reveal_locks_but_keeps_search() {
     // On Wayland an unfocused surface stops receiving frame callbacks, so a
     // mid-reveal toolbar (2.5s hotkey timer, hover, or open dropdown) would
