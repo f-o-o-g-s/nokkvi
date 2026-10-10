@@ -218,7 +218,7 @@ pub(crate) struct CrossfadeCoordinator {
     /// Per-transition policy verdict for the CURRENTLY-PREPARED next track:
     /// `true` suppresses the crossfade arm/trigger so the transition falls
     /// through to the gapless path. Set by `store_prepared_decoder` (AFTER
-    /// its internal `reset_next_track`, BEFORE the arm), cleared by
+    /// its internal reset (`discard_next_track`), BEFORE the arm), cleared by
     /// `reset_next_track`, and gated at BOTH trigger sites
     /// (`arm_renderer_crossfade` — which also covers the rearm-after-seek
     /// path — and `try_start_crossfade_transition`), mirroring the
@@ -261,7 +261,7 @@ pub(crate) struct CrossfadeCoordinator {
     skip_silence: bool,
     /// M8 per-transition crossfade-duration override (bar-snap), following
     /// the `suppress_this_transition` lifecycle EXACTLY: set by
-    /// `store_prepared_decoder` (AFTER its internal `reset_next_track`,
+    /// `store_prepared_decoder` (AFTER its internal reset (`discard_next_track`),
     /// BEFORE the arm), cleared by `reset_next_track`. Every duration read
     /// on the arm/trigger/fire paths goes through
     /// [`Self::effective_duration_ms`]; the `crossfade_duration_shared`
@@ -397,7 +397,7 @@ impl FadeCoordinator {
 /// `Song` metadata (which never crosses the engine boundary) and threads down
 /// into [`CustomAudioEngine::store_prepared_decoder`]. All three share the M4
 /// suppress-flag lifecycle: applied AFTER the store's internal
-/// `reset_next_track`, cleared BY `reset_next_track`, re-derived on every
+/// reset (`discard_next_track`), cleared BY `reset_next_track`, re-derived on every
 /// prep.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreparedTransitionDirectives {
@@ -671,7 +671,7 @@ struct DecodeLoopChannels {
     /// between the outgoing track's last sample and the next track at the
     /// NEXT decoder EOF, or 0. Per-transition, mirroring the M4 suppress-flag
     /// lifecycle: set by `store_prepared_decoder` (after its internal
-    /// `reset_next_track`), cleared by `reset_next_track` (the invariant-3
+    /// reset (`discard_next_track`)), cleared by `reset_next_track` (the invariant-3
     /// funnel every transition abandonment goes through), and consumed
     /// one-shot (`swap(0)`) by the decode loop's EOF branch
     /// (`inject_transition_gap`). Deliberately NOT cleared at
@@ -1416,6 +1416,18 @@ pub struct CustomAudioEngine {
     /// plan's generation, so a superseded or abandoned plan never applies it.
     deferred_skip_seek: Option<DeferredSkipSeek>,
 
+    /// Counts the invalidations of the next-track slot: every
+    /// [`Self::reset_next_track`] bumps it (queue edits, mode toggles, the
+    /// transition-shaping settings, stop and source changes, skip plans).
+    /// A store replacing one prep with another does not. Two readers:
+    /// - a gapless prep snapshots it before it peeks the queue and stores
+    ///   only if it is unchanged ([`Self::store_prepared_decoder_if_current`]),
+    ///   so a build that outlived a queue edit can't install the old next
+    ///   track;
+    /// - the UI tick reports it, and the UI reopens its once-per-track prep
+    ///   latch when it moves, so a reset after the prep gets a new one.
+    next_track_epoch: u64,
+
     // Renderer
     renderer: Arc<PlMutex<AudioRenderer>>,
 
@@ -1495,6 +1507,7 @@ impl CustomAudioEngine {
             next_source: String::new(),
             pending_start_ms: None,
             deferred_skip_seek: None,
+            next_track_epoch: 0,
             renderer: Arc::new(PlMutex::new(AudioRenderer::new())),
             state: PlaybackState::Stopped,
             decode_loop: DecodeLoopHandle::new(),
@@ -2652,7 +2665,7 @@ impl CustomAudioEngine {
     /// Apply the controller's per-transition verdicts (M4 suppress + M8
     /// bar-snap override + M8 gap offset) to the coordinator/channels. Called
     /// from BOTH `store_prepared_decoder` branches, after any internal
-    /// `reset_next_track`; the counterpart clears live in `reset_next_track`.
+    /// reset (`discard_next_track`); the counterpart clears live in `reset_next_track`.
     fn apply_transition_directives(&mut self, directives: &PreparedTransitionDirectives) {
         self.crossfade.suppress_this_transition = directives.suppress_crossfade;
         self.crossfade.duration_override_ms = directives.duration_override_ms;
@@ -2660,7 +2673,7 @@ impl CustomAudioEngine {
         // duration that will actually play — a +1-bar snap needs the bigger
         // cushion BEFORE the fade fires. Stored unconditionally at the
         // EFFECTIVE value (override or global) so the mid-blend store branch
-        // — which skips the internal `reset_next_track` and therefore its
+        // — which skips the internal reset (`discard_next_track`) and therefore its
         // restore — can never leave the PREVIOUS transition's override
         // leaking under a no-override prep. `reset_next_track` restores the
         // global.
@@ -2672,6 +2685,33 @@ impl CustomAudioEngine {
             .store(directives.gap_offset_ms, Ordering::Release);
     }
 
+    /// [`Self::store_prepared_decoder`] for a prep that snapshotted
+    /// [`Self::next_track_epoch`] as `epoch` before it peeked the queue.
+    /// Refuses (returns `false`) when a `reset_next_track` landed since: the
+    /// prep was built for a queue that has changed, and installing it would
+    /// play the old next track under the new queue's label. Production preps
+    /// store through here.
+    pub async fn store_prepared_decoder_if_current(
+        &mut self,
+        epoch: u64,
+        decoder: AudioDecoder,
+        url: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+        directives: PreparedTransitionDirectives,
+    ) -> bool {
+        if epoch != self.next_track_epoch {
+            debug!(
+                " [GAPLESS] Prep outlived a next-track reset (epoch {epoch} → {}) — not stored: {}",
+                self.next_track_epoch,
+                redact_subsonic_url(&url)
+            );
+            return false;
+        }
+        self.store_prepared_decoder(decoder, url, replay_gain, directives)
+            .await;
+        true
+    }
+
     /// Store an already-initialized decoder for gapless playback.
     /// This is the preferred method for gapless prep because it doesn't block
     /// the engine lock during network I/O, allowing the visualizer to continue.
@@ -2681,7 +2721,7 @@ impl CustomAudioEngine {
     /// doesn't have): the M4 crossfade-vs-gapless suppress flag, the M8
     /// bar-snap duration override, and the M8 gap-offset silence length. All
     /// three follow the same lifecycle — applied AFTER this method's internal
-    /// `reset_next_track`, cleared BY `reset_next_track`.
+    /// reset (`discard_next_track`), cleared BY `reset_next_track`.
     ///
     /// Caller should:
     /// 1. Create and init the decoder OUTSIDE of engine lock (do the download)
@@ -2738,12 +2778,12 @@ impl CustomAudioEngine {
 
         // Only reset if we're actually going to store something new
         if self.next_source != url {
-            self.reset_next_track().await;
+            self.discard_next_track().await;
         }
 
         // Per-transition policy verdicts (M4 suppress + M8 override/gap).
         // ORDERING IS LOAD-BEARING: applied AFTER the internal
-        // `reset_next_track` above (which clears all three — setting earlier
+        // reset (`discard_next_track`) above (which clears all three — setting earlier
         // would be silently wiped, losing a suppress verdict) and BEFORE the
         // `arm_renderer_crossfade` below (which gates on the flag and reads
         // the effective duration). Re-applied on EVERY store so a
@@ -4023,7 +4063,19 @@ impl CustomAudioEngine {
     /// the queue already names (the skip advanced the cursor before the blend
     /// started), so a next-track reset has no claim on it. Everything that
     /// belongs to the FOLLOWING transition is still cleared.
+    ///
+    /// Moves [`Self::next_track_epoch`]: a prep that peeked the queue before
+    /// this reset can no longer store, and the UI reopens its prep latch.
     pub async fn reset_next_track(&mut self) {
+        self.next_track_epoch = self.next_track_epoch.wrapping_add(1);
+        self.discard_next_track().await;
+    }
+
+    /// The body of [`Self::reset_next_track`] without the epoch move, for
+    /// `store_prepared_decoder` replacing one prep with another: that is no
+    /// invalidation, and moving the epoch there would reopen the UI's prep
+    /// latch after every store.
+    async fn discard_next_track(&mut self) {
         // Cancel an in-flight AUTO crossfade FIRST. A mode toggle (shuffle /
         // repeat / consume / bit-perfect) during an auto-advance fade must
         // abandon the prepared/in-flight next track so the engine re-derives it
@@ -4138,6 +4190,12 @@ impl CustomAudioEngine {
     /// Check if next track is prepared for gapless playback
     pub async fn is_next_track_prepared(&self) -> bool {
         self.gapless.lock().await.is_prepared()
+    }
+
+    /// The next-track slot's invalidation count (see the field doc). A prep
+    /// snapshots it before it peeks the queue; the UI tick reports it.
+    pub fn next_track_epoch(&self) -> u64 {
+        self.next_track_epoch
     }
 
     /// Handle renderer finished (called when renderer runs out of buffers)
@@ -4961,7 +5019,7 @@ mod tests {
 
     /// M4: the flag re-derives on EVERY prepare, in both directions. The
     /// ordering trap this pins: `store_prepared_decoder` runs an internal
-    /// `reset_next_track` (which clears the flag) partway through — a flag
+    /// reset (`discard_next_track`) (which clears the flag) partway through — a flag
     /// set before that reset would be silently wiped, losing a suppress
     /// verdict (an album segue would blend) or stranding a stale one (the
     /// next transition could never crossfade again).
@@ -6233,6 +6291,67 @@ mod tests {
         };
         engine.crossfade.skip_fade = true;
         engine.renderer.lock().force_crossfade_active_for_test()
+    }
+
+    /// Bug 4: a gapless prep whose decoder build outlived a queue edit must
+    /// not install the old queue's next track. The edit's `reset_next_track`
+    /// moves the epoch the prep snapshotted before it peeked the queue, so the
+    /// store refuses it; a prep that snapshotted after the reset stores, and
+    /// its own store leaves the epoch alone (the UI reopens its prep latch on
+    /// every move, so a store that bumped it would re-prep forever).
+    #[tokio::test]
+    async fn a_prep_that_outlived_a_next_track_reset_is_not_stored() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let stale_epoch = engine.next_track_epoch();
+
+        // The queue edit lands while the prep's decoder builds.
+        engine.reset_next_track().await;
+        assert_ne!(
+            engine.next_track_epoch(),
+            stale_epoch,
+            "a reset must move the epoch"
+        );
+
+        let stored = engine
+            .store_prepared_decoder_if_current(
+                stale_epoch,
+                skip_ready_decoder(200_000),
+                "http://example.test/old-next".to_string(),
+                None,
+                PreparedTransitionDirectives::default(),
+            )
+            .await;
+        assert!(!stored, "the stale prep must be refused");
+        assert!(
+            !engine.is_next_track_prepared().await,
+            "nothing from the old queue may be installed"
+        );
+        assert!(engine.next_source.is_empty());
+
+        let epoch = engine.next_track_epoch();
+        for url in [
+            "http://example.test/new-next",
+            "http://example.test/newer-next",
+        ] {
+            let stored = engine
+                .store_prepared_decoder_if_current(
+                    epoch,
+                    skip_ready_decoder(200_000),
+                    url.to_string(),
+                    None,
+                    PreparedTransitionDirectives::default(),
+                )
+                .await;
+            assert!(stored, "a current prep stores ({url})");
+            assert_eq!(engine.next_source, url);
+        }
+        assert!(engine.is_next_track_prepared().await);
+        assert_eq!(
+            engine.next_track_epoch(),
+            epoch,
+            "a store (even one replacing an earlier prep) must not move the epoch"
+        );
     }
 
     /// A live skip blend's incoming is the track the queue already names, so

@@ -551,8 +551,10 @@ impl PlaybackController {
     /// Shared tail of both seek paths: re-prepare the gapless next track when
     /// the seek cancelled a live automatic crossfade.
     ///
-    /// The cancelled blend dropped the prepared next track, and the UI's prep
-    /// latch only reopens on a song change. MUST run with the engine lock
+    /// The cancelled blend dropped the prepared next track without a
+    /// `reset_next_track` (the start took it out of the slot), so the
+    /// next-track epoch did not move and the UI's prep latch stays shut until
+    /// the song changes. MUST run with the engine lock
     /// released — the decoder builds unlocked (a no-op when a prep already
     /// exists).
     async fn after_seek(&self, outcome: crate::audio::engine::SeekOutcome) {
@@ -708,12 +710,18 @@ impl PlaybackController {
         // the crossfade-policy inputs (min-track floor + album-continuity
         // gate) for the M4 decision below, plus the M8 transition-shaping
         // knobs (bar-snap, gap offset, leading-trim verdict).
-        let prep_cfg = {
+        //
+        // The next-track epoch is snapshotted here, BEFORE the queue peek: a
+        // queue edit whose reset lands after this point (during the peek or
+        // the decoder build) makes the store refuse the build, which may
+        // name the old queue's next track. The UI sees the epoch move and
+        // prepares again.
+        let (prep_cfg, epoch) = {
             let engine = self.audio_engine.lock().await;
             if engine.is_next_track_prepared().await {
                 return false; // Already prepared
             }
-            engine.transition_prep_cfg()
+            (engine.transition_prep_cfg(), engine.next_track_epoch())
         };
 
         let Some(session) = self.queue_service.stream_session().await else {
@@ -854,14 +862,22 @@ impl PlaybackController {
 
                 // BRIEF lock to store the already-downloaded decoder
                 let mut engine = audio_engine.lock().await;
-                engine
-                    .store_prepared_decoder(decoder, url_for_task.clone(), rg_for_task, directives)
+                let stored = engine
+                    .store_prepared_decoder_if_current(
+                        epoch,
+                        decoder,
+                        url_for_task.clone(),
+                        rg_for_task,
+                        directives,
+                    )
                     .await;
                 drop(engine);
-                debug!(
-                    " [GAPLESS] Prepared next track: {}",
-                    redact_subsonic_url(&url_for_task)
-                );
+                if stored {
+                    debug!(
+                        " [GAPLESS] Prepared next track: {}",
+                        redact_subsonic_url(&url_for_task)
+                    );
+                }
 
                 Ok::<_, anyhow::Error>(())
             });
@@ -2300,7 +2316,7 @@ mod tests {
 
     /// A seek that cancels a live AUTO crossfade (back to the track the UI
     /// still shows) dropped the prepared next track with the blend. The UI's
-    /// prep latch only reopens on a song change, so the controller must
+    /// prep latch stays shut (no next-track reset moved the epoch), so the controller must
     /// re-prepare it — otherwise the next transition hard-loads with no
     /// blend.
     #[tokio::test(flavor = "multi_thread")]

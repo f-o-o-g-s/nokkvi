@@ -78,6 +78,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,
+        next_track_epoch: 0,
     }
 }
 
@@ -1946,4 +1947,49 @@ fn sfx_volume_change_updates_the_settings() {
     let mut app = test_app();
     let _ = app.handle_sfx_volume_changed(0.25);
     assert!((app.settings.sfx_volume - 0.25).abs() < f32::EPSILON);
+}
+
+// ============================================================================
+// Gapless prep latch
+// ============================================================================
+
+/// A tick past 80% of the track (170 s of 200 s) on the queue's `song_1`.
+fn tick_past_80_percent(next_track_epoch: u64) -> PlaybackStateUpdate {
+    PlaybackStateUpdate {
+        position: 170,
+        position_ms: 170_000,
+        next_track_epoch,
+        ..make_playback_update()
+    }
+}
+
+/// Bug 4: a queue edit after 80% of the track throws the prepared next track
+/// away (`reset_next_track`, which moves the engine's next-track epoch).
+/// The latch must reopen on the next tick, so the 80% trigger's prep gets
+/// through again; otherwise the next transition is a hard cut.
+#[test]
+fn a_next_track_reset_after_the_prep_reopens_the_gapless_latch() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(tick_past_80_percent(3));
+    let _ = app.handle_prepare_next_for_gapless();
+    assert!(
+        app.engine.gapless_preparing,
+        "precondition: the prep went out"
+    );
+
+    // Same epoch: the latch holds, one prep per transition.
+    let _ = app.handle_playback_state_updated(tick_past_80_percent(3));
+    assert!(
+        app.engine.gapless_preparing,
+        "an unchanged epoch must not re-trigger the prep"
+    );
+
+    // The queue edit's reset moved the epoch.
+    let _ = app.handle_playback_state_updated(tick_past_80_percent(4));
+    assert!(
+        !app.engine.gapless_preparing,
+        "the latch must reopen once the prepared track was thrown away"
+    );
+    let _ = app.handle_prepare_next_for_gapless();
+    assert!(app.engine.gapless_preparing, "the re-prep goes out");
 }

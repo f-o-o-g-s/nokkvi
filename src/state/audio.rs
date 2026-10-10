@@ -7,6 +7,9 @@
 #[derive(Debug, Clone, Default)]
 pub struct EngineState {
     /// Set once the gapless prep for the current track has been requested;
-    /// cleared on the next track or queue-position change.
+    /// cleared on the next track or queue-position change, and whenever the
+    /// engine's next-track epoch moves (the prepared track was thrown away).
     pub gapless_preparing: bool,
+    /// The engine's next-track epoch as of the last tick.
+    pub next_track_epoch: u64,
 }

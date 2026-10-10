@@ -137,6 +137,11 @@ pub struct PlaybackStateUpdate {
     /// flight), so its clock, its listening-time delta and its MPRIS push all
     /// describe a position the user has already moved away from.
     pub seek_epoch: u64,
+    /// The engine's next-track epoch (`CustomAudioEngine::next_track_epoch`),
+    /// read under the same engine lock as the position. It moves whenever the
+    /// prepared next track is thrown away, which reopens the UI's gapless
+    /// prep latch.
+    pub next_track_epoch: u64,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.

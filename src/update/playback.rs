@@ -300,6 +300,7 @@ impl Nokkvi {
                     _ => engine.live_icy_metadata(),
                 };
                 let engine_live_codec = engine.live_codec();
+                let next_track_epoch = engine.next_track_epoch();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -426,6 +427,7 @@ impl Nokkvi {
                     live_icy_metadata: engine_live_icy_metadata,
                     bpm,
                     seek_epoch,
+                    next_track_epoch,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -461,6 +463,7 @@ impl Nokkvi {
             live_icy_metadata,
             bpm,
             seek_epoch,
+            next_track_epoch,
         } = update;
 
         // Whether this update's POSITION is still current. A different seek
@@ -882,6 +885,15 @@ impl Nokkvi {
 
             // Queue focus tracking + gapless preparation
             self.handle_queue_focus_change(current_index, current_entry_id, &mut tasks);
+            // The engine threw its prepared next track away since the last
+            // tick (a queue edit, a mode toggle, a transition-shaping
+            // setting, a skip plan): reopen the latch so the 80% trigger
+            // below prepares the transition again instead of leaving it to
+            // a hard cut.
+            if self.engine.next_track_epoch != next_track_epoch {
+                self.engine.next_track_epoch = next_track_epoch;
+                self.engine.gapless_preparing = false;
+            }
             if playing && !paused && dur > 0 {
                 let threshold = (f64::from(dur) * 0.8) as u32;
                 if pos >= threshold {

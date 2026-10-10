@@ -33,6 +33,8 @@ All notable changes to this project will be documented in this file.
 - Playing or queueing a genre, or mixing one in Trawl, now includes songs tagged with a different capitalization of its name.
 - Importing a .nsp file whose refresh delay Navidrome can't read now stops with an explanation before anything is uploaded.
 - Importing a .nsp file with a refresh delay now warns when the server is older than 0.64 and will ignore it.
+- Adding, removing or moving songs late in a track no longer turns the next crossfade or gapless join into a hard cut.
+- Changing a crossfade or bit-perfect setting late in a track no longer turns the next transition into a hard cut.
 
 ### Removed
 
