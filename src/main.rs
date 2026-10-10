@@ -214,6 +214,9 @@ pub struct Nokkvi {
     pub similar_songs: Option<crate::state::SimilarSongsState>,
     /// Generation counter for stale response rejection
     pub similar_songs_generation: crate::state::StaleDropGen,
+    /// The `getArtistInfo2` answers fetched this session (the Artists
+    /// view's biography and link), keyed by artist id.
+    pub artist_info: crate::state::ArtistInfoState,
 
     /// Harbour home view state — discovery shelves + whole-library
     /// search results. Populated on first visit / library-filter change.
@@ -454,6 +457,7 @@ impl Default for Nokkvi {
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: crate::state::StaleDropGen::default(),
+            artist_info: crate::state::ArtistInfoState::default(),
             harbour: crate::state::HarbourState::default(),
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every scalar

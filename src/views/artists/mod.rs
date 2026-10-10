@@ -67,6 +67,9 @@ pub struct ArtistsViewData<'a> {
     /// is enabled.
     pub album_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
+    /// `getArtistInfo2` answers by artist id; the pill's biography and link
+    /// prefer them over the native row's fields.
+    pub artist_info: &'a HashMap<String, nokkvi_data::types::artist::ArtistInfo>,
     pub window_width: f32,
     pub window_height: f32,
     /// Slot-list chrome inputs (header collapse, select-all bar, pane size),

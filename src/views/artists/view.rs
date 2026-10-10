@@ -289,10 +289,10 @@ impl ArtistsPage {
                     col = col.push(row);
                 }
 
-                // Biography section (artists-specific)
-                if let Some(bio) = &artist.biography
-                    && !bio.is_empty()
-                {
+                // Biography section (artists-specific): the fetched
+                // getArtistInfo2 answer first, the native row otherwise.
+                let (bio, link) = pill_bio_and_link(artist, data.artist_info.get(&artist.id));
+                if let Some(bio) = bio {
                     let bio_preview: String = bio.chars().take(350).collect();
                     let bio_preview = if bio.chars().count() > 350 {
                         format!("{}...", bio_preview.trim_end())
@@ -310,14 +310,14 @@ impl ArtistsPage {
                     .spacing(4)
                     .align_x(iced::Alignment::Center);
 
-                    if let Some(url) = &artist.external_url {
+                    if let Some(url) = link {
                         let read_more_btn = button(
-                            text("Read more on Last.fm")
+                            text(bio_link_label(url))
                                 .size(11)
                                 .color(theme::accent_bright())
                                 .font(theme::weighted_ui_font(iced::font::Weight::Bold)),
                         )
-                        .on_press(ArtistsMessage::OpenExternalUrl(url.clone()))
+                        .on_press(ArtistsMessage::OpenExternalUrl(url.to_string()))
                         .padding(iced::Padding {
                             top: 2.0,
                             bottom: 2.0,
@@ -646,5 +646,132 @@ impl ArtistsPage {
             ArtistsMessage::ContextMenuAction,
             ArtistsMessage::SetOpenMenu,
         )
+    }
+}
+
+/// The biography and link the artwork pill shows for `artist`, each taken
+/// from the native row when it has one, else from the fetched
+/// `getArtistInfo2` answer. The native row is empty until some client has
+/// asked, and once it is filled it is never older than the fetched answer:
+/// the fetch returns what the row holds, and a refresh the fetch queued
+/// reaches the row through the library reload it broadcasts. Empty text
+/// counts as none, and only an http(s) link is offered (it is handed to
+/// `xdg-open`).
+pub(crate) fn pill_bio_and_link<'a>(
+    artist: &'a ArtistUIViewData,
+    info: Option<&'a nokkvi_data::types::artist::ArtistInfo>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    fn text(field: Option<&String>) -> Option<&str> {
+        field.map(String::as_str).filter(|s| !s.trim().is_empty())
+    }
+    let web = |field: Option<&'a String>| {
+        text(field).filter(|url| nokkvi_data::utils::server_url::has_http_scheme(url))
+    };
+    let bio =
+        text(artist.biography.as_ref()).or_else(|| text(info.and_then(|i| i.biography.as_ref())));
+    let link = web(artist.external_url.as_ref())
+        .or_else(|| web(info.and_then(|i| i.external_url.as_ref())));
+    (bio, link)
+}
+
+/// The bio link's label: it names where the link goes ("Read more on
+/// last.fm"), since Navidrome fills the link from whichever agent answered
+/// and it is not always Last.fm. "Read more" when the link has no host.
+pub(crate) fn bio_link_label(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            let host = parsed.host_str()?;
+            let host = host.strip_prefix("www.").unwrap_or(host);
+            (!host.is_empty()).then(|| format!("Read more on {host}"))
+        })
+        .unwrap_or_else(|| "Read more".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use nokkvi_data::types::artist::ArtistInfo;
+
+    use super::*;
+    use crate::test_helpers::make_artist;
+
+    fn row(bio: Option<&str>, link: Option<&str>) -> ArtistUIViewData {
+        let mut artist = make_artist("a1", "A");
+        artist.biography = bio.map(str::to_string);
+        artist.external_url = link.map(str::to_string);
+        artist
+    }
+
+    fn fetched(bio: Option<&str>, link: Option<&str>) -> ArtistInfo {
+        ArtistInfo {
+            biography: bio.map(str::to_string),
+            external_url: link.map(str::to_string),
+            ..ArtistInfo::default()
+        }
+    }
+
+    /// The case this item is about: a native row Navidrome had not filled
+    /// yet shows the fetched answer.
+    #[test]
+    fn the_fetched_answer_fills_an_empty_native_row() {
+        let artist = row(None, None);
+        let info = fetched(Some("fetched bio"), Some("https://www.last.fm/music/A"));
+        assert_eq!(
+            pill_bio_and_link(&artist, Some(&info)),
+            (Some("fetched bio"), Some("https://www.last.fm/music/A"))
+        );
+        assert_eq!(pill_bio_and_link(&artist, None), (None, None));
+    }
+
+    /// A filled native row is never older than the fetched answer (a refresh
+    /// the fetch queued reaches the row through the library reload), so it
+    /// wins field by field.
+    #[test]
+    fn a_filled_native_row_wins_field_by_field() {
+        let artist = row(Some("native bio"), None);
+        let info = fetched(Some("fetched bio"), Some("https://www.last.fm/music/A"));
+        assert_eq!(
+            pill_bio_and_link(&artist, Some(&info)),
+            (Some("native bio"), Some("https://www.last.fm/music/A"))
+        );
+    }
+
+    /// The link is handed to `xdg-open`, so only a web link is offered.
+    #[test]
+    fn only_a_web_link_is_offered() {
+        let artist = row(Some("bio"), Some("file:///etc/passwd"));
+        let info = fetched(None, Some("mailto:someone@example.com"));
+        assert_eq!(pill_bio_and_link(&artist, Some(&info)), (Some("bio"), None));
+        let artist = row(Some("bio"), Some("javascript:alert(1)"));
+        let info = fetched(None, Some("HTTPS://example.org/a"));
+        assert_eq!(
+            pill_bio_and_link(&artist, Some(&info)),
+            (Some("bio"), Some("HTTPS://example.org/a"))
+        );
+    }
+
+    #[test]
+    fn empty_text_counts_as_none() {
+        let artist = row(Some(""), Some(" "));
+        assert_eq!(pill_bio_and_link(&artist, None), (None, None));
+        let blank = fetched(Some("  "), Some(""));
+        let artist = row(Some("native bio"), None);
+        assert_eq!(
+            pill_bio_and_link(&artist, Some(&blank)),
+            (Some("native bio"), None)
+        );
+    }
+
+    #[test]
+    fn the_link_label_names_the_site_it_opens() {
+        assert_eq!(
+            bio_link_label("https://www.last.fm/music/Sia"),
+            "Read more on last.fm"
+        );
+        assert_eq!(
+            bio_link_label("https://isissemajhall.com/"),
+            "Read more on isissemajhall.com"
+        );
+        assert_eq!(bio_link_label("not a url"), "Read more");
     }
 }

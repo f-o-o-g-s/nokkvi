@@ -12,6 +12,10 @@ use crate::{
     widgets,
 };
 
+/// How long an artist must stay centred before the Artists view asks the
+/// server for its info (`getArtistInfo2`).
+const ARTIST_INFO_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+
 impl Nokkvi {
     /// Sort UI artists in-place by rating (Some > None, then desc by value).
     /// Used by the rating-sort carve-out after every page load — the
@@ -255,6 +259,119 @@ impl Nokkvi {
         )
     }
 
+    /// Fetch the centred artist's info (`getArtistInfo2`) unless it is
+    /// cached or already in flight. Navidrome asks its agents for an
+    /// artist's biography only on this call, so without it the bio stays
+    /// blank on a server no other client browses.
+    ///
+    /// The in-flight mark is set before the `app_service` check, like the
+    /// large-artwork marker: it is the observable side effect tests use. In
+    /// the app it is never left behind without a request: `InfoSettled` only
+    /// comes from a timer `artist_center_tasks` starts with a service, and
+    /// logout (which drops the service) clears the marks.
+    pub(crate) fn artist_info_task(&mut self, artist_id: String) -> Task<Message> {
+        let Some(generation) = self.artist_info.begin(&artist_id) else {
+            return Task::none();
+        };
+        let id = artist_id.clone();
+        self.shell_task(
+            move |shell| async move { shell.artist_info_api().await?.get_artist_info(&id).await },
+            move |result| Self::artist_info_result_message(generation, artist_id, result),
+        )
+    }
+
+    /// The large artwork and the info for the artist the Artists view just
+    /// centred. Every centring path goes through this, so the biography
+    /// follows the same trigger as the artwork panel it sits on. The info is
+    /// asked for only once the artist has stayed centred for
+    /// [`ARTIST_INFO_SETTLE`]: a first ask makes the server run its agents
+    /// and broadcast a library refresh, too much to do for every row a held
+    /// arrow key scrolls past.
+    pub(crate) fn artist_center_tasks(&mut self, artist_id: String) -> Task<Message> {
+        let artwork = self.handle_load_artist_large_artwork(artist_id.clone());
+        let info = if self.artist_info.centre(&artist_id) && self.app_service.is_some() {
+            Task::perform(tokio::time::sleep(ARTIST_INFO_SETTLE), move |()| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoSettled(
+                    artist_id,
+                ))
+            })
+        } else {
+            Task::none()
+        };
+        Task::batch([artwork, info])
+    }
+
+    /// An artist's settle timer fired: ask about it if it is still the one
+    /// centred last.
+    pub(crate) fn handle_artist_info_settled(&mut self, artist_id: String) -> Task<Message> {
+        if self.artist_info.settled(&artist_id) {
+            self.artist_info_task(artist_id)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// The artist whose panel the Artists view shows: the effective centre
+    /// (a clicked row's highlight, else the viewport centre), with an album
+    /// row of an expanded artist resolving to that artist. The same row the
+    /// view's artwork pill resolves.
+    pub(crate) fn centred_artist_id(&self) -> Option<String> {
+        let artists = &self.library.artists;
+        let page = &self.artists_page;
+        let idx = page
+            .common
+            .get_center_item_index(page.expansion.flattened_len(artists))?;
+        match page.expansion.get_entry_at(idx, artists, |a| &a.id)? {
+            views::expansion::SlotListEntry::Parent(artist) => Some(artist.id.clone()),
+            views::expansion::SlotListEntry::Child(_, parent_id) => Some(parent_id),
+        }
+    }
+
+    /// The message a finished `getArtistInfo2` fetch sends: a rejected
+    /// session goes to the login screen, anything else lands in
+    /// [`Self::handle_artist_info_loaded`].
+    pub(crate) fn artist_info_result_message(
+        generation: u64,
+        artist_id: String,
+        result: anyhow::Result<nokkvi_data::types::artist::ArtistInfo>,
+    ) -> Message {
+        if let Err(e) = &result
+            && let Some(msg) = super::components::session_expired_message(e)
+        {
+            return msg;
+        }
+        Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoLoaded {
+            generation,
+            artist_id,
+            result: result.map_err(|e| format!("{e:#}")),
+        })
+    }
+
+    /// Land a `getArtistInfo2` answer: cache it, or on failure release the
+    /// artist so the next centring asks again.
+    ///
+    /// A failure is logged and not toasted: the biography is a garnish, and
+    /// a toast per centred artist would bury the view while the server is
+    /// unreachable. The native row's biography still shows.
+    pub(crate) fn handle_artist_info_loaded(
+        &mut self,
+        generation: u64,
+        artist_id: &str,
+        result: Result<nokkvi_data::types::artist::ArtistInfo, String>,
+    ) -> Task<Message> {
+        let info = match result {
+            Ok(info) => Some(info),
+            Err(e) => {
+                debug!("getArtistInfo2 for {artist_id} failed (asked again on next centring): {e}");
+                None
+            }
+        };
+        if !self.artist_info.finish(generation, artist_id, info) {
+            debug!("getArtistInfo2 for {artist_id} landed after logout; dropped");
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_artists_page_loaded(
         &mut self,
         result: Result<Vec<ArtistUIViewData>, String>,
@@ -457,7 +574,7 @@ impl Nokkvi {
                 // scroll-driven `LoadLargeArtwork` path, so the artwork
                 // column would stay blank until the user nudged the list.
                 // Mirror the Albums fix and kick the fetch from here.
-                let artwork_task = self.handle_load_artist_large_artwork(id.clone());
+                let artwork_task = self.artist_center_tasks(id.clone());
 
                 let albums_task = self.expand_load_children_task(
                     move |shell| async move {
@@ -554,17 +671,8 @@ impl Nokkvi {
                 // that lands in this arm exactly once per drag.
                 let mut batch: Vec<Task<Message>> = vec![cmd.map(Message::Artists)];
 
-                let total = self.library.artists.len();
-                if total > 0
-                    && let Some(center_idx) = self
-                        .artists_page
-                        .common
-                        .slot_list
-                        .get_center_item_index(total)
-                    && let Some(artist) = self.library.artists.get(center_idx)
-                {
-                    let id = artist.id.clone();
-                    batch.push(self.handle_load_artist_large_artwork(id));
+                if let Some(id) = self.centred_artist_id() {
+                    batch.push(self.artist_center_tasks(id));
                 }
 
                 // Prefetch viewport mini artwork + chain a page-load if
@@ -608,6 +716,14 @@ impl Nokkvi {
             } => self.handle_artists_loaded(result, total_count, background, anchor_id),
             ArtistsLoaderMessage::PageLoaded(result, total_count) => {
                 self.handle_artists_page_loaded(result, total_count)
+            }
+            ArtistsLoaderMessage::InfoLoaded {
+                generation,
+                artist_id,
+                result,
+            } => self.handle_artist_info_loaded(generation, &artist_id, result),
+            ArtistsLoaderMessage::InfoSettled(artist_id) => {
+                self.handle_artist_info_settled(artist_id)
             }
         }
     }

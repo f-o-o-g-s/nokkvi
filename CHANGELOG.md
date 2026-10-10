@@ -60,6 +60,10 @@ All notable changes to this project will be documented in this file.
 - Seeking a song the server transcodes on the fly is now refused up front, with no seek handle and no media-widget seek bar.
 - A song the server transcodes on the fly is no longer labelled bit-perfect, and shows the codec the server actually sends.
 - A radio station whose server reports a stream length now reconnects when it drops instead of ending like a song.
+- The Artists view now shows an artist's biography even when no other app has opened that artist on the server before.
+- An artist biography's link now names the site it opens instead of always saying Last.fm.
+- Clicking an artist off the centre row now loads that artist's full-size artwork instead of a blurry thumbnail.
+- Scrolling an expanded artist's albums no longer loads another artist's artwork in the background.
 
 ### Removed
 

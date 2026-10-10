@@ -38,6 +38,7 @@
 //! exists for the same reason — `#[derive(Default)]` cannot express
 //! `NonZeroUsize` capacities at compile time.
 
+mod artist_info;
 mod artwork;
 mod audio;
 mod dynamic_accent;
@@ -63,6 +64,7 @@ mod toast;
 mod trawl;
 mod window;
 
+pub(crate) use artist_info::*;
 pub(crate) use artwork::*;
 pub(crate) use audio::*;
 pub(crate) use dynamic_accent::*;

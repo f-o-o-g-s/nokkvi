@@ -18,6 +18,7 @@
 /// use the crate-wide `crate::theme::THEME_MODE_LOCK` for the same reason.
 pub(super) static SSE_SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+mod artist_info;
 mod artwork;
 mod artwork_064;
 mod artwork_drag;

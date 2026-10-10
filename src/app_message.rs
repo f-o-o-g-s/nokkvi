@@ -1195,6 +1195,18 @@ pub enum ArtistsLoaderMessage {
         Result<Vec<nokkvi_data::backend::artists::ArtistUIViewData>, String>,
         usize,
     ),
+    /// A `getArtistInfo2` answer for `artist_id`, fetched when the artist was
+    /// centred. `generation` is the session counter it was dispatched under
+    /// (see `ArtistInfoState`). A rejected session never arrives here: it is
+    /// routed to `Message::SessionExpired`.
+    InfoLoaded {
+        generation: u64,
+        artist_id: String,
+        result: Result<nokkvi_data::types::artist::ArtistInfo, String>,
+    },
+    /// An artist's settle timer fired; the info is asked for only if it is
+    /// still the artist centred last.
+    InfoSettled(String),
 }
 
 // --- Songs Loader ----------------------------------------------------------

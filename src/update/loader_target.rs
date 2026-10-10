@@ -253,17 +253,9 @@ impl LoaderTarget for ArtistsTarget {
     }
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
-        let total = app.library.artists.len();
-        if total == 0 || app.app_service.is_none() {
-            return None;
-        }
-        let center_idx = app
-            .artists_page
-            .common
-            .slot_list
-            .get_center_item_index(total)?;
-        let artist_id = app.library.artists.get(center_idx)?.id.clone();
-        Some(app.handle_load_artist_large_artwork(artist_id))
+        app.app_service.as_ref()?;
+        let artist_id = app.centred_artist_id()?;
+        Some(app.artist_center_tasks(artist_id))
     }
 
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {

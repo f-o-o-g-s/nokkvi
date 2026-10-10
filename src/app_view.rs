@@ -1616,6 +1616,7 @@ impl Nokkvi {
             artist_art: &self.artwork.album_art.snapshot,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
+            artist_info: &self.artist_info.cache.snapshot,
             window_width: chrome.pane_width,
             window_height: chrome.pane_height,
             chrome,

@@ -1685,6 +1685,8 @@ impl Nokkvi {
             similar_songs: _,
             // Carried, like every stale-drop counter.
             similar_songs_generation: _,
+            // Cache and in-flight set; session generation carried.
+            artist_info: _,
             // Shelves + search; both generations carried.
             harbour: _,
             // Crate + modal; search generation carried.
@@ -1879,6 +1881,7 @@ impl Nokkvi {
         self.artwork = crate::state::ArtworkState::default();
         self.similar_songs = None;
         self.similar_songs_generation = self.similar_songs_generation.carried_forward();
+        self.artist_info.reset_for_session();
         self.harbour.reset_for_session();
         self.trawl.reset_for_session();
         self.drop_active_playlist_context();

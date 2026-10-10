@@ -306,17 +306,17 @@ impl Nokkvi {
                 ))))
             }
             View::Artists => {
-                let total = self.library.artists.len();
-                let center_idx = self
-                    .artists_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)?;
-                let artist_id = self.library.artists.get(center_idx)?.id.clone();
-                if self.artwork.large_artwork.peek(&artist_id).is_some() {
-                    return None;
+                let artist_id = self.centred_artist_id()?;
+                // A roulette spin sweeps past dozens of artists; asking the
+                // server about each would run its agents for every one. The
+                // spin plays its pick, and the next centring asks.
+                if self.roulette.is_some() {
+                    if self.artwork.large_artwork.peek(&artist_id).is_some() {
+                        return None;
+                    }
+                    return Some(self.handle_load_artist_large_artwork(artist_id));
                 }
-                Some(self.handle_load_artist_large_artwork(artist_id))
+                Some(self.artist_center_tasks(artist_id))
             }
             // Shared with the `RadiosAction::None` browse arm so both center-load
             // paths agree on which station to load (see the helper).
