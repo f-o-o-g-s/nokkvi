@@ -79,6 +79,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         bpm: None,
         seek_epoch: 0,
         next_track_epoch: 0,
+        station_id: None,
     }
 }
 
@@ -1992,4 +1993,31 @@ fn a_next_track_reset_after_the_prep_reopens_the_gapless_latch() {
     );
     let _ = app.handle_prepare_next_for_gapless();
     assert!(app.engine.gapless_preparing, "the re-prep goes out");
+}
+
+// ============================================================================
+// MPRIS: a tick only publishes metadata for the item playing now
+// ============================================================================
+
+#[test]
+fn a_queue_tick_matches_queue_playback_only() {
+    use crate::update::playback::tick_matches_active_item;
+    let mut app = test_app();
+    assert!(tick_matches_active_item(None, &app.active_playback));
+    // Built under the queue, landing after a switch to radio: its art and
+    // title are the old song's.
+    seed_radio_playback(&mut app);
+    assert!(!tick_matches_active_item(None, &app.active_playback));
+}
+
+#[test]
+fn a_radio_tick_matches_its_own_station_only() {
+    use crate::update::playback::tick_matches_active_item;
+    let mut app = test_app();
+    // Built for a station, landing after a switch back to the queue.
+    assert!(!tick_matches_active_item(Some("r1"), &app.active_playback));
+    seed_radio_playback(&mut app);
+    assert!(tick_matches_active_item(Some("r1"), &app.active_playback));
+    // Built for another station, landing after a station change.
+    assert!(!tick_matches_active_item(Some("r0"), &app.active_playback));
 }

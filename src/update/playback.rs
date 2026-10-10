@@ -163,6 +163,24 @@ fn resolve_cycle_index(
     })
 }
 
+/// Whether a tick describes the item that is playing NOW. `tick_station` is
+/// the station the tick was built for (`PlaybackStateUpdate::station_id`,
+/// `None` for a queue tick). A tick dispatched before a queue/radio switch, or
+/// a station change, lands after it and still carries the old item's art and
+/// title; publishing those would show the old cover beside the new item for
+/// one tick.
+pub(crate) fn tick_matches_active_item(
+    tick_station: Option<&str>,
+    active: &crate::state::ActivePlayback,
+) -> bool {
+    match active {
+        crate::state::ActivePlayback::Queue => tick_station.is_none(),
+        crate::state::ActivePlayback::Radio(state) => {
+            tick_station == Some(state.station.id.as_str())
+        }
+    }
+}
+
 /// Bundled MPRIS state pushed to D-Bus on each playback tick.
 struct MprisUpdate<'a> {
     playing: bool,
@@ -173,6 +191,11 @@ struct MprisUpdate<'a> {
     /// after the tick read the engine). Everything else in the push still
     /// applies; only the position and the `Seeked` signal stand down.
     position: Option<u32>,
+    /// `false` when the tick was built for another item than the one playing
+    /// now ([`tick_matches_active_item`]): the metadata (art, title) stands
+    /// down for this tick and the next one publishes the right item. Status,
+    /// loop, shuffle and position still apply.
+    metadata_current: bool,
     art_url: Option<&'a str>,
     repeat: bool,
     repeat_queue: bool,
@@ -266,6 +289,7 @@ impl Nokkvi {
         // epoch; a seek landing in the gap bumps it and the update is dropped.
         let seek_epoch = self.seek.epoch.current();
         let radio_station = self.active_playback.radio_station().cloned();
+        let station_id = radio_station.as_ref().map(|s| s.id.clone());
         let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
             state.icy_url.clone()
         } else {
@@ -420,6 +444,7 @@ impl Nokkvi {
                     current_index,
                     current_entry_id,
                     song_id,
+                    station_id,
                     format_suffix,
                     sample_rate,
                     current_stream_bit_perfect,
@@ -456,6 +481,7 @@ impl Nokkvi {
             current_index,
             current_entry_id,
             song_id,
+            station_id,
             format_suffix,
             sample_rate,
             current_stream_bit_perfect,
@@ -934,6 +960,10 @@ impl Nokkvi {
             album: &album,
             duration: dur,
             position: position_is_current.then_some(pos),
+            metadata_current: tick_matches_active_item(
+                station_id.as_deref(),
+                &self.active_playback,
+            ),
             art_url: art_url.as_deref(),
             repeat,
             repeat_queue,
@@ -1178,7 +1208,9 @@ impl Nokkvi {
 
         // Push state via channel (synchronous, non-blocking)
         conn.set_playback_status(status);
-        conn.set_metadata(mpris_title, mpris_artist, u.album, duration_us, u.art_url);
+        if u.metadata_current {
+            conn.set_metadata(mpris_title, mpris_artist, u.album, duration_us, u.art_url);
+        }
         conn.set_loop_status(loop_status);
         conn.set_shuffle(u.random);
 

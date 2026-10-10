@@ -116,6 +116,12 @@ pub struct PlaybackStateUpdate {
     /// `QueueAction::FocusOnSong`.
     pub current_entry_id: Option<u64>,
     pub song_id: Option<String>,
+    /// The radio station `handle_tick` built this update for (its
+    /// `active_playback` snapshot at dispatch), `None` for a queue tick. The
+    /// art, title and `song_id` all describe that item, so a result landing
+    /// after a queue/radio switch is recognisable as describing the old one
+    /// (see `tick_matches_active_item`).
+    pub station_id: Option<String>,
     pub format_suffix: String,
     pub sample_rate: u32,
     /// Whether the CURRENTLY-PLAYING stream was actually built bit-perfect
