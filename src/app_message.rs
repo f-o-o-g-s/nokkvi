@@ -54,8 +54,13 @@ impl std::fmt::Display for PlaylistMutation {
                 skipped,
                 ..
             } => {
-                let plural = if *added == 1 { "" } else { "s" };
-                write!(f, "Added {added} song{plural} to '{name}'")?;
+                if *added == 0 {
+                    // The confirm's skip found every song there by add time.
+                    write!(f, "Nothing added to '{name}'")?;
+                } else {
+                    let plural = if *added == 1 { "" } else { "s" };
+                    write!(f, "Added {added} song{plural} to '{name}'")?;
+                }
                 if *skipped > 0 {
                     write!(f, " ({skipped} already there)")?;
                 }

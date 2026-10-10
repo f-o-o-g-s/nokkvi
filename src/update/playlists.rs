@@ -1,7 +1,9 @@
 //! Playlist data loading and component message handlers
 
+use std::collections::HashSet;
+
 use iced::Task;
-use nokkvi_data::{backend::playlists::PlaylistUIViewData, utils::dedupe::already_present};
+use nokkvi_data::backend::playlists::PlaylistUIViewData;
 use tracing::{debug, error, info};
 
 use super::components::session_expired_message;
@@ -11,16 +13,18 @@ use crate::{
         ArtworkMessage, CollageTarget, Message, NavigationMessage, PlaylistMutation,
         SplitViewMessage,
     },
-    state::PendingAppend,
+    state::{AppendPlan, DuplicatePolicy, PendingAppend, plan_append},
     update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
 
-/// What an add to a playlist did after checking the target's tracks.
+/// What an add to a playlist did.
 enum AppendOutcome {
-    /// None of the batch was there: all `count` songs were added.
-    Added(usize),
-    /// Some were there (`present`, each id once): nothing was written.
+    /// `added` songs were written; `skipped` of the batch were already there
+    /// (only under `DuplicatePolicy::Skip`).
+    Added { added: usize, skipped: usize },
+    /// Some were there (`present`, each id once): nothing was written, the
+    /// user is asked.
     Conflict {
         song_ids: Vec<String>,
         present: Vec<String>,
@@ -28,18 +32,20 @@ enum AppendOutcome {
 }
 
 impl Nokkvi {
-    /// Add `song_ids` to a playlist, asking first when it already holds some
-    /// of them: the one path both add sites take (the picker dialog's Submit
-    /// and quick-add to the default playlist).
+    /// Add `song_ids` to a playlist: the one path every add takes (quick-add
+    /// to the default playlist, the picker dialog's Add, and both buttons of
+    /// the add-conflict confirm), under a `DuplicatePolicy`.
     ///
-    /// Loads the target's track ids (one Subsonic `getPlaylist`, read
-    /// status-checked; there is no ids-only endpoint). With none of the batch there, the add goes
-    /// through right there and ends in `PlaylistMutated(Appended)`, as it
-    /// did before the check. Otherwise nothing is written and
-    /// `PlaylistAppendConflict` opens the confirm. Only songs already in the
-    /// target count; repeats inside the batch are the user's selection. A
-    /// failure toasts `Failed to {error_ctx}: …`, and a 401 routes to the
-    /// session-expired path.
+    /// `Ask` and `Skip` load the target's track ids first (one Subsonic
+    /// `getPlaylist`, read status-checked; there is no ids-only endpoint) and
+    /// decide through `plan_append`: `Ask` writes everything when none of the
+    /// batch is there and otherwise writes nothing and opens the confirm
+    /// (`PlaylistAppendConflict`); `Skip` writes only the songs not there at
+    /// add time; `AddAll` writes everything unread. A write ends in
+    /// `PlaylistMutated(Appended)`. Only songs already in the target count;
+    /// repeats inside the batch are the user's selection. A failure toasts
+    /// `Failed to {error_ctx}: …`, and a 401 routes to the session-expired
+    /// path.
     ///
     /// One add per playlist runs at a time (`playlist_appends`): two checks
     /// in flight together would both pass and add the song twice. An add to
@@ -51,6 +57,7 @@ impl Nokkvi {
         playlist_id: String,
         playlist_name: String,
         song_ids: Vec<String>,
+        policy: DuplicatePolicy,
         error_ctx: &'static str,
     ) -> Task<Message> {
         // Adds start only inside a session (the Home screen). A late playlist
@@ -64,6 +71,7 @@ impl Nokkvi {
         let add = PendingAppend {
             playlist_name,
             song_ids,
+            policy,
             error_ctx,
         };
         let Some(ticket) = self.playlist_appends.start(&playlist_id, add.clone()) else {
@@ -73,6 +81,7 @@ impl Nokkvi {
         let PendingAppend {
             playlist_name,
             song_ids,
+            policy,
             error_ctx,
         } = add;
         let target = playlist_id.clone();
@@ -80,23 +89,34 @@ impl Nokkvi {
             move |shell| async move {
                 let service = shell.playlists_api().await?;
                 // Status-checked: a failed read must not pass as "none there".
-                let existing = service.playlist_song_ids(&target).await?;
-                let present = already_present(&song_ids, &existing);
-                if present.is_empty() {
-                    service.add_songs_to_playlist(&target, &song_ids).await?;
-                    Ok(AppendOutcome::Added(song_ids.len()))
+                let existing = if policy.checks() {
+                    service.playlist_song_ids(&target).await?
                 } else {
-                    Ok(AppendOutcome::Conflict { song_ids, present })
+                    HashSet::new()
+                };
+                match plan_append(&song_ids, &existing, policy) {
+                    AppendPlan::Write { to_add, skipped } => {
+                        if !to_add.is_empty() {
+                            service.add_songs_to_playlist(&target, &to_add).await?;
+                        }
+                        Ok(AppendOutcome::Added {
+                            added: to_add.len(),
+                            skipped,
+                        })
+                    }
+                    AppendPlan::Ask { present } => {
+                        Ok(AppendOutcome::Conflict { song_ids, present })
+                    }
                 }
             },
             move |result: anyhow::Result<AppendOutcome>| {
                 let then = match result {
-                    Ok(AppendOutcome::Added(added)) => {
+                    Ok(AppendOutcome::Added { added, skipped }) => {
                         Message::PlaylistMutated(PlaylistMutation::Appended {
                             name: playlist_name,
                             id: playlist_id.clone(),
                             added,
-                            skipped: 0,
+                            skipped,
                         })
                     }
                     Ok(AppendOutcome::Conflict { song_ids, present }) => {
@@ -146,6 +166,7 @@ impl Nokkvi {
                 playlist_id.to_string(),
                 next.playlist_name,
                 next.song_ids,
+                next.policy,
                 next.error_ctx,
             ),
             None => Task::none(),

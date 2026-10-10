@@ -70,6 +70,7 @@ All notable changes to this project will be documented in this file.
 - A rejected session while loading genres or playlists now returns you to the login screen.
 - Playing several items at once, or a Trawl mix, on a rejected session now returns you to the login screen instead of saying "No songs found".
 - A failed unstar now only puts the star back; it no longer rates the song five stars locally and on the server.
+- The "already in playlist" confirm now re-checks the playlist when it adds, so a song added meanwhile is not added twice.
 
 ### Removed
 

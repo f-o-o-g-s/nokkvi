@@ -7,7 +7,9 @@
 //! waits here and runs its own check once the first has finished, so that
 //! check sees the first add.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use nokkvi_data::utils::dedupe::{already_present, without_present};
 
 use super::StaleDropGen;
 
@@ -16,8 +18,77 @@ use super::StaleDropGen;
 pub struct PendingAppend {
     pub playlist_name: String,
     pub song_ids: Vec<String>,
+    pub policy: DuplicatePolicy,
     /// The failure toast's verb phrase (`Failed to {error_ctx}: …`).
     pub error_ctx: &'static str,
+}
+
+/// What an add does about songs the playlist already holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplicatePolicy {
+    /// Read the playlist's tracks first; with any of the batch already
+    /// there, write nothing and ask (the add-conflict confirm). Quick-add
+    /// and the picker's Add.
+    Ask,
+    /// Read the playlist's tracks first and add only the songs not there
+    /// yet: the confirm's "Add" with its box checked. The read happens at
+    /// add time, not when the confirm opened, so a song another add put
+    /// there while the confirm was open is skipped too.
+    Skip,
+    /// Add every song, repeats included: the confirm's "Add anyway", or its
+    /// "Add" with the box unchecked.
+    AddAll,
+}
+
+impl DuplicatePolicy {
+    /// Whether the add reads the playlist's tracks before it writes.
+    pub fn checks(self) -> bool {
+        !matches!(self, Self::AddAll)
+    }
+}
+
+/// What an add writes once the playlist's tracks are known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AppendPlan {
+    /// Write `to_add` (possibly nothing); `skipped` songs of the batch were
+    /// already there.
+    Write { to_add: Vec<String>, skipped: usize },
+    /// Write nothing and ask: `present` are the batch's ids already there,
+    /// each once.
+    Ask { present: Vec<String> },
+}
+
+/// Decide what an add of `song_ids` writes to a playlist holding `existing`.
+pub(crate) fn plan_append(
+    song_ids: &[String],
+    existing: &HashSet<String>,
+    policy: DuplicatePolicy,
+) -> AppendPlan {
+    match policy {
+        DuplicatePolicy::AddAll => AppendPlan::Write {
+            to_add: song_ids.to_vec(),
+            skipped: 0,
+        },
+        DuplicatePolicy::Ask => {
+            let present = already_present(song_ids, existing);
+            if present.is_empty() {
+                AppendPlan::Write {
+                    to_add: song_ids.to_vec(),
+                    skipped: 0,
+                }
+            } else {
+                AppendPlan::Ask { present }
+            }
+        }
+        DuplicatePolicy::Skip => {
+            let present = already_present(song_ids, existing);
+            let to_add = without_present(song_ids, &present);
+            AppendPlan::Write {
+                skipped: song_ids.len() - to_add.len(),
+                to_add,
+            }
+        }
+    }
 }
 
 /// The adds running (at most one per playlist id) and the adds waiting for
@@ -100,8 +171,84 @@ mod tests {
         PendingAppend {
             playlist_name: name.to_string(),
             song_ids: vec!["s1".to_string()],
+            policy: DuplicatePolicy::Ask,
             error_ctx: "add songs to playlist",
         }
+    }
+
+    fn ids<const N: usize>(ids: [&str; N]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    fn existing<const N: usize>(ids: [&str; N]) -> HashSet<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    /// The confirm's skip reads the playlist at add time: a song another
+    /// add put there while the confirm was open is skipped too.
+    #[test]
+    fn skip_rechecks_against_the_playlist_as_it_is_now() {
+        let batch = ids(["a", "b", "c"]);
+        // The confirm opened with only "a" there; "b" landed since.
+        assert_eq!(
+            plan_append(&batch, &existing(["a", "b"]), DuplicatePolicy::Skip),
+            AppendPlan::Write {
+                to_add: ids(["c"]),
+                skipped: 2,
+            }
+        );
+        // Everything is there by now: nothing is written, nothing doubled.
+        assert_eq!(
+            plan_append(&batch, &existing(["a", "b", "c"]), DuplicatePolicy::Skip),
+            AppendPlan::Write {
+                to_add: Vec::new(),
+                skipped: 3,
+            }
+        );
+        // Repeats inside the batch are the user's selection and stay.
+        assert_eq!(
+            plan_append(
+                &ids(["a", "b", "b"]),
+                &existing(["a"]),
+                DuplicatePolicy::Skip
+            ),
+            AppendPlan::Write {
+                to_add: ids(["b", "b"]),
+                skipped: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn add_all_writes_everything_without_a_check() {
+        assert!(!DuplicatePolicy::AddAll.checks());
+        let batch = ids(["a", "a"]);
+        assert_eq!(
+            plan_append(&batch, &existing(["a"]), DuplicatePolicy::AddAll),
+            AppendPlan::Write {
+                to_add: batch.clone(),
+                skipped: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn ask_writes_when_nothing_is_there_and_asks_otherwise() {
+        assert!(DuplicatePolicy::Ask.checks());
+        let batch = ids(["a", "b", "a"]);
+        assert_eq!(
+            plan_append(&batch, &existing([]), DuplicatePolicy::Ask),
+            AppendPlan::Write {
+                to_add: batch.clone(),
+                skipped: 0,
+            }
+        );
+        assert_eq!(
+            plan_append(&batch, &existing(["a", "z"]), DuplicatePolicy::Ask),
+            AppendPlan::Ask {
+                present: ids(["a"])
+            }
+        );
     }
 
     #[test]

@@ -529,24 +529,11 @@ pub enum TextInputDialogMessage {
     SkipDuplicatesToggled(bool),
 }
 
-/// The songs an add-conflict confirm writes: without the ones already
-/// there when the box is checked, all of them otherwise.
-pub(crate) fn songs_to_add(
-    song_ids: &[String],
-    present: &[String],
-    skip_duplicates: bool,
-) -> Vec<String> {
-    let missing = without_present(song_ids, present);
-    if skip_duplicates && !missing.is_empty() {
-        missing
-    } else {
-        song_ids.to_vec()
-    }
-}
-
 /// `(songs already there, songs in the batch)` for an add conflict. A
-/// repeat inside the batch counts as a song of its own.
-fn add_conflict_counts(song_ids: &[String], present: &[String]) -> (usize, usize) {
+/// repeat inside the batch counts as a song of its own. The skip box is
+/// offered while the first is below the second (see
+/// [`TextInputDialogState::skip_duplicates_offer`]).
+pub(crate) fn add_conflict_counts(song_ids: &[String], present: &[String]) -> (usize, usize) {
     let total = song_ids.len();
     (total - without_present(song_ids, present).len(), total)
 }
@@ -1177,14 +1164,11 @@ mod tests {
     }
 
     #[test]
-    fn songs_to_add_follows_the_box() {
-        let batch = ids(&["a", "b", "a", "c"]);
-        let present = ids(&["a"]);
-        assert_eq!(songs_to_add(&batch, &present, true), ids(&["b", "c"]));
-        assert_eq!(songs_to_add(&batch, &present, false), batch);
-        // Every song already there: no box, so "Add anyway" adds them all
-        // whatever the (hidden) box holds.
-        let all = ids(&["a", "a"]);
-        assert_eq!(songs_to_add(&all, &present, true), all);
+    fn add_conflict_counts_count_batch_repeats_as_their_own_songs() {
+        assert_eq!(
+            add_conflict_counts(&ids(&["a", "b", "a", "c"]), &ids(&["a"])),
+            (2, 4)
+        );
+        assert_eq!(add_conflict_counts(&ids(&["a", "a"]), &ids(&["a"])), (2, 2));
     }
 }

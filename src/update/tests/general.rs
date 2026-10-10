@@ -819,6 +819,7 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     let add = crate::state::PendingAppend {
         playlist_name: "Mix".into(),
         song_ids: vec!["s1".into()],
+        policy: crate::state::DuplicatePolicy::Ask,
         error_ctx: "add songs to playlist",
     };
     assert!(app.playlist_appends.start("pl1", add.clone()).is_some());

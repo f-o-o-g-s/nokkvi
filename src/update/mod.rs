@@ -448,6 +448,7 @@ impl Nokkvi {
                                 default_id.clone(),
                                 self.settings.default_playlist_name.clone(),
                                 song_ids,
+                                crate::state::DuplicatePolicy::Ask,
                                 "quick-add to default playlist",
                             );
                         }

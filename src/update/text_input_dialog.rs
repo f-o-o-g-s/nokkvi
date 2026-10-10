@@ -5,8 +5,9 @@ use iced::Task;
 use crate::{
     Nokkvi,
     app_message::{Message, PlaylistMutation},
+    state::DuplicatePolicy,
     widgets::text_input_dialog::{
-        PlaylistOption, TextInputDialogAction, TextInputDialogMessage, songs_to_add,
+        PlaylistOption, TextInputDialogAction, TextInputDialogMessage, add_conflict_counts,
     },
 };
 
@@ -275,34 +276,35 @@ impl Nokkvi {
                     playlist_id,
                     playlist_name,
                     song_ids,
+                    crate::state::DuplicatePolicy::Ask,
                     "add songs to playlist",
                 )
             }
-            // The add-conflict confirm: the check already ran, so this is the
-            // plain add of whatever the box leaves in.
+            // The add-conflict confirm. Both buttons take the same queued add
+            // as every other path, with the policy the dialog settled on: the
+            // skip box (offered only while some of the batch is missing) means
+            // Skip, which reads the playlist again at add time, so a song
+            // another add put there while the confirm was open is skipped
+            // too; "Add anyway" and an unchecked box add everything.
             Some(TextInputDialogAction::AppendToPlaylistConfirmed {
                 playlist_id,
                 playlist_name,
                 song_ids,
                 present,
             }) => {
-                let to_add =
-                    songs_to_add(&song_ids, &present, self.text_input_dialog.skip_duplicates);
+                let (already_there, total) = add_conflict_counts(&song_ids, &present);
+                let skip_offered = already_there < total;
+                let policy = if skip_offered && self.text_input_dialog.skip_duplicates {
+                    DuplicatePolicy::Skip
+                } else {
+                    DuplicatePolicy::AddAll
+                };
                 self.text_input_dialog.close();
-                let added = to_add.len();
-                let skipped = song_ids.len() - added;
-                let id_for_msg = playlist_id.clone();
-                self.shell_action_task(
-                    move |shell| async move {
-                        let service = shell.playlists_api().await?;
-                        service.add_songs_to_playlist(&playlist_id, &to_add).await
-                    },
-                    Message::PlaylistMutated(PlaylistMutation::Appended {
-                        name: playlist_name,
-                        id: id_for_msg,
-                        added,
-                        skipped,
-                    }),
+                self.append_songs_to_playlist_task(
+                    playlist_id,
+                    playlist_name,
+                    song_ids,
+                    policy,
                     "add songs to playlist",
                 )
             }

@@ -806,6 +806,11 @@ fn appended_toast_counts_songs_and_skips() {
         appended(1, 1),
         "Added 1 song to 'Road Trip' (1 already there)"
     );
+    // The confirm's skip can find every song there by add time.
+    assert_eq!(
+        appended(0, 2),
+        "Nothing added to 'Road Trip' (2 already there)"
+    );
 }
 
 // --- Two adds to one playlist never check at the same time -------------------
@@ -930,6 +935,74 @@ fn a_finished_add_still_handles_its_outcome() {
 
     assert!(app.text_input_dialog.visible, "the confirm opens");
     assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
+}
+
+/// The confirm's "Add" with the skip box checked goes through the same
+/// queued add as every other path: it waits for an add already running on
+/// the playlist and re-checks at add time, so a song that other add put
+/// there while the confirm was open is not added again.
+#[test]
+fn a_confirmed_skip_add_waits_its_turn_and_rechecks() {
+    use crate::{state::DuplicatePolicy, widgets::text_input_dialog::TextInputDialogMessage};
+
+    let mut app = home_app();
+    // Add #1's check found "a" there and asks.
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+    assert!(app.text_input_dialog.visible, "the confirm is open");
+    // Meanwhile add #2 (a quick-add of "b") starts on the same playlist.
+    quick_add(&mut app, &["b"]);
+    let running = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("add #2 is in flight");
+
+    // The user confirms with the box checked.
+    assert!(app.text_input_dialog.skip_duplicates);
+    let _ = app.update(Message::TextInputDialog(TextInputDialogMessage::Submit));
+    assert!(!app.text_input_dialog.visible, "the confirm closed");
+
+    assert_eq!(
+        app.playlist_appends.running_ticket("pl1"),
+        Some(running),
+        "add #2 keeps running; the confirmed add must not write beside it"
+    );
+    let waiting = app.playlist_appends.waiting("pl1");
+    assert_eq!(waiting.len(), 1, "the confirmed add waits its turn");
+    assert_eq!(waiting[0].policy, DuplicatePolicy::Skip);
+    assert_eq!(
+        waiting[0].song_ids,
+        vec!["a".to_string(), "b".to_string()],
+        "the whole batch goes in: the check at add time decides what to skip"
+    );
+}
+
+/// "Add anyway" (everything already there) and "Add" with the box unchecked
+/// both add every song, through the same gate.
+#[test]
+fn add_anyway_and_an_unchecked_box_add_everything_through_the_gate() {
+    use crate::{state::DuplicatePolicy, widgets::text_input_dialog::TextInputDialogMessage};
+
+    let mut app = home_app();
+    quick_add(&mut app, &["z"]);
+    let _ = app.update(conflict(&["a"], &["a"]));
+    assert_eq!(app.text_input_dialog.submit_label(), "Add anyway");
+    let _ = app.update(Message::TextInputDialog(TextInputDialogMessage::Submit));
+    let waiting = app.playlist_appends.waiting("pl1");
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].policy, DuplicatePolicy::AddAll);
+    assert_eq!(waiting[0].song_ids, vec!["a".to_string()]);
+
+    let mut app = home_app();
+    quick_add(&mut app, &["z"]);
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::SkipDuplicatesToggled(false),
+    ));
+    let _ = app.update(Message::TextInputDialog(TextInputDialogMessage::Submit));
+    let waiting = app.playlist_appends.waiting("pl1");
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].policy, DuplicatePolicy::AddAll);
+    assert_eq!(waiting[0].song_ids, vec!["a".to_string(), "b".to_string()]);
 }
 
 /// A playlist fetch that lands after logout must not start an add: with no
