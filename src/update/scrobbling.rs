@@ -6,7 +6,8 @@ use tracing::{debug, warn};
 use crate::{
     Nokkvi,
     app_message::{
-        HotkeyMessage, Message, RadioSubmitOutcome, ScrobbleMessage, ScrobbleTargets, ScrobbleTrack,
+        HotkeyMessage, Message, RadioSubmitOutcome, ScrobbleMessage, ScrobbleTargets,
+        ScrobbleTrack, ScrobbledSong,
     },
 };
 
@@ -77,11 +78,14 @@ impl Nokkvi {
                 let (server_url, cred) = auth.server_config().await;
 
                 let send_result = if let Some(api_client) = auth.get_client().await {
-                    let http_client = api_client.http_client();
-                    let url = format!(
-                        "{server_url}/rest/scrobble?id={song_id}&submission=false&{cred}&f=json&v=1.8.0&c=nokkvi"
+                    let request = nokkvi_data::services::api::scrobble::scrobble_request(
+                        &api_client.http_client(),
+                        &server_url,
+                        &cred,
+                        &song_id,
+                        false,
                     );
-                    match http_client.get(&url).send().await {
+                    match request.send().await {
                         Ok(resp) => {
                             if resp.status().is_success() {
                                 Ok(())
@@ -151,21 +155,24 @@ impl Nokkvi {
             return Task::none();
         }
         debug!(" [SCROBBLE] Submitting scrobble for: {}", song_id);
-        let return_id = song_id.clone();
+        let scrobbled = self.scrobbled_song(song_id.clone());
         self.shell_task(
             move |shell| async move {
                 let auth = shell.auth();
                 let (server_url, cred) = auth.server_config().await;
 
                 if let Some(api_client) = auth.get_client().await {
-                    let http_client = api_client.http_client();
-                    let url = format!(
-                        "{server_url}/rest/scrobble?id={song_id}&submission=true&{cred}&f=json&v=1.8.0&c=nokkvi"
+                    let request = nokkvi_data::services::api::scrobble::scrobble_request(
+                        &api_client.http_client(),
+                        &server_url,
+                        &cred,
+                        &song_id,
+                        true,
                     );
-                    match http_client.get(&url).send().await {
+                    match request.send().await {
                         Ok(resp) => {
                             if resp.status().is_success() {
-                                Ok(return_id)
+                                Ok(scrobbled)
                             } else {
                                 Err(format!("HTTP {}", resp.status()))
                             }
@@ -193,14 +200,39 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// `song_id` with the album and artist ids of its loaded row: the queue's
+    /// first, then the Songs view's. Read when the submission is sent; see
+    /// [`ScrobbledSong`].
+    pub(crate) fn scrobbled_song(&self, song_id: String) -> ScrobbledSong {
+        let non_empty = |id: &str| (!id.is_empty()).then(|| id.to_string());
+        let (album_id, artist_id) =
+            if let Some(row) = self.library.queue_songs.iter().find(|s| s.id == song_id) {
+                (non_empty(&row.album_id), non_empty(&row.artist_id))
+            } else if let Some(row) = self.library.songs.iter().find(|s| s.id == song_id) {
+                (
+                    row.album_id.as_deref().and_then(non_empty),
+                    row.artist_id.as_deref().and_then(non_empty),
+                )
+            } else {
+                (None, None)
+            };
+        ScrobbledSong {
+            song_id,
+            album_id,
+            artist_id,
+        }
+    }
+
     /// Handle the result of a scrobble submission. On success, dispatch a local
     /// play-count increment so the UI tracks Navidrome without needing a refetch.
     pub(crate) fn handle_scrobble_submission_result(
         &mut self,
-        result: Result<String, String>,
+        result: Result<ScrobbledSong, String>,
     ) -> Task<Message> {
         match result {
-            Ok(song_id) => {
+            Ok(scrobbled) => {
+                let change = scrobbled.library_change();
+                let song_id = scrobbled.song_id;
                 debug!(" [SCROBBLE] ✅ Submission accepted for {}", song_id);
                 // Latch on CONFIRMED success only, and clear the in-flight guard.
                 self.scrobble.submitted = true;
@@ -214,9 +246,21 @@ impl Nokkvi {
                 if self.settings.rating_reminder_trigger.is_scrobble() {
                     self.maybe_fire_rating_reminder(&song_id);
                 }
-                Task::done(Message::Hotkey(HotkeyMessage::SongPlayCountIncremented(
-                    song_id,
-                )))
+                // The request carried the client unique id, so Navidrome's
+                // refreshResource for this play skips our own event stream
+                // (and no longer reaches other users). Replay it here: the
+                // reload brings the album and artist play counts, the
+                // last-played dates and a Most Played / Recently Played order
+                // up to date, which no local field edit can do for a
+                // server-sorted paged list. The local bump below still covers
+                // the queue and the other song rows the reload doesn't touch.
+                let refresh = self.handle_library_changed(change);
+                Task::batch([
+                    Task::done(Message::Hotkey(HotkeyMessage::SongPlayCountIncremented(
+                        song_id,
+                    ))),
+                    refresh,
+                ])
             }
             Err(e) => {
                 // Leave `submitted` false so the next tick retries this song's

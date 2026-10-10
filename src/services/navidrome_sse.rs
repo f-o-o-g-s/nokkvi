@@ -95,6 +95,26 @@ pub struct LibraryChange {
     pub is_wildcard: bool,
 }
 
+impl LibraryChange {
+    /// The `refreshResource` Navidrome sends for a star or setRating on `id`:
+    /// one id under the entity's own kind (`server/subsonic/media_annotation.go`).
+    ///
+    /// nokkvi's own writes carry its client unique id, so that event skips
+    /// nokkvi's stream; the UI replays it locally once the write is
+    /// confirmed, which keeps a Favorited or Rating sort current.
+    pub(crate) fn for_annotation(kind: nokkvi_data::types::ItemKind, id: String) -> Self {
+        use nokkvi_data::types::ItemKind;
+        let mut change = Self::default();
+        match kind {
+            ItemKind::Album => change.album_ids.push(id),
+            ItemKind::Artist => change.artist_ids.push(id),
+            ItemKind::Song => change.song_ids.push(id),
+            ItemKind::Playlist => change.playlist_ids.push(id),
+        }
+        change
+    }
+}
+
 /// Events yielded to the iced runloop
 #[derive(Debug, Clone)]
 pub(crate) enum SseEvent {
@@ -231,18 +251,16 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
             let url = format!("{}/api/events", info.server_url.trim_end_matches('/'));
             debug!(" [SSE] Connecting to {}", url);
 
-            match client
-                .get(&url)
-                .header("Accept", "text/event-stream")
-                .header("X-ND-Authorization", format!("Bearer {token}"))
-                // Same unique id as the API requests — Navidrome skips
-                // echoing our own mutations back over this stream.
-                .header(
-                    "X-ND-Client-Unique-Id",
-                    nokkvi_data::services::api::client::client_unique_id(),
-                )
-                .send()
-                .await
+            // Same unique id as the API requests: Navidrome skips echoing our
+            // own mutations back over this stream.
+            match nokkvi_data::services::api::client::with_client_unique_id(
+                client
+                    .get(&url)
+                    .header("Accept", "text/event-stream")
+                    .header("X-ND-Authorization", format!("Bearer {token}")),
+            )
+            .send()
+            .await
             {
                 Ok(response) => {
                     let status = response.status();

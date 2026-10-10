@@ -281,3 +281,85 @@ fn rating_revert_message_routes_playlist_through_song_handler_for_now() {
 }
 
 // ============================================================================
+// #30 — confirmed star / rating writes replay the event the server no longer
+// echoes to nokkvi (its requests carry the client unique id)
+// ============================================================================
+
+fn library_change_of(
+    msg: crate::app_message::Message,
+) -> crate::services::navidrome_sse::LibraryChange {
+    match msg {
+        crate::app_message::Message::LibraryChanged(change) => change,
+        other => panic!("expected LibraryChanged, got {other:?}"),
+    }
+}
+
+#[test]
+fn confirmed_star_refreshes_the_starred_kind() {
+    use nokkvi_data::types::ItemKind;
+
+    use crate::services::navidrome_sse::LibraryChange;
+
+    let msg = crate::Nokkvi::star_result_message(Ok(()), "a1".into(), ItemKind::Album, true);
+    assert_eq!(
+        library_change_of(msg),
+        LibraryChange {
+            album_ids: vec!["a1".into()],
+            ..Default::default()
+        }
+    );
+    let msg = crate::Nokkvi::star_result_message(Ok(()), "p1".into(), ItemKind::Playlist, false);
+    assert_eq!(
+        library_change_of(msg),
+        LibraryChange {
+            playlist_ids: vec!["p1".into()],
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn confirmed_rating_refreshes_the_rated_kind() {
+    use nokkvi_data::types::ItemKind;
+
+    use crate::services::navidrome_sse::LibraryChange;
+
+    let msg = crate::Nokkvi::rating_result_message(Ok(()), "ar1".into(), ItemKind::Artist, 2);
+    assert_eq!(
+        library_change_of(msg),
+        LibraryChange {
+            artist_ids: vec!["ar1".into()],
+            ..Default::default()
+        }
+    );
+    let msg = crate::Nokkvi::rating_result_message(Ok(()), "s1".into(), ItemKind::Song, 0);
+    assert_eq!(
+        library_change_of(msg),
+        LibraryChange {
+            song_ids: vec!["s1".into()],
+            ..Default::default()
+        }
+    );
+}
+
+/// A failed write still reverts, and refreshes nothing.
+#[test]
+fn failed_star_reverts_instead_of_refreshing() {
+    use nokkvi_data::types::ItemKind;
+
+    let msg = crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "a1".into(),
+        ItemKind::Album,
+        true,
+    );
+    assert!(
+        matches!(
+            msg,
+            crate::app_message::Message::Hotkey(
+                crate::app_message::HotkeyMessage::AlbumStarredStatusUpdated(ref id, false)
+            ) if id == "a1"
+        ),
+        "got {msg:?}"
+    );
+}

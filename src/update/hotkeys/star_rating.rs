@@ -240,6 +240,7 @@ impl Nokkvi {
                 crate::app_message::HotkeyMessage::SongRatingUpdated(song_id.clone(), 5),
             )));
             let sid = song_id.clone();
+            let sid_done = song_id.clone();
             tasks.push(self.shell_task(
                 move |shell| async move {
                     let auth_vm = shell.auth().clone();
@@ -257,11 +258,19 @@ impl Nokkvi {
                     )
                     .await
                 },
-                |result| {
-                    if let Err(e) = result {
+                move |result| match result {
+                    // Replay the setRating event our tagged request no
+                    // longer echoes, as `rating_result_message` does.
+                    Ok(()) => Message::LibraryChanged(
+                        crate::services::navidrome_sse::LibraryChange::for_annotation(
+                            nokkvi_data::types::ItemKind::Song,
+                            sid_done,
+                        ),
+                    ),
+                    Err(e) => {
                         error!("⭐ Failed to set 5-star rating on loved song: {}", e);
+                        Message::NoOp
                     }
-                    Message::NoOp
                 },
             ));
         }

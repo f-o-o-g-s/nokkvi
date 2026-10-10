@@ -1481,7 +1481,7 @@ fn scrobble_and_mpris_handlers_are_independent_of_editor_by_construction() {
     // A scrobble-submission result (the path that increments play counts) flows
     // through update(); it reads queue/engine state, never the editor buffer.
     let _ = app.update(Message::Scrobble(
-        crate::app_message::ScrobbleMessage::SubmissionResult(Ok("q1".to_string())),
+        crate::app_message::ScrobbleMessage::SubmissionResult(Ok(app.scrobbled_song("q1".into()))),
     ));
 
     assert_eq!(

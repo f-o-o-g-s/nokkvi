@@ -840,7 +840,6 @@ impl Nokkvi {
     /// Optimistic local state updates should be done inline at the call site before calling this.
     /// On failure, emits a revert message to restore the original starred state.
     pub(crate) fn star_item_task(&self, id: String, kind: ItemKind, star: bool) -> Task<Message> {
-        let action = if star { "star" } else { "unstar" };
         let revert_id = id.clone();
         debug!(
             " {} {} {}",
@@ -876,18 +875,35 @@ impl Nokkvi {
                     .await
                 }
             },
-            move |result| {
-                if let Err(e) = result {
-                    if let Some(msg) = session_expired_message(&e) {
-                        return msg;
-                    }
-                    error!(" Failed to {} {}: {}", action, kind, e);
-                    // Revert optimistic update by emitting the original starred state
-                    return Self::starred_revert_message(revert_id, kind, !star);
-                }
-                Message::NoOp
-            },
+            move |result| Self::star_result_message(result, revert_id, kind, star),
         )
+    }
+
+    /// Map a star / unstar call's outcome: a failure reverts the optimistic
+    /// update (or expires the session), a success replays the event the
+    /// server no longer echoes to nokkvi ([`LibraryChange::for_annotation`]).
+    ///
+    /// [`LibraryChange::for_annotation`]: crate::services::navidrome_sse::LibraryChange::for_annotation
+    pub(crate) fn star_result_message(
+        result: anyhow::Result<()>,
+        id: String,
+        kind: ItemKind,
+        star: bool,
+    ) -> Message {
+        match result {
+            Ok(()) => Message::LibraryChanged(
+                crate::services::navidrome_sse::LibraryChange::for_annotation(kind, id),
+            ),
+            Err(e) => {
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
+                }
+                let action = if star { "star" } else { "unstar" };
+                error!(" Failed to {} {}: {}", action, kind, e);
+                // Revert optimistic update by emitting the original starred state
+                Self::starred_revert_message(id, kind, !star)
+            }
+        }
     }
 
     /// Build the appropriate starred-status-updated message for a given item kind.
@@ -975,19 +991,33 @@ impl Nokkvi {
 
                 Ok::<_, anyhow::Error>(())
             },
-            move |result| match result {
-                Ok(()) => Message::NoOp,
-                Err(e) => {
-                    if let Some(msg) = session_expired_message(&e) {
-                        return msg;
-                    }
-                    error!(" Failed to set rating: {}", e);
-                    Self::rating_revert_message(revert_id, kind, current_rating)
-                }
-            },
+            move |result| Self::rating_result_message(result, revert_id, kind, current_rating),
         );
 
         Task::batch(vec![Task::done(optimistic_msg), api_task])
+    }
+
+    /// Map a setRating call's outcome: a failure reverts to `current_rating`
+    /// (or expires the session), a success replays the event the server no
+    /// longer echoes to nokkvi, as [`Self::star_result_message`] does.
+    pub(crate) fn rating_result_message(
+        result: anyhow::Result<()>,
+        id: String,
+        kind: ItemKind,
+        current_rating: u32,
+    ) -> Message {
+        match result {
+            Ok(()) => Message::LibraryChanged(
+                crate::services::navidrome_sse::LibraryChange::for_annotation(kind, id),
+            ),
+            Err(e) => {
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
+                }
+                error!(" Failed to set rating: {}", e);
+                Self::rating_revert_message(id, kind, current_rating)
+            }
+        }
     }
 
     /// Resolve song IDs for an entity, fetch the playlists list, and open the dialog.

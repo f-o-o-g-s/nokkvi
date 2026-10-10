@@ -254,6 +254,35 @@ pub enum PlaybackMessage {
     RadioMetadataUpdate(Option<String>, Option<String>),
 }
 
+/// A song whose scrobble submission is in flight or confirmed, with the album
+/// and artist ids read from the loaded rows when the submission was sent
+/// (`Nokkvi::scrobbled_song`), since the row may be gone (consume) by the
+/// time the server answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScrobbledSong {
+    pub song_id: String,
+    pub album_id: Option<String>,
+    pub artist_id: Option<String>,
+}
+
+impl ScrobbledSong {
+    /// The `refreshResource` Navidrome sends for a confirmed scrobble names the
+    /// song, its album and its album artist (`core/scrobbler/play_tracker.go`),
+    /// whose play counts and last-played dates it just bumped. This carries
+    /// the row's track artist id instead, which is enough: the reload keys
+    /// only on which kinds are named, never on the ids. A kind whose id is
+    /// unknown (the row was gone at submit time) is left out, so that rare
+    /// scrobble reloads only the Songs list.
+    pub fn library_change(&self) -> crate::services::navidrome_sse::LibraryChange {
+        crate::services::navidrome_sse::LibraryChange {
+            song_ids: vec![self.song_id.clone()],
+            album_ids: self.album_id.iter().cloned().collect(),
+            artist_ids: self.artist_id.iter().cloned().collect(),
+            ..Default::default()
+        }
+    }
+}
+
 /// Scrobbling-related messages, namespaced under `Message::Scrobble(..)`
 #[derive(Debug, Clone)]
 pub enum ScrobbleMessage {
@@ -261,9 +290,9 @@ pub enum ScrobbleMessage {
     NowPlaying(u64, String),
     /// song_id - submit scrobble
     Submit(String),
-    /// Submission result — `Ok(song_id)` carries the scrobbled song so the UI
-    /// can optimistically bump its local play count to mirror Navidrome.
-    SubmissionResult(Result<String, String>),
+    /// Submission result — `Ok` carries the scrobbled song so the UI can bump
+    /// its local play count and refresh the lists the play changed.
+    SubmissionResult(Result<ScrobbledSong, String>),
     /// Now-playing heartbeat result — does not affect server play counts.
     NowPlayingResult(Result<(), String>),
     /// song_id — the same track looped in repeat-one mode.

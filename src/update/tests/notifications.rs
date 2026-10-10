@@ -112,7 +112,7 @@ fn maybe_fire_does_not_latch_when_suppressed() {
 fn scrobble_trigger_fires_reminder_on_confirmed_scrobble() {
     let mut app = reminder_app("s1");
     // Default trigger is On Scrobble.
-    let _ = app.handle_scrobble_submission_result(Ok("s1".to_string()));
+    let _ = app.handle_scrobble_submission_result(Ok(app.scrobbled_song("s1".into())));
     assert_eq!(app.last_reminded_song_id.as_deref(), Some("s1"));
 }
 
@@ -121,7 +121,7 @@ fn scrobble_trigger_silent_in_percentage_mode() {
     use nokkvi_data::types::player_settings::RatingReminderTrigger;
     let mut app = reminder_app("s1");
     app.settings.rating_reminder_trigger = RatingReminderTrigger::PercentagePlayed;
-    let _ = app.handle_scrobble_submission_result(Ok("s1".to_string()));
+    let _ = app.handle_scrobble_submission_result(Ok(app.scrobbled_song("s1".into())));
     assert_eq!(
         app.last_reminded_song_id, None,
         "scrobble confirmation must not remind while in percentage mode"

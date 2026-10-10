@@ -41,6 +41,27 @@ pub(crate) async fn subsonic_post(
     subsonic_credential: &str,
     extra_params: &[(&str, &str)],
 ) -> Result<reqwest::Response> {
+    subsonic_post_request(
+        http_client,
+        server_url,
+        endpoint,
+        subsonic_credential,
+        extra_params,
+    )
+    .send()
+    .await
+    .with_context(|| format!("Failed to POST to Subsonic endpoint: {endpoint}"))
+}
+
+/// Build (without sending) the [`subsonic_post`] request. Split out so the
+/// request's shape (body, headers) can be tested without a server.
+fn subsonic_post_request(
+    http_client: &reqwest::Client,
+    server_url: &str,
+    endpoint: &str,
+    subsonic_credential: &str,
+    extra_params: &[(&str, &str)],
+) -> reqwest::RequestBuilder {
     let url = format!("{server_url}/rest/{endpoint}");
 
     // Build form body: credentials + standard params + extra params
@@ -53,13 +74,12 @@ pub(crate) async fn subsonic_post(
         ));
     }
 
-    http_client
-        .post(&url)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await
-        .with_context(|| format!("Failed to POST to Subsonic endpoint: {endpoint}"))
+    crate::services::api::client::with_client_unique_id(
+        http_client
+            .post(&url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body),
+    )
 }
 
 /// Send a POST request and verify the response was successful.
@@ -239,6 +259,31 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::types::error::NokkviError;
+
+    /// Every `/rest` POST carries the client unique id, so the event a write
+    /// causes (star, setRating) skips nokkvi's own stream and stays with the
+    /// same user instead of reaching every user on the server.
+    #[test]
+    fn subsonic_post_request_carries_the_client_unique_id() {
+        let client = reqwest::Client::new();
+        let request = subsonic_post_request(
+            &client,
+            "http://localhost:4533",
+            "star",
+            "u=alice&t=tok&s=salt",
+            &[("id", "s1")],
+        )
+        .build()
+        .expect("request builds");
+        assert_eq!(request.url().as_str(), "http://localhost:4533/rest/star");
+        assert_eq!(
+            request
+                .headers()
+                .get(crate::services::api::client::CLIENT_UNIQUE_ID_HEADER)
+                .and_then(|v| v.to_str().ok()),
+            Some(crate::services::api::client::client_unique_id())
+        );
+    }
 
     /// The generic envelope must parse a canonical `{"subsonic-response":
     /// ...}` body and reject a body missing the key — this is the single

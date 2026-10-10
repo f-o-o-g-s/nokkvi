@@ -112,11 +112,30 @@ impl Clone for ApiClient {
     }
 }
 
-/// The per-process client unique id sent as `X-ND-Client-Unique-Id` on
-/// every native request AND the SSE connection — Navidrome uses it to skip
-/// echoing a client's own mutations back over the event stream. Minted
-/// once from the existing `rand` dependency (no `uuid` crate exists in the
-/// workspace and none is added).
+/// The header Navidrome reads a client's unique id from (its
+/// `consts.UIClientUniqueIDHeader`).
+pub const CLIENT_UNIQUE_ID_HEADER: &str = "X-ND-Client-Unique-Id";
+
+/// Tag a request with [`client_unique_id`] under [`CLIENT_UNIQUE_ID_HEADER`].
+///
+/// Navidrome routes the live event a request causes by this id: with it,
+/// the event skips the sender's own stream and reaches only the same user's
+/// other sessions; without it, the event goes to every open stream of every
+/// user on the server. Every native request, every `/rest` request that can
+/// cause an event (`subsonic_post`, the scrobble GETs) and the SSE connection
+/// carry it. Pings, cover art and streams don't; none of them causes a
+/// per-user event. Navidrome also files a tagged now-playing under this id
+/// instead of the player id, so a restart mid-track leaves the old entry
+/// until it expires, as the web UI's do.
+/// nokkvi's reqwest clients keep no cookie store, so Navidrome's cookie
+/// fallback for the id never applies: the header is the only carrier.
+pub fn with_client_unique_id(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request.header(CLIENT_UNIQUE_ID_HEADER, client_unique_id())
+}
+
+/// The per-process client unique id sent by [`with_client_unique_id`].
+/// Minted once from the existing `rand` dependency (no `uuid` crate exists
+/// in the workspace and none is added).
 pub fn client_unique_id() -> &'static str {
     use std::sync::OnceLock;
     static ID: OnceLock<String> = OnceLock::new();
@@ -359,14 +378,11 @@ impl ApiClient {
             url.set_query(Some(&query_parts.join("&")));
         }
 
-        Ok(self
-            .client
-            .request(method, url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            // Navidrome skips echoing our own mutations over SSE for
-            // requests carrying the same unique id as the event-stream
-            // connection — the draft-workspace hardening layer.
-            .header("X-ND-Client-Unique-Id", client_unique_id()))
+        Ok(with_client_unique_id(
+            self.client
+                .request(method, url.as_str())
+                .header("X-ND-Authorization", self.bearer_header()),
+        ))
     }
 
     /// Apply the shared response status policy: 2xx returns the body, 401

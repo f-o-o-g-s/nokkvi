@@ -16,6 +16,7 @@ pub mod playlists;
 pub mod radios;
 pub mod random;
 pub mod rating;
+pub mod scrobble;
 pub mod similar;
 pub mod songs;
 pub mod sort;

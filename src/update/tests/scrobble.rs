@@ -104,7 +104,7 @@ fn successful_submission_latches_submitted() {
     app.scrobble.submitted = false;
     app.scrobble.submission_in_flight = true;
 
-    let _ = app.handle_scrobble_submission_result(Ok("s".to_string()));
+    let _ = app.handle_scrobble_submission_result(Ok(app.scrobbled_song("s".into())));
 
     assert!(
         app.scrobble.submitted,
@@ -318,4 +318,91 @@ fn radio_tick_title_only_icy_is_skipped() {
     app.handle_radio_scrobble_tick(true, false, &mut tasks);
 
     assert!(tasks.is_empty(), "title-only ICY → nothing dispatched");
+}
+
+// ============================================================================
+// #30 — the client-id header stops the scrobble echo, so the UI refreshes
+// the lists the echo used to refresh
+// ============================================================================
+
+/// The submission reads the album and artist ids off the loaded row (queue
+/// first, then the Songs view), so a consume that drops the row before the
+/// server answers can't lose them.
+#[test]
+fn scrobbled_song_reads_ids_from_the_loaded_row() {
+    use crate::app_message::ScrobbledSong;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("q1", "One", "Artist", "Album")];
+    let mut song = make_song("s1", "Two", "Artist");
+    song.album_id = Some("al-s1".into());
+    song.artist_id = Some("ar-s1".into());
+    seed_songs(&mut app, vec![song]);
+
+    assert_eq!(
+        app.scrobbled_song("q1".into()),
+        ScrobbledSong {
+            song_id: "q1".into(),
+            album_id: Some(app.library.queue_songs[0].album_id.clone()),
+            artist_id: Some("artist_q1".into()),
+        }
+    );
+    assert_eq!(
+        app.scrobbled_song("s1".into()),
+        ScrobbledSong {
+            song_id: "s1".into(),
+            album_id: Some("al-s1".into()),
+            artist_id: Some("ar-s1".into()),
+        }
+    );
+    assert_eq!(
+        app.scrobbled_song("gone".into()),
+        ScrobbledSong {
+            song_id: "gone".into(),
+            album_id: None,
+            artist_id: None,
+        }
+    );
+}
+
+/// A confirmed scrobble reloads the Albums, Artists and Songs lists (play
+/// counts, last played, Most Played / Recently Played order), as Navidrome's
+/// `refreshResource` echo did before nokkvi tagged its requests.
+#[test]
+fn confirmed_scrobble_refreshes_the_lists_it_changed() {
+    let mut app = test_app();
+    seed_albums(&mut app, vec![make_album("a0", "Album 0", "Artist")]);
+    seed_artists(&mut app, vec![make_artist("ar0", "Artist 0")]);
+    seed_songs(&mut app, vec![make_song("s0", "Song 0", "Artist")]);
+    seed_genres(&mut app, vec![make_genre("g0", "Genre 0")]);
+    app.library.queue_songs = vec![make_queue_song("q1", "One", "Artist", "Album")];
+    app.scrobble.submission_in_flight = true;
+
+    let scrobbled = app.scrobbled_song("q1".into());
+    let _ = app.handle_scrobble_submission_result(Ok(scrobbled));
+
+    assert!(app.library.albums.is_loading(), "album play count changed");
+    assert!(
+        app.library.artists.is_loading(),
+        "artist play count changed"
+    );
+    assert!(app.library.songs.is_loading(), "song play count changed");
+    assert!(
+        !app.library.genres.is_loading(),
+        "a scrobble names no genre"
+    );
+}
+
+/// A failed submission changed nothing on the server, so nothing reloads.
+#[test]
+fn failed_scrobble_refreshes_nothing() {
+    let mut app = test_app();
+    seed_albums(&mut app, vec![make_album("a0", "Album 0", "Artist")]);
+    seed_songs(&mut app, vec![make_song("s0", "Song 0", "Artist")]);
+    app.scrobble.submission_in_flight = true;
+
+    let _ = app.handle_scrobble_submission_result(Err("HTTP 500".into()));
+
+    assert!(!app.library.albums.is_loading());
+    assert!(!app.library.songs.is_loading());
 }
