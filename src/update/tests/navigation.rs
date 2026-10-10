@@ -1752,7 +1752,10 @@ fn top_songs_asks_by_artist_id_when_the_server_supports_it() {
         by_id,
         crate::state::SimilarSource::TopSongs {
             artist: "Mono".into(),
-            lookup: TopSongsArtist::Id("ar-7".into()),
+            lookup: TopSongsArtist::Id {
+                id: "ar-7".into(),
+                name: "Mono".into(),
+            },
         }
     );
     assert_eq!(by_id.label(), "Top Songs: Mono");
@@ -1765,6 +1768,35 @@ fn top_songs_asks_by_artist_id_when_the_server_supports_it() {
             lookup: TopSongsArtist::Name("Mono".into()),
         }
     );
+}
+
+/// An Albums track row hands its song's artist id to Top Songs.
+#[test]
+fn albums_track_row_top_songs_carries_the_artist_id() {
+    use crate::views::{AlbumsAction, AlbumsMessage, AlbumsPage};
+
+    let albums = vec![make_album("a1", "Record", "Mono")];
+    let mut page = AlbumsPage::new();
+    page.expansion.expanded_id = Some("a1".into());
+    let mut track = make_song("s1", "Track", "Mono");
+    track.artist_id = Some("ar-m".into());
+    page.expansion.children = vec![track];
+    // Row 0 is the album, row 1 its first track.
+    let (_, action) = page.update(
+        AlbumsMessage::ContextMenuAction(
+            1,
+            crate::widgets::context_menu::LibraryContextEntry::TopSongs,
+        ),
+        albums.len(),
+        &albums,
+    );
+    match action {
+        AlbumsAction::TopSongs(name, id) => {
+            assert_eq!(name, "Mono");
+            assert_eq!(id.as_deref(), Some("ar-m"));
+        }
+        other => panic!("expected TopSongs, got {other:?}"),
+    }
 }
 
 /// The Artists row hands its own id to Top Songs (the row IS the artist).

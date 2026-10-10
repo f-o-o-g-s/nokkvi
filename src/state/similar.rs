@@ -62,7 +62,10 @@ mod tests {
         assert_eq!(
             SimilarSource::TopSongs {
                 artist: "Radiohead".into(),
-                lookup: nokkvi_data::services::api::similar::TopSongsArtist::Id("ar-1".into()),
+                lookup: nokkvi_data::services::api::similar::TopSongsArtist::Id {
+                    id: "ar-1".into(),
+                    name: "Radiohead".into(),
+                },
             }
             .label(),
             "Top Songs: Radiohead"

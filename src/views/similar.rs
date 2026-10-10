@@ -750,7 +750,9 @@ mod tests {
     #[test]
     fn context_top_songs_emits_find_top_songs_action() {
         let mut page = SimilarPage::new();
-        let songs = vec![test_song("s1", "Test Song", "Radiohead")];
+        let mut song = test_song("s1", "Test Song", "Radiohead");
+        song.artist_id = Some("ar-r".into());
+        let songs = vec![song];
         page.common
             .handle_slot_click(0, songs.len(), Default::default());
         let (_, action) = page.update(
@@ -758,8 +760,9 @@ mod tests {
             &songs,
         );
         match action {
-            SimilarAction::FindTopSongs(artist, _) => {
+            SimilarAction::FindTopSongs(artist, artist_id) => {
                 assert_eq!(artist, "Radiohead");
+                assert_eq!(artist_id.as_deref(), Some("ar-r"));
             }
             other => panic!("expected FindTopSongs, got {other:?}"),
         }

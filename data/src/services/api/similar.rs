@@ -39,8 +39,10 @@ struct TopSongs {
 pub enum TopSongsArtist {
     /// `id=<artistId>`, from the OpenSubsonic `topSongsByArtistId` extension
     /// (Navidrome 0.64.0+). Names exactly one artist, so two artists who
-    /// share a name don't get each other's songs.
-    Id(String),
+    /// share a name don't get each other's songs. The name rides along as
+    /// `artist=`: Navidrome's `findArtist` tries the id first and falls back
+    /// to the name when the id is unknown (a row from before a rescan).
+    Id { id: String, name: String },
     /// `artist=<name>`, the base Subsonic form. Navidrome matches it against
     /// artist names and takes the first hit.
     Name(String),
@@ -54,16 +56,20 @@ impl TopSongsArtist {
     /// caller has a non-empty id; ask by name otherwise.
     pub fn choose(artist_name: &str, artist_id: Option<&str>, by_id_supported: bool) -> Self {
         match artist_id {
-            Some(id) if by_id_supported && !id.is_empty() => Self::Id(id.to_string()),
+            Some(id) if by_id_supported && !id.is_empty() => Self::Id {
+                id: id.to_string(),
+                name: artist_name.to_string(),
+            },
             _ => Self::Name(artist_name.to_string()),
         }
     }
 
-    /// The query parameter this lookup sends.
-    fn query_param(&self) -> (&'static str, &str) {
+    /// The query parameters this lookup sends.
+    fn query_params(&self) -> Vec<(&'static str, &str)> {
         match self {
-            Self::Id(id) => ("id", id),
-            Self::Name(name) => ("artist", name),
+            Self::Id { id, name } if name.is_empty() => vec![("id", id)],
+            Self::Id { id, name } => vec![("id", id), ("artist", name)],
+            Self::Name(name) => vec![("artist", name)],
         }
     }
 }
@@ -118,13 +124,15 @@ impl SimilarApiService {
     /// empty list that would read as "this artist has no top songs".
     pub async fn get_top_songs(&self, artist: &TopSongsArtist, count: u32) -> Result<Vec<Song>> {
         let count_str = count.to_string();
+        let mut params = artist.query_params();
+        params.push(("count", &count_str));
         let inner: TopSongsResponseInner =
             crate::services::api::subsonic::subsonic_get_envelope_checked(
                 &self.client.http_client(),
                 &self.server_url,
                 "getTopSongs",
                 &self.subsonic_credential,
-                &[artist.query_param(), ("count", &count_str)],
+                &params,
                 "getTopSongs",
             )
             .await?;
@@ -202,17 +210,24 @@ mod tests {
         assert!(songs.is_empty());
     }
 
-    /// With `topSongsByArtistId` advertised, a known id is sent as `id`;
-    /// without it, or without an id, the name is sent as `artist`.
+    /// With `topSongsByArtistId` advertised, a known id is sent as `id`, with
+    /// the name as `artist` for Navidrome's unknown-id fallback; without the
+    /// extension, or without an id, only the name is sent.
     #[test]
-    fn top_songs_asks_by_id_only_with_the_extension_and_an_id() {
+    fn top_songs_asks_by_id_with_the_extension_and_an_id() {
         let by_id = TopSongsArtist::choose("Mono", Some("ar-1"), true);
-        assert_eq!(by_id, TopSongsArtist::Id("ar-1".into()));
-        assert_eq!(by_id.query_param(), ("id", "ar-1"));
+        assert_eq!(
+            by_id,
+            TopSongsArtist::Id {
+                id: "ar-1".into(),
+                name: "Mono".into()
+            }
+        );
+        assert_eq!(by_id.query_params(), [("id", "ar-1"), ("artist", "Mono")]);
 
         let no_ext = TopSongsArtist::choose("Mono", Some("ar-1"), false);
         assert_eq!(no_ext, TopSongsArtist::Name("Mono".into()));
-        assert_eq!(no_ext.query_param(), ("artist", "Mono"));
+        assert_eq!(no_ext.query_params(), [("artist", "Mono")]);
 
         assert_eq!(
             TopSongsArtist::choose("Mono", None, true),
