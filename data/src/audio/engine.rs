@@ -2374,7 +2374,7 @@ impl CustomAudioEngine {
     /// cycle station). With "Fade Radio Switches" enabled and something
     /// audibly playing, runs the fixed `RADIO_SWITCH_FADE_MS` out-ramp and
     /// arms the renderer's first-audio fade-in for the stream the upcoming
-    /// `set_source` + `play` will build. Otherwise delegates to
+    /// `load_radio_stream` + `play` will build. Otherwise delegates to
     /// [`Self::stop`] — including its "Fade on Stop" semantics — so the
     /// switched-off path is byte-identical to the historical explicit stop
     /// these call sites used.
@@ -2384,7 +2384,7 @@ impl CustomAudioEngine {
                 .await;
             self.stop_without_fade().await;
             // Armed AFTER the teardown (renderer.stop() clears it) so the
-            // next fresh start() — the radio stream `set_source` + `play`
+            // next fresh start() — the radio stream `load_radio_stream` + `play`
             // are about to build — fades in from its first real sample.
             self.renderer.lock().request_switch_fade_in();
         } else {
@@ -2746,6 +2746,19 @@ impl CustomAudioEngine {
     ) {
         self.set_source(url.to_string(), expected_duration_ms).await;
         self.renderer.lock().set_pending_replay_gain(rg);
+    }
+
+    /// Load an internet radio stream as the source: every UI radio start
+    /// (play a station, cycle stations) goes through here, then `play()`.
+    ///
+    /// A stream carries no ReplayGain tags, so this stages `None`, the same
+    /// as an untagged track (the fallback dB, or AGC when "fall back to AGC"
+    /// is on). A bare `set_source` would leave the last queue song's tags (or
+    /// a promoted blend's) staged, and the station would build at that level.
+    /// No expected duration: the stream is infinite. The order is
+    /// [`Self::load_track_with_rg`]'s: the source first, then the stash.
+    pub async fn load_radio_stream(&mut self, url: &str) {
+        self.load_track_with_rg(url, None, None).await;
     }
 
     /// Apply the controller's per-transition verdicts (M4 suppress + M8
@@ -5850,7 +5863,7 @@ mod tests {
     /// audibly playing, `stop_for_radio_switch()` (the UI radio-start paths)
     /// must run the switch out-ramp to completion via live render ticks
     /// BEFORE teardown, then arm the renderer's first-audio fade-in for the
-    /// radio stream the upcoming `set_source` + `play` will build.
+    /// radio stream the upcoming `load_radio_stream` + `play` will build.
     #[tokio::test(flavor = "multi_thread")]
     async fn radio_switch_stop_fades_out_and_arms_first_audio_fade_in() {
         let mut engine = CustomAudioEngine::new();
@@ -6786,6 +6799,55 @@ mod tests {
             engine.renderer.lock().pending_replay_gain_for_test(),
             Some(rg(-1.0)),
             "the loaded track must be built with its own tags"
+        );
+    }
+
+    /// A radio start after a tagged queue song: the stream has no tags, so it
+    /// must build at an untagged track's gain, not the last song's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_start_after_a_tagged_song_stages_no_replay_gain() {
+        let mut engine = CustomAudioEngine::new();
+        engine
+            .load_track_with_rg("http://example.test/loud-song", Some(rg(-8.0)), None)
+            .await;
+        engine.force_playing_for_test();
+
+        engine.stop_for_radio_switch().await;
+        engine
+            .load_radio_stream("http://example.test/station")
+            .await;
+
+        assert!(engine.is_playing_source("http://example.test/station"));
+        assert_eq!(
+            engine.renderer.lock().pending_replay_gain_for_test(),
+            None,
+            "the station must not inherit the queue song's tags"
+        );
+    }
+
+    /// A radio start over a live skip blend: the radio-switch stop promotes
+    /// the skip target, which stages the target's tags, and the station must
+    /// still build without them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_start_over_a_live_skip_fade_stages_no_replay_gain() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/target");
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-9.0)));
+
+        engine.stop_for_radio_switch().await;
+        engine
+            .load_radio_stream("http://example.test/station")
+            .await;
+
+        assert!(engine.is_playing_source("http://example.test/station"));
+        assert_eq!(
+            engine.renderer.lock().pending_replay_gain_for_test(),
+            None,
+            "the station must not inherit the promoted skip target's tags"
         );
     }
 

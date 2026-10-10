@@ -1531,8 +1531,8 @@ impl Nokkvi {
                     // first-audio fade-in when "Fade Radio Switches" is on;
                     // a plain stop otherwise.
                     engine.stop_for_radio_switch().await;
-                    // Radio: infinite stream, no metadata duration to expect.
-                    engine.set_source(stream_url, None).await;
+                    // Radio: infinite stream with no ReplayGain tags.
+                    engine.load_radio_stream(&stream_url).await;
                     engine.play().await?;
                     Ok(())
                 },
