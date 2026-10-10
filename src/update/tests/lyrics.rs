@@ -411,6 +411,7 @@ fn library_change_redrives_an_unresolved_track() {
     // annotation writes). A track showing the no-match state gets a second
     // look, so lyrics embedded by the rescan appear without a restart.
     let mut app = test_app();
+    app.screen = crate::Screen::Home;
     app.settings.lyrics_enabled = true;
     app.current_view = crate::View::Queue;
     app.scrobble.current_song_id = Some("song_1".to_string());

@@ -11,12 +11,40 @@ fn wildcard_change() -> LibraryChange {
     }
 }
 
+/// A logged-in app: a library change is only acted on inside a session.
+fn home_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app
+}
+
 // Library Refresh Toast Suppression (library_refresh.rs)
 // ============================================================================
 
+/// A star, rating or scrobble result that lands after logout replays its
+/// library refresh. On the login screen there is no library to refresh, so
+/// nothing may load and no "Library refreshed" toast may appear.
+#[test]
+fn library_changed_on_the_login_screen_toasts_and_loads_nothing() {
+    let mut app = test_app();
+    assert_eq!(app.screen, crate::Screen::Login);
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "A", "Artist")]);
+
+    let task = app.handle_library_changed(wildcard_change());
+
+    assert!(app.toast.toasts.is_empty(), "no toast on the login screen");
+    assert!(
+        !app.library.albums.is_loading(),
+        "no reload is started on the login screen"
+    );
+    assert_eq!(task.units(), 0, "no task is dispatched");
+}
+
 #[test]
 fn library_refreshed_emits_toast_by_default() {
-    let mut app = test_app();
+    let mut app = home_app();
     assert!(!app.settings.suppress_library_refresh_toasts);
     assert!(app.toast.toasts.is_empty());
 
@@ -38,7 +66,7 @@ fn library_refreshed_emits_toast_by_default() {
 
 #[test]
 fn library_refreshed_suppresses_toast_when_flag_set() {
-    let mut app = test_app();
+    let mut app = home_app();
     app.settings.suppress_library_refresh_toasts = true;
     assert!(app.toast.toasts.is_empty());
 
@@ -140,7 +168,7 @@ fn snapshot(app: &crate::Nokkvi) -> LoadingSnapshot {
 
 #[test]
 fn library_refresh_album_only_reloads_albums_only() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&["a1"], &[], &[], &[], &[]));
@@ -155,7 +183,7 @@ fn library_refresh_album_only_reloads_albums_only() {
 
 #[test]
 fn library_refresh_artist_only_reloads_artists_only() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&[], &["ar1"], &[], &[], &[]));
@@ -170,7 +198,7 @@ fn library_refresh_artist_only_reloads_artists_only() {
 
 #[test]
 fn library_refresh_song_only_reloads_songs_only() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&[], &[], &["s1"], &[], &[]));
@@ -185,7 +213,7 @@ fn library_refresh_song_only_reloads_songs_only() {
 
 #[test]
 fn library_refresh_playlist_only_reloads_playlists_only() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&[], &[], &[], &["p1"], &[]));
@@ -203,7 +231,7 @@ fn library_refresh_playlist_only_reloads_playlists_only() {
 
 #[test]
 fn library_refresh_genre_only_reloads_genres_only() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&[], &[], &[], &[], &["g1"]));
@@ -218,7 +246,7 @@ fn library_refresh_genre_only_reloads_genres_only() {
 
 #[test]
 fn library_refresh_album_and_playlist_reloads_both() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(change_with(&["a1"], &[], &[], &["p1"], &[]));
@@ -233,7 +261,7 @@ fn library_refresh_album_and_playlist_reloads_both() {
 
 #[test]
 fn library_refresh_wildcard_reloads_all_kinds() {
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
 
     let _ = app.handle_library_changed(wildcard_change());
@@ -253,7 +281,7 @@ fn library_refresh_does_not_trigger_artwork_refetch() {
     // `Handle::from_bytes` cache-busting reupload causes a one-frame
     // flicker. Cover-art replacements propagate via the parallel paged
     // reload + the user-initiated right-click "Refresh Artwork" path.
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
     // Prime the album_art LRU so any album_id is "in UI" — historically
     // this gated the artwork refresh; today it should not change behavior.
@@ -280,7 +308,7 @@ fn library_refresh_skips_kinds_with_empty_buffers() {
     // First-launch state: nothing has been loaded yet. SSE arrives. The
     // non-empty gate protects against starting reloads for views the user
     // hasn't visited — they'll fetch fresh on first entry.
-    let mut app = test_app();
+    let mut app = home_app();
     // Deliberately do NOT seed any buffers.
 
     let _ = app.handle_library_changed(wildcard_change());
@@ -300,7 +328,7 @@ fn library_refresh_skips_random_sort_for_paginated_kinds() {
     // and jarring the user mid-browse. The user can press F5 to re-randomize
     // intentionally. Applies to the three paged kinds (albums/artists/songs);
     // playlists and genres don't have a Random sort mode so they always run.
-    let mut app = test_app();
+    let mut app = home_app();
     seed_all(&mut app);
     app.albums_page.common.current_sort_mode = SortMode::Random;
     app.artists_page.common.current_sort_mode = SortMode::Random;
@@ -359,7 +387,7 @@ fn albums_loaded_clamps_viewport_when_anchor_missing() {
     // Old buffer had 50 albums, viewport was deep at 40. SSE-driven refresh
     // returns 15 albums and the anchor ID isn't present. viewport_offset must
     // land within the new buffer to keep slots rendering real items.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let old_albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -386,7 +414,7 @@ fn albums_loaded_clamps_viewport_when_anchor_id_none() {
     // Background reload with no anchor (pre-existing buffer empty at snapshot
     // time, then offset advanced somehow). viewport_offset still must land
     // within the new buffer.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let old_albums: Vec<_> = (0..30)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -412,7 +440,7 @@ fn albums_loaded_anchor_match_takes_precedence_over_clamp() {
     // When the anchor IS found, anchor wins — viewport jumps to the new
     // index, even though that index is also within bounds. Locks the existing
     // anchor-restore behavior so the clamp fix can't quietly override it.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let old_albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -442,7 +470,7 @@ fn albums_loaded_purges_stale_selected_indices() {
     // Selected indices that point past the new buffer must be removed —
     // otherwise the slot list highlight + batch-action paths see phantom
     // selections against items that no longer exist.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let old_albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -480,7 +508,7 @@ fn albums_loaded_total_count_matches_buffer_length() {
     // Header total count and buffer length come from the same load — they
     // must agree after `handle_albums_loaded` returns. Locks the assignment
     // ordering so a future reorder doesn't introduce a transient mismatch.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let old_albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -503,7 +531,7 @@ fn albums_loaded_background_preserves_viewport_when_safe() {
     // viewport to 0 (foreground refresh resets, background preserves).
     // Regression guard around the existing `if !background` branch in
     // `handle_albums_loaded`.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -547,7 +575,7 @@ fn albums_loaded_background_preserves_viewport_when_safe() {
 fn albums_scroll_seek_does_not_load_artwork_immediately() {
     // Hot-path scroll events should only update viewport state. Artwork loading
     // is deferred to the seek_settled debounce timer.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -569,7 +597,7 @@ fn albums_scroll_seek_does_not_load_artwork_immediately() {
 fn albums_scroll_seek_bumps_scroll_generation_id() {
     // The seek_settled timer is gated by scroll_generation_id; each scroll
     // event must bump it so stale timers from earlier seeks are skipped.
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let albums: Vec<_> = (0..20)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -594,7 +622,7 @@ fn albums_seek_settled_dispatches_load_large_artwork_for_centered_album() {
     // message reproduces what the 150ms debounce timer does in production.
     use crate::app_message::SlotListMessage;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let albums: Vec<_> = (0..50)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -621,7 +649,7 @@ fn songs_seek_settled_dispatches_load_large_artwork_for_centered_song_album() {
     // regression sentinel so the fix in albums doesn't break the working path.
     use crate::app_message::SlotListMessage;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Songs;
     app.library.songs.set_from_vec(
         (0..50)
@@ -651,7 +679,7 @@ fn albums_seek_settled_skipped_when_generation_id_is_stale() {
     // alongside the fix.
     use crate::app_message::SlotListMessage;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.current_view = View::Albums;
     let albums: Vec<_> = (0..20)
         .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
@@ -755,7 +783,7 @@ fn tray_settings_default_off() {
 
 #[test]
 fn window_opened_replaces_main_window_id() {
-    let mut app = test_app();
+    let mut app = home_app();
     let id1 = iced::window::Id::unique();
     let id2 = iced::window::Id::unique();
 
@@ -774,7 +802,7 @@ fn window_opened_replaces_main_window_id() {
 
 #[test]
 fn window_close_requested_with_close_to_tray_off_does_not_hide() {
-    let mut app = test_app();
+    let mut app = home_app();
     app.settings.show_tray_icon = true;
     app.settings.close_to_tray = false;
     let id = iced::window::Id::unique();
@@ -789,7 +817,7 @@ fn window_close_requested_with_close_to_tray_off_does_not_hide() {
 
 #[test]
 fn window_close_requested_with_close_to_tray_on_destroys_window() {
-    let mut app = test_app();
+    let mut app = home_app();
     app.settings.show_tray_icon = true;
     app.settings.close_to_tray = true;
     app.main_window_id = Some(iced::window::Id::unique());
@@ -807,7 +835,7 @@ fn window_close_requested_with_close_to_tray_on_destroys_window() {
 fn tray_activate_toggles_window_hidden_flag() {
     use crate::services::tray::TrayEvent;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.main_window_id = Some(iced::window::Id::unique());
     assert!(!app.tray_window_hidden);
 
@@ -836,7 +864,7 @@ fn tray_activate_toggles_window_hidden_flag() {
 fn tray_activate_without_window_id_is_noop() {
     use crate::services::tray::TrayEvent;
 
-    let mut app = test_app();
+    let mut app = home_app();
     assert!(app.main_window_id.is_none());
 
     let _ = app.handle_tray(TrayEvent::Activate);
@@ -854,7 +882,7 @@ fn tray_activate_never_opens_a_second_window() {
     // for a live window before opening. No known path pairs a live id with
     // the hidden flag, but if one does, the click must not open a second
     // window beside it.
-    let mut app = test_app();
+    let mut app = home_app();
     let id = iced::window::Id::unique();
     app.main_window_id = Some(id);
     app.tray_window_hidden = true;
@@ -884,7 +912,7 @@ use crate::app_message::{ArtworkMessage, Message};
 
 #[test]
 fn large_artist_loaded_with_none_clears_matching_marker() {
-    let mut app = test_app();
+    let mut app = home_app();
     app.artwork.loading_large_artwork = Some("artist_a".to_string());
 
     let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
@@ -906,7 +934,7 @@ fn large_artist_loaded_with_none_clears_matching_marker() {
 fn large_artist_loaded_for_stale_id_preserves_active_marker() {
     use iced::widget::image;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.artwork.loading_large_artwork = Some("artist_b".to_string());
 
     // Simulate A's late completion arriving after the user moved on to B.
@@ -931,7 +959,7 @@ fn large_artist_loaded_for_stale_id_preserves_active_marker() {
 fn large_artist_loaded_with_handle_clears_matching_marker_and_caches() {
     use iced::widget::image;
 
-    let mut app = test_app();
+    let mut app = home_app();
     app.artwork.loading_large_artwork = Some("artist_a".to_string());
 
     let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
@@ -971,7 +999,7 @@ fn library_changed_skips_reload_during_playlist_edit() {
 
     use crate::state::PlaylistEditorState;
 
-    let mut app = test_app();
+    let mut app = home_app();
     seed_songs(&mut app, songs_indexed(3));
     app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
         "p1".into(),
@@ -1001,7 +1029,7 @@ fn library_changed_skips_reload_during_playlist_edit() {
 fn library_changed_skips_reload_during_cross_pane_drag() {
     use crate::state::CrossPaneDragState;
 
-    let mut app = test_app();
+    let mut app = home_app();
     seed_songs(&mut app, songs_indexed(3));
     app.cross_pane_drag.active = Some(CrossPaneDragState {
         origin: iced::Point::ORIGIN,
@@ -1031,7 +1059,7 @@ fn library_changed_reloads_when_idle() {
     // Positive control: with no gesture active, a non-empty, non-Random songs
     // buffer must still reload on a wildcard change (the guard is not
     // over-broad).
-    let mut app = test_app();
+    let mut app = home_app();
     seed_songs(&mut app, songs_indexed(3));
     assert!(app.playlist_editor.is_none());
     assert!(app.cross_pane_drag.active.is_none());

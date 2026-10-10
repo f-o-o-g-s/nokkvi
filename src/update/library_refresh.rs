@@ -16,6 +16,15 @@ use crate::{
 
 impl Nokkvi {
     pub(crate) fn handle_library_changed(&mut self, change: LibraryChange) -> Task<Message> {
+        // No session, nothing to refresh or announce. The SSE stream is torn
+        // down at logout, but a star, rating or scrobble confirmed after it
+        // replays its refresh here (see `star_result_message`,
+        // `handle_scrobble_submission_result`), and would otherwise toast
+        // "Library refreshed" on the login screen.
+        if self.screen != crate::Screen::Home {
+            tracing::debug!(" [SSE] LibraryChanged outside a session; nothing to refresh");
+            return Task::none();
+        }
         // Skip the reload while the user is mid-gesture: a server-pushed
         // refreshResource arriving during a playlist edit or cross-pane drag
         // would reset scroll / selection / viewport under the in-progress

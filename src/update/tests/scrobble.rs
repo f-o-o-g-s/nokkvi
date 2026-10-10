@@ -374,6 +374,7 @@ fn scrobbled_song_reads_ids_from_the_loaded_row() {
 #[test]
 fn confirmed_scrobble_refreshes_the_lists_it_changed() {
     let mut app = test_app();
+    app.screen = crate::Screen::Home;
     seed_albums(&mut app, vec![make_album("a0", "Album 0", "Artist")]);
     seed_artists(&mut app, vec![make_artist("ar0", "Artist 0")]);
     seed_songs(&mut app, vec![make_song("s0", "Song 0", "Artist")]);
