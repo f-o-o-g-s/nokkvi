@@ -34,6 +34,8 @@
 //!   responder. Phase 0 is one-request-per-connection.
 //! - [`client`] — sync [`client::send_request`] for the fork-before-iced
 //!   path; one request → one response → close.
+//! - [`instance_lock`] — the launch `flock` that keeps two near-simultaneous
+//!   first launches from both booting (never taken by the client path).
 //! - [`socket_path`] — XDG-aware per-PID socket paths and live-instance
 //!   enumeration (rmpc-style; replaced the previous single-fixed-path
 //!   design to close the orphan-socket bug class).
@@ -72,6 +74,7 @@
 //! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 
 pub mod client;
+pub mod instance_lock;
 pub mod protocol;
 pub mod server;
 pub mod socket_path;

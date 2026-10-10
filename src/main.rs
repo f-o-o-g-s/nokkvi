@@ -772,10 +772,10 @@ impl Nokkvi {
         let task_status_sub = iced::Subscription::run(services::task_subscription::run)
             .map(|(handle, status)| Message::TaskStatusChanged(handle, status));
 
-        // IPC subscription: binds `$XDG_RUNTIME_DIR/nokkvi.sock` at boot and
-        // yields each incoming request as a `Message::Ipc`. The single-instance
-        // guard in argv parsing keeps the bind from colliding with another
-        // live nokkvi process.
+        // IPC subscription: binds `$XDG_RUNTIME_DIR/nokkvi-{pid}.sock` at boot
+        // and yields each incoming request as a `Message::Ipc`. The bind lands
+        // seconds into boot, which is why `main()` takes the launch lock before
+        // it probes for a live socket.
         let ipc_sub = iced::Subscription::run(services::ipc::run)
             .map(|incoming| Message::Ipc(Box::new(incoming)));
 
@@ -1297,10 +1297,26 @@ pub fn main() -> iced::Result {
     // The launcher's `XDG_ACTIVATION_TOKEN` is not forwarded: iced's Linux
     // window settings have no activation-token field and winit reads one only
     // at window creation, so the running window cannot use it.
-    match second_launch_action(&args, nokkvi_ipc::find_live_socket()) {
+    //
+    // The probe alone cannot see a launch that is still booting (its socket
+    // binds seconds in), so the launch lock comes first: a double-click on the
+    // launcher made both launches boot. The winner holds `_instance_lock`
+    // until `main` returns. A loser leaves below, before tracing truncates the
+    // shared log and before iced starts MPRIS or the tray.
+    let (_instance_lock, launch_lock, lock_error) = match nokkvi_ipc::instance_lock::try_acquire() {
+        nokkvi_ipc::instance_lock::InstanceLock::Won(file) => (Some(file), LaunchLock::Won, None),
+        nokkvi_ipc::instance_lock::InstanceLock::Lost => (None, LaunchLock::Lost, None),
+        nokkvi_ipc::instance_lock::InstanceLock::Unavailable(err) => {
+            (None, LaunchLock::Unavailable, Some(err))
+        }
+    };
+    match second_launch_action(&args, launch_lock, nokkvi_ipc::find_live_socket, || {
+        std::thread::sleep(SOCKET_WAIT_INTERVAL)
+    }) {
         SecondLaunch::Boot => {}
         SecondLaunch::ForwardShow(socket) => return hand_off_to_running_instance(&socket),
         SecondLaunch::Refuse(socket) => refuse_second_launch(&socket),
+        SecondLaunch::RefuseStarting => refuse_starting_launch(),
     }
 
     // Initialize tracing.
@@ -1399,6 +1415,14 @@ pub fn main() -> iced::Result {
         .with(stderr_layer)
         .with(file_layer)
         .init();
+
+    if let Some(err) = lock_error {
+        tracing::warn!(
+            "could not take the single-instance lock at {} ({err}); a second launch \
+             in the next few seconds may also boot",
+            nokkvi_ipc::instance_lock::lock_path().display()
+        );
+    }
 
     // Run the legacy → XDG-state-dir migration now that tracing is up,
     // and before iced::daemon spins up `Nokkvi::default()` (which loads
@@ -1646,22 +1670,72 @@ enum SecondLaunch {
     ForwardShow(std::path::PathBuf),
     /// Unrecognized args while an instance runs: refuse with exit 1.
     Refuse(std::path::PathBuf),
+    /// Another launch holds the instance lock but its socket never appeared
+    /// (or args were given while it boots): refuse with exit 1.
+    RefuseStarting,
 }
 
+/// What the launch lock said, without the file (see
+/// [`nokkvi_ipc::instance_lock`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchLock {
+    /// This launch holds the lock.
+    Won,
+    /// Another instance holds it: it is booting or running.
+    Lost,
+    /// No lock could be taken; decide on the socket probe alone.
+    Unavailable,
+}
+
+/// How often a launch that lost the lock looks for the winner's socket.
+const SOCKET_WAIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+/// How long it looks before refusing. The socket binds a few seconds into
+/// boot (inside the iced subscription), so this covers a slow start.
+const SOCKET_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+/// Probes after the first one: one per [`SOCKET_WAIT_INTERVAL`] in the timeout.
+const SOCKET_WAIT_POLLS: u128 = SOCKET_WAIT_TIMEOUT.as_millis() / SOCKET_WAIT_INTERVAL.as_millis();
+
 /// Decide what a launch does once it has got past the known-verb gate and
-/// `--version` / `--help`. `live_socket` is the result of
+/// `--version` / `--help`. `lock` is what the launch lock said; `probe` is
 /// [`nokkvi_ipc::find_live_socket`], which enumerates `nokkvi-*.sock` in
 /// `$XDG_RUNTIME_DIR` (or the `/tmp` fallback) and connect-probes each, so a
-/// dead socket file from a `SIGKILL`'d instance reads as `None`.
+/// dead socket file from a `SIGKILL`'d instance reads as `None`; `pause`
+/// sleeps [`SOCKET_WAIT_INTERVAL`].
 ///
 /// Only a bare `nokkvi` is handed to the running instance: args we don't
 /// recognize still refuse, so a typo like `nokkvi nexxt` never quietly shows
-/// the window. With no instance running, every argv shape boots as before.
-fn second_launch_action(args: &[String], live_socket: Option<std::path::PathBuf>) -> SecondLaunch {
-    match live_socket {
-        None => SecondLaunch::Boot,
-        Some(path) if args.len() <= 1 => SecondLaunch::ForwardShow(path),
-        Some(path) => SecondLaunch::Refuse(path),
+/// the window. With no instance running (lock won, or no lock to be had),
+/// every argv shape boots as before.
+///
+/// A launch that LOSES the lock never boots: another instance is booting or
+/// running. A bare one probes every [`SOCKET_WAIT_INTERVAL`] for up to
+/// [`SOCKET_WAIT_TIMEOUT`] and forwards `show` to the socket once it appears
+/// (the running window's `show_window` absorbs a show in its boot gap); with
+/// args, or when the socket never appears, it refuses. A live socket with the
+/// lock won means an instance that predates the lock, handled as before.
+fn second_launch_action(
+    args: &[String],
+    lock: LaunchLock,
+    mut probe: impl FnMut() -> Option<std::path::PathBuf>,
+    mut pause: impl FnMut(),
+) -> SecondLaunch {
+    let bare = args.len() <= 1;
+    match (lock, probe()) {
+        (_, Some(path)) if bare => SecondLaunch::ForwardShow(path),
+        (_, Some(path)) => SecondLaunch::Refuse(path),
+        (LaunchLock::Won | LaunchLock::Unavailable, None) => SecondLaunch::Boot,
+        (LaunchLock::Lost, None) if !bare => SecondLaunch::RefuseStarting,
+        // The winner is still booting: its socket binds seconds in. Wait for
+        // it and hand off as a bare second launch does.
+        (LaunchLock::Lost, None) => {
+            for _ in 0..SOCKET_WAIT_POLLS {
+                pause();
+                if let Some(path) = probe() {
+                    return SecondLaunch::ForwardShow(path);
+                }
+            }
+            SecondLaunch::RefuseStarting
+        }
     }
 }
 
@@ -1708,6 +1782,21 @@ fn refuse_second_launch(socket: &std::path::Path) -> ! {
         eprintln!(
             "nokkvi is already running (socket: {}). Refusing second launch.",
             socket.display()
+        );
+    }
+    std::process::exit(1);
+}
+
+/// Another launch holds the instance lock (it is booting or running) and no
+/// socket answered in time, or this launch carries args. Exit 1 so this
+/// process never reaches iced.
+fn refuse_starting_launch() -> ! {
+    #[expect(clippy::print_stderr, reason = "command-line error output")]
+    {
+        eprintln!(
+            "nokkvi is already starting (lock: {}) but its IPC socket is not up. \
+             Refusing second launch.",
+            nokkvi_ipc::instance_lock::lock_path().display()
         );
     }
     std::process::exit(1);
@@ -1909,50 +1998,131 @@ mod build_ipc_cli_args_tests {
 
 #[cfg(test)]
 mod second_launch_tests {
-    use std::path::PathBuf;
+    use std::{cell::Cell, path::PathBuf};
 
     use nokkvi_ipc::IpcResponse;
     use serde_json::json;
 
-    use super::{SecondLaunch, running_instance_predates_show, second_launch_action};
+    use super::{
+        LaunchLock, SOCKET_WAIT_POLLS, SecondLaunch, running_instance_predates_show,
+        second_launch_action,
+    };
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|a| (*a).to_string()).collect()
     }
 
-    fn live() -> Option<PathBuf> {
-        Some(PathBuf::from("/run/user/1000/nokkvi-4242.sock"))
+    fn sock() -> PathBuf {
+        PathBuf::from("/run/user/1000/nokkvi-4242.sock")
+    }
+
+    /// Decide with a probe that finds the socket from its `appears_on`-th
+    /// call (1-based; `None` = never) and a pause that only counts. Returns
+    /// the decision, the probe count and the pause count.
+    fn decide(
+        args: &[&str],
+        lock: LaunchLock,
+        appears_on: Option<u32>,
+    ) -> (SecondLaunch, u32, u32) {
+        let probes = Cell::new(0u32);
+        let pauses = Cell::new(0u32);
+        let action = second_launch_action(
+            &argv(args),
+            lock,
+            || {
+                probes.set(probes.get() + 1);
+                appears_on.filter(|&n| probes.get() >= n).map(|_| sock())
+            },
+            || pauses.set(pauses.get() + 1),
+        );
+        (action, probes.get(), pauses.get())
     }
 
     #[test]
     fn bare_launch_with_a_live_instance_forwards_show() {
         // The `.desktop` `Exec=nokkvi`, `uwsm app -- nokkvi` and `cargo run`
-        // all arrive as argc == 1.
-        assert_eq!(
-            second_launch_action(&argv(&["nokkvi"]), live()),
-            SecondLaunch::ForwardShow(PathBuf::from("/run/user/1000/nokkvi-4242.sock")),
-            "the hand-off goes to the socket the probe found, not a fresh lookup"
-        );
+        // all arrive as argc == 1. Won + a live socket = an instance that
+        // predates the lock (a binary upgraded under it).
+        for lock in [LaunchLock::Won, LaunchLock::Unavailable] {
+            assert_eq!(
+                decide(&["nokkvi"], lock, Some(1)),
+                (SecondLaunch::ForwardShow(sock()), 1, 0),
+                "the hand-off goes to the socket the probe found ({lock:?})"
+            );
+        }
     }
 
     #[test]
-    fn bare_launch_without_an_instance_boots() {
-        assert_eq!(
-            second_launch_action(&argv(&["nokkvi"]), None),
-            SecondLaunch::Boot
-        );
+    fn bare_launch_that_wins_the_lock_without_an_instance_boots() {
+        for lock in [LaunchLock::Won, LaunchLock::Unavailable] {
+            assert_eq!(
+                decide(&["nokkvi"], lock, None),
+                (SecondLaunch::Boot, 1, 0),
+                "{lock:?}"
+            );
+        }
     }
 
     #[test]
     fn unknown_args_with_a_live_instance_refuse() {
         // A typo like `nokkvi nexxt` must never quietly show the window.
         for args in [["nokkvi", "haha"], ["nokkvi", "--foo"]] {
+            for lock in [LaunchLock::Won, LaunchLock::Lost, LaunchLock::Unavailable] {
+                assert_eq!(
+                    decide(&args, lock, Some(1)),
+                    (SecondLaunch::Refuse(sock()), 1, 0),
+                    "{args:?} {lock:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_args_without_an_instance_boot() {
+        // Today's behaviour: with nothing running, stray args start the app.
+        for args in [["nokkvi", "haha"], ["nokkvi", "--foo"]] {
             assert_eq!(
-                second_launch_action(&argv(&args), live()),
-                SecondLaunch::Refuse(PathBuf::from("/run/user/1000/nokkvi-4242.sock")),
+                decide(&args, LaunchLock::Won, None),
+                (SecondLaunch::Boot, 1, 0),
                 "{args:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_bare_launch_that_loses_the_lock_never_boots() {
+        // The double-click: the winner is still booting, its socket not yet
+        // bound. Booting here is what opened two windows.
+        let (action, _, _) = decide(&["nokkvi"], LaunchLock::Lost, None);
+        assert_ne!(action, SecondLaunch::Boot);
+    }
+
+    #[test]
+    fn a_bare_launch_that_loses_the_lock_waits_for_the_socket_then_forwards_show() {
+        assert_eq!(
+            decide(&["nokkvi"], LaunchLock::Lost, Some(4)),
+            (SecondLaunch::ForwardShow(sock()), 4, 3),
+            "three 100 ms pauses, then the socket is there"
+        );
+    }
+
+    #[test]
+    fn a_bare_launch_that_loses_the_lock_refuses_once_the_wait_runs_out() {
+        let polls = u32::try_from(SOCKET_WAIT_POLLS).expect("small");
+        assert_eq!(polls, 150, "15 s at one probe per 100 ms");
+        assert_eq!(
+            decide(&["nokkvi"], LaunchLock::Lost, None),
+            (SecondLaunch::RefuseStarting, polls + 1, polls)
+        );
+    }
+
+    #[test]
+    fn args_while_another_launch_boots_refuse_without_waiting() {
+        // The answer is a refusal either way, so it never sits out the wait.
+        assert_eq!(
+            decide(&["nokkvi", "haha"], LaunchLock::Lost, None),
+            (SecondLaunch::RefuseStarting, 1, 0)
+        );
     }
 
     #[test]
@@ -1971,18 +2141,6 @@ mod second_launch_tests {
         assert!(!running_instance_predates_show(&shown));
         let other = IpcResponse::err(1, "invalid_args", "boom");
         assert!(!running_instance_predates_show(&other));
-    }
-
-    #[test]
-    fn unknown_args_without_an_instance_boot() {
-        // Today's behaviour: with nothing running, stray args start the app.
-        for args in [["nokkvi", "haha"], ["nokkvi", "--foo"]] {
-            assert_eq!(
-                second_launch_action(&argv(&args), None),
-                SecondLaunch::Boot,
-                "{args:?}"
-            );
-        }
     }
 }
 

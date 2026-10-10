@@ -55,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - Desktop media widgets no longer show a seek bar while a radio station plays.
 - Desktop media widgets now receive a track ID for the playing song or station.
 - A media-widget seek aimed at a previous song, or past the song's end, is now ignored instead of moving the playhead.
+- Launching nokkvi twice in quick succession now opens one window instead of two.
 
 ### Removed
 
