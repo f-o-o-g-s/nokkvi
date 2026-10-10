@@ -740,17 +740,19 @@ impl PlaybackController {
         // gate) for the M4 decision below, plus the M8 transition-shaping
         // knobs (bar-snap, gap offset, leading-trim verdict).
         //
-        // The next-track epoch is snapshotted here, BEFORE the queue peek: a
-        // queue edit whose reset lands after this point (during the peek or
-        // the decoder build) makes the store refuse the build, which may
-        // name the old queue's next track. The UI sees the epoch move and
+        // The prep ticket (next-track epoch + slot takes) is snapshotted here,
+        // BEFORE the queue peek: a queue edit whose reset lands after this
+        // point (during the peek or the decoder build) makes the store refuse
+        // the build, which may name the old queue's next track, and so does a
+        // prepared track taken out meanwhile (an overlapping prep of the
+        // same epoch already played it). The UI sees the epoch move and
         // prepares again.
-        let (prep_cfg, epoch) = {
+        let (prep_cfg, ticket) = {
             let engine = self.audio_engine.lock().await;
             if engine.is_next_track_prepared().await {
                 return false; // Already prepared
             }
-            (engine.transition_prep_cfg(), engine.next_track_epoch())
+            (engine.transition_prep_cfg(), engine.prep_ticket().await)
         };
 
         let Some(session) = self.queue_service.stream_session().await else {
@@ -906,7 +908,7 @@ impl PlaybackController {
                 let mut engine = audio_engine.lock().await;
                 let stored = engine
                     .store_prepared_decoder_if_current(
-                        epoch,
+                        ticket,
                         decoder,
                         url_for_task.clone(),
                         rg_for_task,

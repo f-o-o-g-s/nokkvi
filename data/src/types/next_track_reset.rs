@@ -15,26 +15,41 @@ use crate::audio::engine::CustomAudioEngine;
 
 #[must_use = "NextTrackResetEffect must be applied via `effect.apply_to(&engine).await` (or `effect.apply_locked(&mut engine).await` when the engine lock is already held) to reset gapless prep — forgetting silently corrupts next-track state"]
 pub struct NextTrackResetEffect {
-    _seal: (),
+    /// False only for a mutation that provably left the next track alone
+    /// ([`Self::only_if`]); applying such an effect does nothing.
+    needed: bool,
 }
 
 impl NextTrackResetEffect {
     pub(crate) fn new() -> Self {
-        Self { _seal: () }
+        Self { needed: true }
     }
 
     /// Fold a second mutation's effect into this one. A reset covers every
     /// mutation before it, so one applied effect stands in for both.
     pub(crate) fn and(self, other: Self) -> Self {
-        let Self { _seal: () } = other;
-        self
+        Self {
+            needed: self.needed || other.needed,
+        }
+    }
+
+    /// Keep the reset only when `changes_next_track`. For a mutation whose
+    /// caller can prove the queue's next track is unchanged (an append
+    /// behind the next song): each reset throws the prepared track away and
+    /// the UI re-prepares it, so a needless one costs a decoder build.
+    pub(crate) fn only_if(self, changes_next_track: bool) -> Self {
+        Self {
+            needed: self.needed && changes_next_track,
+        }
     }
 
     /// Consume the effect by resetting the engine's prepared next-track
     /// state. Locks the engine internally — use when the caller does not
     /// already hold the engine lock.
     pub async fn apply_to(self, engine: &Mutex<CustomAudioEngine>) {
-        engine.lock().await.reset_next_track().await;
+        if self.needed {
+            engine.lock().await.reset_next_track().await;
+        }
     }
 
     /// Consume the effect when the caller already holds the engine lock.
@@ -42,6 +57,8 @@ impl NextTrackResetEffect {
     /// `play_previous`, and other paths that mutate the queue from inside
     /// an existing `&mut CustomAudioEngine` borrow.
     pub async fn apply_locked(self, engine: &mut CustomAudioEngine) {
-        engine.reset_next_track().await;
+        if self.needed {
+            engine.reset_next_track().await;
+        }
     }
 }

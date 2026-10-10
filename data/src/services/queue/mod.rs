@@ -348,6 +348,17 @@ impl QueueManager {
     // ══════════════════════════════════════════════════════════════════════
 
     pub fn add_songs(&mut self, mut songs: Vec<Song>) -> Result<NextTrackResetEffect> {
+        // Without shuffle the rows land at the end of the play order, so
+        // when the cursor has a row after it the next song stays the same
+        // and the prepared next track stays valid (a large play appends a
+        // page at a time while its first song plays). On the last row (or
+        // with nothing current) the append becomes, or can wrap to, the
+        // next song; under shuffle it lands anywhere after the cursor.
+        let changes_next_track = self.queue.shuffle
+            || !self
+                .queue
+                .current_order
+                .is_some_and(|cur| cur + 1 < self.queue.order.len());
         self.assign_original_positions(&mut songs);
         let count = songs.len();
         let fresh_entry_ids = self.allocate_entry_ids(count);
@@ -365,7 +376,7 @@ impl QueueManager {
 
         // Extend order array with new indices
         tx.extend_order(start_idx..start_idx + count);
-        Ok(tx.commit_save_all())
+        Ok(tx.commit_save_all().only_if(changes_next_track))
     }
 
     pub fn set_queue(
@@ -3963,5 +3974,47 @@ pub(crate) mod tests {
         let _: NextTrackResetEffect = qm
             .move_batch_by_entry_ids(&[], MoveBatchTarget::End)
             .unwrap();
+    }
+
+    /// Whether applying a queue mutation's effect threw the engine's
+    /// prepared next track away (the next-track epoch moved).
+    async fn effect_resets_the_next_track(effect: NextTrackResetEffect) -> bool {
+        let engine = tokio::sync::Mutex::new(crate::audio::engine::CustomAudioEngine::new());
+        let before = engine.lock().await.next_track_epoch();
+        effect.apply_to(&engine).await;
+        let after = engine.lock().await.next_track_epoch();
+        before != after
+    }
+
+    /// Bug 4 follow-up: a large play appends its pages while the first song
+    /// plays. Without shuffle, rows appended behind a cursor that is not on
+    /// the last row land after the next song, so the prepared next track is
+    /// still right: discarding it on every page re-prepared it page after
+    /// page. On the last row (or under shuffle) the next song does change.
+    #[tokio::test]
+    async fn an_append_behind_the_next_song_keeps_the_prepared_track() {
+        let songs = || vec![make_test_song("a"), make_test_song("b")];
+
+        let (mut qm, _t) = make_test_manager(songs(), Some(0));
+        let effect = qm.add_songs(vec![make_test_song("c")]).expect("append");
+        assert!(
+            !effect_resets_the_next_track(effect).await,
+            "the next song is still b"
+        );
+
+        let (mut qm, _t) = make_test_manager(songs(), Some(1));
+        let effect = qm.add_songs(vec![make_test_song("c")]).expect("append");
+        assert!(
+            effect_resets_the_next_track(effect).await,
+            "on the last row the append becomes the next song"
+        );
+
+        let (mut qm, _t) = make_test_manager(songs(), Some(0));
+        qm.queue.shuffle = true;
+        let effect = qm.add_songs(vec![make_test_song("c")]).expect("append");
+        assert!(
+            effect_resets_the_next_track(effect).await,
+            "under shuffle the append can land next"
+        );
     }
 }

@@ -490,6 +490,25 @@ pub(crate) struct GaplessSlot {
     /// that take the track ([`Self::take_prepared`]) get these tags with the
     /// decoder and apply them themselves, never the renderer's staged copy.
     pub replay_gain: Option<crate::types::song::ReplayGain>,
+    /// How many prepared tracks have been taken out ([`Self::take_prepared`]):
+    /// the inline gapless swap, a blend start, `load_prepared_track`. A prep
+    /// snapshots it with the next-track epoch ([`PrepTicket`]); a store
+    /// refuses when it moved, because the track the prep built was already
+    /// consumed by an earlier prep of the same epoch and installing it again
+    /// would play it twice.
+    takes: u64,
+}
+
+/// A gapless prep's snapshot of the next-track state, taken under the engine
+/// lock before it peeks the queue ([`CustomAudioEngine::prep_ticket`]). The
+/// store ([`CustomAudioEngine::store_prepared_decoder_if_current`]) refuses
+/// it once a `reset_next_track` moved the epoch (the queue changed) or a
+/// prepared track was taken out of the slot since (an earlier prep of the
+/// same epoch already played).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrepTicket {
+    epoch: u64,
+    slot_takes: u64,
 }
 
 /// A prepared next track taken out of the [`GaplessSlot`]: its decoder with
@@ -508,6 +527,7 @@ impl GaplessSlot {
             source: String::new(),
             prepared: false,
             replay_gain: None,
+            takes: 0,
         }
     }
 
@@ -522,6 +542,7 @@ impl GaplessSlot {
     pub(crate) fn take_prepared(&mut self) -> Option<PreparedTrack> {
         let decoder = self.decoder.take()?;
         self.prepared = false;
+        self.takes = self.takes.wrapping_add(1);
         Some(PreparedTrack {
             decoder,
             source: std::mem::take(&mut self.source),
@@ -536,6 +557,27 @@ impl GaplessSlot {
         self.source = track.source;
         self.replay_gain = track.replay_gain;
         self.prepared = true;
+    }
+
+    /// Stage a prepared track. With `expected_takes`, refuse (and leave the
+    /// slot alone) when a track was taken out since that snapshot; the check
+    /// and the write share this one slot-lock hold, so the decode loop's
+    /// inline swap cannot take in between.
+    fn fill(
+        &mut self,
+        expected_takes: Option<u64>,
+        decoder: AudioDecoder,
+        source: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+    ) -> bool {
+        if expected_takes.is_some_and(|takes| takes != self.takes) {
+            return false;
+        }
+        self.decoder = Some(decoder);
+        self.source = source;
+        self.prepared = true;
+        self.replay_gain = replay_gain;
+        true
     }
 
     pub fn clear(&mut self) {
@@ -1418,7 +1460,8 @@ pub struct CustomAudioEngine {
 
     /// Counts the invalidations of the next-track slot: every
     /// [`Self::reset_next_track`] bumps it (queue edits, mode toggles, the
-    /// transition-shaping settings, stop and source changes, skip plans).
+    /// transition-shaping settings, stop, which a `set_source` on a playing
+    /// or paused engine runs too, and skip plans).
     /// A store replacing one prep with another does not. Two readers:
     /// - a gapless prep snapshots it before it peeks the queue and stores
     ///   only if it is unchanged ([`Self::store_prepared_decoder_if_current`]),
@@ -2722,31 +2765,55 @@ impl CustomAudioEngine {
             .store(directives.gap_offset_ms, Ordering::Release);
     }
 
-    /// [`Self::store_prepared_decoder`] for a prep that snapshotted
-    /// [`Self::next_track_epoch`] as `epoch` before it peeked the queue.
-    /// Refuses (returns `false`) when a `reset_next_track` landed since: the
-    /// prep was built for a queue that has changed, and installing it would
-    /// play the old next track under the new queue's label. Production preps
-    /// store through here.
+    /// The snapshot a gapless prep takes before it peeks the queue; see
+    /// [`PrepTicket`].
+    pub async fn prep_ticket(&self) -> PrepTicket {
+        PrepTicket {
+            epoch: self.next_track_epoch,
+            slot_takes: self.gapless.lock().await.takes,
+        }
+    }
+
+    /// [`Self::store_prepared_decoder`] for a prep holding `ticket`. Refuses
+    /// (returns `false`) when a `reset_next_track` landed since (the prep was
+    /// built for a queue that has changed, and installing it would play the
+    /// old next track under the new queue's label) or when a prepared track
+    /// was taken out since (two preps of one epoch overlapped and the first
+    /// already played; the second would install that track as its own next).
+    /// Production preps store through here.
     pub async fn store_prepared_decoder_if_current(
         &mut self,
-        epoch: u64,
+        ticket: PrepTicket,
         decoder: AudioDecoder,
         url: String,
         replay_gain: Option<crate::types::song::ReplayGain>,
         directives: PreparedTransitionDirectives,
     ) -> bool {
-        if epoch != self.next_track_epoch {
+        if ticket.epoch != self.next_track_epoch {
             debug!(
-                " [GAPLESS] Prep outlived a next-track reset (epoch {epoch} → {}) — not stored: {}",
+                " [GAPLESS] Prep outlived a next-track reset (epoch {} → {}) — not stored: {}",
+                ticket.epoch,
                 self.next_track_epoch,
                 redact_subsonic_url(&url)
             );
             return false;
         }
-        self.store_prepared_decoder(decoder, url, replay_gain, directives)
+        let stored = self
+            .store_prepared(
+                Some(ticket.slot_takes),
+                decoder,
+                url.clone(),
+                replay_gain,
+                directives,
+            )
             .await;
-        true
+        if !stored {
+            debug!(
+                " [GAPLESS] A prepared track was taken since this prep started — not stored: {}",
+                redact_subsonic_url(&url)
+            );
+        }
+        stored
     }
 
     /// Store an already-initialized decoder for gapless playback.
@@ -2770,9 +2837,24 @@ impl CustomAudioEngine {
         replay_gain: Option<crate::types::song::ReplayGain>,
         directives: PreparedTransitionDirectives,
     ) {
+        self.store_prepared(None, decoder, url, replay_gain, directives)
+            .await;
+    }
+
+    /// Body of the two store entry points. `expected_takes` is the checked
+    /// path's slot snapshot ([`GaplessSlot::fill`]); returns whether it stored
+    /// (the unchecked path also skips an empty URL or the playing source).
+    async fn store_prepared(
+        &mut self,
+        expected_takes: Option<u64>,
+        decoder: AudioDecoder,
+        url: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+        directives: PreparedTransitionDirectives,
+    ) -> bool {
         // Check if we should store this decoder
         if url.is_empty() || url == self.source {
-            return;
+            return false;
         }
 
         // M7: a prep landing while a blend is LIVE — or while a planned
@@ -2800,17 +2882,19 @@ impl CustomAudioEngine {
             debug!(
                 "🔀 [GAPLESS] Prep landed mid-blend/mid-skip-window — storing without reset/arm"
             );
-            self.next_format = decoder.format().clone();
-            self.next_source = url;
+            let format = decoder.format().clone();
+            if !self
+                .gapless
+                .lock()
+                .await
+                .fill(expected_takes, decoder, url.clone(), replay_gain)
             {
-                let mut slot = self.gapless.lock().await;
-                slot.decoder = Some(decoder);
-                slot.source = self.next_source.clone();
-                slot.prepared = true;
-                slot.replay_gain = replay_gain;
+                return false;
             }
+            self.next_format = format;
+            self.next_source = url;
             self.apply_transition_directives(&directives);
-            return;
+            return true;
         }
 
         // Only reset if we're actually going to store something new
@@ -2827,19 +2911,24 @@ impl CustomAudioEngine {
         // re-preparation re-derives the verdicts in both directions.
         self.apply_transition_directives(&directives);
 
-        self.next_format = decoder.format().clone();
+        let format = decoder.format().clone();
         let incoming_duration = decoder.duration();
-        self.next_source = url;
-        {
-            let mut slot = self.gapless.lock().await;
-            slot.decoder = Some(decoder);
-            slot.source = self.next_source.clone();
-            slot.prepared = true;
-            // Recorded on the slot too so every later slot consumer
-            // (finalize/seek re-arm, EOF-fallback fire) can re-stage it —
-            // e.g. after a cancel dropped the renderer's staged copy.
-            slot.replay_gain = replay_gain.clone();
+        // The ReplayGain is recorded on the slot too so every later slot
+        // consumer (finalize/seek re-arm, EOF-fallback fire) can re-stage it —
+        // e.g. after a cancel dropped the renderer's staged copy.
+        if !self.gapless.lock().await.fill(
+            expected_takes,
+            decoder,
+            url.clone(),
+            replay_gain.clone(),
+        ) {
+            // A track was taken since the prep's snapshot: the directives
+            // applied above describe a transition that already happened.
+            self.clear_transition_directives();
+            return false;
         }
+        self.next_format = format;
+        self.next_source = url;
 
         // Stash the incoming track's ReplayGain so the renderer's crossfade
         // trigger builds the incoming stream at the right gain
@@ -2858,6 +2947,7 @@ impl CustomAudioEngine {
         if self.crossfade.crossfade_eligible() && self.crossfade.effective_duration_ms() > 0 {
             self.arm_renderer_crossfade(incoming_duration);
         }
+        true
     }
 
     /// Consume gapless transition info that was set by the decode loop.
@@ -4147,21 +4237,25 @@ impl CustomAudioEngine {
         self.gapless.lock().await.clear();
         self.next_source.clear();
         self.next_format = AudioFormat::invalid();
-        // The per-transition verdicts die with the transition they were
-        // derived for; the next `store_prepared_decoder` re-derives them.
-        // The M8 override restore covers the shared watermark mirror too
-        // (invariant 9 — a stale snapped value must never leak into a later
-        // spawn's `compute_watermarks`), and the pending gap is voided.
+        self.clear_transition_directives();
+        // Still needed for the Armed-but-not-Active case (cancel_crossfade only
+        // touches Active); harmless when cancel_crossfade already disarmed, and
+        // a no-op on a spared skip blend (disarm leaves Active alone).
+        self.renderer.lock().disarm_crossfade();
+    }
+
+    /// The per-transition verdicts die with the transition they were derived
+    /// for; the next `store_prepared_decoder` re-derives them. The M8
+    /// override restore covers the shared watermark mirror too (invariant 9 —
+    /// a stale snapped value must never leak into a later spawn's
+    /// `compute_watermarks`), and the pending gap is voided.
+    fn clear_transition_directives(&mut self) {
         self.crossfade.suppress_this_transition = false;
         self.crossfade.duration_override_ms = None;
         self.channels
             .crossfade_duration_shared
             .store(self.crossfade.duration_ms, Ordering::Relaxed);
         self.channels.gap_offset_ms.store(0, Ordering::Release);
-        // Still needed for the Armed-but-not-Active case (cancel_crossfade only
-        // touches Active); harmless when cancel_crossfade already disarmed, and
-        // a no-op on a spared skip blend (disarm leaves Active alone).
-        self.renderer.lock().disarm_crossfade();
     }
 
     /// Get playback state
@@ -6340,6 +6434,7 @@ mod tests {
         let mut engine = CustomAudioEngine::new();
         prime_playing_engine(&mut engine);
         let stale_epoch = engine.next_track_epoch();
+        let stale_ticket = engine.prep_ticket().await;
 
         // The queue edit lands while the prep's decoder builds.
         engine.reset_next_track().await;
@@ -6351,7 +6446,7 @@ mod tests {
 
         let stored = engine
             .store_prepared_decoder_if_current(
-                stale_epoch,
+                stale_ticket,
                 skip_ready_decoder(200_000),
                 "http://example.test/old-next".to_string(),
                 None,
@@ -6366,13 +6461,14 @@ mod tests {
         assert!(engine.next_source.is_empty());
 
         let epoch = engine.next_track_epoch();
+        let ticket = engine.prep_ticket().await;
         for url in [
             "http://example.test/new-next",
             "http://example.test/newer-next",
         ] {
             let stored = engine
                 .store_prepared_decoder_if_current(
-                    epoch,
+                    ticket,
                     skip_ready_decoder(200_000),
                     url.to_string(),
                     None,
@@ -6387,6 +6483,56 @@ mod tests {
             engine.next_track_epoch(),
             epoch,
             "a store (even one replacing an earlier prep) must not move the epoch"
+        );
+    }
+
+    /// Two preps of one epoch can overlap (a mode toggle reopens the UI's
+    /// latch and the next tick's epoch move reopens it again). Once the first
+    /// prep's track is taken out of the slot (the inline swap, a blend start
+    /// or `load_prepared_track`), the second must not install that same
+    /// track as the next one: it would play twice.
+    #[tokio::test]
+    async fn a_prep_whose_twin_was_already_played_is_not_stored() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let ticket = engine.prep_ticket().await;
+
+        assert!(
+            engine
+                .store_prepared_decoder_if_current(
+                    ticket,
+                    skip_ready_decoder(200_000),
+                    "http://example.test/next?_=1".to_string(),
+                    None,
+                    PreparedTransitionDirectives::default(),
+                )
+                .await,
+            "the first prep stores"
+        );
+        // The transition takes it (here the decode loop's inline swap).
+        assert!(engine.gapless.lock().await.take_prepared().is_some());
+
+        let stored = engine
+            .store_prepared_decoder_if_current(
+                ticket,
+                skip_ready_decoder(200_000),
+                "http://example.test/next?_=2".to_string(),
+                None,
+                PreparedTransitionDirectives {
+                    suppress_crossfade: true,
+                    duration_override_ms: Some(6_000),
+                    gap_offset_ms: 1_000,
+                },
+            )
+            .await;
+
+        assert!(!stored, "the twin must be refused");
+        assert!(!engine.is_next_track_prepared().await);
+        assert!(
+            !engine.crossfade.suppress_this_transition
+                && engine.crossfade.duration_override_ms.is_none()
+                && engine.channels.gap_offset_ms.load(Ordering::Relaxed) == 0,
+            "a refused prep leaves no directives behind"
         );
     }
 

@@ -135,7 +135,7 @@ impl<'a> StagedSong<'a> {
 #[derive(Debug)]
 pub enum NextOutcome {
     /// End of order — nothing to advance to. Neither the queue cursor nor
-    /// the engine moved.
+    /// the engine moved (the current song was still recorded in history).
     NoNext,
     /// End of order under consume: the finished song was consumed, the
     /// cursor emptied and the engine stopped.
