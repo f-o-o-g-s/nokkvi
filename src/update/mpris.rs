@@ -32,10 +32,6 @@ impl Nokkvi {
             MprisEvent::Connected(connection) => {
                 debug!(" MPRIS connected - storing connection handle");
                 self.mpris_connection = Some(connection);
-                // A fresh player starts with CanSeek false and no track id:
-                // forget what an earlier one was told, so the next tick's push
-                // republishes CanSeek instead of skipping it as unchanged.
-                self.mpris_track = crate::services::mpris::PublishedTrack::default();
                 Task::none()
             }
 
@@ -74,6 +70,13 @@ impl Nokkvi {
             MprisEvent::Previous => {
                 debug!(" MPRIS: Previous");
                 Task::done(Message::Playback(PlaybackMessage::PrevTrack))
+            }
+
+            // The spec: Seek has no effect while CanSeek is false (a station,
+            // a stopped queue, a song of unknown length).
+            MprisEvent::Seek(offset_us) if !self.mpris_track.accepts_seek() => {
+                debug!(" MPRIS: ignored Seek {offset_us}µs (CanSeek is false)");
+                Task::none()
             }
 
             MprisEvent::Seek(offset_us) => {

@@ -147,15 +147,19 @@ fn track_id_escaping_never_merges_two_ids() {
 
 #[test]
 fn only_a_song_of_known_length_can_seek() {
-    assert!(PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Song("s"), 0).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Station("r1"), 0).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Nothing, 0).can_seek);
+    assert!(PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Song("s"), 0, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Station("r1"), 0, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Nothing, 0, true).can_seek);
     assert!(!PublishedTrack::default().can_seek);
+    assert!(
+        !PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, false).can_seek,
+        "not loaded"
+    );
 }
 
 fn song_track() -> PublishedTrack {
-    PublishedTrack::for_item(MprisItem::Song("song_1"), 200_000_000)
+    PublishedTrack::for_item(MprisItem::Song("song_1"), 200_000_000, true)
 }
 
 #[test]
@@ -183,7 +187,7 @@ fn set_position_ignores_what_the_spec_says_to_ignore() {
         None,
         "past the end"
     );
-    let station = PublishedTrack::for_item(MprisItem::Station("r1"), 0);
+    let station = PublishedTrack::for_item(MprisItem::Station("r1"), 0, true);
     let station_id = station.track_id.clone();
     assert_eq!(
         station.set_position_target(&station_id, 0),
@@ -247,7 +251,7 @@ fn a_station_tick_publishes_an_unseekable_station() {
     });
     assert_eq!(
         app.mpris_track,
-        PublishedTrack::for_item(MprisItem::Station("r1"), 0)
+        PublishedTrack::for_item(MprisItem::Station("r1"), 0, true)
     );
     assert!(!app.mpris_track.can_seek);
 }
@@ -264,4 +268,88 @@ fn a_stale_tick_leaves_the_published_track_alone() {
         ..make_playback_update()
     });
     assert_eq!(app.mpris_track, song_track());
+}
+
+// ============================================================================
+// What the tick's push sends (a channel-backed connection)
+// ============================================================================
+
+use crate::services::mpris::{MprisCommand, MprisConnection};
+
+fn connected_app() -> (crate::Nokkvi, std::sync::mpsc::Receiver<MprisCommand>) {
+    let mut app = test_app();
+    let (conn, rx) = MprisConnection::test_pair();
+    app.mpris_connection = Some(conn);
+    (app, rx)
+}
+
+fn sent(rx: &std::sync::mpsc::Receiver<MprisCommand>) -> Vec<MprisCommand> {
+    rx.try_iter().collect()
+}
+
+#[test]
+fn a_stale_tick_sends_no_metadata() {
+    // Built for station r1, landing after a switch back to the queue: its art
+    // and title describe the station, so nothing of them may reach D-Bus.
+    let (mut app, rx) = connected_app();
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        song_id: Some("r1".to_string()),
+        station_id: Some("r1".to_string()),
+        ..make_playback_update()
+    });
+    let commands = sent(&rx);
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, MprisCommand::SetMetadata { .. })),
+        "{commands:?}"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, MprisCommand::SetPlaybackStatus(_))),
+        "status still goes out: {commands:?}"
+    );
+}
+
+#[test]
+fn every_current_tick_sends_the_track_id_and_can_seek() {
+    // CanSeek goes out with every current tick (mpris-server drops an
+    // unchanged value), so a reconnect or a failed emit heals on the next one.
+    let (mut app, rx) = connected_app();
+    for _ in 0..2 {
+        let _ = app.handle_playback_state_updated(make_playback_update());
+        let commands = sent(&rx);
+        assert!(
+            commands.iter().any(|c| matches!(
+                c,
+                MprisCommand::SetMetadata { track_id, .. }
+                    if *track_id == track_id_path(MprisItem::Song("song_1"))
+            )),
+            "{commands:?}"
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|c| matches!(c, MprisCommand::SetCanSeek(true))),
+            "{commands:?}"
+        );
+    }
+}
+
+#[test]
+fn a_stopped_song_cannot_seek() {
+    // A restored queue at login names its current song, but the engine has
+    // nothing loaded until play.
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        playing: false,
+        paused: false,
+        ..make_playback_update()
+    });
+    assert_eq!(
+        app.mpris_track.track_id,
+        track_id_path(MprisItem::Song("song_1"))
+    );
+    assert!(!app.mpris_track.can_seek);
 }

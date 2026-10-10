@@ -1179,14 +1179,12 @@ impl Nokkvi {
         // Record what this tick describes before the connection check, so
         // `SetPosition` is judged against it (and tests can read it). A stale
         // tick leaves the record on the item it last described.
-        let mut can_seek_changed = false;
         if u.metadata_current {
-            let published = crate::services::mpris::PublishedTrack::for_item(
+            self.mpris_track = crate::services::mpris::PublishedTrack::for_item(
                 u.item,
                 i64::from(u.duration) * 1_000_000,
+                u.playing || u.paused,
             );
-            can_seek_changed = published.can_seek != self.mpris_track.can_seek;
-            self.mpris_track = published;
         }
 
         let Some(ref conn) = self.mpris_connection else {
@@ -1228,6 +1226,9 @@ impl Nokkvi {
 
         // Push state via channel (synchronous, non-blocking)
         conn.set_playback_status(status);
+        // CanSeek rides along with every current tick, like the metadata:
+        // mpris-server drops an unchanged value, so a fresh player or a failed
+        // emit is corrected on the next tick with no bookkeeping here.
         if u.metadata_current {
             conn.set_metadata(
                 &self.mpris_track.track_id,
@@ -1237,8 +1238,6 @@ impl Nokkvi {
                 duration_us,
                 u.art_url,
             );
-        }
-        if can_seek_changed {
             conn.set_can_seek(self.mpris_track.can_seek);
         }
         conn.set_loop_status(loop_status);

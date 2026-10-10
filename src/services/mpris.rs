@@ -160,15 +160,23 @@ impl Default for PublishedTrack {
 }
 
 impl PublishedTrack {
-    /// The record for one tick: `item` and its length. Seeking is possible
-    /// only for a queue song of known length; a station is a live stream,
-    /// and with nothing loaded there is nothing to seek in.
-    pub(crate) fn for_item(item: MprisItem<'_>, length_us: i64) -> Self {
+    /// The record for one tick: `item`, its length, and whether the engine
+    /// has it loaded (playing or paused). Seeking is possible only for a
+    /// loaded queue song of known length: a station is a live stream, and a
+    /// stopped queue (a restored one at login) names a song the engine has
+    /// not loaded.
+    pub(crate) fn for_item(item: MprisItem<'_>, length_us: i64, loaded: bool) -> Self {
         Self {
             track_id: track_id_path(item),
             length_us,
-            can_seek: matches!(item, MprisItem::Song(_)) && length_us > 0,
+            can_seek: loaded && matches!(item, MprisItem::Song(_)) && length_us > 0,
         }
+    }
+
+    /// Whether a relative `Seek` may run: the spec says it has no effect
+    /// while CanSeek is false.
+    pub(crate) fn accepts_seek(&self) -> bool {
+        self.can_seek
     }
 
     /// The seek target, in seconds, for a `SetPosition(track_id, position)`
@@ -193,6 +201,14 @@ pub struct MprisConnection {
 }
 
 impl MprisConnection {
+    /// A connection whose commands land on the returned receiver instead of
+    /// an MPRIS thread, so tests can read what a push sent.
+    #[cfg(test)]
+    pub(crate) fn test_pair() -> (Self, std_mpsc::Receiver<MprisCommand>) {
+        let (sender, receiver) = std_mpsc::channel();
+        (Self { sender }, receiver)
+    }
+
     /// Queue a command for the MPRIS thread. A closed channel means that
     /// thread has ended (no D-Bus session, or shutdown) and the app runs on
     /// without MPRIS, so the update is dropped with a trace line.
