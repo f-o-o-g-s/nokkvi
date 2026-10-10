@@ -1303,21 +1303,38 @@ pub fn main() -> iced::Result {
     // launcher made both launches boot. The winner holds `_instance_lock`
     // until `main` returns. A loser leaves below, before tracing truncates the
     // shared log and before iced starts MPRIS or the tray.
-    let (_instance_lock, launch_lock, lock_error) = match nokkvi_ipc::instance_lock::try_acquire() {
-        nokkvi_ipc::instance_lock::InstanceLock::Won(file) => (Some(file), LaunchLock::Won, None),
-        nokkvi_ipc::instance_lock::InstanceLock::Lost => (None, LaunchLock::Lost, None),
-        nokkvi_ipc::instance_lock::InstanceLock::Unavailable(err) => {
-            (None, LaunchLock::Unavailable, Some(err))
-        }
-    };
-    match second_launch_action(&args, launch_lock, nokkvi_ipc::find_live_socket, || {
-        std::thread::sleep(SOCKET_WAIT_INTERVAL)
-    }) {
+    let (mut instance_lock, launch_lock, lock_error) =
+        match nokkvi_ipc::instance_lock::try_acquire() {
+            nokkvi_ipc::instance_lock::InstanceLock::Won(file) => {
+                (Some(file), LaunchLock::Won, None)
+            }
+            nokkvi_ipc::instance_lock::InstanceLock::Lost => (None, LaunchLock::Lost, None),
+            nokkvi_ipc::instance_lock::InstanceLock::Unavailable(err) => {
+                (None, LaunchLock::Unavailable, Some(err))
+            }
+        };
+    let action = second_launch_action(
+        &args,
+        launch_lock,
+        nokkvi_ipc::find_live_socket,
+        || std::thread::sleep(SOCKET_WAIT_INTERVAL),
+        || match nokkvi_ipc::instance_lock::try_acquire() {
+            nokkvi_ipc::instance_lock::InstanceLock::Won(file) => {
+                instance_lock = Some(file);
+                true
+            }
+            nokkvi_ipc::instance_lock::InstanceLock::Lost
+            | nokkvi_ipc::instance_lock::InstanceLock::Unavailable(_) => false,
+        },
+    );
+    match action {
         SecondLaunch::Boot => {}
         SecondLaunch::ForwardShow(socket) => return hand_off_to_running_instance(&socket),
         SecondLaunch::Refuse(socket) => refuse_second_launch(&socket),
         SecondLaunch::RefuseStarting => refuse_starting_launch(),
     }
+    // Held until `main` returns, i.e. for as long as iced runs.
+    let _instance_lock = instance_lock;
 
     // Initialize tracing.
     //
@@ -1700,7 +1717,8 @@ const SOCKET_WAIT_POLLS: u128 = SOCKET_WAIT_TIMEOUT.as_millis() / SOCKET_WAIT_IN
 /// [`nokkvi_ipc::find_live_socket`], which enumerates `nokkvi-*.sock` in
 /// `$XDG_RUNTIME_DIR` (or the `/tmp` fallback) and connect-probes each, so a
 /// dead socket file from a `SIGKILL`'d instance reads as `None`; `pause`
-/// sleeps [`SOCKET_WAIT_INTERVAL`].
+/// sleeps [`SOCKET_WAIT_INTERVAL`]; `retry_lock` tries the lock again and
+/// says whether this launch now holds it.
 ///
 /// Only a bare `nokkvi` is handed to the running instance: args we don't
 /// recognize still refuse, so a typo like `nokkvi nexxt` never quietly shows
@@ -1710,14 +1728,16 @@ const SOCKET_WAIT_POLLS: u128 = SOCKET_WAIT_TIMEOUT.as_millis() / SOCKET_WAIT_IN
 /// A launch that LOSES the lock never boots: another instance is booting or
 /// running. A bare one probes every [`SOCKET_WAIT_INTERVAL`] for up to
 /// [`SOCKET_WAIT_TIMEOUT`] and forwards `show` to the socket once it appears
-/// (the running window's `show_window` absorbs a show in its boot gap); with
-/// args, or when the socket never appears, it refuses. A live socket with the
+/// (the running window's `show_window` absorbs a show in its boot gap). If
+/// the lock comes free first (the holder crashed or quit), it boots. With
+/// args, or when neither happens in time, it refuses. A live socket with the
 /// lock won means an instance that predates the lock, handled as before.
 fn second_launch_action(
     args: &[String],
     lock: LaunchLock,
     mut probe: impl FnMut() -> Option<std::path::PathBuf>,
     mut pause: impl FnMut(),
+    mut retry_lock: impl FnMut() -> bool,
 ) -> SecondLaunch {
     let bare = args.len() <= 1;
     match (lock, probe()) {
@@ -1732,6 +1752,11 @@ fn second_launch_action(
                 pause();
                 if let Some(path) = probe() {
                     return SecondLaunch::ForwardShow(path);
+                }
+                // The holder let go with no socket up: it crashed mid-boot,
+                // or quit. Nothing runs, so this launch boots.
+                if retry_lock() {
+                    return SecondLaunch::Boot;
                 }
             }
             SecondLaunch::RefuseStarting
@@ -2024,8 +2049,20 @@ mod second_launch_tests {
         lock: LaunchLock,
         appears_on: Option<u32>,
     ) -> (SecondLaunch, u32, u32) {
+        decide_with(args, lock, appears_on, None)
+    }
+
+    /// [`decide`], plus a lock that the winner releases (it exited or
+    /// crashed) from the `frees_on`-th retry on.
+    fn decide_with(
+        args: &[&str],
+        lock: LaunchLock,
+        appears_on: Option<u32>,
+        frees_on: Option<u32>,
+    ) -> (SecondLaunch, u32, u32) {
         let probes = Cell::new(0u32);
         let pauses = Cell::new(0u32);
+        let retries = Cell::new(0u32);
         let action = second_launch_action(
             &argv(args),
             lock,
@@ -2034,6 +2071,10 @@ mod second_launch_tests {
                 appears_on.filter(|&n| probes.get() >= n).map(|_| sock())
             },
             || pauses.set(pauses.get() + 1),
+            || {
+                retries.set(retries.get() + 1);
+                frees_on.is_some_and(|n| retries.get() >= n)
+            },
         );
         (action, probes.get(), pauses.get())
     }
@@ -2113,6 +2154,26 @@ mod second_launch_tests {
         assert_eq!(
             decide(&["nokkvi"], LaunchLock::Lost, None),
             (SecondLaunch::RefuseStarting, polls + 1, polls)
+        );
+    }
+
+    #[test]
+    fn a_waiting_launch_boots_once_the_winner_lets_go_without_a_socket() {
+        // The winner crashed mid-boot, or quit after its socket went away:
+        // nothing runs, so the waiting launch takes the lock and boots
+        // instead of refusing after 15 s.
+        assert_eq!(
+            decide_with(&["nokkvi"], LaunchLock::Lost, None, Some(3)),
+            (SecondLaunch::Boot, 4, 3),
+            "the first probe, then three pause-probe-retry rounds"
+        );
+    }
+
+    #[test]
+    fn a_socket_that_answers_wins_over_a_freed_lock() {
+        assert_eq!(
+            decide_with(&["nokkvi"], LaunchLock::Lost, Some(2), Some(1)),
+            (SecondLaunch::ForwardShow(sock()), 2, 1)
         );
     }
 
