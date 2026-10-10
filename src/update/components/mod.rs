@@ -78,9 +78,7 @@ pub(super) use artwork_prefetch::{
 /// envelope). This helper consolidates the inverse: catching the typed error
 /// inside `Result<_, anyhow::Error>` results bubbled back to UI handlers.
 pub(crate) fn session_expired_message(e: &anyhow::Error) -> Option<Message> {
-    e.downcast_ref::<NokkviError>()
-        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-        .then_some(Message::SessionExpired)
+    NokkviError::is_unauthorized(e).then_some(Message::SessionExpired)
 }
 
 /// Map a failed playlist-list fetch (the Save Queue and Add to Playlist

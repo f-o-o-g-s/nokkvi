@@ -24,6 +24,7 @@ use crate::{
     services::api::{playlists::PlaylistsApiService, songs::SongsApiService},
     types::{
         batch::{BatchItem, BatchPayload},
+        error::NokkviError,
         genre::GenreRef,
         song::Song,
         song_source::SongSource,
@@ -137,11 +138,17 @@ impl<'a> LibraryOrchestrator<'a> {
     /// through the per-entity `resolve_*` methods so the entity quirks (genre's
     /// tag-id filter, playlist's on-demand API construction) stay encapsulated.
     ///
-    /// Skip-on-fail: items that error are logged at `warn!` and dropped — matches
-    /// today's `AppService::resolve_batch` behavior. Empty result is a hard error.
+    /// An item the server fails is skipped (one dead album must not cancel
+    /// the rest; the skips are counted into one `warn!`), except a rejected
+    /// session (`NokkviError::Unauthorized`), which every item would hit
+    /// alike: it ends the resolution with that error, so the UI drops to
+    /// login instead of toasting "No songs found". Empty result is a hard
+    /// error.
     pub async fn resolve_batch(&self, batch: BatchPayload) -> Result<Vec<Song>> {
         let mut resolved = Vec::new();
         let mut seen = HashSet::new();
+        let total = batch.items.len();
+        let mut skipped = 0usize;
 
         for item in batch.items {
             let songs_result = match item {
@@ -159,8 +166,15 @@ impl<'a> LibraryOrchestrator<'a> {
                         }
                     }
                 }
-                Err(e) => tracing::warn!("Batch item resolution failed, skipping: {e}"),
+                Err(e) if NokkviError::is_unauthorized(&e) => return Err(e),
+                Err(e) => {
+                    skipped += 1;
+                    tracing::debug!("Batch item resolution failed, skipping: {e:#}");
+                }
             }
+        }
+        if skipped > 0 {
+            tracing::warn!("{skipped} of {total} batch items failed to resolve and were skipped");
         }
 
         if resolved.is_empty() {
@@ -173,7 +187,8 @@ impl<'a> LibraryOrchestrator<'a> {
     /// Resolve a trawl crate into its blended track list.
     ///
     /// Per seed: fetch songs through the per-entity `resolve_*` helpers
-    /// (skip-on-fail with `warn!`, like [`Self::resolve_batch`]), apply the
+    /// (a failed seed is skipped and a rejected session ends the mix, like
+    /// [`Self::resolve_batch`]), apply the
     /// length and rating filters (hand-picked Song seeds exempt), sample
     /// artist and genre seeds down to
     /// [`crate::types::trawl::TRAWL_SEED_SAMPLE_CAP`], then merge everything
@@ -191,6 +206,7 @@ impl<'a> LibraryOrchestrator<'a> {
 
         let mut lists: Vec<(Vec<Song>, u8)> = Vec::new();
         let mut pre_filter_total = 0usize;
+        let mut skipped = 0usize;
 
         for seed in &mix.seeds {
             let songs_result = match &seed.item {
@@ -217,8 +233,18 @@ impl<'a> LibraryOrchestrator<'a> {
                     }
                     lists.push((songs, seed.weight));
                 }
-                Err(e) => tracing::warn!("Trawl seed resolution failed, skipping: {e}"),
+                Err(e) if NokkviError::is_unauthorized(&e) => return Err(e),
+                Err(e) => {
+                    skipped += 1;
+                    tracing::debug!("Trawl seed resolution failed, skipping: {e:#}");
+                }
             }
+        }
+        if skipped > 0 {
+            tracing::warn!(
+                "{skipped} of {} Trawl seeds failed to resolve and were skipped",
+                mix.seeds.len()
+            );
         }
 
         let mut blended = blend_trawl(lists, mix.blend, &mut rand::rng());
@@ -389,9 +415,90 @@ mod tests {
         assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
     }
 
+    /// A session the server has rejected: every item would fail the same
+    /// way, so the first `Unauthorized` ends the whole resolution with that
+    /// error (the UI drops to login) instead of being skipped into a
+    /// "No songs found" toast.
+    async fn rejected_session_fixtures() -> (AuthGateway, AlbumsService, ArtistsService) {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let base_url =
+            crate::services::api::subsonic::tests::one_shot_server("401 Unauthorized", "{}").await;
+        auth.resume_session(base_url, "u".into(), "jwt".into(), "u=u".into())
+            .await
+            .expect("a resumed session seeds the API client");
+        (auth, albums, artists)
+    }
+
+    #[tokio::test]
+    async fn resolve_batch_aborts_on_a_rejected_session() {
+        let (auth, albums, artists) = rejected_session_fixtures().await;
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let payload = BatchPayload::new()
+            .with_item(BatchItem::Album("al1".into()))
+            .with_item(BatchItem::Song(Box::new(Song::test_default("a", "Song A"))));
+
+        let err = orch
+            .resolve_batch(payload)
+            .await
+            .expect_err("a rejected session must end the batch");
+        assert!(
+            matches!(
+                err.downcast_ref::<crate::types::error::NokkviError>(),
+                Some(crate::types::error::NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+    }
+
+    /// Any other failure (here: no server at all) is skipped, and the rest
+    /// of the batch still resolves.
+    #[tokio::test]
+    async fn resolve_batch_skips_a_plain_failure_and_keeps_the_rest() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let payload = BatchPayload::new()
+            .with_item(BatchItem::Album("nonexistent".into()))
+            .with_item(BatchItem::Song(Box::new(Song::test_default("a", "Song A"))));
+
+        let out = orch
+            .resolve_batch(payload)
+            .await
+            .expect("the song item survives");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "a");
+    }
+
     // ---- resolve_trawl ---------------------------------------------------
 
     use crate::types::trawl::{TrawlCrate, TrawlMinLength, TrawlSeed};
+
+    #[tokio::test]
+    async fn resolve_trawl_aborts_on_a_rejected_session() {
+        let (auth, albums, artists) = rejected_session_fixtures().await;
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate::default();
+        mix.add(TrawlSeed::new(
+            BatchItem::Album("al1".into()),
+            "Ghost Album",
+            "Nobody",
+        ));
+        mix.add(song_seed("a", 200));
+
+        let err = orch
+            .resolve_trawl(&mix)
+            .await
+            .expect_err("a rejected session must end the mix");
+        assert!(
+            matches!(
+                err.downcast_ref::<crate::types::error::NokkviError>(),
+                Some(crate::types::error::NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+    }
 
     fn song_seed(id: &str, duration: u32) -> TrawlSeed {
         let mut song = Song::test_default(id, &format!("Song {id}"));

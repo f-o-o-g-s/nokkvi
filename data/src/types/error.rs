@@ -20,6 +20,14 @@ pub enum NokkviError {
 }
 
 impl NokkviError {
+    /// Whether an `anyhow` chain is a rejected session: its typed cause is
+    /// [`NokkviError::Unauthorized`] (set at the client.rs / subsonic.rs
+    /// boundary, possibly wrapped in context). The downcast that the UI's
+    /// `session_expired_message` and the batch / Trawl resolvers share.
+    pub fn is_unauthorized(e: &anyhow::Error) -> bool {
+        matches!(e.downcast_ref::<Self>(), Some(Self::Unauthorized))
+    }
+
     /// Returns true when a stringified error chain carries the
     /// [`NokkviError::Unauthorized`] Display marker. Used by the 5 loader
     /// handlers whose results are flattened to `Result<_, String>` at the
