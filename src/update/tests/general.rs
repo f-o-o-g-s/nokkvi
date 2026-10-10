@@ -1360,3 +1360,56 @@ mod slot_count_resync {
 }
 
 // ============================================================================
+
+// ============================================================================
+// Similar songs: a failed read is an error, not "no similar songs"
+// ============================================================================
+
+/// `getSimilarSongs2` reads through the checked envelope, so a server
+/// failure lands here as `Err`: it toasts the failure, never the
+/// "No similar songs found" an empty answer gets.
+#[test]
+fn similar_songs_failure_toasts_the_error_not_an_empty_result() {
+    let mut app = test_app();
+    let generation = app.similar_songs_generation.current();
+    let _ = app.update(crate::app_message::Message::Find(
+        crate::app_message::FindMessage::Loaded(
+            generation,
+            Err("getSimilarSongs2: data not found".into()),
+            crate::state::SimilarSource::SimilarTo("Seed".into()),
+        ),
+    ));
+    let messages: Vec<&str> = app
+        .toast
+        .toasts
+        .iter()
+        .map(|t| t.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Failed to load similar songs") && m.contains("data not found")),
+        "got: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("No similar songs found"))
+    );
+}
+
+/// A rejected token on the similar read routes to the login screen.
+#[test]
+fn similar_songs_rejected_token_routes_to_login() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    let generation = app.similar_songs_generation.current();
+    let _ = app.update(crate::app_message::Message::Find(
+        crate::app_message::FindMessage::Loaded(
+            generation,
+            Err(nokkvi_data::types::error::NokkviError::Unauthorized.to_string()),
+            crate::state::SimilarSource::SimilarTo("Seed".into()),
+        ),
+    ));
+    assert_eq!(app.screen, crate::Screen::Login);
+}

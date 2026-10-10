@@ -95,17 +95,22 @@ impl SimilarApiService {
     ///
     /// Uses Navidrome's `getSimilarSongs2` endpoint which leverages Last.fm
     /// or ListenBrainz for recommendations.
+    ///
+    /// Reads through the checked envelope, like [`Self::get_top_songs`]: a
+    /// failed call is an error, not an empty list that would read as "no
+    /// similar songs".
     pub async fn get_similar_songs(&self, id: &str, count: u32) -> Result<Vec<Song>> {
         let count_str = count.to_string();
-        let inner: SimilarResponseInner = crate::services::api::subsonic::subsonic_get_envelope(
-            &self.client.http_client(),
-            &self.server_url,
-            "getSimilarSongs2",
-            &self.subsonic_credential,
-            &[("id", id), ("count", &count_str)],
-            "getSimilarSongs2",
-        )
-        .await?;
+        let inner: SimilarResponseInner =
+            crate::services::api::subsonic::subsonic_get_envelope_checked(
+                &self.client.http_client(),
+                &self.server_url,
+                "getSimilarSongs2",
+                &self.subsonic_credential,
+                &[("id", id), ("count", &count_str)],
+                "getSimilarSongs2",
+            )
+            .await?;
 
         let songs = inner
             .similar_songs2
@@ -148,7 +153,52 @@ impl SimilarApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::api::subsonic::SubsonicEnvelope;
+    use crate::{
+        services::api::subsonic::{
+            SubsonicEnvelope,
+            tests::{FAILED_ENVELOPE, NOT_FOUND_ENVELOPE, one_shot_server},
+        },
+        types::error::NokkviError,
+    };
+
+    async fn similar_from(base_url: String) -> Result<Vec<Song>> {
+        let url = url::Url::parse(&base_url).expect("one-shot server url");
+        SimilarApiService::new(ApiClient::new(url, String::new()), base_url, "u=x".into())
+            .get_similar_songs("s1", 50)
+            .await
+    }
+
+    /// A failed `getSimilarSongs2` (an id gone since a rescan, a rejected
+    /// token) must be an error, not "No similar songs found". A server with
+    /// no matches still answers ok with an empty list.
+    #[tokio::test]
+    async fn similar_songs_turn_a_failed_envelope_into_an_error() {
+        let err = similar_from(one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        let err = similar_from(one_shot_server("200 OK", FAILED_ENVELOPE).await)
+            .await
+            .expect_err("a rejected token must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        const NO_MATCHES: &str =
+            r#"{"subsonic-response":{"status":"ok","version":"1.16.1","similarSongs2":{}}}"#;
+        let songs = similar_from(one_shot_server("200 OK", NO_MATCHES).await)
+            .await
+            .expect("an ok envelope with no songs is not an error");
+        assert!(songs.is_empty());
+    }
 
     /// Verify `getSimilarSongs2` JSON parses correctly.
     #[test]
