@@ -2444,9 +2444,31 @@ impl CustomAudioEngine {
         // which the UI still shows. This sits BELOW the duration guard: a
         // refused seek must leave an auto blend running, and a skip blend
         // never gets there (its fire refuses an unknown outgoing duration).
-        let outcome = match self.end_crossfade_on_queue_track().await {
-            BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
-            BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
+        //
+        // One gap needs its own verdict: the render thread finalizes its half
+        // of a blend first (it promotes the incoming and leaves Active), and
+        // only the dispatched `on_renderer_finished` then finalizes the
+        // engine. A seek in between would cancel an AUTO blend whose audio
+        // has already moved on. Finish the engine half instead, exactly as
+        // `try_finalize_crossfade` would with the renderer no longer active
+        // (an auto blend's completion callback fires here, once; a skip
+        // blend's stays suppressed), and move the source generation so the
+        // already-dispatched `on_renderer_finished` fails the renderer's
+        // staleness gate instead of running against the seeked state (with
+        // a re-armed slot it would start a fresh blend from the seek
+        // position).
+        let renderer_finalized =
+            !self.crossfade.phase.is_idle() && !self.renderer.lock().is_crossfade_active();
+        let outcome = if renderer_finalized {
+            debug!("🔍 [SEEK] Blend already finished on the render thread — finalizing it first");
+            self.finalize_crossfade_engine().await;
+            self.channels.source_generation.bump_for_user_action();
+            SeekOutcome::Settled
+        } else {
+            match self.end_crossfade_on_queue_track().await {
+                BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
+                BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
+            }
         };
 
         // Idempotent after the line above; kept for its renderer disarm (the
@@ -6674,6 +6696,58 @@ mod tests {
         // A seek made in the window shows where the target will start.
         engine.seek(30_000).await;
         assert_eq!(engine.position(), 30_000);
+    }
+
+    /// Bug 13: the render thread finalizes its half of an AUTO blend first
+    /// (it promotes the incoming and leaves Active), and only then does the
+    /// dispatched `on_renderer_finished` finalize the engine. A seek landing
+    /// in that one-hop gap must not cancel the blend back to the outgoing:
+    /// the audio has already moved on. It finalizes instead (the verdict
+    /// `try_finalize_crossfade` reaches with the renderer no longer active),
+    /// fires the completion callback once, seeks the promoted track, and
+    /// moves the source generation so the already-dispatched
+    /// `on_renderer_finished` is dropped by the renderer's staleness gate.
+    #[tokio::test]
+    async fn a_seek_after_the_renderer_finalized_an_auto_blend_lands_on_the_incoming() {
+        let mut engine = CustomAudioEngine::new();
+        let completions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = completions.clone();
+        engine.set_completion_callback(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let _keepalive = engine.force_live_auto_crossfade_for_test();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        // The render thread's half, and the generation its dispatched
+        // `on_renderer_finished` snapshotted.
+        engine.renderer.lock().finalize_crossfade();
+        let dispatched_generation = engine.source_generation();
+
+        let outcome = engine.seek(10_000).await;
+
+        assert_eq!(
+            outcome,
+            SeekOutcome::Settled,
+            "the blend had finished; nothing was abandoned"
+        );
+        assert_eq!(
+            engine.source(),
+            "http://example.test/next",
+            "the seek must land on the promoted incoming, not the outgoing"
+        );
+        assert!(engine.crossfade.phase.is_idle());
+        assert_eq!(
+            completions.load(Ordering::SeqCst),
+            1,
+            "the auto-advance completion fires exactly once"
+        );
+        assert_ne!(
+            engine.source_generation(),
+            dispatched_generation,
+            "the already-dispatched on_renderer_finished must fail the staleness gate"
+        );
     }
 
     /// During the skip blend the UI clock is the incoming's: the blend's
