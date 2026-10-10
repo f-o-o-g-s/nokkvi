@@ -431,6 +431,7 @@ fn library_change_redrives_an_unresolved_track() {
     // the whole chain, third-party LRCLIB request included, on every scrobble
     // point and every rating keypress for the track being watched.
     let mut annotated = test_app();
+    annotated.screen = crate::Screen::Home;
     annotated.settings.lyrics_enabled = true;
     annotated.current_view = crate::View::Queue;
     annotated.scrobble.current_song_id = Some("song_1".to_string());
@@ -450,6 +451,7 @@ fn library_change_redrives_an_unresolved_track() {
 
     // A sheet already showing is left alone — no flicker, no refetch.
     let mut app2 = test_app();
+    app2.screen = crate::Screen::Home;
     app2.settings.lyrics_enabled = true;
     app2.current_view = crate::View::Queue;
     app2.scrobble.current_song_id = Some("song_1".to_string());
