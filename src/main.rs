@@ -375,6 +375,10 @@ pub struct Nokkvi {
     /// mode flags with a stale backend snapshot (the snapshot may predate the
     /// commit). Mirrors the `suppress_next_auto_center` idiom.
     pub pending_mode_commits: u32,
+    /// Adds to a playlist that are running or waiting their turn: one add
+    /// per playlist runs at a time, so its duplicate check sees the add
+    /// before it (see `PlaylistAppendQueue`).
+    pub playlist_appends: crate::state::PlaylistAppendQueue,
     /// Find-and-expand chain cluster: in-flight target + center-only flag +
     /// post-load top pin (per-field docs on `PendingExpandState`).
     pub pending_expand: crate::state::PendingExpandState,
@@ -475,6 +479,7 @@ impl Default for Nokkvi {
             start_view_applied: false,
             suppress_next_auto_center: false,
             pending_mode_commits: 0,
+            playlist_appends: crate::state::PlaylistAppendQueue::default(),
             pending_expand: crate::state::PendingExpandState::default(),
             server_version: None,
             open_subsonic_extensions: None,

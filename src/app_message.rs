@@ -1529,6 +1529,15 @@ pub enum Message {
         song_ids: Vec<String>,
         present: Vec<String>,
     },
+    /// An add to a playlist finished, whatever its outcome (`then`: the
+    /// outcome's own message, `PlaylistMutated` / `PlaylistAppendConflict` /
+    /// `SessionExpired` / a toast). Frees the playlist for the next add
+    /// waiting on it (`Nokkvi::playlist_appends`), then handles `then`.
+    PlaylistAppendFinished {
+        playlist_id: String,
+        ticket: u64,
+        then: Box<Message>,
+    },
     LoadSongs,
     /// Fetch one page of songs and append to queue, then chain next page if needed.
     /// Enables per-page UI refresh during progressive queue building.

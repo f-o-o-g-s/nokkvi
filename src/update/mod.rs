@@ -371,6 +371,11 @@ impl Nokkvi {
                 };
                 Task::batch([editor_reload, self.handle_load_playlists()])
             }
+            Message::PlaylistAppendFinished {
+                playlist_id,
+                ticket,
+                then,
+            } => self.handle_playlist_append_finished(&playlist_id, ticket, *then),
             Message::PlaylistAppendConflict {
                 playlist_id,
                 playlist_name,

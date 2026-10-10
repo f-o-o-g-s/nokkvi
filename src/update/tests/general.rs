@@ -750,6 +750,13 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
     app.similar_songs_generation = crate::state::StaleDropGen::at(7);
+    let add = crate::state::PendingAppend {
+        playlist_name: "Mix".into(),
+        song_ids: vec!["s1".into()],
+        error_ctx: "add songs to playlist",
+    };
+    assert!(app.playlist_appends.start("pl1", add.clone()).is_some());
+    assert!(app.playlist_appends.start("pl1", add).is_none());
     app.session_user_id = "u1".into();
     app.login_page.password = "hunter2".into();
     app.login_page.login_in_progress = true;
@@ -847,6 +854,15 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.library.albums.is_empty(), "library albums reset");
     assert!(app.library.artists.is_empty(), "library artists reset");
     assert!(app.similar_songs.is_none());
+    assert_eq!(
+        app.playlist_appends.running_ticket("pl1"),
+        None,
+        "running playlist adds reset"
+    );
+    assert!(
+        app.playlist_appends.waiting("pl1").is_empty(),
+        "waiting playlist adds reset"
+    );
     assert_eq!(
         app.similar_songs_generation.current(),
         8,

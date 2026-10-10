@@ -48,6 +48,7 @@ All notable changes to this project will be documented in this file.
 - A radio station list the server fails to send now shows an error instead of an empty Radios view.
 - A failed library list fetch no longer clears your library selection; it shows an error instead.
 - A Find Similar request the server fails now shows an error instead of "No similar songs found".
+- Adding the same song to a playlist twice in quick succession now adds it once, then asks about the duplicate.
 
 ### Removed
 

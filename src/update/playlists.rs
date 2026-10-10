@@ -11,6 +11,7 @@ use crate::{
         ArtworkMessage, CollageTarget, Message, NavigationMessage, PlaylistMutation,
         SplitViewMessage,
     },
+    state::PendingAppend,
     update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
@@ -39,13 +40,33 @@ impl Nokkvi {
     /// target count; repeats inside the batch are the user's selection. A
     /// failure toasts `Failed to {error_ctx}: …`, and a 401 routes to the
     /// session-expired path.
+    ///
+    /// One add per playlist runs at a time (`playlist_appends`): two checks
+    /// in flight together would both pass and add the song twice. An add to
+    /// a busy playlist waits and runs once the one before it finishes, so
+    /// its check sees that add. Every outcome comes back wrapped in
+    /// `PlaylistAppendFinished`, which frees the playlist.
     pub(crate) fn append_songs_to_playlist_task(
-        &self,
+        &mut self,
         playlist_id: String,
         playlist_name: String,
         song_ids: Vec<String>,
         error_ctx: &'static str,
     ) -> Task<Message> {
+        let add = PendingAppend {
+            playlist_name,
+            song_ids,
+            error_ctx,
+        };
+        let Some(ticket) = self.playlist_appends.start(&playlist_id, add.clone()) else {
+            debug!(" Add to playlist {playlist_id} waits for the add already running on it");
+            return Task::none();
+        };
+        let PendingAppend {
+            playlist_name,
+            song_ids,
+            error_ctx,
+        } = add;
         let target = playlist_id.clone();
         self.shell_task(
             move |shell| async move {
@@ -60,34 +81,68 @@ impl Nokkvi {
                     Ok(AppendOutcome::Conflict { song_ids, present })
                 }
             },
-            move |result: anyhow::Result<AppendOutcome>| match result {
-                Ok(AppendOutcome::Added(added)) => {
-                    Message::PlaylistMutated(PlaylistMutation::Appended {
-                        name: playlist_name,
-                        id: playlist_id,
-                        added,
-                        skipped: 0,
-                    })
-                }
-                Ok(AppendOutcome::Conflict { song_ids, present }) => {
-                    Message::PlaylistAppendConflict {
-                        playlist_id,
-                        playlist_name,
-                        song_ids,
-                        present,
+            move |result: anyhow::Result<AppendOutcome>| {
+                let then = match result {
+                    Ok(AppendOutcome::Added(added)) => {
+                        Message::PlaylistMutated(PlaylistMutation::Appended {
+                            name: playlist_name,
+                            id: playlist_id.clone(),
+                            added,
+                            skipped: 0,
+                        })
                     }
+                    Ok(AppendOutcome::Conflict { song_ids, present }) => {
+                        Message::PlaylistAppendConflict {
+                            playlist_id: playlist_id.clone(),
+                            playlist_name,
+                            song_ids,
+                            present,
+                        }
+                    }
+                    Err(e) => session_expired_message(&e).unwrap_or_else(|| {
+                        error!(" Failed to {error_ctx}: {e}");
+                        Message::Toast(crate::app_message::ToastMessage::Push(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Failed to {error_ctx}: {e}"),
+                                nokkvi_data::types::toast::ToastLevel::Error,
+                            ),
+                        ))
+                    }),
+                };
+                Message::PlaylistAppendFinished {
+                    playlist_id,
+                    ticket,
+                    then: Box::new(then),
                 }
-                Err(e) => session_expired_message(&e).unwrap_or_else(|| {
-                    error!(" Failed to {error_ctx}: {e}");
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to {error_ctx}: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
-                }),
             },
         )
+    }
+
+    /// An add to `playlist_id` finished: free the playlist, handle the add's
+    /// outcome (`then`), then start the next add waiting on that playlist.
+    ///
+    /// The outcome goes first so an expired session tears down (and drops
+    /// the waiting adds with it) before anything else is sent to the server.
+    pub(crate) fn handle_playlist_append_finished(
+        &mut self,
+        playlist_id: &str,
+        ticket: u64,
+        then: Message,
+    ) -> Task<Message> {
+        let next = self.playlist_appends.finish(playlist_id, ticket);
+        let outcome = self.update(then);
+        let next_task = match next {
+            // The session that queued it ended while this add ran.
+            Some(_) if self.screen != crate::Screen::Home => Task::none(),
+            Some(next) => self.append_songs_to_playlist_task(
+                playlist_id.to_string(),
+                next.playlist_name,
+                next.song_ids,
+                next.error_ctx,
+            ),
+            None => Task::none(),
+        };
+        Task::batch([outcome, next_task])
     }
 
     pub(crate) fn handle_load_playlists(&mut self) -> Task<Message> {

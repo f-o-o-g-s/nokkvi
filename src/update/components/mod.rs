@@ -1718,6 +1718,8 @@ impl Nokkvi {
             start_view_applied: _,
             suppress_next_auto_center: _,
             pending_mode_commits: _,
+            // Running and waiting playlist adds; ticket counter carried.
+            playlist_appends: _,
             // Dropped so its FFT thread joins now.
             visualizer: _,
             // The gapless prep latch; the engine it latched for is stopped.
@@ -1882,6 +1884,7 @@ impl Nokkvi {
         self.queue_current = crate::state::QueueCurrent::default();
         self.playlist_editor = None;
         self.pending_expand = crate::state::PendingExpandState::default();
+        self.playlist_appends.reset_for_session();
         self.roulette = None;
         self.playback.reset_for_session();
 

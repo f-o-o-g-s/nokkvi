@@ -807,3 +807,127 @@ fn appended_toast_counts_songs_and_skips() {
         "Added 1 song to 'Road Trip' (1 already there)"
     );
 }
+
+// --- Two adds to one playlist never check at the same time -------------------
+
+/// Quick-add `song_ids` to the default playlist "pl1" (the add task itself
+/// needs a live session, so tests drive the bookkeeping around it).
+fn quick_add(app: &mut crate::Nokkvi, song_ids: &[&str]) {
+    app.settings.quick_add_to_playlist = true;
+    app.settings.default_playlist_id = Some("pl1".into());
+    app.settings.default_playlist_name = "Road Trip".into();
+    let triples = vec![("pl1".to_owned(), "Road Trip".to_owned(), false)];
+    let _ = app.update(Message::PlaylistsFetchedForAddToPlaylist(
+        triples,
+        song_ids.iter().map(|id| (*id).to_string()).collect(),
+    ));
+}
+
+fn finished(ticket: u64, then: Message) -> Message {
+    Message::PlaylistAppendFinished {
+        playlist_id: "pl1".into(),
+        ticket,
+        then: Box::new(then),
+    }
+}
+
+/// Two fast quick-adds of the same song: the second must not run its own
+/// duplicate check while the first is still in flight (both would pass and
+/// the song would land twice). It waits, and starts once the first is done,
+/// so its check sees the first add.
+#[test]
+fn a_second_quick_add_waits_for_the_first_to_finish() {
+    let mut app = home_app();
+    quick_add(&mut app, &["song1"]);
+    let first = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("the first add is in flight");
+
+    quick_add(&mut app, &["song1"]);
+    assert_eq!(
+        app.playlist_appends.running_ticket("pl1"),
+        Some(first),
+        "the second add must not start while the first runs"
+    );
+    let waiting = app.playlist_appends.waiting("pl1");
+    assert_eq!(waiting.len(), 1, "the second add is deferred");
+    assert_eq!(waiting[0].song_ids, vec!["song1".to_string()]);
+
+    // The first add lands; its outcome is handled and the second starts.
+    let _ = app.update(finished(first, Message::NoOp));
+    let second = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("the deferred add now runs");
+    assert_ne!(second, first);
+    assert!(app.playlist_appends.waiting("pl1").is_empty());
+
+    let _ = app.update(finished(second, Message::NoOp));
+    assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
+}
+
+/// The picker dialog's Add takes the same gate as quick-add.
+#[test]
+fn the_picker_add_waits_behind_a_running_quick_add() {
+    use crate::widgets::text_input_dialog::{PlaylistOption, TextInputDialogMessage};
+
+    let mut app = home_app();
+    quick_add(&mut app, &["song1"]);
+    let first = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("in flight");
+
+    app.text_input_dialog.open_add_to_playlist(
+        &[("pl1".to_owned(), "Road Trip".to_owned())],
+        vec!["song1".into()],
+    );
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::PlaylistSelected(PlaylistOption::Existing {
+            id: "pl1".into(),
+            name: "Road Trip".into(),
+        }),
+    ));
+    let _ = app.update(Message::TextInputDialog(TextInputDialogMessage::Submit));
+    assert!(!app.text_input_dialog.visible, "the picker closed on Add");
+
+    assert_eq!(app.playlist_appends.running_ticket("pl1"), Some(first));
+    assert_eq!(app.playlist_appends.waiting("pl1").len(), 1);
+}
+
+/// An add whose outcome is an expired session drops the adds waiting behind
+/// it: the session they were asked in is gone.
+#[test]
+fn a_session_expired_outcome_drops_the_waiting_adds() {
+    let mut app = home_app();
+    quick_add(&mut app, &["song1"]);
+    let first = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("in flight");
+    quick_add(&mut app, &["song2"]);
+
+    let _ = app.update(finished(first, Message::SessionExpired));
+
+    assert_eq!(app.screen, crate::Screen::Login);
+    assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
+    assert!(app.playlist_appends.waiting("pl1").is_empty());
+}
+
+/// The outcome carried by the finish message is still handled: a conflict
+/// opens the confirm as before.
+#[test]
+fn a_finished_add_still_handles_its_outcome() {
+    let mut app = home_app();
+    quick_add(&mut app, &["a", "b"]);
+    let first = app
+        .playlist_appends
+        .running_ticket("pl1")
+        .expect("in flight");
+
+    let _ = app.update(finished(first, conflict(&["a", "b"], &["a"])));
+
+    assert!(app.text_input_dialog.visible, "the confirm opens");
+    assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
+}
