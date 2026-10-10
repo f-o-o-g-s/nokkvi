@@ -280,8 +280,8 @@ impl Nokkvi {
                     "add songs to playlist",
                 )
             }
-            // The add-conflict confirm. Both buttons take the same queued add
-            // as every other path, with the policy the dialog settled on: the
+            // The add-conflict confirm. Its Add (or Add anyway) takes the same
+            // queued add as every other path, with the policy the dialog settled on: the
             // skip box (offered only while some of the batch is missing) means
             // Skip, which reads the playlist again at add time, so a song
             // another add put there while the confirm was open is skipped
