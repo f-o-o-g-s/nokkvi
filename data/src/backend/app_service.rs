@@ -1939,7 +1939,9 @@ impl AppService {
                 ClearQueueOutcome::StationKept
             } else {
                 engine.stop().await;
-                engine.set_source(String::new(), None).await;
+                engine
+                    .set_source(String::new(), crate::audio::SourceKind::Track, None)
+                    .await;
                 ClearQueueOutcome::EngineStopped
             }
         };

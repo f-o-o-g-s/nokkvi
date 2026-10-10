@@ -384,8 +384,8 @@ struct RebufferLatch {
     ticks: u32,
 }
 
-/// Pure pause-and-rebuffer state machine for the FINITE (seekable, non-infinite)
-/// path. Advances the latch and returns the action `render_tick` applies.
+/// Pure pause-and-rebuffer state machine for FINITE (non-radio) streams,
+/// sized or unsized (a live transcode). Advances the latch and returns the action `render_tick` applies.
 /// Never fires during a crossfade, on radio, before the ring has primed once
 /// after a start/seek, at genuine end-of-track (decoder EOF), or with an invalid
 /// format — the guards that keep it from disrupting normal playback.
@@ -478,7 +478,7 @@ pub struct AudioRenderer {
     /// Set by the engine's decode loop when the primary decoder reaches EOF.
     decoder_eof: Arc<AtomicBool>,
     /// Set by the engine's decode loop to the cached stream type. The mid-track
-    /// network rebuffer only runs on FINITE (seekable) streams, never radio.
+    /// network rebuffer only runs on FINITE streams, never radio.
     stream_is_infinite: Arc<AtomicBool>,
     /// Network-rebuffer latch (issue #9); see [`RebufferLatch`].
     rebuffer: RebufferLatch,

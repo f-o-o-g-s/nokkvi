@@ -17,7 +17,7 @@ use tokio_util::{
     bytes::{Buf, Bytes},
     sync::CancellationToken,
 };
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::range_http_reader::RangeHttpReader;
 use crate::{
@@ -283,6 +283,36 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
     }
 }
 
+/// What a caller is loading into a decoder. It decides how `open_input`
+/// reads a response that carries no length: a queue song is still a finite
+/// track, a station is a live stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SourceKind {
+    /// A queue song. Finite even when the server sends it without a length
+    /// (a live transcode); never reconnected.
+    #[default]
+    Track,
+    /// An internet radio station: a live stream that is reconnected when it
+    /// drops. Only `CustomAudioEngine::load_radio_stream` loads one.
+    Station,
+}
+
+/// How the open source delivers its bytes, decided by `open_input`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StreamDelivery {
+    /// A source of known length: HTTP Range reads, or a local file. Finite
+    /// and seekable.
+    #[default]
+    Sized,
+    /// A queue song the server sends without a length, read once from front
+    /// to back. Navidrome serves a live (not yet cached) transcode this way:
+    /// `Accept-Ranges: none`, no Content-Length, `X-Content-Duration`.
+    /// Finite (its EOF ends the track) but not seekable.
+    Unsized,
+    /// A radio station's live stream: infinite, reconnected when it drops.
+    Live,
+}
+
 /// Audio decoder using symphonia
 pub struct AudioDecoder {
     format_reader: Option<Box<dyn FormatReader>>,
@@ -298,10 +328,12 @@ pub struct AudioDecoder {
     /// EMA-smoothed compressed bitrate in kbps, computed per-packet from
     /// Symphonia's `Packet.data.len()` and `Packet::block_dur()`.
     smoothed_bitrate_kbps: f64,
-    /// True when stream has no Content-Length (internet radio / infinite stream).
-    /// Engine uses this to skip gapless preparation, crossfade arming, and
-    /// consume-mode queue mutation.
-    infinite_stream: bool,
+    /// What the caller is loading (see [`SourceKind`]); set before `init`.
+    source_kind: SourceKind,
+    /// How the open source delivers its bytes (see [`StreamDelivery`]).
+    /// `Live` is what the engine treats as radio: no backpressure, the jitter
+    /// prebuffer, and the reconnect at EOF.
+    delivery: StreamDelivery,
     /// Server-reported track duration in ms, used to sanity-check the probed
     /// duration in `open_input`. `None` for radio and engine-internal loads.
     expected_duration_ms: Option<u64>,
@@ -544,7 +576,8 @@ impl AudioDecoder {
             eof: false,
             frame_buffer: Vec::new(),
             smoothed_bitrate_kbps: 0.0,
-            infinite_stream: false,
+            source_kind: SourceKind::Track,
+            delivery: StreamDelivery::Sized,
             expected_duration_ms: None,
             seek_scale: 1.0,
             live_icy_metadata,
@@ -558,6 +591,12 @@ impl AudioDecoder {
     /// no trustworthy metadata exists (radio, engine-internal fallback loads).
     pub fn set_expected_duration_ms(&mut self, expected_ms: Option<u64>) {
         self.expected_duration_ms = expected_ms;
+    }
+
+    /// Say what this decoder is for before `init()`: a queue song
+    /// (the default) or a radio station. See [`SourceKind`].
+    pub fn set_source_kind(&mut self, kind: SourceKind) {
+        self.source_kind = kind;
     }
 
     /// Enable the M8 leading-silence trim for this decoder (call before any
@@ -762,12 +801,20 @@ impl AudioDecoder {
 
                 // Create Range-based reader - fetches only needed bytes on demand
                 let reader = RangeHttpReader::new(self.url.clone(), len);
+                self.delivery = StreamDelivery::Sized;
 
                 let media_source: Box<dyn MediaSource> = Box::new(reader);
                 MediaSourceStream::new(media_source, Default::default())
             } else {
-                trace!(" [DECODER] No Content-Length found, treating as infinite stream.");
-                self.infinite_stream = true;
+                // No length. A station is a live stream. A queue song is still
+                // a finite track: the server sends it without a length when it
+                // transcodes on the fly (Navidrome: `Accept-Ranges: none`, no
+                // Content-Length until the transcode is cached).
+                let station = is_radio || self.source_kind == SourceKind::Station;
+                trace!(
+                    " [DECODER] No Content-Length found, opening a {} stream.",
+                    if station { "live" } else { "length-less track" }
+                );
 
                 let url_copy = self.url.clone();
 
@@ -792,9 +839,11 @@ impl AudioDecoder {
                     .build()
                     .context("Failed to create radio HTTP client")?;
 
-                let response = client
-                    .get(&url_copy)
-                    .header("Icy-MetaData", "1")
+                let mut request = client.get(&url_copy);
+                if station {
+                    request = request.header("Icy-MetaData", "1");
+                }
+                let response = request
                     .send()
                     .await
                     // A `.send()` error carries the credentialed URL; strip it before
@@ -802,7 +851,19 @@ impl AudioDecoder {
                     // failure log (engine.rs, `{:?}`); the radio-reconnect log uses
                     // `{}`, which prints only the top context, so it never showed the URL.
                     .map_err(reqwest::Error::without_url)
-                    .context("Failed to open infinite stream connection")?;
+                    .context("Failed to open the stream connection")?;
+
+                // An answer with ICY headers is a station whatever the caller
+                // loaded it as.
+                self.delivery = if station || is_radio_response(response.headers()) {
+                    StreamDelivery::Live
+                } else {
+                    info!(
+                        " [DECODER] The server sent this track without a length (a live \
+                         transcode): playing it once through, with no seeking"
+                    );
+                    StreamDelivery::Unsized
+                };
 
                 let content_type = response
                     .headers()
@@ -821,7 +882,7 @@ impl AudioDecoder {
                 }
 
                 if let Some(ref format) = detected_format {
-                    trace!(" [DECODER] Detected format for infinite stream: {}", format);
+                    trace!(" [DECODER] Detected format for the stream: {}", format);
                 }
 
                 // Check for ICY metadata
@@ -871,6 +932,7 @@ impl AudioDecoder {
                 .with_context(|| format!("Failed to open file: {}", self.url))?;
             let media_source: Box<dyn MediaSource> = Box::new(file);
             let mss = MediaSourceStream::new(media_source, Default::default());
+            self.delivery = StreamDelivery::Sized;
 
             // Try to extract format from file path
             (mss, self.extract_format_hint(&self.url))
@@ -1387,10 +1449,16 @@ impl AudioDecoder {
         self.eof
     }
 
-    /// True when stream has no Content-Length (internet radio).
-    /// Engine queries this to skip gapless, crossfade, and consume-mode logic.
+    /// True for a radio station's live stream ([`StreamDelivery::Live`]).
+    /// The engine reads it to skip backpressure and to reconnect at EOF
+    /// instead of ending the track.
     pub fn is_infinite_stream(&self) -> bool {
-        self.infinite_stream
+        self.delivery == StreamDelivery::Live
+    }
+
+    /// How the open source delivers its bytes (see [`StreamDelivery`]).
+    pub fn delivery(&self) -> StreamDelivery {
+        self.delivery
     }
 
     /// Get the EMA-smoothed live compressed bitrate in kbps.
@@ -2203,5 +2271,131 @@ pub(crate) mod tests {
             buffer.is_valid() && buffer.byte_count() > 0,
             "the reconnected stream must decode audio"
         );
+    }
+
+    // =========================================================================
+    // A server-side live transcode (Navidrome, not yet cached)
+    // =========================================================================
+
+    /// A quarter second (ten frames) of the fixture, without its first MPEG frame (the Xing
+    /// header). ffmpeg writing to a pipe can't go back to fill one in, so a
+    /// live transcode carries none and the probe can't read a length from
+    /// it. Kept shorter than the decode cushion (`CUSHION_MS`), so an engine
+    /// decode loop reaches the end without anything draining its ring.
+    pub(crate) fn transcode_body() -> &'static [u8] {
+        const AUDIO: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+        // 128 kbps MPEG-1 Layer III at 44.1 kHz, no padding: 417 bytes.
+        const FRAME_LEN: usize = 417;
+        &AUDIO[FRAME_LEN..FRAME_LEN * 11]
+    }
+
+    /// A local server shaped like Navidrome serving a live transcode on
+    /// `/rest/stream`: `Accept-Ranges: none`, no Content-Length, an
+    /// `X-Content-Duration` header when `duration_header` is set, an audio
+    /// content type and no ICY headers. Every GET (a Range probe too, which a
+    /// live transcode ignores) gets the whole body, chunked, then the
+    /// connection closes; a HEAD gets the headers alone. Returns the stream
+    /// URL and the number of requests served so far.
+    pub(crate) async fn spawn_live_transcode(
+        duration_header: Option<&'static str>,
+    ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served = requests.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                served.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut request = [0u8; 2048];
+                    let len = socket.read(&mut request).await.unwrap_or(0);
+                    let mut headers = String::from(
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nAccept-Ranges: none\r\n",
+                    );
+                    if let Some(secs) = duration_header {
+                        headers.push_str(&format!("X-Content-Duration: {secs}\r\n"));
+                    }
+                    if request[..len].starts_with(b"GET") {
+                        headers.push_str("Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+                        let _ = socket.write_all(headers.as_bytes()).await;
+                        for chunk in transcode_body().chunks(4096) {
+                            let _ = socket
+                                .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                                .await;
+                            let _ = socket.write_all(chunk).await;
+                            let _ = socket.write_all(b"\r\n").await;
+                        }
+                        let _ = socket.write_all(b"0\r\n\r\n").await;
+                    } else {
+                        headers.push_str("Connection: close\r\n\r\n");
+                        let _ = socket.write_all(headers.as_bytes()).await;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}/rest/stream?id=t1&f=json"), requests)
+    }
+
+    /// Read `decoder` until EOF (or 10 s), as the decode loop would.
+    fn drain_to_eof(decoder: &mut AudioDecoder) {
+        let started = std::time::Instant::now();
+        while !decoder.is_eof() && started.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::task::block_in_place(|| decoder.read_buffer(64 * 1024));
+        }
+    }
+
+    /// A queue song the server transcodes on the fly arrives with no length
+    /// and no ICY headers. It is still a finite track: it must not be taken
+    /// for a radio station (which the engine reconnects at EOF, restarting
+    /// the song instead of moving on), and it can't seek.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_track_served_without_a_length_is_a_finite_unseekable_track() {
+        let (url, _requests) = spawn_live_transcode(Some("0.261")).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the transcode must open");
+
+        assert!(
+            !decoder.is_infinite_stream(),
+            "a queue song without a length was classified as a radio stream"
+        );
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+
+        drain_to_eof(&mut decoder);
+        assert!(decoder.is_eof(), "the transcode's end must read as EOF");
+    }
+
+    /// A station is live however its server answers: one with no length and
+    /// no ICY headers (the same response shape as a live transcode) stays a
+    /// live stream when the caller loaded it as a station.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_station_without_icy_headers_stays_live() {
+        let (url, _requests) = spawn_live_transcode(None).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.set_source_kind(SourceKind::Station);
+        decoder.init(&url).await.expect("the station must open");
+
+        assert!(decoder.is_infinite_stream());
+        assert_eq!(decoder.delivery(), StreamDelivery::Live);
+    }
+
+    /// ICY headers make a stream live even when the caller loaded it as a
+    /// track: radio detection by header is unchanged.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn icy_headers_make_a_track_load_live() {
+        let url = spawn_slow_start_station(AfterAudio::HangUp).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.set_source_kind(SourceKind::Track);
+        decoder.init(&url).await.expect("the station must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Live);
     }
 }

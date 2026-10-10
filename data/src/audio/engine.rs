@@ -11,7 +11,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     audio::{
         AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration,
-        format::samples_for_duration,
+        decoder::SourceKind, format::samples_for_duration,
     },
     utils::url_redaction::redact_subsonic_url,
 };
@@ -688,7 +688,7 @@ struct DecodeLoopChannels {
     /// triggers from transiently empty buffers after a seek.
     decoder_eof: Arc<AtomicBool>,
     /// Set by the decode loop to the cached stream type. Shared with the renderer
-    /// so the mid-track network rebuffer only runs on FINITE (seekable) streams.
+    /// so the mid-track network rebuffer only runs on FINITE streams.
     stream_is_infinite: Arc<AtomicBool>,
     /// Lock-free crossfade duration for the decode loop's dynamic backpressure.
     /// Updated by `set_crossfade_duration()`, read by the spawned decode task.
@@ -1575,8 +1575,15 @@ impl CustomAudioEngine {
         &self.source
     }
 
-    /// Set source URL
-    pub async fn set_source(&mut self, source: String, expected_duration_ms: Option<u64>) {
+    /// Set source URL. `kind` says whether it is a queue song or a radio
+    /// station (it decides how a stream without a length is read, see
+    /// [`SourceKind`]); `expected_duration_ms` is a song's server length.
+    pub async fn set_source(
+        &mut self,
+        source: String,
+        kind: SourceKind,
+        expected_duration_ms: Option<u64>,
+    ) {
         trace!(
             " AudioEngine: set_source called with: {}",
             redact_subsonic_url(&source)
@@ -1629,6 +1636,7 @@ impl CustomAudioEngine {
 
         trace!(" AudioEngine: creating fresh decoder for new source");
         let mut fresh_decoder = AudioDecoder::new(self.live_icy_metadata.clone_arc());
+        fresh_decoder.set_source_kind(kind);
         fresh_decoder.set_expected_duration_ms(expected_duration_ms);
         self.decoder = Arc::new(tokio::sync::Mutex::new(fresh_decoder));
 
@@ -2744,7 +2752,21 @@ impl CustomAudioEngine {
         rg: Option<crate::types::song::ReplayGain>,
         expected_duration_ms: Option<u64>,
     ) {
-        self.set_source(url.to_string(), expected_duration_ms).await;
+        self.load_with_rg(url, rg, SourceKind::Track, expected_duration_ms)
+            .await;
+    }
+
+    /// The body of [`Self::load_track_with_rg`] and
+    /// [`Self::load_radio_stream`]: the source first, then the stash.
+    async fn load_with_rg(
+        &mut self,
+        url: &str,
+        rg: Option<crate::types::song::ReplayGain>,
+        kind: SourceKind,
+        expected_duration_ms: Option<u64>,
+    ) {
+        self.set_source(url.to_string(), kind, expected_duration_ms)
+            .await;
         self.renderer.lock().set_pending_replay_gain(rg);
     }
 
@@ -2755,10 +2777,13 @@ impl CustomAudioEngine {
     /// as an untagged track (the fallback dB, or AGC when "fall back to AGC"
     /// is on). A bare `set_source` would leave the last queue song's tags (or
     /// a promoted blend's) staged, and the station would build at that level.
-    /// No expected duration: the stream is infinite. The order is
+    /// No expected duration: the stream is infinite. It loads as a
+    /// [`SourceKind::Station`], so it stays a live stream (reconnected when
+    /// it drops) even when its server sends no ICY headers. The order is
     /// [`Self::load_track_with_rg`]'s: the source first, then the stash.
     pub async fn load_radio_stream(&mut self, url: &str) {
-        self.load_track_with_rg(url, None, None).await;
+        self.load_with_rg(url, None, SourceKind::Station, None)
+            .await;
     }
 
     /// Apply the controller's per-transition verdicts (M4 suppress + M8
@@ -4809,7 +4834,11 @@ mod tests {
         // A fresh-source load clears a previously-armed offset.
         engine.set_pending_start_ms(5_000);
         engine
-            .set_source("http://server/rest/stream?id=a".into(), None)
+            .set_source(
+                "http://server/rest/stream?id=a".into(),
+                SourceKind::Track,
+                None,
+            )
             .await;
         assert_eq!(
             engine.pending_start_ms, None,
@@ -4824,7 +4853,11 @@ mod tests {
         // A same-source reload takes the early return — the offset must
         // STILL clear (the clear sits above the return).
         engine
-            .set_source("http://server/rest/stream?id=a".into(), None)
+            .set_source(
+                "http://server/rest/stream?id=a".into(),
+                SourceKind::Track,
+                None,
+            )
             .await;
         assert_eq!(
             engine.pending_start_ms, None,
@@ -5845,7 +5878,11 @@ mod tests {
 
         let t0 = std::time::Instant::now();
         engine
-            .set_source("http://example.test/new".to_string(), None)
+            .set_source(
+                "http://example.test/new".to_string(),
+                SourceKind::Track,
+                None,
+            )
             .await;
 
         assert!(
@@ -5933,7 +5970,11 @@ mod tests {
         engine.start_render_thread();
 
         engine
-            .set_source("http://example.test/next-track".to_string(), None)
+            .set_source(
+                "http://example.test/next-track".to_string(),
+                SourceKind::Track,
+                None,
+            )
             .await;
 
         assert_eq!(
@@ -5961,7 +6002,11 @@ mod tests {
 
         let t0 = std::time::Instant::now();
         engine
-            .set_source("http://example.test/new".to_string(), None)
+            .set_source(
+                "http://example.test/new".to_string(),
+                SourceKind::Track,
+                None,
+            )
             .await;
 
         assert!(
@@ -8635,6 +8680,61 @@ mod tests {
             engine.renderer.lock().current_replay_gain_for_test(),
             Some(rg(-9.0)),
             "the swapped-in track's bookkeeping must carry its own tags"
+        );
+    }
+
+    /// A queue song the server transcodes on the fly arrives with no length.
+    /// At its end the decode loop must signal EOF so the queue moves on. It
+    /// used to take the stream for a radio station and reconnect, which
+    /// re-requested the song and played it again from the start.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_ends_at_eof_instead_of_reconnecting() {
+        use crate::audio::decoder::tests::spawn_live_transcode;
+
+        let (url, requests) = spawn_live_transcode(Some("0.261")).await;
+        let mut engine = CustomAudioEngine::new();
+        let _mixer = engine.renderer.lock().install_detached_output_for_test();
+        engine.load_track_with_rg(&url, None, Some(261)).await;
+        engine.play().await.expect("the transcode plays");
+        let opened = requests.load(Ordering::SeqCst);
+
+        // The body is shorter than the decode cushion, so the loop reaches
+        // the end without anything draining the ring.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !engine.channels.decoder_eof.load(Ordering::Acquire)
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let ended = engine.channels.decoder_eof.load(Ordering::Acquire);
+        // A reconnect's first attempt comes after a 2 s backoff.
+        tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
+        let requested_again = requests.load(Ordering::SeqCst) > opened;
+        engine.stop().await;
+
+        assert!(ended, "the decode loop never signalled the transcode's end");
+        assert!(
+            !requested_again,
+            "the decode loop re-requested the track at its end (a radio reconnect)"
+        );
+    }
+
+    /// A station whose server sends no length and no ICY headers answers
+    /// exactly like a live transcode. Loaded as a station it must still be
+    /// a live stream, so the decode loop reconnects it when it drops.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_station_without_icy_headers_loads_as_a_live_stream() {
+        use crate::audio::decoder::tests::spawn_live_transcode;
+
+        let (url, _requests) = spawn_live_transcode(None).await;
+        let mut engine = CustomAudioEngine::new();
+        engine.load_radio_stream(&url).await;
+
+        let mut decoder = engine.decoder.lock().await;
+        decoder.init(&url).await.expect("the station opens");
+        assert!(
+            decoder.is_infinite_stream(),
+            "a station loaded through load_radio_stream was read as a finite track"
         );
     }
 

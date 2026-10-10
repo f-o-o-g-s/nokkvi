@@ -34,7 +34,7 @@ pub mod symphonia_registry;
 
 pub use buffer::AudioBuffer;
 pub(crate) use crossfade_liveness::IncomingLiveness;
-pub use decoder::AudioDecoder;
+pub use decoder::{AudioDecoder, SourceKind, StreamDelivery};
 pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
 pub(crate) use generation::{DecodeLoopHandle, SourceGeneration};
