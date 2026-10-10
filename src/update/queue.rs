@@ -762,6 +762,7 @@ impl Nokkvi {
                 {
                     return Task::done(Message::Find(FindMessage::TopSongs {
                         artist_name: song.artist.clone(),
+                        artist_id: Some(song.artist_id.clone()),
                     }));
                 }
             }

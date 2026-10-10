@@ -803,7 +803,7 @@ mod r1 {
         assert!(!app.theater.active, "the Similar results are shown");
 
         let _ = app.enter_theater();
-        let _ = app.handle_find_top_songs("artist".into());
+        let _ = app.handle_find_top_songs("artist".into(), None);
         assert!(!app.theater.active);
     }
 

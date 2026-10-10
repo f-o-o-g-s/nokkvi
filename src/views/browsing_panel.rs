@@ -86,7 +86,7 @@ impl BrowsingPanel {
                 if view == BrowsingView::Similar
                     && matches!(
                         similar_source,
-                        Some(crate::state::SimilarSource::TopSongs(_))
+                        Some(crate::state::SimilarSource::TopSongs { .. })
                     )
                 {
                     label_str = "Top Songs";

@@ -100,7 +100,7 @@ impl AlbumsPage {
                 if song.artist.is_empty() {
                     AlbumsAction::None
                 } else {
-                    AlbumsAction::TopSongs(song.artist.clone())
+                    AlbumsAction::TopSongs(song.artist.clone(), song.artist_id.clone())
                 }
             }
             // Album rows don't offer Top Songs; the rest are other views' entries.

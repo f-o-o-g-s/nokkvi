@@ -172,7 +172,7 @@ impl SongsPage {
                             if !artist.is_empty() {
                                 (
                                     Task::none(),
-                                    SongsAction::TopSongs(artist.clone()),
+                                    SongsAction::TopSongs(artist.clone(), song.artist_id.clone()),
                                 )
                             } else {
                                 (Task::none(), SongsAction::None)

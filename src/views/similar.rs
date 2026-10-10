@@ -107,7 +107,7 @@ pub enum SimilarAction {
     /// (song id, song title)
     FindSimilar(String, String),
     /// Top Songs for an artist (artist name), triggered from within similar results
-    FindTopSongs(String),
+    FindTopSongs(String, Option<String>), // (artist_name, artist_id)
     /// User toggled a similar column's visibility — persist to config.toml.
     ColumnVisibilityChanged(SimilarColumn, bool),
     None,
@@ -259,7 +259,10 @@ impl SimilarPage {
                         ),
                         LibraryContextEntry::TopSongs => (
                             Task::none(),
-                            SimilarAction::FindTopSongs(song.artist.clone()),
+                            SimilarAction::FindTopSongs(
+                                song.artist.clone(),
+                                song.artist_id.clone(),
+                            ),
                         ),
                         LibraryContextEntry::AddToMix => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
@@ -366,7 +369,7 @@ impl SimilarPage {
         // Loading state
         if data.loading && data.songs.is_empty() {
             let loading_text = match data.source {
-                Some(crate::state::SimilarSource::TopSongs(_)) => "Loading top songs…",
+                Some(crate::state::SimilarSource::TopSongs { .. }) => "Loading top songs…",
                 Some(crate::state::SimilarSource::SimilarTo(_)) | None => "Loading similar songs…",
             };
 
@@ -755,7 +758,7 @@ mod tests {
             &songs,
         );
         match action {
-            SimilarAction::FindTopSongs(artist) => {
+            SimilarAction::FindTopSongs(artist, _) => {
                 assert_eq!(artist, "Radiohead");
             }
             other => panic!("expected FindTopSongs, got {other:?}"),

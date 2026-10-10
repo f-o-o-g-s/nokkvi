@@ -658,7 +658,12 @@ pub enum FindMessage {
     /// getSimilarSongs2. `seed_name` is the song/album/artist's display name.
     Similar { id: String, seed_name: String },
     /// Trigger "Top Songs" for an artist — opens browsing panel, fires getTopSongs.
-    TopSongs { artist_name: String },
+    /// `artist_id` is sent instead of the name when the server supports it;
+    /// `None` where the caller has no id (a radio track's ICY artist).
+    TopSongs {
+        artist_name: String,
+        artist_id: Option<String>,
+    },
     /// API response for similar/top songs (generation counter, result, source).
     Loaded(
         u64,
@@ -1791,10 +1796,15 @@ mod tests {
         // TopSongs trigger
         let msg = Message::Find(FindMessage::TopSongs {
             artist_name: "Artist X".into(),
+            artist_id: Some("ar-x".into()),
         });
         match msg {
-            Message::Find(FindMessage::TopSongs { artist_name }) => {
+            Message::Find(FindMessage::TopSongs {
+                artist_name,
+                artist_id,
+            }) => {
                 assert_eq!(artist_name, "Artist X");
+                assert_eq!(artist_id.as_deref(), Some("ar-x"));
             }
             _ => panic!("expected Message::Find(FindMessage::TopSongs)"),
         }
@@ -1818,7 +1828,10 @@ mod tests {
     /// `Message::SimilarSongsLoaded` variant.
     #[test]
     fn find_message_loaded_carries_error_string() {
-        let source = crate::state::SimilarSource::TopSongs("Artist X".into());
+        let source = crate::state::SimilarSource::TopSongs {
+            artist: "Artist X".into(),
+            lookup: nokkvi_data::services::api::similar::TopSongsArtist::Name("Artist X".into()),
+        };
         let msg = Message::Find(FindMessage::Loaded(42, Err("boom".into()), source.clone()));
         match msg {
             Message::Find(FindMessage::Loaded(generation, Err(err), loaded_source)) => {

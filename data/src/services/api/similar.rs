@@ -34,6 +34,40 @@ struct TopSongs {
     song: Option<Vec<Song>>,
 }
 
+/// How a `getTopSongs` request names its artist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TopSongsArtist {
+    /// `id=<artistId>`, from the OpenSubsonic `topSongsByArtistId` extension
+    /// (Navidrome 0.64.0+). Names exactly one artist, so two artists who
+    /// share a name don't get each other's songs.
+    Id(String),
+    /// `artist=<name>`, the base Subsonic form. Navidrome matches it against
+    /// artist names and takes the first hit.
+    Name(String),
+}
+
+impl TopSongsArtist {
+    /// The OpenSubsonic extension that lets `getTopSongs` take an artist id.
+    pub const BY_ID_EXTENSION: &'static str = "topSongsByArtistId";
+
+    /// Ask by id when the server advertises [`Self::BY_ID_EXTENSION`] and the
+    /// caller has a non-empty id; ask by name otherwise.
+    pub fn choose(artist_name: &str, artist_id: Option<&str>, by_id_supported: bool) -> Self {
+        match artist_id {
+            Some(id) if by_id_supported && !id.is_empty() => Self::Id(id.to_string()),
+            _ => Self::Name(artist_name.to_string()),
+        }
+    }
+
+    /// The query parameter this lookup sends.
+    fn query_param(&self) -> (&'static str, &str) {
+        match self {
+            Self::Id(id) => ("id", id),
+            Self::Name(name) => ("artist", name),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SimilarApiService {
     client: ApiClient,
@@ -77,28 +111,27 @@ impl SimilarApiService {
         Ok(songs)
     }
 
-    /// Fetch top songs for an artist by name.
+    /// Fetch an artist's top songs (`getTopSongs`), by id or by name as
+    /// `artist` says.
     ///
-    /// Uses Navidrome's `getTopSongs` endpoint.
-    pub async fn get_top_songs(&self, artist_name: &str, count: u32) -> Result<Vec<Song>> {
+    /// Reads through the checked envelope: a failed call is an error, not an
+    /// empty list that would read as "this artist has no top songs".
+    pub async fn get_top_songs(&self, artist: &TopSongsArtist, count: u32) -> Result<Vec<Song>> {
         let count_str = count.to_string();
-        let inner: TopSongsResponseInner = crate::services::api::subsonic::subsonic_get_envelope(
-            &self.client.http_client(),
-            &self.server_url,
-            "getTopSongs",
-            &self.subsonic_credential,
-            &[("artist", artist_name), ("count", &count_str)],
-            "getTopSongs",
-        )
-        .await?;
+        let inner: TopSongsResponseInner =
+            crate::services::api::subsonic::subsonic_get_envelope_checked(
+                &self.client.http_client(),
+                &self.server_url,
+                "getTopSongs",
+                &self.subsonic_credential,
+                &[artist.query_param(), ("count", &count_str)],
+                "getTopSongs",
+            )
+            .await?;
 
         let songs = inner.top_songs.and_then(|s| s.song).unwrap_or_default();
 
-        debug!(
-            "🎵 getTopSongs: {} results for artist='{}'",
-            songs.len(),
-            artist_name
-        );
+        debug!("🎵 getTopSongs: {} results for {:?}", songs.len(), artist);
 
         Ok(songs)
     }
@@ -167,6 +200,29 @@ mod tests {
             .and_then(|s| s.song)
             .unwrap_or_default();
         assert!(songs.is_empty());
+    }
+
+    /// With `topSongsByArtistId` advertised, a known id is sent as `id`;
+    /// without it, or without an id, the name is sent as `artist`.
+    #[test]
+    fn top_songs_asks_by_id_only_with_the_extension_and_an_id() {
+        let by_id = TopSongsArtist::choose("Mono", Some("ar-1"), true);
+        assert_eq!(by_id, TopSongsArtist::Id("ar-1".into()));
+        assert_eq!(by_id.query_param(), ("id", "ar-1"));
+
+        let no_ext = TopSongsArtist::choose("Mono", Some("ar-1"), false);
+        assert_eq!(no_ext, TopSongsArtist::Name("Mono".into()));
+        assert_eq!(no_ext.query_param(), ("artist", "Mono"));
+
+        assert_eq!(
+            TopSongsArtist::choose("Mono", None, true),
+            TopSongsArtist::Name("Mono".into())
+        );
+        // The queue row carries the id as a plain String, empty when unknown.
+        assert_eq!(
+            TopSongsArtist::choose("Mono", Some(""), true),
+            TopSongsArtist::Name("Mono".into())
+        );
     }
 
     /// Verify `getTopSongs` JSON parses correctly.

@@ -550,6 +550,15 @@ impl Nokkvi {
             .is_some_and(|s| s.contains("songLyrics"))
     }
 
+    /// `topSongsByArtistId` extension (`getTopSongs` by artist id). `false`
+    /// until the login-time probe lands, so Top Songs falls back to asking by
+    /// name.
+    pub(crate) fn supports_top_songs_by_artist_id(&self) -> bool {
+        self.open_subsonic_extensions.as_ref().is_some_and(|s| {
+            s.contains(nokkvi_data::services::api::similar::TopSongsArtist::BY_ID_EXTENSION)
+        })
+    }
+
     /// Window title — dynamic based on playback state.
     ///
     /// Daemon-mode signature: the `_window` id is unused because nokkvi only

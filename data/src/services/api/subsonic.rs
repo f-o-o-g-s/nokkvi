@@ -133,8 +133,8 @@ pub(crate) fn check_subsonic_response_status(
 /// POST to a Subsonic endpoint and parse the enveloped JSON payload.
 ///
 /// Shared fetch pipeline for the typed list endpoints (getGenres,
-/// getMusicFolders, getInternetRadioStations, getSimilarSongs2, getTopSongs,
-/// getPlaylist): send via [`subsonic_post`], read the body, parse a
+/// getMusicFolders, getInternetRadioStations, getSimilarSongs2, getPlaylist):
+/// send via [`subsonic_post`], read the body, parse a
 /// [`SubsonicEnvelope<T>`] with the UTF-8-safe preview parser, and return the
 /// inner payload. `label` names the response in every error context
 /// (`Failed to fetch {label}` / `Failed to read {label} response` /

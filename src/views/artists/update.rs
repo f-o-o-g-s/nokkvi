@@ -95,7 +95,7 @@ impl ArtistsPage {
                 ArtistsAction::FindSimilar(album.id.clone(), album.name.clone())
             }
             (Entry::TopSongs, Some(SlotListEntry::Parent(artist))) => {
-                ArtistsAction::TopSongs(artist.name.clone())
+                ArtistsAction::TopSongs(artist.name.clone(), Some(artist.id.clone()))
             }
             // An artist has no folder of its own, and album rows don't offer
             // Top Songs; the rest are other views' entries.

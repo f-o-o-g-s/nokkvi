@@ -40,6 +40,8 @@ All notable changes to this project will be documented in this file.
 - Seeking at the instant a crossfade finishes no longer jumps back into the previous song.
 - Clearing the queue while a radio station plays now leaves the station playing, as removing every song already did.
 - With ReplayGain on, a radio station now plays at the untagged-track level instead of the previous song's.
+- Top Songs now shows the chosen artist's songs, not those of another artist with the same name, on Navidrome 0.64 and newer.
+- A Top Songs request the server fails now shows an error instead of "No similar songs found".
 
 ### Removed
 

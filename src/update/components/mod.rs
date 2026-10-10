@@ -1553,8 +1553,20 @@ impl Nokkvi {
             self.toast_warn("No artist metadata for currently playing track");
             return Task::none();
         }
+        // A station's ICY artist names no library artist; a queue track's row
+        // carries the id the server can look up unambiguously.
+        let artist_id = if self.active_playback.is_radio() {
+            None
+        } else {
+            self.scrobble
+                .current_song_id
+                .as_deref()
+                .and_then(|sid| self.library.queue_songs.iter().find(|s| s.id == sid))
+                .map(|s| s.artist_id.clone())
+        };
         Task::done(Message::Find(FindMessage::TopSongs {
             artist_name: artist,
+            artist_id,
         }))
     }
 

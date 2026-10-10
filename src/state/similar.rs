@@ -8,8 +8,13 @@ pub enum SimilarSource {
     /// `getSimilarSongs2` seeded by a song, album or artist; carries the
     /// seed's display name.
     SimilarTo(String),
-    /// `getTopSongs` for an artist; carries the artist name.
-    TopSongs(String),
+    /// `getTopSongs` for an artist: `artist` is the display name the header
+    /// shows, `lookup` is what the request sends (the artist id when the
+    /// server supports it, else the name).
+    TopSongs {
+        artist: String,
+        lookup: nokkvi_data::services::api::similar::TopSongsArtist,
+    },
 }
 
 impl SimilarSource {
@@ -17,7 +22,15 @@ impl SimilarSource {
     pub fn label(&self) -> String {
         match self {
             Self::SimilarTo(seed) => format!("Similar to: {seed}"),
-            Self::TopSongs(artist) => format!("Top Songs: {artist}"),
+            Self::TopSongs { artist, .. } => format!("Top Songs: {artist}"),
+        }
+    }
+
+    /// What the result list holds, for the empty and failure toasts.
+    pub fn result_noun(&self) -> &'static str {
+        match self {
+            Self::SimilarTo(_) => "similar songs",
+            Self::TopSongs { .. } => "top songs",
         }
     }
 }
@@ -47,8 +60,28 @@ mod tests {
             "Similar to: Paranoid Android"
         );
         assert_eq!(
-            SimilarSource::TopSongs("Radiohead".into()).label(),
+            SimilarSource::TopSongs {
+                artist: "Radiohead".into(),
+                lookup: nokkvi_data::services::api::similar::TopSongsArtist::Id("ar-1".into()),
+            }
+            .label(),
             "Top Songs: Radiohead"
+        );
+    }
+
+    #[test]
+    fn result_noun_names_each_source() {
+        assert_eq!(
+            SimilarSource::SimilarTo("x".into()).result_noun(),
+            "similar songs"
+        );
+        assert_eq!(
+            SimilarSource::TopSongs {
+                artist: "x".into(),
+                lookup: nokkvi_data::services::api::similar::TopSongsArtist::Name("x".into()),
+            }
+            .result_noun(),
+            "top songs"
         );
     }
 }

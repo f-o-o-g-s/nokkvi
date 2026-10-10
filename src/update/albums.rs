@@ -708,8 +708,11 @@ impl Nokkvi {
             AlbumsAction::FindSimilar(id, seed_name) => {
                 return Task::done(Message::Find(FindMessage::Similar { id, seed_name }));
             }
-            AlbumsAction::TopSongs(artist_name) => {
-                return Task::done(Message::Find(FindMessage::TopSongs { artist_name }));
+            AlbumsAction::TopSongs(artist_name, artist_id) => {
+                return Task::done(Message::Find(FindMessage::TopSongs {
+                    artist_name,
+                    artist_id,
+                }));
             }
             AlbumsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

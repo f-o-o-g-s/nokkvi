@@ -1713,7 +1713,80 @@ fn songs_top_songs_header_names_the_artist() {
         .expect("Top Songs fills the Similar tab");
     assert_eq!(
         state.source,
-        crate::state::SimilarSource::TopSongs("Artist".into())
+        crate::state::SimilarSource::TopSongs {
+            artist: "Artist".into(),
+            lookup: nokkvi_data::services::api::similar::TopSongsArtist::Name("Artist".into()),
+        }
     );
     assert_eq!(state.source.label(), "Top Songs: Artist");
+}
+
+/// Two artists can share a name, so Top Songs asks by the row's artist id
+/// once the server advertises `topSongsByArtistId`, and by name before that.
+/// The header names the artist either way.
+#[test]
+fn top_songs_asks_by_artist_id_when_the_server_supports_it() {
+    use nokkvi_data::services::api::similar::TopSongsArtist;
+
+    let open_top_songs = |extensions: Vec<String>| {
+        let mut app = test_app();
+        let _ = app.update(crate::app_message::Message::OpenSubsonicExtensionsFetched(
+            Some(extensions),
+        ));
+        let mut song = make_song("s1", "Song", "Mono");
+        song.artist_id = Some("ar-7".into());
+        seed_songs(&mut app, vec![song]);
+        let _ = app.update(crate::app_message::Message::Songs(
+            crate::views::SongsMessage::ContextMenuAction(
+                0,
+                crate::widgets::context_menu::LibraryContextEntry::TopSongs,
+            ),
+        ));
+        app.similar_songs
+            .expect("Top Songs fills the Similar tab")
+            .source
+    };
+
+    let by_id = open_top_songs(vec!["topSongsByArtistId".into()]);
+    assert_eq!(
+        by_id,
+        crate::state::SimilarSource::TopSongs {
+            artist: "Mono".into(),
+            lookup: TopSongsArtist::Id("ar-7".into()),
+        }
+    );
+    assert_eq!(by_id.label(), "Top Songs: Mono");
+
+    let by_name = open_top_songs(vec!["formPost".into()]);
+    assert_eq!(
+        by_name,
+        crate::state::SimilarSource::TopSongs {
+            artist: "Mono".into(),
+            lookup: TopSongsArtist::Name("Mono".into()),
+        }
+    );
+}
+
+/// The Artists row hands its own id to Top Songs (the row IS the artist).
+#[test]
+fn artists_row_top_songs_carries_the_artist_id() {
+    use crate::views::{ArtistsAction, ArtistsMessage, ArtistsPage};
+
+    let artists = vec![make_artist("ar1", "Mono")];
+    let mut page = ArtistsPage::new();
+    let (_, action) = page.update(
+        ArtistsMessage::ContextMenuAction(
+            0,
+            crate::widgets::context_menu::LibraryContextEntry::TopSongs,
+        ),
+        artists.len(),
+        &artists,
+    );
+    match action {
+        ArtistsAction::TopSongs(name, id) => {
+            assert_eq!(name, "Mono");
+            assert_eq!(id.as_deref(), Some("ar1"));
+        }
+        other => panic!("expected TopSongs, got {other:?}"),
+    }
 }

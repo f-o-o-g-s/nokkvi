@@ -471,8 +471,8 @@ impl Nokkvi {
             SongsAction::FindSimilar(song_id, title) => {
                 return self.handle_find_similar(song_id, title);
             }
-            SongsAction::TopSongs(artist_name) => {
-                return self.handle_find_top_songs(artist_name);
+            SongsAction::TopSongs(artist_name, artist_id) => {
+                return self.handle_find_top_songs(artist_name, artist_id);
             }
             SongsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);
