@@ -162,8 +162,12 @@ impl LibrariesApiService {
 
     /// Fall back to Subsonic `getMusicFolders`. Returns the id+name
     /// list without per-library counts.
+    ///
+    /// Status-checked: an empty list here prunes the user's whole library
+    /// selection (`AppService::apply_library_refresh`), so a failed answer
+    /// must be an `Err`, which leaves the selection alone.
     async fn load_via_subsonic(&self) -> Result<Vec<Library>> {
-        let inner: MusicFoldersInner = subsonic::subsonic_get_envelope(
+        let inner: MusicFoldersInner = subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getMusicFolders",
@@ -193,6 +197,54 @@ impl LibrariesApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        services::api::subsonic::tests::{FAILED_ENVELOPE, NOT_FOUND_ENVELOPE, one_shot_server},
+        types::error::NokkviError,
+    };
+
+    /// A non-admin session: `/api/library` answers 403, so the list comes
+    /// from `getMusicFolders` at `subsonic_body`.
+    async fn load_as_non_admin(subsonic_body: &'static str) -> Result<Vec<Library>> {
+        let native = one_shot_server("403 Forbidden", "").await;
+        let subsonic = one_shot_server("200 OK", subsonic_body).await;
+        let url = url::Url::parse(&native).expect("one-shot server url");
+        LibrariesApiService::new(ApiClient::new(url, String::new()), subsonic, "u=x".into())
+            .load()
+            .await
+    }
+
+    /// A failed `getMusicFolders` must be an error. As an empty list,
+    /// `refresh_libraries` handed it to `apply_library_refresh`, which pruned
+    /// every id out of the user's library selection and persisted that; an
+    /// `Err` returns before the prune and the callers toast it (or drop to
+    /// login for a rejected token) without blocking login.
+    #[tokio::test]
+    async fn music_folders_turn_a_failed_envelope_into_an_error() {
+        let err = load_as_non_admin(NOT_FOUND_ENVELOPE)
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        let err = load_as_non_admin(FAILED_ENVELOPE)
+            .await
+            .expect_err("a rejected token must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        const ONE_FOLDER: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","musicFolders":{"musicFolder":[{"id":1,"name":"Music"}]}}}"#;
+        let libraries = load_as_non_admin(ONE_FOLDER)
+            .await
+            .expect("an ok envelope parses");
+        assert_eq!(libraries.len(), 1);
+    }
 
     /// Round-trip the canonical Subsonic `getMusicFolders` shape into
     /// `Vec<Library>`. Covers the two-library happy path the popover

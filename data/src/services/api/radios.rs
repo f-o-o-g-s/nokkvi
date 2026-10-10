@@ -48,8 +48,9 @@ impl RadiosApiService {
     /// Fetch all internet radio stations from the Subsonic API.
     ///
     /// Returns a flat list — the Subsonic API has no pagination for radio stations.
+    /// Status-checked: a failed answer is an error, never "no stations".
     pub async fn load_radio_stations(&self) -> Result<Vec<RadioStation>> {
-        let inner: RadiosInner = crate::services::api::subsonic::subsonic_get_envelope(
+        let inner: RadiosInner = crate::services::api::subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getInternetRadioStations",
@@ -173,5 +174,51 @@ impl RadiosApiService {
             "Failed to update internet radio station",
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        services::api::subsonic::tests::{FAILED_ENVELOPE, NOT_FOUND_ENVELOPE, one_shot_server},
+        types::error::NokkviError,
+    };
+
+    async fn load_from(base_url: String) -> Result<Vec<RadioStation>> {
+        let url = url::Url::parse(&base_url).expect("one-shot server url");
+        RadiosApiService::new(ApiClient::new(url, String::new()), base_url, "u=x".into())
+            .load_radio_stations()
+            .await
+    }
+
+    /// A failed envelope must be an error: as an empty list the Radios view
+    /// says the server has no stations. A server with none still answers ok.
+    #[tokio::test]
+    async fn a_failed_envelope_is_an_error_not_an_empty_list() {
+        let err = load_from(one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        let err = load_from(one_shot_server("200 OK", FAILED_ENVELOPE).await)
+            .await
+            .expect_err("a rejected token must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        const NO_STATIONS: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","internetRadioStations":{}}}"#;
+        let stations = load_from(one_shot_server("200 OK", NO_STATIONS).await)
+            .await
+            .expect("an ok envelope with no stations is not an error");
+        assert!(stations.is_empty());
     }
 }

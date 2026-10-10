@@ -171,12 +171,14 @@ pub(crate) fn check_subsonic_response_status(
     Ok(())
 }
 
-/// POST to a Subsonic endpoint and parse the enveloped JSON payload.
+/// POST to a Subsonic endpoint and parse the enveloped JSON payload,
+/// WITHOUT looking at the HTTP status or a `status: "failed"` envelope, so a
+/// failure parses as an empty payload. Only for a read where that is
+/// fail-safe (the public `getOpenSubsonicExtensions` probe); everything else
+/// reads through [`subsonic_get_envelope_checked`].
 ///
-/// Shared fetch pipeline for the typed list endpoints (getGenres,
-/// getMusicFolders, getInternetRadioStations, getSimilarSongs2, getPlaylist):
-/// send via [`subsonic_post`], read the body, parse a
-/// [`SubsonicEnvelope<T>`] with the UTF-8-safe preview parser, and return the
+/// Sends via [`subsonic_post`], reads the body, parses a
+/// [`SubsonicEnvelope<T>`] with the UTF-8-safe preview parser, and returns the
 /// inner payload. `label` names the response in every error context
 /// (`Failed to fetch {label}` / `Failed to read {label} response` /
 /// `Failed to parse {label}: <preview>`).

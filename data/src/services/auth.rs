@@ -274,6 +274,11 @@ impl AuthService {
     /// the form body like every other Subsonic call is harmless. An absent
     /// `openSubsonicExtensions` field (pre-OpenSubsonic server) deserializes
     /// to an empty list, never an error.
+    ///
+    /// Deliberately the LENIENT reader, unlike the other Subsonic reads: the
+    /// endpoint is public, so a rejected token cannot fail it, and an empty
+    /// list is fail-safe (every extension-gated feature stays hidden or
+    /// falls back). A proxy's error page still fails to parse and errs.
     pub async fn fetch_open_subsonic_extensions(&self) -> Result<Vec<String>> {
         let client = self
             .client

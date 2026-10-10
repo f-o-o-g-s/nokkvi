@@ -211,9 +211,11 @@ impl GenresApiService {
         ]
     }
 
-    /// Fetch genres from Subsonic API (for counts)
+    /// Fetch genres from Subsonic API (for counts). Status-checked, so a
+    /// failed answer is an `Err` the loader logs (counts stay blank) rather
+    /// than a silent "no genres".
     async fn fetch_subsonic_genres(&self) -> Result<Vec<(String, u32, u32)>> {
-        let inner: GenresInner = crate::services::api::subsonic::subsonic_get_envelope(
+        let inner: GenresInner = crate::services::api::subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getGenres",
@@ -315,6 +317,39 @@ impl GenresApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::api::subsonic::tests::{NOT_FOUND_ENVELOPE, one_shot_server};
+
+    fn service_at(base_url: &str) -> GenresApiService {
+        let url = url::Url::parse(base_url).expect("one-shot server url");
+        GenresApiService::new(
+            ApiClient::new(url, String::new()),
+            base_url.to_string(),
+            "u=x".into(),
+        )
+    }
+
+    /// The `getGenres` count enrichment reads through the checked envelope:
+    /// a failed answer is an error (which the genre loader logs and degrades
+    /// to blank counts), not a server that silently reports no genres.
+    #[tokio::test]
+    async fn subsonic_genre_counts_turn_a_failed_envelope_into_an_error() {
+        let err = service_at(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+            .fetch_subsonic_genres()
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        const NO_GENRES: &str =
+            r#"{"subsonic-response":{"status":"ok","version":"1.16.1","genres":{}}}"#;
+        let counts = service_at(&one_shot_server("200 OK", NO_GENRES).await)
+            .fetch_subsonic_genres()
+            .await
+            .expect("an ok envelope with no genres is not an error");
+        assert!(counts.is_empty());
+    }
 
     /// Pin the `/api/genre` browse wire shape: full-set load (no-limit
     /// `_end`), text search on `name`, `library_id` repeats last.

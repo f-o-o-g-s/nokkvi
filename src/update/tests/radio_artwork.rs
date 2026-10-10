@@ -530,3 +530,41 @@ fn station_list_reload_resets_sort_signature_and_resorts() {
         "a reload with an unchanged count must still re-sort the fresh list"
     );
 }
+
+// ============================================================================
+// Station-list load failure: an error, never an empty list
+// ============================================================================
+
+/// Now that a failed `getInternetRadioStations` is an `Err` rather than an
+/// empty list, the Radios view keeps the stations it had and says why,
+/// instead of reporting a server with no stations.
+#[test]
+fn failed_station_reload_keeps_the_list_and_toasts() {
+    let mut app = test_app();
+    app.library.radio_stations = vec![station("s1", "One", None)];
+
+    let _ = app.handle_radio_stations_loaded(Err("radio stations: data not found".into()));
+
+    assert_eq!(app.library.radio_stations.len(), 1, "the list must survive");
+    assert!(
+        app.toast
+            .toasts
+            .iter()
+            .any(|t| t.message.contains("Failed to load radio stations")),
+        "the failure must be toasted"
+    );
+}
+
+/// A rejected token on the station read (code 40 → `Unauthorized`) sends
+/// the user to the login screen.
+#[test]
+fn rejected_token_on_station_load_routes_to_login() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+
+    let _ = app.handle_radio_stations_loaded(Err(
+        nokkvi_data::types::error::NokkviError::Unauthorized.to_string(),
+    ));
+
+    assert_eq!(app.screen, crate::Screen::Login);
+}
