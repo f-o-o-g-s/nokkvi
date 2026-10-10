@@ -583,13 +583,16 @@ pub(crate) fn view_header_with_identity<
     for cell in button_cells {
         header_row = header_row.push(wrap_header_cell(cell, true));
     }
+    // The cell before the count loses its divider when the count goes, which
+    // a search can flip mid-type ("59 songs" → "12 of 59 songs" is wider), so
+    // it keeps one tree shape either way and the search input keeps its focus.
     if let Some(search_element) = search_field {
-        header_row = header_row.push(wrap_header_cell(search_element, !hide_count));
+        header_row = header_row.push(divided_header_cell(search_element, !hide_count));
     } else {
         // No search bar — push a flex spacer so the count cell still ends
         // up flush-right. The spacer is wrapped to provide the divider
         // before the count.
-        header_row = header_row.push(wrap_header_cell(
+        header_row = header_row.push(divided_header_cell(
             iced::widget::Space::new()
                 .width(Length::Fill)
                 .height(Length::Fixed(HEADER_HEIGHT))
@@ -813,6 +816,17 @@ fn wrap_header_cell<'a, Message: 'a>(
     if !trailing_divider {
         return inner;
     }
+    divided_header_cell(inner, true)
+}
+
+/// [`wrap_header_cell`] for a cell whose divider comes and goes between
+/// renders: the cell keeps one widget-tree shape either way (the divider
+/// collapses to zero width), so state inside it, like a `text_input`'s focus,
+/// survives the flip.
+fn divided_header_cell<'a, Message: 'a>(
+    inner: Element<'a, Message>,
+    divider: bool,
+) -> Element<'a, Message> {
     // Use a right-side 1 px sibling stripe rather than the container's
     // `border` field — iced's Border draws all 4 sides with uniform width.
     // A sibling stripe gives us a clean right-only divider without
@@ -820,7 +834,7 @@ fn wrap_header_cell<'a, Message: 'a>(
     row![
         container(inner).height(Length::Fill),
         container(iced::widget::Space::new())
-            .width(Length::Fixed(1.0))
+            .width(Length::Fixed(if divider { 1.0 } else { 0.0 }))
             .height(Length::Fill)
             .style(|_| container::Style {
                 background: Some(theme::border().into()),
@@ -883,6 +897,8 @@ pub(crate) fn header_icon_cell<'a, Message: Clone + 'a>(
 
 #[cfg(test)]
 mod tests {
+    use iced::advanced::widget::Tree;
+
     use super::*;
 
     #[test]
@@ -924,5 +940,101 @@ mod tests {
     fn wrap_header_cell_with_divider_wraps_in_row() {
         let inner: Element<'_, String> = iced::widget::text("cell").boxed();
         let _ = wrap_header_cell(inner, true);
+    }
+
+    /// A revealed header with a merged identity whose count cell is shown or
+    /// hidden; everything else held equal.
+    fn identity_header(hide_count: bool) -> Element<'static, String> {
+        let config = ViewHeaderConfig {
+            current_view: "Album",
+            view_options: &["Album", "Artist"],
+            sort_ascending: true,
+            search_query: "a",
+            filtered_count: 12,
+            total_count: 59,
+            item_type: "songs",
+            search_input_id: "view_header_test_search",
+            on_view_selected: Box::new(str::to_string),
+            show_search: true,
+            on_search_change: Box::new(|q| q),
+            buttons: vec![HeaderButton::SortToggle("sort".to_string())],
+            on_roulette: None,
+            collapsed: false,
+            on_hover_enter: None,
+            on_hover_exit: None,
+            on_dropdown_open: None,
+            on_dropdown_close: None,
+            total_duration_secs: None,
+            sort_placeholder: None,
+        };
+        let identity = HeaderIdentity {
+            cell: iced::widget::text("Best Phonk").boxed(),
+            actions: vec![HeaderAction {
+                icon: "assets/icons/save.svg",
+                tooltip: "Save",
+                on_press: "save".to_string(),
+            }],
+            hide_count,
+            below: None,
+        };
+        view_header_with_identity(config, Some(identity))
+    }
+
+    /// The first `text_input` node in `tree`, depth-first.
+    fn text_input_node(
+        tree: &mut Tree,
+        tag: iced::advanced::widget::tree::Tag,
+    ) -> Option<&mut Tree> {
+        if tree.tag == tag {
+            return Some(tree);
+        }
+        tree.children
+            .iter_mut()
+            .find_map(|child| text_input_node(child, tag))
+    }
+
+    /// Stands in for a `text_input`'s state, so a diff that keeps the node
+    /// keeps the marker and a diff that rebuilds it loses it.
+    struct KeptMarker;
+
+    /// Mark the header's search input, re-render it as `next`, and report
+    /// whether the input kept its state (and so its focus) across the diff.
+    fn search_state_survives(
+        tree: &mut Tree,
+        mut next: Element<'static, String>,
+        tag: iced::advanced::widget::tree::Tag,
+    ) -> bool {
+        use iced::advanced::widget::tree::State;
+        text_input_node(tree, tag)
+            .expect("search input in the header")
+            .state = State::new(KeptMarker);
+        tree.diff(&mut next);
+        matches!(
+            &text_input_node(tree, tag).expect("search input in the header").state,
+            State::Some(state) if state.is::<KeptMarker>()
+        )
+    }
+
+    #[test]
+    fn search_input_survives_the_count_cell_hiding() {
+        // Typing into the Queue's search turns "59 songs" into "12 of 59
+        // songs"; on a narrow pane the wider label makes the playlist identity
+        // drop the count cell. The search input's state (its focus) must
+        // survive that re-render, or the field blurs after one keystroke.
+        let tag =
+            Tree::new::<String, iced::Theme, iced::Renderer>(&iced::widget::text_input("", "")).tag;
+        let mut shown = identity_header(false);
+        let mut tree = Tree::new(&shown);
+        tree.diff(&mut shown);
+
+        assert!(
+            search_state_survives(&mut tree, identity_header(true), tag),
+            "hiding the count cell rebuilt the search input"
+        );
+        // And back, when clearing the search brings the count cell back.
+        assert!(
+            search_state_survives(&mut tree, identity_header(false), tag),
+            "showing the count cell rebuilt the search input"
+        );
     }
 }

@@ -47,7 +47,7 @@ paths:
 
 ## Widget Tree & Focus
 
-- **Widget tree stability**: changing the root widget type (Row→Column) destroys `text_input` focus. Use `base_slot_list_empty_state` for consistent structure.
+- **Widget tree stability**: changing the root widget type (Row→Column) destroys `text_input` focus. Use `base_slot_list_empty_state` for consistent structure. The same holds for any wrapper on the path to the input: a view-header cell whose divider can flip between renders goes through `divided_header_cell` (the divider collapses to zero width), because the Queue's search-driven count label once hid the count cell mid-type and blurred the field after one keystroke (`search_input_survives_the_count_cell_hiding`).
 - **Search input ID collisions**: each view needs a unique search input ID constant.
 - **HoverOverlay canonical pattern**: `mouse_area(HoverOverlay::new(container(content))).on_press(msg)`. Wrapping a native button works in some places (press events are tracked passively — never captured — and `update` issues `request_redraw`), but reach for the canonical container pattern first.
 - **`Length::Fill` stripe in unconstrained Row**: `container(Space).height(Fill)` in a row without explicit height expands to fill column space. Set `height(Shrink)` on the wrapper row.
