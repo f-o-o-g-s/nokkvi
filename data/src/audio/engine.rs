@@ -2499,19 +2499,25 @@ impl CustomAudioEngine {
         // already-dispatched `on_renderer_finished` fails the renderer's
         // staleness gate instead of running against the seeked state (with
         // a re-armed slot it would start a fresh blend from the seek
-        // position).
+        // position). The seek itself is dropped: for an auto blend it was
+        // measured on the OUTGOING's timeline (the queue, and so the UI,
+        // still name the outgoing until the completion runs), and applied to
+        // the promoted track a target near the outgoing's end would end the
+        // incoming at once.
         let renderer_finalized =
             !self.crossfade.phase.is_idle() && !self.renderer.lock().is_crossfade_active();
-        let outcome = if renderer_finalized {
-            debug!("🔍 [SEEK] Blend already finished on the render thread — finalizing it first");
+        if renderer_finalized {
+            debug!(
+                "🔍 [SEEK] Blend already finished on the render thread — finalizing it; \
+                 the seek aimed at the ended track is dropped"
+            );
             self.finalize_crossfade_engine().await;
             self.channels.source_generation.bump_for_user_action();
-            SeekOutcome::Settled
-        } else {
-            match self.end_crossfade_on_queue_track().await {
-                BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
-                BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
-            }
+            return SeekOutcome::Settled;
+        }
+        let outcome = match self.end_crossfade_on_queue_track().await {
+            BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
+            BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
         };
 
         // Idempotent after the line above; kept for its renderer disarm (the
@@ -4929,6 +4935,8 @@ mod tests {
     /// pins the invariant the corrected `bump_for_user_action` doc now
     /// documents, so a future maintainer can't quietly add a spurious bump into
     /// seek and invalidate the render/visualizer staleness gating mid-seek.
+    /// (The render-finalized blend gap bumps, but there `seek` finalizes the
+    /// blend and drops the seek; see the bug 13 test.)
     #[tokio::test]
     async fn seek_preserves_source_generation() {
         let mut engine = CustomAudioEngine::new();
@@ -6850,9 +6858,11 @@ mod tests {
     /// in that one-hop gap must not cancel the blend back to the outgoing:
     /// the audio has already moved on. It finalizes instead (the verdict
     /// `try_finalize_crossfade` reaches with the renderer no longer active),
-    /// fires the completion callback once, seeks the promoted track, and
-    /// moves the source generation so the already-dispatched
-    /// `on_renderer_finished` is dropped by the renderer's staleness gate.
+    /// fires the completion callback once, and moves the source generation
+    /// so the already-dispatched `on_renderer_finished` is dropped by the
+    /// renderer's staleness gate. The seek itself, aimed at the ended
+    /// track's timeline, is dropped (not pinned here: the test decoder is
+    /// uninitialized, so a seek of it aborts either way).
     #[tokio::test]
     async fn a_seek_after_the_renderer_finalized_an_auto_blend_lands_on_the_incoming() {
         let mut engine = CustomAudioEngine::new();

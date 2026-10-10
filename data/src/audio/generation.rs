@@ -58,7 +58,10 @@ impl SourceGeneration {
     /// `renderer.seek` recreates the primary stream under the same generation
     /// (the seek window is gated by the `seeking` AtomicBool +
     /// `decode_loop.supersede` instead). Bumping on seek would needlessly
-    /// invalidate the visualizer/render staleness gating mid-seek.
+    /// invalidate the visualizer/render staleness gating mid-seek. (A seek
+    /// that lands after the render thread already finished a blend does
+    /// bump, but it seeks nothing: it finalizes the blend, a source change,
+    /// and drops the seek; see `CustomAudioEngine::seek`.)
     pub fn bump_for_user_action(&self) -> u64 {
         self.counter.fetch_add(1, Ordering::Release) + 1
     }
