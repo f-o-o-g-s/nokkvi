@@ -64,6 +64,8 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
         sample_rate: 44100,
         current_stream_bit_perfect: false,
         bitrate: 1411,
+        seekable: true,
+        live_transcode: false,
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,

@@ -156,6 +156,14 @@ pub struct PlaybackState {
     pub bit_perfect_holder_reprobe_ticks: u8,
     /// Bitrate in kbps (e.g., 320, 1411)
     pub bitrate: u32,
+    /// Whether the engine can seek what it plays, from the last tick: false
+    /// for a song the server transcodes on the fly (and for a station).
+    /// The seek producers and the progress bar read it through
+    /// `Nokkvi::seek_available`.
+    pub seekable: bool,
+    /// Whether the playing song is the server's live transcode, from the
+    /// last tick. Such a stream is never shown as bit-perfect.
+    pub live_transcode: bool,
     /// Throttle timestamp for volume persistence to storage
     pub volume_persist_throttle: Option<std::time::Instant>,
     /// Set while volume saves keep failing, so only the first failure of a
@@ -215,6 +223,8 @@ impl Default for PlaybackState {
             bit_perfect_unverifiable_streak: 0,
             bit_perfect_holder_reprobe_ticks: 0,
             bitrate: 0,
+            seekable: true,
+            live_transcode: false,
             volume_persist_throttle: None,
             volume_save_failing: false,
             play_attempt: super::StaleDropGen::default(),

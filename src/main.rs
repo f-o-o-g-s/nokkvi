@@ -1196,6 +1196,13 @@ impl Nokkvi {
     // =========================================================================
 
     /// Push an Info-level toast notification
+    /// Whether a seek can reach the engine: not on a station, and not on a
+    /// song the server transcodes on the fly (the last tick's
+    /// `PlaybackState::seekable`).
+    pub(crate) fn seek_available(&self) -> bool {
+        !self.active_playback.is_radio() && self.playback.seekable
+    }
+
     pub fn toast_info(&mut self, msg: impl Into<String>) {
         self.toast.push(nokkvi_data::types::toast::Toast::new(
             msg,

@@ -659,6 +659,7 @@ impl Nokkvi {
             volume: self.settings.volume,
             has_queue,
             is_radio: self.active_playback.is_radio(),
+            seekable: self.seek_available(),
             is_random_mode: self.modes.random,
             is_repeat_mode: self.modes.repeat,
             is_repeat_queue_mode: self.modes.repeat_queue,

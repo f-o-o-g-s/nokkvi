@@ -75,6 +75,8 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         sample_rate: 44100,
         current_stream_bit_perfect: false,
         bitrate: 1411,
+        seekable: true,
+        live_transcode: false,
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,
@@ -2020,4 +2022,84 @@ fn a_radio_tick_matches_its_own_station_only() {
     assert!(tick_matches_active_item(Some("r1"), &app.active_playback));
     // Built for another station, landing after a station change.
     assert!(!tick_matches_active_item(Some("r0"), &app.active_playback));
+}
+
+// ============================================================================
+// A song the server transcodes on the fly (no length, no seeking)
+// ============================================================================
+
+fn live_transcode_tick() -> PlaybackStateUpdate {
+    PlaybackStateUpdate {
+        seekable: false,
+        live_transcode: true,
+        ..make_playback_update()
+    }
+}
+
+/// The slider, the capsule, MPRIS and Previous's rewind all reach
+/// `handle_seek`. On a track the engine can't seek it refuses up front (the
+/// engine would refuse too) and says why, instead of dispatching a seek that
+/// silently does nothing.
+#[test]
+fn a_seek_on_a_live_transcode_is_refused_with_a_toast() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(live_transcode_tick());
+    app.scrobble.last_position = -7.0;
+    let toasts_before = app.toast.toasts.len();
+
+    let _ = app.handle_seek(30.0);
+
+    assert_eq!(app.scrobble.last_position, -7.0, "the seek was dispatched");
+    assert!(!app.seek_available());
+    assert!(app.toast.toasts.len() > toasts_before, "no toast said why");
+}
+
+/// A seekable track's tick turns seeking back on.
+#[test]
+fn a_seekable_tick_makes_seeking_available_again() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(live_transcode_tick());
+    let _ = app.handle_playback_state_updated(make_playback_update());
+
+    assert!(app.seek_available());
+    let _ = app.handle_seek(30.0);
+    assert_eq!(app.scrobble.last_position, 30.0);
+}
+
+/// A server transcode is lossy whatever the file on disk is, so the
+/// now-playing badge never calls it bit-perfect.
+#[test]
+fn a_live_transcode_never_shows_the_bit_perfect_badge() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        current_stream_bit_perfect: true,
+        ..live_transcode_tick()
+    });
+    assert!(!app.playback.bit_perfect_engaged);
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        current_stream_bit_perfect: true,
+        ..make_playback_update()
+    });
+    assert!(
+        app.playback.bit_perfect_engaged,
+        "control: the same stream from the file is bit-perfect"
+    );
+}
+
+/// The format label names what plays: a transcode's own codec, not the
+/// extension of the file the server transcoded.
+#[test]
+fn a_live_transcode_is_labelled_with_its_own_codec() {
+    use crate::update::playback::song_format_label;
+    assert_eq!(
+        song_format_label("/m/a/01.flac", Some("opus"), true),
+        "opus"
+    );
+    assert_eq!(
+        song_format_label("/m/a/01.flac", Some("flac"), false),
+        "flac"
+    );
+    assert_eq!(song_format_label("/m/a/01.FLAC", None, true), "flac");
+    assert_eq!(song_format_label("", None, false), "");
 }

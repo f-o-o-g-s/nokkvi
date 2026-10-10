@@ -55,7 +55,7 @@ Scroll-to-volume on wheel (both music + SFX sliders publish a delta via `on_scro
 
 ## Progress Bar (`progress_bar.rs`)
 
-Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer()` pass so it sits above neighboring quads; the seek tooltip renders through a real `overlay()` (`TooltipOverlay`) so it z-orders above other widgets. Drag-release publishes `Seek(progress * duration)` once; in-flight position keeps the handle smooth via `last_position + elapsed` interpolation. `filled(true)` switches to the MiniPlayer capsule look — a full-height track that is structurally handle-less (the handle never draws in filled mode) and carries `time_labels(CapLabel, CapLabel)` end-caps. `interactive(false)` (radio) disables seeking and is decoupled from `hide_handle`.
+Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer()` pass so it sits above neighboring quads; the seek tooltip renders through a real `overlay()` (`TooltipOverlay`) so it z-orders above other widgets. Drag-release publishes `Seek(progress * duration)` once; in-flight position keeps the handle smooth via `last_position + elapsed` interpolation. `filled(true)` switches to the MiniPlayer capsule look — a full-height track that is structurally handle-less (the handle never draws in filled mode) and carries `time_labels(CapLabel, CapLabel)` end-caps. `interactive(false)` (radio, or a song the server transcodes on the fly: `PlayerBarData.seekable` = `Nokkvi::seek_available()`) disables seeking and is decoupled from `hide_handle`.
 
 ## Key Widgets
 

@@ -24,6 +24,8 @@ fn threshold_crossing_update(song_id: &str, pos: u32, dur: u32) -> PlaybackState
         sample_rate: 44100,
         current_stream_bit_perfect: false,
         bitrate: 1411,
+        seekable: true,
+        live_transcode: false,
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,

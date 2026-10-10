@@ -729,6 +729,9 @@ pub(crate) struct PlayerBarViewData {
     pub volume: f32,
     pub has_queue: bool,
     pub is_radio: bool,
+    /// Whether the progress bar can seek: false on a station and on a song
+    /// the server transcodes on the fly (`Nokkvi::seek_available`).
+    pub seekable: bool,
     // Mode states
     pub is_random_mode: bool,
     pub is_repeat_mode: bool,
@@ -1357,16 +1360,17 @@ pub(crate) fn player_bar<'a>(
 
     // The inline progress row (with time end-caps + drag handle) used by every
     // mode EXCEPT MiniPlayer. MiniPlayer instead floats a bare seek scrub as a
-    // top-edge overlay (built in the assembly below). Radio is non-seekable, so
-    // it hides the handle and disables interaction.
+    // top-edge overlay (built in the assembly below). Radio and a live
+    // transcode are non-seekable, so they hide the handle and disable
+    // interaction.
     use nokkvi_data::types::player_settings::TrackInfoDisplay;
     let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
 
     let custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
-            .hide_handle(data.is_radio)
-            .interactive(!data.is_radio)
+            .hide_handle(!data.seekable)
+            .interactive(data.seekable)
             .width(Length::Fill)
             .height(24.0);
 
@@ -1595,10 +1599,11 @@ pub(crate) fn player_bar<'a>(
             widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
                 .is_playing(data.playback_playing && !data.playback_paused)
                 // filled (capsule) mode is inherently handle-less; no need to
-                // also pass hide_handle. Radio is non-seekable.
+                // also pass hide_handle. Radio and a live transcode are
+                // non-seekable.
                 .filled(true)
                 .time_labels(cap_left, cap_right)
-                .interactive(!data.is_radio)
+                .interactive(data.seekable)
                 .width(Length::Fill)
                 .height(CAPSULE_SCRUB_HEIGHT);
 
@@ -2491,6 +2496,7 @@ mod mode_descriptor_tests {
             volume: 1.0,
             has_queue: false,
             is_radio: false,
+            seekable: true,
             is_random_mode: false,
             is_repeat_mode: false,
             is_repeat_queue_mode: false,

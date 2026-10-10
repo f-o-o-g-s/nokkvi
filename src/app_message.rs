@@ -131,6 +131,13 @@ pub struct PlaybackStateUpdate {
     pub current_stream_bit_perfect: bool,
     /// Bitrate in kbps (e.g., 320 for MP3, 1411 for CD-quality FLAC)
     pub bitrate: u32,
+    /// Whether the engine can seek the item it plays
+    /// (`CustomAudioEngine::seekable`): false for a station and for a song
+    /// the server transcodes on the fly.
+    pub seekable: bool,
+    /// Whether the playing song is the server's live transcode
+    /// (`CustomAudioEngine::is_live_transcode`): lossy whatever the file is.
+    pub live_transcode: bool,
     /// Live ICY-metadata parsed by IcyMetadataReader
     pub live_icy_metadata: Option<String>,
     /// Tagged BPM of the current song, if the file/server reports one.

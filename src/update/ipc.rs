@@ -107,7 +107,8 @@
 //! | `seek`        | act_str   | `{"position":N}` absolute, or `{"offset":±N}`  |
 //! |               |           | relative; arg `position` (seconds). `"+N"`/    |
 //! |               |           | `"-N"` seeks relative to the current position, |
-//! |               |           | `"N"` is absolute. `unavailable` during radio. |
+//! |               |           | `"N"` is absolute. `unavailable` during radio  |
+//! |               |           | and on a song the server transcodes on the fly.|
 //! | `volume`      | act_str   | `{"volume":N}`; arg `value`. `"+N"`/`"-N"`     |
 //! |               |           | (delta, clamped 0.0..=1.0) or `"N"` absolute  |
 //! |               |           | (0.0..=1.0, rejected if out of range). Routes |
@@ -446,7 +447,8 @@ define_commands! {
         let task = app.handle_stop();
         Ok((task, json!({ "state": play_state_str(&app.playback) })))
     });
-    // The seek handlers no-op on radio (no seekable position), so guard here
+    // The seek handlers no-op on radio and on a song the server transcodes
+    // on the fly (no seekable position), so guard here
     // and return an error rather than echoing a false success.
     //
     // Absolute answers `{"position": N}`; relative answers `{"offset": ±N}`,
@@ -455,6 +457,12 @@ define_commands! {
     "seek"        => act_str ("position", |app: &mut Nokkvi, raw: &str| {
         if app.active_playback.is_radio() {
             return Err(("unavailable", "seek is not available during radio playback".to_string()));
+        }
+        if !app.seek_available() {
+            return Err((
+                "unavailable",
+                "seek is not available: the server is transcoding this song".to_string(),
+            ));
         }
         let request = parse_seek_arg(raw).map_err(|message| ("invalid_args", message))?;
         match request {

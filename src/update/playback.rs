@@ -117,14 +117,32 @@ fn bit_perfect_status_for(
 /// reading the setting would let the badge claim BIT-PERFECT for a stream still
 /// on the DSP path. `current_stream_bit_perfect` already encodes the
 /// native-PipeWire-volume requirement (the cpal fallback can't be bit-perfect),
-/// so no separate native-volume check is needed. Radio is excluded outright —
-/// a lossy network stream can't be bit-perfect regardless of the device clock.
+/// so no separate native-volume check is needed. A lossy source is excluded
+/// outright (a radio stream, or a song the server transcodes on the fly): it
+/// can't be bit-perfect regardless of the device clock.
 fn bit_perfect_badge_engaged(
     current_stream_bit_perfect: bool,
     playing: bool,
-    is_radio: bool,
+    lossy_source: bool,
 ) -> bool {
-    current_stream_bit_perfect && playing && !is_radio
+    current_stream_bit_perfect && playing && !lossy_source
+}
+
+/// The format label for a queue song: the file's extension, or for a live
+/// transcode the codec the server actually sends.
+pub(crate) fn song_format_label(
+    path: &str,
+    live_codec: Option<&str>,
+    live_transcode: bool,
+) -> String {
+    match live_codec {
+        Some(codec) if live_transcode => codec.to_string(),
+        _ => path
+            .rsplit('.')
+            .next()
+            .map(|ext| ext.to_lowercase())
+            .unwrap_or_default(),
+    }
 }
 
 /// Resolve the next radio-station index when cycling.
@@ -198,6 +216,8 @@ struct MprisUpdate<'a> {
     metadata_current: bool,
     /// The item this tick describes, for `mpris:trackid` and `CanSeek`.
     item: crate::services::mpris::MprisItem<'a>,
+    /// Whether the engine can seek it (false for a live transcode).
+    seekable: bool,
     art_url: Option<&'a str>,
     repeat: bool,
     repeat_queue: bool,
@@ -327,6 +347,8 @@ impl Nokkvi {
                 };
                 let engine_live_codec = engine.live_codec();
                 let next_track_epoch = engine.next_track_epoch();
+                let seekable = engine.seekable();
+                let live_transcode = engine.is_live_transcode();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -346,13 +368,13 @@ impl Nokkvi {
                             engine_live_bitrate,
                         )
                     } else if let Some(s) = &song {
-                        // Extract format suffix from file path (e.g., "flac" from "/path/to/song.flac")
-                        let suffix = s
-                            .path
-                            .rsplit('.')
-                            .next()
-                            .map(|ext| ext.to_lowercase())
-                            .unwrap_or_default();
+                        // The file's extension (e.g. "flac"), or the codec a
+                        // live transcode actually sends.
+                        let suffix = song_format_label(
+                            &s.path,
+                            engine_live_codec.as_deref(),
+                            live_transcode,
+                        );
                         // Prefer live decoder bitrate over static Navidrome API value
                         let br = if engine_live_bitrate > 0 {
                             engine_live_bitrate
@@ -451,6 +473,8 @@ impl Nokkvi {
                     sample_rate,
                     current_stream_bit_perfect,
                     bitrate,
+                    seekable,
+                    live_transcode,
                     live_icy_metadata: engine_live_icy_metadata,
                     bpm,
                     seek_epoch,
@@ -488,6 +512,8 @@ impl Nokkvi {
             sample_rate,
             current_stream_bit_perfect,
             bitrate,
+            seekable,
+            live_transcode,
             live_icy_metadata,
             bpm,
             seek_epoch,
@@ -585,6 +611,8 @@ impl Nokkvi {
         self.playback.album = album.clone();
         self.playback.format_suffix = format_suffix;
         self.playback.sample_rate = sample_rate;
+        self.playback.seekable = seekable;
+        self.playback.live_transcode = live_transcode;
         // Honest bit-perfect badge. Engaged only when the CURRENTLY-PLAYING
         // stream was actually built bit-perfect (build-time fact from the
         // renderer — NOT the live setting, which a mid-track toggle flips before
@@ -596,7 +624,7 @@ impl Nokkvi {
         let bit_perfect_engaged = bit_perfect_badge_engaged(
             current_stream_bit_perfect,
             playing,
-            self.active_playback.is_radio(),
+            self.active_playback.is_radio() || live_transcode,
         );
         self.playback.bit_perfect_engaged = bit_perfect_engaged;
         // A genuine track / play-state change (vs a same-track periodic
@@ -971,6 +999,7 @@ impl Nokkvi {
                 (None, Some(song)) => crate::services::mpris::MprisItem::Song(song),
                 (None, None) => crate::services::mpris::MprisItem::Nothing,
             },
+            seekable,
             art_url: art_url.as_deref(),
             repeat,
             repeat_queue,
@@ -1184,6 +1213,7 @@ impl Nokkvi {
                 u.item,
                 i64::from(u.duration) * 1_000_000,
                 u.playing || u.paused,
+                u.seekable,
             );
         }
 
@@ -2018,6 +2048,14 @@ impl Nokkvi {
         if self.active_playback.is_radio() {
             return Task::none();
         }
+        // A song the server transcodes on the fly can only play front to
+        // back (the engine refuses the seek too). Say so: this is reached by
+        // a deliberate act (Previous's rewind; the slider and MPRIS are
+        // already disarmed), never by a held key.
+        if !self.seek_available() {
+            self.toast_info("Can't seek: the server is transcoding this song");
+            return Task::none();
+        }
         // Mark the seek explicitly: advance last_position to the seek target so
         // the next position tick computes a ~0 delta and credits NO listening
         // time for the jump (forward OR backward, any magnitude). This is the
@@ -2039,10 +2077,11 @@ impl Nokkvi {
     /// [`Self::track_listening_time`]), and `SeekApplied` writes the landed
     /// position when it comes back.
     ///
-    /// Radio is a silent no-op: these are the arrow keys, which a held finger
-    /// repeats ~25 times a second, so a toast would be a flood.
+    /// Radio, and a song the server transcodes on the fly, are a silent
+    /// no-op: these are the arrow keys, which a held finger repeats ~25 times
+    /// a second, so a toast would be a flood.
     pub(crate) fn handle_seek_relative(&mut self, delta: f32) -> Task<Message> {
-        if self.active_playback.is_radio() {
+        if !self.seek_available() {
             return Task::none();
         }
         self.dispatch_seek(crate::state::SeekRequest::Relative(delta))

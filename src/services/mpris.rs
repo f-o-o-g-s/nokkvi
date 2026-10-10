@@ -160,16 +160,22 @@ impl Default for PublishedTrack {
 }
 
 impl PublishedTrack {
-    /// The record for one tick: `item`, its length, and whether the engine
-    /// has it loaded (playing or paused). Seeking is possible only for a
-    /// loaded queue song of known length: a station is a live stream, and a
-    /// stopped queue (a restored one at login) names a song the engine has
-    /// not loaded.
-    pub(crate) fn for_item(item: MprisItem<'_>, length_us: i64, loaded: bool) -> Self {
+    /// The record for one tick: `item`, its length, whether the engine has
+    /// it loaded (playing or paused) and whether the engine can seek it.
+    /// Seeking is possible only for a loaded, seekable queue song of known
+    /// length: a station is a live stream, a song the server transcodes on
+    /// the fly plays front to back, and a stopped queue (a restored one at
+    /// login) names a song the engine has not loaded.
+    pub(crate) fn for_item(
+        item: MprisItem<'_>,
+        length_us: i64,
+        loaded: bool,
+        seekable: bool,
+    ) -> Self {
         Self {
             track_id: track_id_path(item),
             length_us,
-            can_seek: loaded && matches!(item, MprisItem::Song(_)) && length_us > 0,
+            can_seek: loaded && seekable && matches!(item, MprisItem::Song(_)) && length_us > 0,
         }
     }
 

@@ -147,19 +147,23 @@ fn track_id_escaping_never_merges_two_ids() {
 
 #[test]
 fn only_a_song_of_known_length_can_seek() {
-    assert!(PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, true).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Song("s"), 0, true).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Station("r1"), 0, true).can_seek);
-    assert!(!PublishedTrack::for_item(MprisItem::Nothing, 0, true).can_seek);
+    assert!(PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, true, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Song("s"), 0, true, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Station("r1"), 0, true, true).can_seek);
+    assert!(!PublishedTrack::for_item(MprisItem::Nothing, 0, true, true).can_seek);
     assert!(!PublishedTrack::default().can_seek);
     assert!(
-        !PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, false).can_seek,
+        !PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, true, false).can_seek,
+        "the engine can't seek it (a live transcode)"
+    );
+    assert!(
+        !PublishedTrack::for_item(MprisItem::Song("s"), 200_000_000, false, true).can_seek,
         "not loaded"
     );
 }
 
 fn song_track() -> PublishedTrack {
-    PublishedTrack::for_item(MprisItem::Song("song_1"), 200_000_000, true)
+    PublishedTrack::for_item(MprisItem::Song("song_1"), 200_000_000, true, true)
 }
 
 #[test]
@@ -187,7 +191,7 @@ fn set_position_ignores_what_the_spec_says_to_ignore() {
         None,
         "past the end"
     );
-    let station = PublishedTrack::for_item(MprisItem::Station("r1"), 0, true);
+    let station = PublishedTrack::for_item(MprisItem::Station("r1"), 0, true, true);
     let station_id = station.track_id.clone();
     assert_eq!(
         station.set_position_target(&station_id, 0),
@@ -251,7 +255,7 @@ fn a_station_tick_publishes_an_unseekable_station() {
     });
     assert_eq!(
         app.mpris_track,
-        PublishedTrack::for_item(MprisItem::Station("r1"), 0, true)
+        PublishedTrack::for_item(MprisItem::Station("r1"), 0, true, true)
     );
     assert!(!app.mpris_track.can_seek);
 }
@@ -352,4 +356,45 @@ fn a_stopped_song_cannot_seek() {
         track_id_path(MprisItem::Song("song_1"))
     );
     assert!(!app.mpris_track.can_seek);
+}
+
+// ============================================================================
+// A song the server transcodes on the fly can't seek
+// ============================================================================
+
+fn live_transcode_update() -> PlaybackStateUpdate {
+    PlaybackStateUpdate {
+        seekable: false,
+        live_transcode: true,
+        ..make_playback_update()
+    }
+}
+
+#[test]
+fn a_live_transcode_tick_publishes_an_unseekable_song() {
+    let (mut app, rx) = connected_app();
+    let _ = app.handle_playback_state_updated(live_transcode_update());
+
+    assert!(!app.mpris_track.can_seek);
+    let commands = sent(&rx);
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, MprisCommand::SetCanSeek(false))),
+        "{commands:?}"
+    );
+}
+
+#[test]
+fn a_set_position_on_a_live_transcode_does_not_seek() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(live_transcode_update());
+    app.scrobble.last_position = UNTOUCHED;
+
+    let _ = app.handle_mpris(MprisEvent::SetPosition {
+        track_id: app.mpris_track.track_id.clone(),
+        position_us: 30_000_000,
+    });
+
+    assert_eq!(app.scrobble.last_position, UNTOUCHED);
 }

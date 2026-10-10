@@ -57,6 +57,8 @@ All notable changes to this project will be documented in this file.
 - A media-widget seek aimed at a previous song, or past the song's end, is now ignored instead of moving the playhead.
 - Launching nokkvi twice in quick succession now opens one window instead of two.
 - A song the server transcodes on the fly now ends and moves to the next song instead of restarting.
+- Seeking a song the server transcodes on the fly is now refused up front, with no seek handle and no media-widget seek bar.
+- A song the server transcodes on the fly is no longer labelled bit-perfect, and shows the codec the server actually sends.
 
 ### Removed
 

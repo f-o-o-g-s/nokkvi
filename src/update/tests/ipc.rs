@@ -1336,3 +1336,19 @@ fn preset_answers_report_the_preset_on_screen_like_status() {
     assert_eq!(data.get("preset"), Some(&json!(shown)));
     assert!(data.get("loading").and_then(|v| v.as_str()).is_some());
 }
+
+#[test]
+fn seek_on_a_live_transcode_returns_unavailable() {
+    // A song the server transcodes on the fly can't seek; the verb says so
+    // rather than echo a position the engine will never reach.
+    let mut app = test_app();
+    app.playback.seekable = false;
+    for raw in ["42", "+10"] {
+        let resp = drive_on_with_args(&mut app, "seek", json!({ "position": raw }));
+        let err = resp
+            .error
+            .unwrap_or_else(|| panic!("{raw}: must be refused"));
+        assert_eq!(err.code, "unavailable", "{raw}");
+        assert!(resp.data.is_none(), "{raw}");
+    }
+}

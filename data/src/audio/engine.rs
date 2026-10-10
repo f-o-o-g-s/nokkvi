@@ -11,7 +11,8 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     audio::{
         AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration,
-        decoder::SourceKind, format::samples_for_duration,
+        decoder::{SourceKind, StreamDelivery},
+        format::samples_for_duration,
     },
     utils::url_redaction::redact_subsonic_url,
 };
@@ -457,6 +458,8 @@ pub struct GaplessTransitionInfo {
     pub duration: u64,
     pub format: AudioFormat,
     pub codec: Option<String>,
+    /// How the swapped-in track's bytes arrive (whether it can seek).
+    pub delivery: StreamDelivery,
     /// The swapped-in track's ReplayGain tags, restaged by
     /// `consume_gapless_transition` for the next rebuild of the track.
     pub replay_gain: Option<crate::types::song::ReplayGain>,
@@ -1200,6 +1203,7 @@ async fn try_gapless_swap(
             } = next;
             let next_duration = next_dec.duration();
             let next_codec = next_dec.live_codec();
+            let next_delivery = next_dec.delivery();
 
             // Swap into primary decoder
             *decoder.lock().await = next_dec;
@@ -1225,6 +1229,7 @@ async fn try_gapless_swap(
                     duration: next_duration,
                     format: next_fmt,
                     codec: next_codec,
+                    delivery: next_delivery,
                     replay_gain: next_replay_gain,
                 });
             }
@@ -1428,7 +1433,12 @@ pub struct CustomAudioEngine {
     paused: bool,
     position: u64, // milliseconds
     duration: u64, // milliseconds
-    volume: f64,   // 0.0-1.0
+    /// How the now-playing track's bytes arrive, recorded with `duration`
+    /// whenever a decoder becomes the now-playing one (a fresh `play()`, the
+    /// three promotions). Only a `Sized` track can seek: `seek` refuses the
+    /// others, and the UI and MPRIS read [`Self::seekable`].
+    delivery: StreamDelivery,
+    volume: f64, // 0.0-1.0
 
     // Decoder
     decoder: Arc<tokio::sync::Mutex<AudioDecoder>>,
@@ -1541,6 +1551,7 @@ impl CustomAudioEngine {
             paused: false,
             position: 0,
             duration: 0,
+            delivery: StreamDelivery::Sized,
             volume: 1.0,
             decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
                 live_icy_metadata.clone_arc(),
@@ -1642,6 +1653,7 @@ impl CustomAudioEngine {
 
         self.duration = 0;
         self.position = 0;
+        self.delivery = StreamDelivery::Sized;
 
         self.source = source;
         self.channels.source_generation.bump_for_user_action();
@@ -1745,6 +1757,22 @@ impl CustomAudioEngine {
         self.duration
     }
 
+    /// Whether the track the queue names can seek. A track the server sends
+    /// without a length (its live transcode) can't, and neither can a
+    /// station; [`Self::seek`] refuses them. While a skip lands the target
+    /// is not known yet and reads seekable (`seek` checks again once it has
+    /// promoted the target).
+    pub fn seekable(&self) -> bool {
+        self.skip_landing_pending() || self.delivery == StreamDelivery::Sized
+    }
+
+    /// Whether the track the queue names is a server's live transcode
+    /// ([`StreamDelivery::Unsized`]): lossy whatever the original was, and
+    /// not seekable.
+    pub fn is_live_transcode(&self) -> bool {
+        !self.skip_landing_pending() && self.delivery == StreamDelivery::Unsized
+    }
+
     /// Whether a manual skip or click has moved the queue to a target the
     /// engine has not promoted yet: its decoder is building (the
     /// `skip_fade_pending` window) or it is blending in (a skip blend, until
@@ -1822,6 +1850,7 @@ impl CustomAudioEngine {
                         decoder.duration()
                     );
                     self.duration = decoder.duration();
+                    self.delivery = decoder.delivery();
                     self.live_codec_name.set(decoder.live_codec());
                 }
                 Err(e) => {
@@ -1829,6 +1858,19 @@ impl CustomAudioEngine {
                     return Err(e);
                 }
             }
+        } else if decoder.delivery() != StreamDelivery::Sized {
+            // A replay (Stop then Play) of a track that can't seek: open it
+            // again, which starts it from the beginning. A seek to 0 would
+            // fail and leave the decoder wherever it stopped reading, ahead
+            // of a clock that restarts at 0.
+            debug!(" AudioEngine: replaying a track that can't seek, reopening it");
+            decoder.stop();
+            if let Err(e) = decoder.init(&self.source).await {
+                error!(" AudioEngine: reopening the track FAILED: {:?}", e);
+                return Err(e);
+            }
+            self.duration = decoder.duration();
+            self.delivery = decoder.delivery();
         } else {
             trace!(" AudioEngine: decoder already initialized, seeking to start");
             // Seek back to the beginning for replay. Chunk 0 may have left
@@ -1856,7 +1898,12 @@ impl CustomAudioEngine {
         let mut start_offset: Option<u64> = None;
         if let Some(pending_ms) = self.pending_start_ms.take() {
             let target = pending_ms.min(self.duration);
-            if target > 0 {
+            if target > 0 && decoder.delivery() != StreamDelivery::Sized {
+                // A live transcode can only be read from its start (see
+                // `seek`): start there rather than read through to the offset
+                // under the engine lock.
+                warn!("Start offset {target}ms dropped: this track can't seek; starting at 0");
+            } else if target > 0 {
                 // A blocking range request on a cache miss (always, for a
                 // mid-song resume): hand the worker off, as `seek()` does.
                 if tokio::task::block_in_place(|| decoder.seek(target)) {
@@ -2472,6 +2519,20 @@ impl CustomAudioEngine {
             return SeekOutcome::Settled;
         }
 
+        // A track the server sends without a length (a live transcode) is
+        // read once from front to back: a format reader can't go back, and
+        // going forward means reading through every byte up to the target
+        // under the engine lock. Refuse, and leave playback untouched. Inside
+        // a skip blend the outgoing's delivery says nothing about the
+        // target; that case is checked below, once the target is promoted.
+        if !self.crossfade.skip_fade && self.delivery != StreamDelivery::Sized {
+            debug!(
+                "🔍 [SEEK] Refused - this track can't seek ({:?})",
+                self.delivery
+            );
+            return SeekOutcome::Settled;
+        }
+
         let seek_start = std::time::Instant::now();
         debug!(
             "🔍 [SEEK] Starting seek to {}ms (duration={}ms)",
@@ -2527,6 +2588,15 @@ impl CustomAudioEngine {
             BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
             BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
         };
+        // A promoted skip target that can't seek: the promotion already
+        // started its decode loop, so refuse here and leave it playing.
+        if self.delivery != StreamDelivery::Sized {
+            debug!(
+                "🔍 [SEEK] Refused - the promoted track can't seek ({:?})",
+                self.delivery
+            );
+            return outcome;
+        }
 
         // Idempotent after the line above; kept for its renderer disarm (the
         // re-arm at the end restores a prepared transition's trigger against
@@ -3006,7 +3076,13 @@ impl CustomAudioEngine {
                 info.duration,
                 info.format
             );
-            self.promote_to_now_playing(info.source, info.format, info.duration, info.codec);
+            self.promote_to_now_playing(
+                info.source,
+                info.format,
+                info.duration,
+                info.codec,
+                info.delivery,
+            );
             // The swap only recorded these tags as the stream's (it can't
             // touch `pending_replay_gain`: a superseded decode loop could
             // overwrite a newer hard load's). Restage them here, under the
@@ -3035,6 +3111,7 @@ impl CustomAudioEngine {
         format: AudioFormat,
         duration_ms: u64,
         codec: Option<String>,
+        delivery: StreamDelivery,
     ) {
         if self.next_source == source {
             self.next_source.clear();
@@ -3044,6 +3121,7 @@ impl CustomAudioEngine {
             .store(format.sample_rate(), Ordering::Relaxed);
         self.current_format = format;
         self.duration = duration_ms;
+        self.delivery = delivery;
         self.position = 0;
         self.live_codec_name.set(codec);
         self.next_format = AudioFormat::invalid();
@@ -3897,9 +3975,10 @@ impl CustomAudioEngine {
             let format = decoder.format().clone();
             let duration = decoder.duration();
             let codec = decoder.live_codec();
+            let delivery = decoder.delivery();
             // Swap decoders
             *self.decoder.lock().await = decoder;
-            self.promote_to_now_playing(incoming_source, format, duration, codec);
+            self.promote_to_now_playing(incoming_source, format, duration, codec, delivery);
 
             // Read the stored crossfade elapsed time and apply state resets.
             // The renderer already finalized (from render_buffers), so we just
@@ -4090,9 +4169,10 @@ impl CustomAudioEngine {
         let format = next_decoder.format().clone();
         let duration = next_decoder.duration();
         let codec = next_decoder.live_codec();
+        let delivery = next_decoder.delivery();
         // Switch decoders
         *self.decoder.lock().await = next_decoder;
-        self.promote_to_now_playing(next_source, format, duration, codec);
+        self.promote_to_now_playing(next_source, format, duration, codec, delivery);
 
         // Check if formats match for gapless playback
         let formats_match = prev_format.is_valid()
@@ -7197,6 +7277,31 @@ mod tests {
         assert!(engine.renderer.lock().is_crossfade_active());
     }
 
+    /// Guard: a seek refused because the outgoing is a live transcode leaves
+    /// a live AUTO blend running too (the blend is aimed at the track the UI
+    /// still shows, which can't seek).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_seek_refused_on_a_live_transcode_leaves_an_auto_blend_running() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.duration = 200_000;
+        engine.delivery = StreamDelivery::Unsized;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        let _keepalive = engine.renderer.lock().force_crossfade_active_for_test();
+
+        let outcome = engine.seek(30_000).await;
+
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "the blend must keep running"
+        );
+        assert!(engine.renderer.lock().is_crossfade_active());
+    }
+
     /// Guard: an AUTO blend keeps today's seek semantics. Its cursor has not
     /// advanced (it moves at finalize), so the seek cancels back to the
     /// outgoing — the track the UI still shows.
@@ -8225,6 +8330,7 @@ mod tests {
             duration: 222_222,
             format: staged_format.clone(),
             codec: Some("flac-incoming".to_string()),
+            delivery: StreamDelivery::Unsized,
             replay_gain: None,
         });
 
@@ -8254,6 +8360,13 @@ mod tests {
             engine.duration, 222_222,
             "duration must be replaced with the staged duration",
         );
+        // 2b. delivery <- info.delivery (whether the track can seek)
+        assert_eq!(
+            engine.delivery,
+            StreamDelivery::Unsized,
+            "delivery must be replaced with the staged delivery",
+        );
+        assert!(!engine.seekable(), "a swapped-in live transcode can't seek");
         // 3. position <- 0 (read the private field; engine is not playing)
         assert_eq!(
             engine.position, 0,
@@ -8716,6 +8829,91 @@ mod tests {
         assert!(
             !requested_again,
             "the decode loop re-requested the track at its end (a radio reconnect)"
+        );
+    }
+
+    /// An engine playing the fake live transcode on a device-less output.
+    /// Returns the engine, the server's request counter and the mixer source
+    /// (keep it alive for the test).
+    async fn engine_playing_a_live_transcode() -> (
+        CustomAudioEngine,
+        Arc<std::sync::atomic::AtomicUsize>,
+        rodio::mixer::MixerSource,
+    ) {
+        use crate::audio::decoder::tests::spawn_live_transcode;
+
+        let (url, requests) = spawn_live_transcode(Some("200")).await;
+        let mut engine = CustomAudioEngine::new();
+        let mixer = engine.renderer.lock().install_detached_output_for_test();
+        engine.load_track_with_rg(&url, None, Some(200_000)).await;
+        engine.play().await.expect("the transcode plays");
+        (engine, requests, mixer)
+    }
+
+    /// A live transcode can only be read from its start, so a seek is
+    /// refused: playback is left untouched (the decode loop keeps running,
+    /// nothing is re-requested) and the engine reports the track unseekable.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_seek_on_a_live_transcode_is_refused() {
+        let (mut engine, requests, _mixer) = engine_playing_a_live_transcode().await;
+        let generation = engine.decode_loop.current();
+        let opened = requests.load(Ordering::SeqCst);
+
+        assert!(!engine.seekable(), "a live transcode must read unseekable");
+        assert!(engine.is_live_transcode());
+        let outcome = engine.seek(60_000).await;
+        let loop_kept = engine.decode_loop.current() == generation;
+        let requested = requests.load(Ordering::SeqCst) > opened;
+        engine.stop().await;
+
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert!(loop_kept, "the refused seek tore down the decode loop");
+        assert!(!requested, "the refused seek re-requested the track");
+    }
+
+    /// Stop then Play of a live transcode starts it again from the top: the
+    /// track is opened again (a seek to 0 can't work on it), so the audio
+    /// matches the clock that restarts at 0.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn replaying_a_live_transcode_opens_it_again() {
+        let (mut engine, requests, _mixer) = engine_playing_a_live_transcode().await;
+        // Let the decode loop read the short body to its end.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !engine.channels.decoder_eof.load(Ordering::Acquire)
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        engine.stop().await;
+        let opened = requests.load(Ordering::SeqCst);
+
+        let played = engine.play().await;
+        let reopened = requests.load(Ordering::SeqCst) > opened;
+        engine.stop().await;
+
+        assert!(played.is_ok(), "the replay failed: {played:?}");
+        assert!(reopened, "the replay did not open the track again");
+    }
+
+    /// A resume offset (a pulled queue's saved position) can't be honoured on
+    /// a live transcode without reading through to it under the engine lock:
+    /// the track starts at 0 instead, and the clock says so.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_ignores_a_start_offset() {
+        use crate::audio::decoder::tests::spawn_live_transcode;
+
+        let (url, _requests) = spawn_live_transcode(Some("200")).await;
+        let mut engine = CustomAudioEngine::new();
+        let _mixer = engine.renderer.lock().install_detached_output_for_test();
+        engine.load_track_with_rg(&url, None, Some(200_000)).await;
+        engine.set_pending_start_ms(100);
+        engine.play().await.expect("the transcode plays");
+        let position = engine.position;
+        engine.stop().await;
+
+        assert_eq!(
+            position, 0,
+            "the start offset was applied to a live transcode"
         );
     }
 
