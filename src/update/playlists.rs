@@ -53,6 +53,14 @@ impl Nokkvi {
         song_ids: Vec<String>,
         error_ctx: &'static str,
     ) -> Task<Message> {
+        // Adds start only inside a session (the Home screen). A late playlist
+        // fetch that lands after logout would otherwise mark the playlist
+        // busy with an add `shell_task` never sends, so no finish would ever
+        // free it.
+        if self.screen != crate::Screen::Home {
+            debug!(" Add to playlist {playlist_id} dropped: no session");
+            return Task::none();
+        }
         let add = PendingAppend {
             playlist_name,
             song_ids,

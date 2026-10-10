@@ -931,3 +931,17 @@ fn a_finished_add_still_handles_its_outcome() {
     assert!(app.text_input_dialog.visible, "the confirm opens");
     assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
 }
+
+/// A playlist fetch that lands after logout must not start an add: with no
+/// session the add task is never sent, so no finish would ever free the
+/// playlist and every later add to it would wait forever.
+#[test]
+fn a_quick_add_landing_after_logout_starts_nothing() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Login;
+
+    quick_add(&mut app, &["song1"]);
+
+    assert_eq!(app.playlist_appends.running_ticket("pl1"), None);
+    assert!(app.playlist_appends.waiting("pl1").is_empty());
+}
