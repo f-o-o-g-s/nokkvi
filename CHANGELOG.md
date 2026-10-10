@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 - The artwork column beside the list now runs down to the window's bottom edge.
 - With the Metadata Strip on Top Bar or Top Bar Under, the strip now spans only the list beside the artwork column.
 - Toasts now sit over the list instead of across the artwork column.
-- The artwork column's resize handle is now invisible, marked only by the resize cursor at the column's left edge.
+- The artwork's resize handle is now invisible, marked only by the resize cursor at the artwork's edge beside the list.
 - Mouse-wheel scrolling in Settings, the Get Info dialog and the rules editor now glides instead of jumping.
 - Hotkey badges in Settings are now at least 96 pixels wide.
 - With the Metadata Strip on Top Bar or Top Bar Under, the top nav bar now spans only the list beside the artwork column.

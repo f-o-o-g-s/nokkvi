@@ -27,6 +27,24 @@ fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'
         .boxed()
 }
 
+/// Lay the Always modes' resize handle over the artwork it resizes. The
+/// handle takes no room of its own: it fills the artwork's `Stack` layer and
+/// grabs only the edge facing the list, so the list meets the artwork
+/// directly and only the resize cursor marks the grab zone. Topmost in the
+/// `Stack`, it takes the press before the panel.
+fn with_resize_handle<'a, Message: 'a>(
+    artwork: Element<'a, Message>,
+    handle: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    match handle {
+        Some(handle) => iced::widget::Stack::new()
+            .push(artwork)
+            .push(handle)
+            .boxed(),
+        None => artwork,
+    }
+}
+
 /// Artwork column styling - functions for dynamic theme support
 #[inline]
 pub(crate) fn artwork_outer_bg() -> Color {
@@ -302,9 +320,8 @@ fn always_vertical_extent(window_height: f32) -> f32 {
 /// too tall and overflow behind the vertical artwork. Returns 0 in every
 /// other configuration (Horizontal, hidden, `show_artwork_column = false`).
 ///
-/// In `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes the vertical
-/// drag handle sits between the artwork and the slot list, so its 6 px
-/// thickness is added on top of `extent`.
+/// The Always-Vertical modes' drag handle overlays the artwork's bottom edge
+/// and adds no height, so the chrome is the artwork's `extent` in every mode.
 pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 {
     // Spell every arm out so a future `ArtworkOrientation` variant forces a
     // compile error here — matches the workspace's
@@ -320,14 +337,7 @@ pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 
                 orientation: ArtworkOrientation::Vertical,
                 ..
             },
-        ) => {
-            let handle = if theme::artwork_column_mode().is_vertical() {
-                crate::widgets::artwork_split_handle::HANDLE_THICKNESS
-            } else {
-                0.0
-            };
-            layout.extent + handle
-        }
+        ) => layout.extent,
     }
 }
 
@@ -1081,10 +1091,10 @@ pub(crate) fn base_slot_list_layout<'a, Message: 'a>(
     )
 }
 
-/// Variant of [`base_slot_list_layout`] that also renders drag handles
-/// alongside the artwork. The horizontal handle (`on_drag`) draws in the
+/// Variant of [`base_slot_list_layout`] that also lays invisible drag handles
+/// over the artwork's edge. The horizontal handle (`on_drag`) is live in the
 /// `AlwaysNative` / `AlwaysStretched` modes; the vertical handle
-/// (`on_drag_vertical`) draws in the `AlwaysVerticalNative` /
+/// (`on_drag_vertical`) in the `AlwaysVerticalNative` /
 /// `AlwaysVerticalStretched` modes. Auto modes — including the
 /// portrait-fallback vertical layout — suppress both handles since the
 /// resolver picks the extent itself.
@@ -1201,18 +1211,9 @@ where
         None
     };
 
-    // The handle takes no width of its own: it lies invisibly over the
-    // column's left edge (the stripe and the panel's first pixels), so the
-    // list meets the stripe directly and only the resize cursor marks the
-    // grab zone. Topmost in the `Stack`, it takes the press before the panel.
-    let artwork_side: Element<'a, Message> = if let Some(handle_elem) = handle {
-        iced::widget::Stack::new()
-            .push(with_left_stripe(artwork_side_inner))
-            .push(handle_elem)
-            .boxed()
-    } else {
-        with_left_stripe(artwork_side_inner)
-    };
+    // The handle's grab strip covers the column's left edge: the stripe and
+    // the panel's first pixels.
+    let artwork_side = with_resize_handle(with_left_stripe(artwork_side_inner), handle);
 
     // Beside the lowered artwork the home view runs main_content up to the
     // window's top edge and docks the top chrome (the top nav bar, the
@@ -1289,8 +1290,8 @@ where
 /// top padding provides any gap below the artwork.
 ///
 /// Used by both the Auto-mode portrait fallback (no drag handle) and the
-/// `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes (with a
-/// horizontal-bar drag handle below the artwork).
+/// `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes (with an
+/// invisible drag handle over the artwork's bottom edge).
 fn vertical_layout<'a, Message, G>(
     config: &BaseSlotListLayoutConfig,
     layout: ArtworkLayout,
@@ -1332,33 +1333,21 @@ where
     } else {
         None
     };
-    let handle_height = if handle.is_some() {
-        crate::widgets::artwork_split_handle::HANDLE_THICKNESS
-    } else {
-        0.0
-    };
 
-    // Artwork + optional drag handle, both running edge-to-edge horizontally
-    // (matches the slot rows' zero-pad geometry) and flush against the chrome
-    // above.
-    let artwork_side: Element<'a, Message> = if let Some(h) = handle {
-        column![artwork_panel, h]
-            .width(Length::Fill)
-            .spacing(0)
-            .boxed()
-    } else {
-        artwork_panel.boxed()
-    };
+    // The artwork runs edge-to-edge horizontally (matches the slot rows'
+    // zero-pad geometry) and flush against the chrome above; the handle's
+    // grab strip covers its bottom edge.
+    let artwork_side = with_resize_handle(artwork_panel.boxed(), handle);
 
     // Pin the slot-list rect to a Fixed height that matches what
     // `SlotListConfig::with_dynamic_slots` budgeted for. The view passes
     // its slot-list chrome via `config.slot_list_chrome`; subtracting that
-    // plus the artwork side (`extent + optional handle`) from `window_height`
-    // yields the exact slot-list rect the slot-count math expects. Using
-    // `Fill` here lets iced's flex layout drift by a few pixels and produce
-    // a partial slot at the bottom — Fixed locks the rect to the slot math.
+    // plus the artwork's `extent` from `window_height` yields the exact
+    // slot-list rect the slot-count math expects. Using `Fill` here lets
+    // iced's flex layout drift by a few pixels and produce a partial slot at
+    // the bottom — Fixed locks the rect to the slot math.
     let slot_list_height =
-        (config.window_height - config.slot_list_chrome - layout.extent - handle_height).max(0.0);
+        (config.window_height - config.slot_list_chrome - layout.extent).max(0.0);
 
     let slot_list_pinned = container(slot_list_content)
         .width(Length::Fill)
@@ -1712,15 +1701,15 @@ mod tests {
     }
 
     #[test]
-    fn always_vertical_chrome_includes_handle_height() {
+    fn always_vertical_chrome_is_the_artwork_extent_alone() {
         let _g = lock_atomics();
         reset_atomics();
         theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
         theme::set_artwork_vertical_height_pct(0.40);
-        // 1500 × 0.40 = 600; chrome = 600 + handle_height.
+        // 1500 × 0.40 = 600; the drag handle overlays the artwork's bottom
+        // edge and adds no height.
         let chrome = vertical_artwork_chrome(&cfg(1920.0, 1500.0, true));
-        let expected = 600.0 + crate::widgets::artwork_split_handle::HANDLE_THICKNESS;
-        assert!((chrome - expected).abs() < 1e-3);
+        assert!((chrome - 600.0).abs() < 1e-3);
         reset_atomics();
     }
 

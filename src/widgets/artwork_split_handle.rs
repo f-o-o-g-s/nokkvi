@@ -1,10 +1,13 @@
 //! Drag handle for resizing the artwork panel.
 //!
 //! Single widget parameterized over [`Axis`] — `Horizontal` for the
-//! right-hand artwork column (handle is a vertical strip dragged left/right)
-//! and `Vertical` for the Always-Vertical stack (handle is a horizontal bar
-//! dragged up/down). Both axes share the same drag bookkeeping, the same
-//! [`DragEvent`] enum, and the same Change/Commit cadence:
+//! right-hand artwork column (dragged left/right by its left edge) and
+//! `Vertical` for the Always-Vertical stack (dragged up/down by its bottom
+//! edge). The handle is invisible and takes no room: it is a `Stack` layer
+//! over the artwork panel that grabs only a `HANDLE_THICKNESS` strip along
+//! the edge facing the list, and the resize cursor is its only affordance.
+//! Both axes share the same drag bookkeeping, the same [`DragEvent`] enum,
+//! and the same Change/Commit cadence:
 //!
 //! - `on_change(pct)` fires on every `CursorMoved` during a drag (live
 //!   preview — update the theme atomic, do not persist yet).
@@ -22,7 +25,7 @@
 //! recreated freely on every render without losing the in-flight drag.
 
 use iced::{
-    Color, Element, Length, Rectangle, Size, Widget as _,
+    Element, Length, Rectangle, Size, Widget as _,
     advanced::{
         Shell,
         layout::{Layout, Limits},
@@ -33,22 +36,21 @@ use iced::{
     mouse,
 };
 
-/// Thickness of the drag affordance (px) on the handle's *constrained* axis.
-/// [`Axis::Horizontal`]: the width of an invisible grab zone laid over the
-/// artwork column's left edge. [`Axis::Vertical`]: the height of a visible bar
-/// between the artwork and the slot list.
-pub(crate) const HANDLE_THICKNESS: f32 = 6.0;
+/// Thickness (px) of the invisible grab strip along the artwork's edge: its
+/// width over the column's left edge ([`Axis::Horizontal`]), its height over
+/// the stacked artwork's bottom edge ([`Axis::Vertical`]).
+const HANDLE_THICKNESS: f32 = 6.0;
 
 /// Drag orientation — which side of the artwork the handle sits on and which
 /// cursor axis drives the drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Axis {
-    /// Handle is a vertical strip to the *left* of the artwork column;
-    /// cursor x drives the drag. Cursor right → artwork shrinks → pct
-    /// decreases, so `pct_sign() == -1.0`.
+    /// Grab strip along the artwork column's *left* edge; cursor x drives
+    /// the drag. Cursor right → artwork shrinks → pct decreases, so
+    /// `pct_sign() == -1.0`.
     Horizontal,
-    /// Handle is a horizontal bar *below* the artwork; cursor y drives the
-    /// drag. Cursor down → artwork grows → pct increases, so
+    /// Grab strip along the stacked artwork's *bottom* edge; cursor y drives
+    /// the drag. Cursor down → artwork grows → pct increases, so
     /// `pct_sign() == +1.0`.
     Vertical,
 }
@@ -59,10 +61,10 @@ impl Axis {
     /// positions so callers don't have to remember which side gets the flip.
     fn pct_sign(self) -> f32 {
         match self {
-            // Handle is *left of* the artwork: pushing the cursor right
+            // Strip on the artwork's *left* edge: pushing the cursor right
             // (positive dx) shrinks the artwork (negative dpct).
             Self::Horizontal => -1.0,
-            // Handle is *below* the artwork: pushing the cursor down
+            // Strip on the artwork's *bottom* edge: pushing the cursor down
             // (positive dy) grows the artwork (positive dpct).
             Self::Vertical => 1.0,
         }
@@ -86,27 +88,22 @@ impl Axis {
         }
     }
 
-    /// Size in iced layout terms — `Length::Fill` along the long axis,
-    /// `Length::Fixed(thickness)` across the constrained axis.
-    fn size(self, thickness: f32) -> Size<Length> {
+    /// The grab strip inside the handle's `bounds` (the whole artwork
+    /// panel): the `thickness`-px band along the edge that faces the list.
+    fn grip(self, bounds: Rectangle, thickness: f32) -> Rectangle {
         match self {
-            Self::Horizontal => Size {
-                width: Length::Fixed(thickness),
-                height: Length::Fill,
+            Self::Horizontal => Rectangle {
+                width: thickness.min(bounds.width),
+                ..bounds
             },
-            Self::Vertical => Size {
-                width: Length::Fill,
-                height: Length::Fixed(thickness),
-            },
-        }
-    }
-
-    /// Lay out the node — span the long axis fully from `limits`, fix the
-    /// short axis to `thickness`.
-    fn layout_size(self, limits_max: Size, thickness: f32) -> Size {
-        match self {
-            Self::Horizontal => Size::new(thickness, limits_max.height),
-            Self::Vertical => Size::new(limits_max.width, thickness),
+            Self::Vertical => {
+                let height = thickness.min(bounds.height);
+                Rectangle {
+                    y: bounds.y + bounds.height - height,
+                    height,
+                    ..bounds
+                }
+            }
         }
     }
 }
@@ -151,7 +148,7 @@ pub(crate) struct ArtworkSplitHandle<'a, Message> {
     min_pct: f32,
     /// Inclusive upper bound for the published pct.
     max_pct: f32,
-    /// Visual thickness in pixels (along the constrained axis).
+    /// Grab-strip thickness in pixels (across the edge it lies on).
     thickness: f32,
 }
 
@@ -203,11 +200,16 @@ where
     }
 
     fn size(&self) -> Size<Length> {
-        self.axis.size(self.thickness)
+        Size {
+            width: Length::Fill,
+            height: Length::Fill,
+        }
     }
 
+    /// Covers the whole layer (the artwork panel) so the grab strip can sit
+    /// on whichever edge [`Axis::grip`] picks.
     fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits) {
-        tree.size = self.axis.layout_size(limits.bounds(), self.thickness);
+        tree.size = limits.bounds();
     }
 
     fn update(
@@ -221,11 +223,11 @@ where
         _viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<HandleState>();
-        let bounds = layout.bounds();
+        let grip = self.axis.grip(layout.bounds(), self.thickness);
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let Some(p) = cursor.position_over(bounds) {
+                if let Some(p) = cursor.position_over(grip) {
                     let start_cursor = match self.axis {
                         Axis::Horizontal => p.x,
                         Axis::Vertical => p.y,
@@ -284,56 +286,32 @@ where
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<HandleState>();
-        let bounds = layout.bounds();
-        let hovered = cursor.position_over(bounds).is_some();
+        let hovered = cursor
+            .position_over(self.axis.grip(layout.bounds(), self.thickness))
+            .is_some();
 
-        // `None` (not `Idle`) off the handle: the horizontal handle is a
-        // `Stack` layer over the artwork panel, and a `Stack` reports its
-        // topmost non-`None` layer, so `Idle` would mask the panel's own
-        // cursor (the Theater corner button's pointer).
+        // `None` (not `Idle`) off the grab strip: the handle is a `Stack`
+        // layer over the artwork panel, and a `Stack` reports its topmost
+        // non-`None` layer (and hides the cursor from the layers under a
+        // non-`None` one), so `Idle` would mask the panel's own cursor and
+        // hover (the Theater corner button).
         match (state, hovered) {
             (HandleState::Dragging { .. }, _) | (_, true) => self.axis.cursor_icon(),
             _ => mouse::Interaction::None,
         }
     }
 
+    /// Draws nothing: the resize cursor is the handle's only affordance.
     fn draw(
         &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
+        _tree: &Tree,
+        _renderer: &mut Renderer,
         _theme: &Theme,
         _defaults: &renderer::Style,
-        layout: Layout,
-        cursor: mouse::Cursor,
+        _layout: Layout,
+        _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        // The horizontal handle is invisible: it overlays the artwork
-        // column's left edge, and the resize cursor is its only affordance.
-        if self.axis == Axis::Horizontal {
-            return;
-        }
-
-        let state = tree.state.downcast_ref::<HandleState>();
-        let bounds = layout.bounds();
-
-        // Active state — brighten while dragged or hovered.
-        let dragging = matches!(state, HandleState::Dragging { .. });
-        let hovered = cursor.position_over(bounds).is_some();
-        let active = dragging || hovered;
-
-        let bg: Color = if active {
-            crate::theme::bg3()
-        } else {
-            crate::theme::bg1()
-        };
-
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds,
-                ..Default::default()
-            },
-            iced::Background::Color(bg),
-        );
     }
 }
 
@@ -381,4 +359,109 @@ where
         move |pct| on_commit(DragEvent::Commit(pct)),
     )
     .boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::{Point, advanced::Layout};
+
+    use super::*;
+
+    /// An artwork panel laid out away from the origin, so a grip computed
+    /// against the window instead of the panel shows up.
+    const PANEL: Rectangle = Rectangle {
+        x: 100.0,
+        y: 50.0,
+        width: 400.0,
+        height: 300.0,
+    };
+
+    fn handle(axis: Axis) -> ArtworkSplitHandle<'static, ()> {
+        ArtworkSplitHandle::new(axis, 1000.0, 0.4, |_| (), |_| ())
+    }
+
+    /// The cursor the handle reports with the pointer at `at` over [`PANEL`].
+    fn interaction_at(axis: Axis, at: Point) -> mouse::Interaction {
+        let handle = handle(axis);
+        let tree = Tree::new::<(), (), ()>(&handle);
+        let layout = Layout::new(PANEL.size()).move_to(PANEL.position());
+        Widget::<(), (), ()>::mouse_interaction(
+            &handle,
+            &tree,
+            layout,
+            mouse::Cursor::Available(at),
+            &PANEL,
+            &(),
+        )
+    }
+
+    #[test]
+    fn horizontal_grip_is_the_panels_left_edge() {
+        assert_eq!(
+            Axis::Horizontal.grip(PANEL, HANDLE_THICKNESS),
+            Rectangle {
+                width: HANDLE_THICKNESS,
+                ..PANEL
+            }
+        );
+    }
+
+    #[test]
+    fn vertical_grip_is_the_panels_bottom_edge() {
+        assert_eq!(
+            Axis::Vertical.grip(PANEL, HANDLE_THICKNESS),
+            Rectangle {
+                y: PANEL.y + PANEL.height - HANDLE_THICKNESS,
+                height: HANDLE_THICKNESS,
+                ..PANEL
+            }
+        );
+    }
+
+    #[test]
+    fn grip_stays_inside_a_panel_thinner_than_it() {
+        let sliver = Rectangle {
+            width: 2.0,
+            height: 2.0,
+            ..PANEL
+        };
+        assert_eq!(Axis::Horizontal.grip(sliver, HANDLE_THICKNESS), sliver);
+        assert_eq!(Axis::Vertical.grip(sliver, HANDLE_THICKNESS), sliver);
+    }
+
+    /// Off the grip the handle must report `None`: it is the top `Stack`
+    /// layer over the whole panel, and anything else would mask the panel's
+    /// own cursor and hide the pointer from the panel's hover.
+    #[test]
+    fn handle_shows_the_resize_cursor_on_its_edge_only() {
+        let center = PANEL.center();
+        let left_edge = Point::new(PANEL.x + 1.0, center.y);
+        let bottom_edge = Point::new(center.x, PANEL.y + PANEL.height - 1.0);
+
+        assert_eq!(
+            interaction_at(Axis::Horizontal, left_edge),
+            mouse::Interaction::ResizingHorizontally
+        );
+        assert_eq!(
+            interaction_at(Axis::Horizontal, center),
+            mouse::Interaction::None
+        );
+        assert_eq!(
+            interaction_at(Axis::Horizontal, bottom_edge),
+            mouse::Interaction::None
+        );
+
+        assert_eq!(
+            interaction_at(Axis::Vertical, bottom_edge),
+            mouse::Interaction::ResizingVertically
+        );
+        assert_eq!(
+            interaction_at(Axis::Vertical, center),
+            mouse::Interaction::None
+        );
+        assert_eq!(
+            interaction_at(Axis::Vertical, left_edge),
+            mouse::Interaction::None
+        );
+    }
 }
