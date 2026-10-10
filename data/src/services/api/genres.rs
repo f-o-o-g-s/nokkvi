@@ -60,6 +60,11 @@ impl GenresApiService {
     ///
     /// An empty `library_ids` slice omits the param entirely (Navidrome
     /// auto-scopes to libraries the user can access).
+    ///
+    /// Errors like the paged album, artist and song loaders: a request the
+    /// server rejects or fails (a 401 is `NokkviError::Unauthorized`) or a
+    /// body that doesn't parse. The Subsonic count enrichment never fails
+    /// the load; it degrades to blank counts.
     pub async fn load_genres_with_libraries(
         &self,
         sort_mode: &str,
@@ -84,22 +89,22 @@ impl GenresApiService {
         let params =
             Self::build_genre_params(sort_param, order_param, search_query, &library_id_strings);
 
-        // Fetch from both APIs in parallel
-        let native_result = self.client.get_with_headers("/api/genre", &params).await;
-        let subsonic_result = self.fetch_subsonic_genres().await;
+        // The native read is the view. A request the server rejects or
+        // fails, or a body that doesn't parse, is an error the caller shows
+        // (a 401 drops to login; anything else toasts and keeps the rows),
+        // never an empty Genres view. It goes first, so a dead session costs
+        // one request.
+        let (response_text, _) = self
+            .client
+            .get_with_headers("/api/genre", &params)
+            .await
+            .context("Failed to fetch genres")?;
+        let native_genres: Vec<Genre> =
+            parse::parse_json_with_preview(&response_text, "genres JSON response")?;
 
-        // Parse native API response (for IDs). Parse failures degrade to an
-        // empty list like the network-error arm below, but are logged — a
-        // malformed body must never yield a silently empty Genres view.
-        let native_genres: Vec<Genre> = match native_result {
-            Ok((response_text, _)) => {
-                parse::parse_json_or_default(&response_text, "genres JSON response")
-            }
-            Err(e) => {
-                warn!(" GenresApiService: Native API failed: {}", e);
-                Vec::new()
-            }
-        };
+        // The Subsonic counts only enrich the rows: a failure there leaves
+        // them blank (logged), by design.
+        let subsonic_result = self.fetch_subsonic_genres().await;
 
         // Build counts map from Subsonic API
         let counts_map: HashMap<String, (u32, u32)> = match subsonic_result {
@@ -317,7 +322,10 @@ impl GenresApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::api::subsonic::tests::{NOT_FOUND_ENVELOPE, one_shot_server};
+    use crate::{
+        services::api::subsonic::tests::{NOT_FOUND_ENVELOPE, one_shot_server},
+        types::error::NokkviError,
+    };
 
     fn service_at(base_url: &str) -> GenresApiService {
         let url = url::Url::parse(base_url).expect("one-shot server url");
@@ -349,6 +357,43 @@ mod tests {
             .await
             .expect("an ok envelope with no genres is not an error");
         assert!(counts.is_empty());
+    }
+
+    /// The native `/api/genre` read is the Genres view. A request the server
+    /// rejects or fails must be an error the view can show (a 401 drops to
+    /// login; anything else toasts and keeps the rows), never an empty
+    /// Genres view. A real empty answer is still the empty state.
+    #[tokio::test]
+    async fn load_genres_turns_a_failed_native_request_into_an_error() {
+        let err = service_at(&one_shot_server("401 Unauthorized", "{}").await)
+            .load_genres_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect_err("a rejected session must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        let err = service_at(&one_shot_server("500 Internal Server Error", "boom").await)
+            .load_genres_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect_err("a server failure must be an error");
+        assert!(
+            err.downcast_ref::<NokkviError>().is_none(),
+            "a plain failure is not a dead session: {err:#}"
+        );
+
+        // The Subsonic count enrichment finds no server behind the one-shot
+        // port and degrades to blank counts, as designed.
+        let (genres, total) = service_at(&one_shot_server("200 OK", "[]").await)
+            .load_genres_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect("no genres is not an error");
+        assert!(genres.is_empty());
+        assert_eq!(total, 0);
     }
 
     /// Pin the `/api/genre` browse wire shape: full-set load (no-limit

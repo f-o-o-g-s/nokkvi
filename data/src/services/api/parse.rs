@@ -35,10 +35,11 @@ pub(crate) fn preview(body: &str) -> String {
 /// Parse a JSON body into `T`, logging a `warn!` with the UTF-8-safe preview
 /// and returning `T::default()` on failure.
 ///
-/// For graceful-degradation loaders (genres / playlists browse, collage
-/// artwork) where an empty result is preferable to a hard error — but the
-/// malformed response must never be silent. Propagating paths keep using
-/// [`parse_json_with_preview`]; this is the deliberate lenient variant.
+/// For graceful-degradation reads (the collage artwork lists, the orphan
+/// sweep's raw playlist list) where an empty result is preferable to a hard
+/// error — but the malformed response must never be silent. Every list a
+/// view shows uses [`parse_json_with_preview`]; this is the deliberate
+/// lenient variant.
 pub(crate) fn parse_json_or_default<T>(body: &str, label: &str) -> T
 where
     T: DeserializeOwned + Default,

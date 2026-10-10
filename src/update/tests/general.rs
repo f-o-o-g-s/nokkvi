@@ -717,6 +717,71 @@ fn test_albums_loaded_unauthorized_triggers_logout() {
     );
 }
 
+/// The Genres and Playlists views take the same shared load-result path as
+/// the paged views: a rejected session drops to login.
+#[test]
+fn genres_and_playlists_loaded_unauthorized_trigger_logout() {
+    let err = || "Failed to fetch: Unauthorized: Session expired".to_string();
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    let _ = app.handle_genres_loaded(Err(err()), 0);
+    assert_eq!(app.screen, crate::Screen::Login, "genres");
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    let _ = app.handle_playlists_loaded(Err(err()), 0);
+    assert_eq!(app.screen, crate::Screen::Login, "playlists");
+}
+
+/// Any other load failure keeps the rows the view already shows and toasts,
+/// instead of replacing them with an empty view.
+#[test]
+fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
+    use nokkvi_data::types::toast::ToastLevel;
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.library
+        .genres
+        .set_from_vec(vec![make_genre("g1", "Jazz")]);
+    app.library.genres.set_loading(true);
+    let _ = app.handle_genres_loaded(
+        Err("API GET /api/genre failed with status 500: boom".into()),
+        0,
+    );
+    assert_eq!(app.screen, crate::Screen::Home);
+    assert_eq!(app.library.genres.len(), 1, "the genre rows stay");
+    assert!(!app.library.genres.is_loading());
+    let toast = app.toast.toasts.back().expect("an error toast");
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert!(
+        toast.message.starts_with("Failed to load Genres"),
+        "{}",
+        toast.message
+    );
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.library
+        .playlists
+        .set_from_vec(vec![super::playlists::playlist_row("pl1", "Mix", false)]);
+    app.library.playlists.set_loading(true);
+    let _ = app.handle_playlists_loaded(
+        Err("API GET /api/playlist failed with status 500: boom".into()),
+        0,
+    );
+    assert_eq!(app.library.playlists.len(), 1, "the playlist rows stay");
+    assert!(!app.library.playlists.is_loading());
+    let toast = app.toast.toasts.back().expect("an error toast");
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert!(
+        toast.message.starts_with("Failed to load Playlists"),
+        "{}",
+        toast.message
+    );
+}
+
 // ============================================================================
 // Session reset — shared between logout + session-expired
 // (update/components.rs::reset_session_state)

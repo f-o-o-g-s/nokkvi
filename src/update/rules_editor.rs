@@ -252,9 +252,14 @@ impl Nokkvi {
             },
             |result: Result<Vec<(String, String)>, anyhow::Error>| match result {
                 Ok(list) => Message::RulesEditor(RulesEditorMessage::SessionPlaylistsLoaded(list)),
+                // A rejected session drops to login; any other failure leaves
+                // the sub-picker rows empty (the diagnostics they gate stay
+                // off), which the log explains.
                 Err(e) => {
-                    warn!("rules session playlists fetch failed: {e:#}");
-                    Message::RulesEditor(RulesEditorMessage::SessionPlaylistsLoaded(Vec::new()))
+                    crate::update::components::session_expired_message(&e).unwrap_or_else(|| {
+                        warn!("rules session playlists fetch failed: {e:#}");
+                        Message::RulesEditor(RulesEditorMessage::SessionPlaylistsLoaded(Vec::new()))
+                    })
                 }
             },
         );

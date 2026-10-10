@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::{
     services::api::{
@@ -79,6 +79,10 @@ impl PlaylistsApiService {
     /// ignored or surface as a `LIKE 'playlist.library_id ...'` error
     /// (the `playlist` table has no `library_id` column). User-accessible
     /// library auto-scoping already filters this list server-side.
+    ///
+    /// Errors like the paged album, artist and song loaders: a request the
+    /// server rejects or fails (a 401 is `NokkviError::Unauthorized`) or a
+    /// body that doesn't parse.
     pub async fn load_playlists_with_libraries(
         &self,
         sort_mode: &str,
@@ -100,21 +104,17 @@ impl PlaylistsApiService {
 
         let params = Self::build_playlist_params(sort_param, order_param, search_query);
 
-        // Fetch from native API
-        let result = self.client.get_with_headers("/api/playlist", &params).await;
-
-        // Parse failures degrade to an empty list like the network-error arm
-        // below, but are logged — a malformed body must never yield a
-        // silently empty Playlists view.
-        let playlists: Vec<Playlist> = match result {
-            Ok((response_text, _)) => {
-                parse::parse_json_or_default(&response_text, "playlists JSON response")
-            }
-            Err(e) => {
-                warn!(" PlaylistsApiService: Native API failed: {}", e);
-                Vec::new()
-            }
-        };
+        // The native read is the Playlists view and every playlist picker.
+        // A request the server rejects or fails, or a body that doesn't
+        // parse, is an error the caller shows (a 401 drops to login;
+        // anything else toasts and keeps the rows), never an empty list.
+        let (response_text, _) = self
+            .client
+            .get_with_headers("/api/playlist", &params)
+            .await
+            .context("Failed to fetch playlists")?;
+        let playlists: Vec<Playlist> =
+            parse::parse_json_with_preview(&response_text, "playlists JSON response")?;
 
         // Central draft filtering — the single-point fix for draft leakage.
         // Every caller lane (Playlists view, Harbour shelf, whole-library
@@ -854,6 +854,42 @@ mod tests {
     }
 
     const EMPTY_PLAYLIST: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","playlist":{"id":"pl1","name":"Empty"}}}"#;
+
+    /// The native `/api/playlist` read is the Playlists view and every
+    /// playlist picker. A request the server rejects or fails must be an
+    /// error the caller can show (a 401 drops to login; anything else toasts
+    /// and keeps the rows), never an empty list. A real empty answer is
+    /// still the empty state.
+    #[tokio::test]
+    async fn load_playlists_turns_a_failed_native_request_into_an_error() {
+        let err = service_at(&one_shot_server("401 Unauthorized", "{}").await)
+            .load_playlists_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect_err("a rejected session must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        let err = service_at(&one_shot_server("500 Internal Server Error", "boom").await)
+            .load_playlists_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect_err("a server failure must be an error");
+        assert!(
+            err.downcast_ref::<NokkviError>().is_none(),
+            "a plain failure is not a dead session: {err:#}"
+        );
+
+        let (playlists, total) = service_at(&one_shot_server("200 OK", "[]").await)
+            .load_playlists_with_libraries("name", "ASC", None, &[])
+            .await
+            .expect("no playlists is not an error");
+        assert!(playlists.is_empty());
+        assert_eq!(total, 0);
+    }
 
     /// Playing, expanding or editing a playlist reads its tracks here. A
     /// failed envelope must be an error: read as an empty playlist it plays

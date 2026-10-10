@@ -652,15 +652,10 @@ impl Nokkvi {
                         },
                         |result: Result<Vec<(String, String)>, anyhow::Error>| match result {
                             Ok(playlists) => Message::PlaylistsFetchedForDialog(playlists),
-                            Err(e) => {
-                                tracing::error!("Failed to fetch playlists for dialog: {e}");
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to load playlists: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
-                            }
+                            Err(e) => crate::update::components::playlists_fetch_failed_message(
+                                &e,
+                                "for the save dialog",
+                            ),
                         },
                     );
                 }

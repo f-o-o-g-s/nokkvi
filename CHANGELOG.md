@@ -66,6 +66,8 @@ All notable changes to this project will be documented in this file.
 - Scrolling an expanded artist's albums no longer loads another artist's artwork in the background.
 - Several server rejections at once now return you to the login screen once, with one toast, instead of wiping the form repeatedly.
 - A server rejection left over from an earlier login no longer logs out the session that replaced it.
+- A genre or playlist list the server fails to send now shows an error and keeps the rows, instead of an empty view.
+- A rejected session while loading genres or playlists now returns you to the login screen.
 
 ### Removed
 

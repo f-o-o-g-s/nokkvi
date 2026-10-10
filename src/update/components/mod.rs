@@ -83,6 +83,21 @@ pub(crate) fn session_expired_message(e: &anyhow::Error) -> Option<Message> {
         .then_some(Message::SessionExpired)
 }
 
+/// Map a failed playlist-list fetch (the Save Queue and Add to Playlist
+/// pickers): a rejected session drops to login, anything else logs at this
+/// boundary and toasts. `purpose` names the picker in the log line.
+pub(crate) fn playlists_fetch_failed_message(e: &anyhow::Error, purpose: &str) -> Message {
+    session_expired_message(e).unwrap_or_else(|| {
+        error!("Failed to fetch playlists {purpose}: {e}");
+        Message::Toast(crate::app_message::ToastMessage::Push(
+            nokkvi_data::types::toast::Toast::new(
+                format!("Failed to load playlists: {e}"),
+                nokkvi_data::types::toast::ToastLevel::Error,
+            ),
+        ))
+    })
+}
+
 /// Bundled params for a paginated library fetch (Albums, Artists, Songs).
 ///
 /// Built once at the call site from the page's common state via
