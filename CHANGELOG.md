@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Text fields now undo and redo with Ctrl+Z and Ctrl+Y.
 - The raw rules JSON editor now deletes a whole word with Ctrl+Backspace or Ctrl+Delete.
+- Bars and Lines have a new Reflection Below Cover setting, on by default.
 
 ### Changed
 
@@ -20,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Hotkey badges in Settings are now at least 96 pixels wide.
 - With the Metadata Strip on Top Bar or Top Bar Under, the top nav bar now spans only the list beside the artwork column.
 - With the Metadata Strip on Top Bar or Top Bar Under, the artwork column beside the list now reaches the window's top edge.
+- With Reflection Below Cover on, the Reflection's water now hangs below the cover over the UI, where there is room for it.
+- With Reflection Below Cover on, Bars and Lines now stand on the cover's bottom edge and fill Visualizer Height when their water fits below it.
 
 ### Fixed
 

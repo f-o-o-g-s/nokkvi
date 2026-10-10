@@ -663,6 +663,21 @@ define_settings! {
                 read_field: |d| d.bars_reflection,
             },
         },
+        BarsReflectionBelowCover {
+            key: "visualizer.bars.reflection_below_cover",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.with_visualizer(|vz| vz.bars.reflection_below_cover = v),
+            toml_apply: |_ts, _p| {},
+            read: |_src, _out| {},
+            write: |_ps, _ts| {},
+            ui_meta: {
+                label: "Reflection Below Cover",
+                category: "Bars",
+                subtitle: Some("Over the cover, the bars fill Visualizer Height down to the cover's edge and the water hangs below it, over the UI. Off keeps the water on the cover"),
+                default: crate::types::visualizer_config::VisualizerConfig::default().bars.reflection_below_cover,
+                read_field: |d| d.bars_reflection_below_cover,
+            },
+        },
         BarsHorizon {
             key: "visualizer.bars.horizon",
             value_type: Bool,
@@ -932,6 +947,21 @@ define_settings! {
                 subtitle: Some("The line rides above a waterline and reflects in dark, rippling water below it. Kicks send ripples across"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().lines.reflection,
                 read_field: |d| d.lines_reflection,
+            },
+        },
+        LinesReflectionBelowCover {
+            key: "visualizer.lines.reflection_below_cover",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.with_visualizer(|vz| vz.lines.reflection_below_cover = v),
+            toml_apply: |_ts, _p| {},
+            read: |_src, _out| {},
+            write: |_ps, _ts| {},
+            ui_meta: {
+                label: "Reflection Below Cover",
+                category: "Lines",
+                subtitle: Some("Over the cover, the line rides down to the cover's edge and the water hangs below it, over the UI. Off keeps the water on the cover"),
+                default: crate::types::visualizer_config::VisualizerConfig::default().lines.reflection_below_cover,
+                read_field: |d| d.lines_reflection_below_cover,
             },
         },
         LinesHorizon {

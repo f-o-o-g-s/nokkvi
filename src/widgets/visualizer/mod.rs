@@ -233,6 +233,33 @@ fn reflection_and_horizon(
     }
 }
 
+/// Whether `mode`'s Reflection hangs its water below the cover, over the UI
+/// (Bars / Lines with their Reflection and Reflection Below Cover both on).
+/// The one gate for the over-cover spill floor and the root spill layer.
+pub(crate) fn reflection_spills(
+    cfg: &crate::visualizer_config::VisualizerConfig,
+    mode: VisualizationMode,
+) -> bool {
+    let below_cover = match mode {
+        VisualizationMode::Bars => cfg.bars.reflection_below_cover,
+        VisualizationMode::Lines => cfg.lines.reflection_below_cover,
+        VisualizationMode::Scope | VisualizationMode::Milkdrop => false,
+    };
+    below_cover && reflection_and_horizon(cfg, mode).0
+}
+
+/// The layer that draws a spilling Reflection's water below the cover
+/// ([`shader::ReflectionSpill`]): window-sized, pushed at the root of the
+/// view above the content while an over-cover Bars / Lines Reflection is on
+/// (`Nokkvi::bottom_band_layers`). Draws nothing in a frame whose
+/// over-cover visualizer kept its water on the cover, or drew no cover.
+pub(crate) fn reflection_spill<'a, Message: 'a>() -> Element<'a, Message> {
+    iced::widget::shader(shader::ReflectionSpill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .boxed()
+}
+
 /// Default bar width in pixels (fallback when dynamic calculation fails)
 const BAR_WIDTH: f32 = 4.0;
 
@@ -386,6 +413,9 @@ pub struct Visualizer {
     max_bars: usize, // Maximum bar count to try when calculating
     /// Logical px of the canvas above the band (`horizon_headroom`).
     headroom: f32,
+    /// Over the cover: the lowest window y the Reflection's water may hang
+    /// down to below the band (`spill_floor`). `None` keeps it in the band.
+    spill_floor: Option<f32>,
     /// Refcount-keyed kill switch for the FFT worker.
     /// See [`state::FftShutdownGuard`] for the lifecycle invariant.
     _shutdown_guard: std::sync::Arc<state::FftShutdownGuard>,
@@ -434,23 +464,24 @@ impl Visualizer {
             // Dynamic bars enabled
             dynamic_bars: true,
             headroom: 0.0,
+            spill_floor: None,
             _shutdown_guard: shutdown_guard,
         }
     }
 
-    /// Set window height for scaling
     /// Logical px the Horizon needs above a `band_h`-tall band: its far rows
     /// crest past the band's top, by up to [`horizon::HEADROOM`] of the scene
-    /// (the band, or its part above the waterline with Reflection on). The
-    /// layout makes the canvas that much taller, upward, and passes it to
-    /// [`Self::headroom`]; the bars / line keep the band. 0 when this mode's
-    /// Horizon is off.
+    /// (the band, or its part above the waterline with Reflection on; with a
+    /// spill floor the water may hang below the band, which leaves the scene
+    /// up to the whole band). The layout makes the canvas that much taller,
+    /// upward, and passes it to [`Self::headroom`]; the bars / line keep the
+    /// band. 0 when this mode's Horizon is off.
     pub(crate) fn horizon_headroom(&self, band_h: f32) -> f32 {
         let (reflection, horizon) = reflection_and_horizon(&self.config.read(), self.mode);
         if !horizon {
             return 0.0;
         }
-        let scene = if reflection {
+        let scene = if reflection && self.spill_floor.is_none() {
             band_h * WATER_LINE
         } else {
             band_h
@@ -465,6 +496,30 @@ impl Visualizer {
         self
     }
 
+    /// Over the cover: let the Reflection's water hang below the band, down
+    /// to window y `floor` (logical px). The scene then stands on the band's
+    /// bottom edge, and the water below the cover is drawn by the
+    /// [`reflection_spill`] layer, over whatever UI lies there. With no room
+    /// below the band the water stays in it, as without a floor.
+    pub(crate) fn spill_floor(mut self, floor: f32) -> Self {
+        self.spill_floor = Some(floor);
+        self
+    }
+
+    /// How much of its band the scene took in the last frame drawn with the
+    /// Reflection on: where the over-cover boat's waterline is, as a share
+    /// of the band from its top (`WATER_LINE` until a spilling frame lands).
+    pub(crate) fn scene_share(&self) -> f32 {
+        self.state.scene_share()
+    }
+
+    /// The floor [`Self::spill_floor`] set, if any.
+    #[cfg(test)]
+    pub(crate) fn spill_floor_value(&self) -> Option<f32> {
+        self.spill_floor
+    }
+
+    /// Set window height for scaling
     pub fn window_height(mut self, height: f32) -> Self {
         self.window_height = height;
         self
@@ -832,6 +887,7 @@ impl Visualizer {
             reflection,
             horizon,
             headroom: self.headroom,
+            spill_floor: self.spill_floor,
         }
     }
 
@@ -1749,6 +1805,34 @@ mod build_shader_params_tests {
 
         shared.write().bars.horizon = false;
         assert_eq!(viz(VisualizationMode::Bars).horizon_headroom(200.0), 0.0);
+    }
+
+    /// Over the cover the Reflection's water may hang below the band, which
+    /// leaves the scene up to the whole band, so the Horizon sizes its
+    /// headroom for that; the floor reaches the primitive with the params.
+    #[test]
+    fn a_spilling_reflection_sizes_the_headroom_for_the_whole_band() {
+        let mut cfg = VisualizerConfig::default();
+        cfg.lines.horizon = true;
+        cfg.lines.reflection = true;
+        let shared = Arc::new(RwLock::new(cfg.clone()));
+        let lines = Visualizer::new(64, shared.clone(), Default::default())
+            .mode(VisualizationMode::Lines)
+            .spill_floor(900.0);
+
+        assert!((lines.horizon_headroom(200.0) - 200.0 * horizon::HEADROOM).abs() < 1e-4);
+        let params = lines.build_shader_params(&cfg, &ThemeBarColors::default());
+        assert_eq!(params.spill_floor, Some(900.0));
+
+        let in_band =
+            Visualizer::new(64, shared, Default::default()).mode(VisualizationMode::Lines);
+        assert_eq!(
+            in_band
+                .build_shader_params(&cfg, &ThemeBarColors::default())
+                .spill_floor,
+            None,
+            "no floor, no spill (the bottom band)"
+        );
     }
 
     /// Scope's Tunnel rides `scope_tunnel`, and while it is on the ring's

@@ -225,3 +225,40 @@ fn loaded_settings_point_the_fft_worker_at_their_mode() {
         assert!(viz.feed_active());
     }
 }
+
+/// Over the cover, the Reflection's water hangs below the cover only while
+/// that mode's Reflection Below Cover is on: the visualizer then carries
+/// the spill floor. Off, or without the Reflection, the water stays on the
+/// cover. Each mode follows its own toggle.
+#[test]
+fn reflection_below_cover_gates_the_over_cover_spill() {
+    use nokkvi_data::types::player_settings::VisualizationMode as Setting;
+
+    let mut app = app_with_visualizer();
+    // The test app reads the developer's config.debug.toml; start from the
+    // shipped defaults (Bars / Lines over the cover) instead.
+    *app.visualizer_config.write() = crate::visualizer_config::VisualizerConfig::default();
+    let spill_floor = |app: &crate::Nokkvi| {
+        let (viz, _boat) = app.over_cover_overlays();
+        viz.expect("Bars / Lines draw over the cover by default")
+            .0
+            .spill_floor_value()
+    };
+
+    app.settings.visualization_mode = Setting::Bars;
+    app.visualizer_config.write().bars.reflection = true;
+    assert_eq!(
+        spill_floor(&app),
+        Some(app.reflection_spill_floor()),
+        "on by default"
+    );
+    app.visualizer_config.write().bars.reflection_below_cover = false;
+    assert_eq!(spill_floor(&app), None, "off keeps the water on the cover");
+
+    app.settings.visualization_mode = Setting::Lines;
+    assert_eq!(spill_floor(&app), None, "no Lines Reflection yet");
+    app.visualizer_config.write().lines.reflection = true;
+    assert!(spill_floor(&app).is_some(), "Lines follows its own toggle");
+    app.visualizer_config.write().lines.reflection_below_cover = false;
+    assert_eq!(spill_floor(&app), None);
+}

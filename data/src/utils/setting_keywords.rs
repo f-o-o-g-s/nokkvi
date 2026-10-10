@@ -450,6 +450,16 @@ keyword_table! {
             "ripple",
             "waves",
         ],
+        "visualizer.bars.reflection_below_cover" | "visualizer.lines.reflection_below_cover" => &[
+            "spill",
+            "overflow",
+            "under",
+            "beneath",
+            "outside",
+            "water",
+            "mirror",
+            "edge",
+        ],
         "visualizer.bars.horizon" | "visualizer.lines.horizon" => &[
             "history",
             "mountains",

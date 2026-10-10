@@ -528,3 +528,35 @@ fn artwork_bleed_keeps_the_top_chrome_band_beside_the_lowered_artwork() {
     app.browsing_panel = Some(crate::views::BrowsingPanel::new());
     assert_eq!(app.artwork_bleed(), ArtworkBleed::NONE);
 }
+
+#[test]
+fn the_reflection_spill_stops_at_the_player_bar_under_the_artwork() {
+    // The over-cover Reflection's water may hang below the cover down to
+    // `reflection_spill_floor`. Beside the lowered bar the artwork column
+    // runs to the window's bottom edge; a portrait window stacks the artwork
+    // above the list, which ends at the bar's top, so the water stops there;
+    // Theater Mode's bar slides in over the panel.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = lowered_queue_app();
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+    assert!(
+        app.lowered_player_bar_width().is_some(),
+        "setup invariant: the queue's artwork column lowers the bar"
+    );
+    assert_eq!(app.reflection_spill_floor(), app.window.height);
+
+    app.window.width = 608.0;
+    app.window.height = 1406.0;
+    assert!(
+        app.lowered_player_bar_width().is_none(),
+        "setup invariant: a portrait window stacks the artwork above the list"
+    );
+    assert_eq!(
+        app.reflection_spill_floor(),
+        app.window.height - player_bar_height()
+    );
+
+    app.theater.active = true;
+    assert_eq!(app.reflection_spill_floor(), app.window.height);
+}

@@ -280,6 +280,13 @@ pub struct BarsConfig {
     /// Default: false (off — strong character change)
     pub reflection: bool,
 
+    /// Reflection Below Cover: over the cover, the bars fill the Visualizer
+    /// Height down to the cover's bottom edge and the Reflection's water hangs
+    /// below the cover, over the UI there (where there is room; otherwise it
+    /// stays on the cover). Off keeps the water inside the cover.
+    /// Default: true
+    pub reflection_below_cover: bool,
+
     /// Horizon: about the last second and a half of bars recede behind the live ones
     /// in rows toward a horizon, shrinking and fading into mist.
     /// Default: false (off — strong character change)
@@ -314,6 +321,7 @@ impl Default for BarsConfig {
             trails: 0.0,
             echo: 0.0,
             reflection: false,
+            reflection_below_cover: true,
             horizon: false,
             placement: VisualizerPlacement::OverCover,
         }
@@ -412,6 +420,13 @@ pub struct LinesConfig {
     /// Default: false (off — strong character change)
     pub reflection: bool,
 
+    /// Reflection Below Cover: over the cover, the line rides down to the
+    /// cover's bottom edge and the Reflection's water hangs below the cover,
+    /// over the UI there (where there is room; otherwise it stays on the
+    /// cover). Off keeps the water inside the cover.
+    /// Default: true
+    pub reflection_below_cover: bool,
+
     /// Horizon: about the last second and a half of the line recedes behind it as
     /// misty waves toward a horizon.
     /// Default: false (off — strong character change)
@@ -440,6 +455,7 @@ impl Default for LinesConfig {
             trails: 0.0,
             echo: 0.0,
             reflection: false,
+            reflection_below_cover: true,
             horizon: false,
             placement: VisualizerPlacement::OverCover,
         }
@@ -695,6 +711,7 @@ pub mod keys {
     pub const BARS_TRAILS: &str = "visualizer.bars.trails";
     pub const BARS_ECHO: &str = "visualizer.bars.echo";
     pub const BARS_REFLECTION: &str = "visualizer.bars.reflection";
+    pub const BARS_REFLECTION_BELOW_COVER: &str = "visualizer.bars.reflection_below_cover";
     pub const BARS_HORIZON: &str = "visualizer.bars.horizon";
     pub const BARS_PLACEMENT: &str = "visualizer.bars.placement";
 
@@ -713,6 +730,7 @@ pub mod keys {
     pub const LINES_TRAILS: &str = "visualizer.lines.trails";
     pub const LINES_ECHO: &str = "visualizer.lines.echo";
     pub const LINES_REFLECTION: &str = "visualizer.lines.reflection";
+    pub const LINES_REFLECTION_BELOW_COVER: &str = "visualizer.lines.reflection_below_cover";
     pub const LINES_HORIZON: &str = "visualizer.lines.horizon";
     pub const LINES_PLACEMENT: &str = "visualizer.lines.placement";
 
@@ -782,6 +800,7 @@ pub mod keys {
         BARS_TRAILS,
         BARS_ECHO,
         BARS_REFLECTION,
+        BARS_REFLECTION_BELOW_COVER,
         BARS_HORIZON,
         BARS_PLACEMENT,
         LINES_POINT_COUNT,
@@ -798,6 +817,7 @@ pub mod keys {
         LINES_TRAILS,
         LINES_ECHO,
         LINES_REFLECTION,
+        LINES_REFLECTION_BELOW_COVER,
         LINES_HORIZON,
         LINES_PLACEMENT,
         SCOPE_POINT_COUNT,
@@ -1423,6 +1443,23 @@ placement = "nowhere"
             LinesConfig::default().placement,
             VisualizerPlacement::OverCover
         );
+    }
+
+    /// Reflection Below Cover ships on, and a config written before it
+    /// existed (Reflection on, no key) loads with it on: the water hangs
+    /// below the cover until the user turns it off.
+    #[test]
+    fn reflection_below_cover_defaults_on_for_new_and_older_configs() {
+        assert!(BarsConfig::default().reflection_below_cover);
+        assert!(LinesConfig::default().reflection_below_cover);
+
+        let older: BarsConfig = toml::from_str("reflection = true").expect("parse");
+        assert!(older.reflection && older.reflection_below_cover);
+        let older: LinesConfig = toml::from_str("reflection = true").expect("parse");
+        assert!(older.reflection && older.reflection_below_cover);
+        let off: LinesConfig =
+            toml::from_str("reflection = true\nreflection_below_cover = false").expect("parse");
+        assert!(!off.reflection_below_cover);
     }
 
     /// Lock the WGSL dispatch contract — the `#[repr(u32)]` discriminants on

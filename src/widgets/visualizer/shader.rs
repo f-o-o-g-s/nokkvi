@@ -21,29 +21,63 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 /// Where the visualizer stands in its canvas, in fractions of the canvas
 /// height from the top: the Horizon's headroom, then the scene (the bars /
-/// line), then with Reflection on the water below the waterline.
+/// line), then with Reflection on the water below the waterline. The canvas
+/// is the widget, plus the water a spilling Reflection hangs below it
+/// ([`Self::spill`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct BandLayout {
     /// The headroom above the band (0 without the Horizon).
     top: f32,
     /// The scene: the band, or its part above the waterline.
     scene: f32,
+    /// Logical px the canvas runs past the widget's bottom edge.
+    spill: f32,
+}
+
+/// What lies under the scene in a [`BandLayout`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Water {
+    /// No Reflection: the scene fills the band.
+    Dry,
+    /// The Reflection's water, free to hang up to `room` logical px below
+    /// the widget (0 or less keeps it inside the band).
+    Reflection { room: f32 },
 }
 
 impl BandLayout {
     /// A canvas `headroom` px of whose `canvas_h` px sit above the band.
-    pub(super) fn new(headroom: f32, canvas_h: f32, reflection: bool) -> Self {
-        let top = (headroom / canvas_h.max(1.0)).clamp(0.0, 1.0);
-        let band = 1.0 - top;
+    ///
+    /// The Reflection's water takes `1 - WATER_LINE` of the band plus
+    /// whatever room it hangs into, so the waterline sinks as the room grows
+    /// and reaches the widget's bottom edge, the scene filling the band, once
+    /// the room holds a whole reflection. Any more room stays unused.
+    pub(super) fn new(headroom: f32, canvas_h: f32, water: Water) -> Self {
+        let canvas_h = canvas_h.max(1.0);
+        let band = canvas_h - headroom.clamp(0.0, canvas_h);
+        let (scene, spill) = match water {
+            Water::Dry => (band, 0.0),
+            Water::Reflection { room } => {
+                let spill = room.clamp(0.0, band * (1.0 - WATER_LINE) / WATER_LINE);
+                ((band + spill) * WATER_LINE, spill)
+            }
+        };
+        let total = canvas_h + spill;
         Self {
-            top,
-            scene: if reflection { band * WATER_LINE } else { band },
+            top: (canvas_h - band) / total,
+            scene: scene / total,
+            spill,
         }
     }
 
     /// The scene's bottom edge: the waterline when Reflection is on.
     pub(super) fn water_line(self) -> f32 {
         (self.top + self.scene).min(1.0)
+    }
+
+    /// Logical px the canvas runs past the widget's bottom edge: the water a
+    /// spilling Reflection hangs below it (0 when it stays in the band).
+    pub(super) fn spill(self) -> f32 {
+        self.spill
     }
 
     /// Inside a canvas rect `[x, y, w, h]`: the backdrop's rect (headroom +
@@ -67,8 +101,55 @@ impl Default for BandLayout {
         Self {
             top: 0.0,
             scene: 1.0,
+            spill: 0.0,
         }
     }
+}
+
+/// The nudge iced applies before rounding a clip rect onto the pixel grid
+/// (`iced_wgpu::nudge::NUDGE`), so the spill snaps its rows exactly the way
+/// iced snapped the scene's clip.
+const SNAP_NUDGE: f32 = 0.001;
+
+/// `rect` (logical px) scaled to the target and snapped the way iced snaps a
+/// primitive's clip bounds.
+fn snap_to_target(rect: Rectangle, scale: f32) -> Option<Rectangle<u32>> {
+    (rect * scale + iced::Vector::new(SNAP_NUDGE, SNAP_NUDGE)).snap()
+}
+
+/// The target px both halves of a spilling canvas share as their viewport
+/// origin: the top-left corner of the scene's clip, which iced snaps from
+/// the widget's bounds and the scene's render reads back as `clip_bounds`.
+fn spill_origin(bounds: &Rectangle, scale: f32) -> [f32; 2] {
+    snap_to_target(*bounds, scale).map_or([0.0; 2], |clip| [clip.x as f32, clip.y as f32])
+}
+
+/// The target rows (and the widget's columns) a spilling Reflection's water
+/// covers: from the row where the scene's clip ends down through `spill`
+/// logical px more, clamped to the `target`. `None` when nothing is left.
+fn spill_scissor(
+    bounds: &Rectangle,
+    spill: f32,
+    scale: f32,
+    target: iced::Size<u32>,
+) -> Option<Rectangle<u32>> {
+    let clip = snap_to_target(*bounds, scale)?;
+    let canvas = snap_to_target(
+        Rectangle {
+            height: bounds.height + spill,
+            ..*bounds
+        },
+        scale,
+    )?;
+    let top = clip.y + clip.height;
+    let bottom = (canvas.y + canvas.height).min(target.height);
+    let right = (clip.x + clip.width).min(target.width);
+    (bottom > top && right > clip.x).then(|| Rectangle {
+        x: clip.x,
+        y: top,
+        width: right - clip.x,
+        height: bottom - top,
+    })
 }
 
 fn get_elapsed_time() -> f32 {
@@ -278,6 +359,9 @@ pub(crate) struct VisualizerPrimitive {
     /// Logical px of the canvas above the band (`ShaderParams::headroom`,
     /// clamped to the canvas).
     pub headroom: f32,
+    /// How far down the Reflection's water may hang below the widget
+    /// (`ShaderParams::spill_floor`).
+    pub spill_floor: Option<f32>,
     /// Scope: the Tunnel's receding rings (tunnel.wgsl), drawn behind the ring
     /// from this snapshot (uploaded into the peak buffer, which Scope never
     /// reads otherwise). Empty when the Tunnel is off.
@@ -385,6 +469,10 @@ pub(crate) struct ShaderParams {
     /// Logical px of the canvas above the band, room for the Horizon's far
     /// rows (`Visualizer::horizon_headroom`); 0 without it.
     pub headroom: f32,
+    /// Over the cover: the lowest window y (logical px) the Reflection's
+    /// water may hang down to below the widget (`Visualizer::spill_floor`).
+    /// `None` keeps the water inside the band.
+    pub spill_floor: Option<f32>,
 }
 
 impl VisualizerPrimitive {
@@ -596,6 +684,7 @@ impl VisualizerPrimitive {
             reflection,
             horizon_data,
             headroom: params.headroom,
+            spill_floor: params.spill_floor,
             tunnel_data,
         }
     }
@@ -643,8 +732,13 @@ pub(crate) struct VisualizerPipeline {
     pub(super) msaa_size: (u32, u32),
     /// The last prepared primitive's band within its canvas (`prepare`).
     pub(super) band: BandLayout,
-    /// Its canvas in target px (the viewport iced sets for `draw`).
+    /// Its canvas in target px: the widget's bounds, plus the water a
+    /// spilling Reflection hangs below them.
     pub(super) canvas_px: [f32; 4],
+    /// This frame's water below the cover, planned by the scene's `prepare`
+    /// for the spill layer that draws it later in the frame; `trim` drops it
+    /// once the frame is done.
+    pub(super) spill: Option<SpillPlan>,
     pub(super) format: wgpu::TextureFormat,
     // --- Bloom post-processing ---
     /// resolve_texture -> half-res bloom (horizontal blur + soft-knee threshold)
@@ -719,6 +813,21 @@ pub(crate) struct VisualizerPipeline {
     pub(super) reflection_uniform_bind_group: wgpu::BindGroup,
 }
 
+/// The part of a spilling Reflection's canvas below the cover, as the spill
+/// layer draws it ([`VisualizerDraw::Spill`]): the scene's own display
+/// passes, over the rows the scene's clip leaves out.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SpillPlan {
+    /// The canvas's top-left corner in target px, shared with the scene.
+    origin: [f32; 2],
+    /// The target px below the cover the water covers.
+    scissor: Rectangle<u32>,
+    /// What the scene displays (`display_bind_group`) and whether it blooms.
+    echo: bool,
+    trails: bool,
+    bloom: bool,
+}
+
 /// Reflection pass parameters (reflection.wgsl `ReflectionParams`) — a small
 /// standalone uniform like `BloomParams`, outside the `VisualizerConfig` interlock.
 #[derive(Debug, Clone, Copy)]
@@ -726,7 +835,8 @@ pub(crate) struct VisualizerPipeline {
 pub(super) struct ReflectionParams {
     /// waterline (fraction from the top), clock s, beat pulse, bass level
     pub(super) surface: [f32; 4],
-    /// widget width px, height px, mirror compression, unused
+    /// canvas width px, height px, mirror compression, and the cover's
+    /// bottom edge (fraction from the top; 1 when the water stays on it)
     pub(super) size: [f32; 4],
     /// water body colour (the theme's dark stroke)
     pub(super) tint: [f32; 4],
@@ -1038,11 +1148,13 @@ impl VisualizerPrimitive {
             &pipeline.lines_pipeline,
             scope_pipe,
             self.backdrop_pipe(pipeline, false),
+            // The band's fractions are of the whole canvas, water below the
+            // widget included.
             pipeline.band.rects([
                 clip_bounds.x as f32,
                 clip_bounds.y as f32,
                 clip_bounds.width as f32,
-                clip_bounds.height as f32,
+                pipeline.canvas_px[3],
             ]),
             &mut render_pass,
         );
@@ -1055,7 +1167,20 @@ impl VisualizerPrimitive {
     }
 }
 
-impl shader::Primitive for VisualizerPrimitive {
+/// What a visualizer shader layer draws. Both kinds share one
+/// [`VisualizerPipeline`] (iced keeps one pipeline per primitive type), which
+/// is what lets the spill draw from the textures the scene rendered.
+#[derive(Debug)]
+pub(crate) enum VisualizerDraw {
+    /// The visualizer over its widget: the scene, and the water as far as
+    /// the widget reaches.
+    Scene(Box<VisualizerPrimitive>),
+    /// The water a spilling Reflection hangs below the cover, from a layer
+    /// above everything the cover sits among ([`ReflectionSpill`]).
+    Spill,
+}
+
+impl shader::Primitive for VisualizerDraw {
     type Pipeline = VisualizerPipeline;
 
     fn prepare(
@@ -1064,7 +1189,48 @@ impl shader::Primitive for VisualizerPrimitive {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bounds: &Rectangle,
-        _viewport: &Viewport,
+        viewport: &Viewport,
+    ) {
+        match self {
+            Self::Scene(scene) => scene.prepare(pipeline, device, queue, bounds, viewport),
+            // The scene's prepare (an earlier layer) planned it.
+            Self::Spill => {}
+        }
+    }
+
+    fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+        match self {
+            Self::Scene(scene) => scene.draw(pipeline, render_pass),
+            Self::Spill => {
+                pipeline.draw_spill(render_pass);
+                true
+            }
+        }
+    }
+
+    fn render(
+        &self,
+        pipeline: &Self::Pipeline,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        clip_bounds: &Rectangle<u32>,
+    ) {
+        match self {
+            Self::Scene(scene) => scene.render(pipeline, encoder, target, clip_bounds),
+            // Drawn in iced's pass (`draw` always takes it).
+            Self::Spill => {}
+        }
+    }
+}
+
+impl VisualizerPrimitive {
+    fn prepare(
+        &self,
+        pipeline: &mut VisualizerPipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &Viewport,
     ) {
         // NOTE: tick() runs on a background FFT thread, decoupled from the render path.
         // The shader widget self-drives redraws via Action::request_redraw() in update().
@@ -1100,16 +1266,33 @@ impl shader::Primitive for VisualizerPrimitive {
         self.state.clear_dirty();
 
         // The scene stands in the band below the Horizon's headroom, above
-        // the waterline when the Reflection is on.
-        let band = BandLayout::new(self.headroom, bounds.height, self.reflection);
+        // the waterline when the Reflection is on. Over the cover the water
+        // may hang below the widget, down to the spill floor.
+        let water = if self.reflection {
+            Water::Reflection {
+                room: self
+                    .spill_floor
+                    .map_or(0.0, |floor| floor - (bounds.y + bounds.height)),
+            }
+        } else {
+            Water::Dry
+        };
+        let band = BandLayout::new(self.headroom, bounds.height, water);
         pipeline.band = band;
-        let scale = _viewport.scale_factor();
+        // The canvas: the widget, plus the water hanging below it.
+        let canvas_h = bounds.height + band.spill();
+        let scale = viewport.scale_factor();
         pipeline.canvas_px = [
             bounds.x * scale,
             bounds.y * scale,
             bounds.width * scale,
-            bounds.height * scale,
+            canvas_h * scale,
         ];
+        if self.reflection {
+            // The over-cover boat rides the waterline wherever it settled.
+            let band_h = (bounds.height - self.headroom).max(1.0);
+            self.state.set_scene_share(band.scene * canvas_h / band_h);
+        }
 
         // Update uniforms
         let uniforms = Uniforms {
@@ -1117,7 +1300,7 @@ impl shader::Primitive for VisualizerPrimitive {
                 bounds.x,
                 bounds.y + self.headroom,
                 bounds.width,
-                band.scene * bounds.height,
+                band.scene * canvas_h,
             ],
             gradient_colors: self.gradient_colors,
             peak_gradient_colors: self.peak_gradient_colors,
@@ -1143,7 +1326,12 @@ impl shader::Primitive for VisualizerPrimitive {
                     self.state.current_beat_pulse() * self.beat_reactivity,
                     bass,
                 ],
-                size: [bounds.width, bounds.height, REFLECTION_STRETCH, 0.0],
+                size: [
+                    bounds.width,
+                    canvas_h,
+                    REFLECTION_STRETCH,
+                    bounds.height / canvas_h,
+                ],
                 tint: self.border_color,
                 glint: self.peak_gradient_colors[0],
                 ripples: self.state.reflection_ripples(),
@@ -1212,7 +1400,7 @@ impl shader::Primitive for VisualizerPrimitive {
             || self.reflection
         {
             let w = (bounds.width * scale).ceil() as u32;
-            let h = (bounds.height * scale).ceil() as u32;
+            let h = (canvas_h * scale).ceil() as u32;
 
             if w > 0 && h > 0 && pipeline.msaa_size != (w, h) {
                 // 4x MSAA texture (widget-sized)
@@ -1491,6 +1679,22 @@ impl shader::Primitive for VisualizerPrimitive {
             }
         }
 
+        // The water below the cover is left to the spill layer, which draws
+        // later in this frame from what this primitive renders now.
+        pipeline.spill = if band.spill() > 0.0 && pipeline.blit_bind_group.is_some() {
+            spill_scissor(bounds, band.spill(), scale, viewport.physical_size()).map(|scissor| {
+                SpillPlan {
+                    origin: spill_origin(bounds, scale),
+                    scissor,
+                    echo: self.echo_enabled,
+                    trails: self.trails_enabled,
+                    bloom: self.bloom_enabled,
+                }
+            })
+        } else {
+            None
+        };
+
         // Refresh the bloom uniform every frame (intensity tracks config without
         // necessarily triggering a texture resize).
         if self.bloom_enabled {
@@ -1567,7 +1771,7 @@ impl shader::Primitive for VisualizerPrimitive {
         }
     }
 
-    fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+    fn draw(&self, pipeline: &VisualizerPipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         let bar_count = self.config.bar_count;
         if bar_count == 0 {
             return true;
@@ -1612,7 +1816,7 @@ impl shader::Primitive for VisualizerPrimitive {
 
     fn render(
         &self,
-        pipeline: &Self::Pipeline,
+        pipeline: &VisualizerPipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
@@ -1956,15 +2160,9 @@ impl shader::Primitive for VisualizerPrimitive {
             pass.draw(0..3, 0..1);
         }
 
-        // The displayed scene is the echo accumulator when echo is on, else the
-        // trail accumulator when trails are on, else the raw resolve texture.
-        let display_bg = match echo_handles {
-            Some((.., dbg)) => dbg,
-            None => match trail_handles {
-                Some((_, bg)) => bg,
-                None => blit_bg,
-            },
-        };
+        let display_bg = pipeline
+            .display_bind_group(self.echo_enabled, self.trails_enabled)
+            .unwrap_or(blit_bg);
 
         // Echo keeps the Scope Tunnel out of its feedback (see
         // `echo_backdrop_pipe`), so draw it fresh here, under the displayed
@@ -2053,81 +2251,88 @@ impl shader::Primitive for VisualizerPrimitive {
             );
         }
 
-        // Reflection: mirror the displayed scene below the waterline. Drawn
-        // before the bloom composite, so the glow spills over the surface.
-        if self.reflection {
-            let mut reflection_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("visualizer reflection pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            let (tex_w, tex_h) = pipeline.msaa_size;
-            reflection_pass.set_viewport(
-                clip_bounds.x as f32,
-                clip_bounds.y as f32,
-                tex_w as f32,
-                tex_h as f32,
-                0.0,
-                1.0,
+        // Pass 3: the Reflection's water, then the bloom composited over the
+        // scene and the water. A spilling Reflection's water below the cover
+        // is the spill layer's (`draw_spill`), which repeats these over the
+        // rows this clip leaves out.
+        let water = self.reflection.then_some(display_bg);
+        let glow = bloom_views.map(|(.., bg_bloom)| bg_bloom);
+        if water.is_some() || glow.is_some() {
+            let mut pass = Self::begin_overlay_pass(
+                encoder,
+                target,
+                clip_bounds,
+                pipeline.msaa_size,
+                "visualizer water + bloom composite pass",
             );
-            reflection_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
-            reflection_pass.set_pipeline(&pipeline.reflection_pipeline);
-            reflection_pass.set_bind_group(0, display_bg, &[]);
-            reflection_pass.set_bind_group(1, &pipeline.reflection_uniform_bind_group, &[]);
-            reflection_pass.draw(0..3, 0..1);
+            pipeline.record_water_and_glow(&mut pass, water, glow);
         }
+    }
+}
 
-        // Pass 3: additively composite the blurred bloom over the scene.
-        if let Some((.., bg_bloom)) = bloom_views {
-            let mut bloom_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("visualizer bloom composite pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+impl VisualizerPipeline {
+    /// What the display passes show: the echo accumulator while echo is on,
+    /// else the trail accumulator while trails are, else the resolve. `None`
+    /// before the offscreen targets exist.
+    fn display_bind_group(&self, echo: bool, trails: bool) -> Option<&wgpu::BindGroup> {
+        let echo_bg = self.blit_bg_echo.as_ref().filter(|_| echo);
+        let trail_bg = self.blit_bg_trail.as_ref().filter(|_| trails);
+        echo_bg.or(trail_bg).or(self.blit_bind_group.as_ref())
+    }
 
-            let (tex_w, tex_h) = pipeline.msaa_size;
-            bloom_pass.set_viewport(
-                clip_bounds.x as f32,
-                clip_bounds.y as f32,
-                tex_w as f32,
-                tex_h as f32,
-                0.0,
-                1.0,
-            );
-            bloom_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
-
-            bloom_pass.set_pipeline(&pipeline.bloom_composite_pipeline);
-            bloom_pass.set_bind_group(0, bg_bloom, &[]);
-            bloom_pass.draw(0..3, 0..1);
+    /// The last display passes, into a pass whose viewport is the canvas:
+    /// the Reflection's `water` (mirroring the displayed scene bound here),
+    /// then the bloom `glow` additively over it, so the glow spills over the
+    /// surface.
+    fn record_water_and_glow(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        water: Option<&wgpu::BindGroup>,
+        glow: Option<&wgpu::BindGroup>,
+    ) {
+        if let Some(display) = water {
+            pass.set_pipeline(&self.reflection_pipeline);
+            pass.set_bind_group(0, display, &[]);
+            pass.set_bind_group(1, &self.reflection_uniform_bind_group, &[]);
+            pass.draw(0..3, 0..1);
         }
+        if let Some(bloom) = glow {
+            pass.set_pipeline(&self.bloom_composite_pipeline);
+            pass.set_bind_group(0, bloom, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    /// The spill layer's draw: this frame's water below the cover (the
+    /// scene's `prepare` planned it, its render filled the textures), into
+    /// iced's pass over the rows the scene's clip left out. Nothing without
+    /// a plan.
+    fn draw_spill(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let Some(plan) = self.spill else {
+            return;
+        };
+        let Some(display) = self.display_bind_group(plan.echo, plan.trails) else {
+            return;
+        };
+        let (tex_w, tex_h) = self.msaa_size;
+        let [x, y] = plan.origin;
+        pass.set_viewport(x, y, tex_w as f32, tex_h as f32, 0.0, 1.0);
+        let s = plan.scissor;
+        pass.set_scissor_rect(s.x, s.y, s.width, s.height);
+        let glow = self.bloom_bg_b.as_ref().filter(|_| plan.bloom);
+        self.record_water_and_glow(pass, Some(display), glow);
     }
 }
 
 impl shader::Pipeline for VisualizerPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         Self::new(device, queue, format)
+    }
+
+    /// iced trims every pipeline once a frame is drawn: the spill plan only
+    /// ever describes the frame whose scene made it.
+    fn trim(&mut self) {
+        self.spill = None;
     }
 }
 
@@ -2156,7 +2361,7 @@ impl ShaderVisualizer {
 
 impl<Message> shader::Program<Message> for ShaderVisualizer {
     type State = ();
-    type Primitive = VisualizerPrimitive;
+    type Primitive = VisualizerDraw;
 
     fn update(
         &self,
@@ -2197,7 +2402,34 @@ impl<Message> shader::Program<Message> for ShaderVisualizer {
         // so we pass the ratio through directly (no bounds.height scaling).
         adjusted_params.peak_thickness = self.params.peak_thickness;
 
-        VisualizerPrimitive::new(&self.state, self.mode, &adjusted_params)
+        VisualizerDraw::Scene(Box::new(VisualizerPrimitive::new(
+            &self.state,
+            self.mode,
+            &adjusted_params,
+        )))
+    }
+}
+
+/// The Reflection's spill layer: a window-sized shader layer at the root of
+/// the view (`Nokkvi::bottom_band_layers`), above everything the cover panel
+/// sits among and below the modals, toasts and menus, that draws the water a
+/// spilling over-cover Reflection hangs below the cover
+/// ([`VisualizerDraw::Spill`]). It draws nothing in a frame whose scene did
+/// not spill, and it is inert to events.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ReflectionSpill;
+
+impl<Message> shader::Program<Message> for ReflectionSpill {
+    type State = ();
+    type Primitive = VisualizerDraw;
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        _cursor: mouse::Cursor,
+        _bounds: Rectangle,
+    ) -> Self::Primitive {
+        VisualizerDraw::Spill
     }
 }
 
@@ -2222,12 +2454,18 @@ mod layout_tests {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3)
     }
 
+    /// The Reflection with no room below the widget: its water stays in the band.
+    const IN_BAND: Water = Water::Reflection { room: 0.0 };
+
     #[test]
     fn a_band_without_headroom_or_water_is_the_whole_canvas() {
         let canvas = [10.0, 20.0, 300.0, 100.0];
-        let (backdrop, scene) = BandLayout::new(0.0, 100.0, false).rects(canvas);
+        let (backdrop, scene) = BandLayout::new(0.0, 100.0, Water::Dry).rects(canvas);
         assert!(close(backdrop, canvas) && close(scene, canvas));
-        assert_eq!(BandLayout::default(), BandLayout::new(0.0, 100.0, false));
+        assert_eq!(
+            BandLayout::default(),
+            BandLayout::new(0.0, 100.0, Water::Dry)
+        );
         assert_eq!(BandLayout::default().rows(57), 57);
     }
 
@@ -2237,24 +2475,139 @@ mod layout_tests {
     #[test]
     fn headroom_lifts_the_backdrop_above_the_scene() {
         let canvas = [0.0, 0.0, 400.0, 125.0];
-        let band = BandLayout::new(25.0, 125.0, true);
+        let band = BandLayout::new(25.0, 125.0, IN_BAND);
         let (backdrop, scene) = band.rects(canvas);
         let scene_h = 100.0 * WATER_LINE;
         assert!(close(scene, [0.0, 25.0, 400.0, scene_h]));
         assert!(close(backdrop, [0.0, 0.0, 400.0, 25.0 + scene_h]));
         assert!((band.water_line() - (25.0 + scene_h) / 125.0).abs() < 1e-6);
         assert_eq!(band.rows(125), (25.0 + scene_h).round() as u32);
+        assert_eq!(band.spill(), 0.0);
 
-        let dry = BandLayout::new(25.0, 125.0, false);
+        let dry = BandLayout::new(25.0, 125.0, Water::Dry);
         assert!(close(dry.rects(canvas).1, [0.0, 25.0, 400.0, 100.0]));
         assert!((dry.water_line() - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn headroom_never_exceeds_the_canvas() {
-        let band = BandLayout::new(500.0, 100.0, false);
+        let band = BandLayout::new(500.0, 100.0, Water::Dry);
         let (backdrop, scene) = band.rects([0.0, 0.0, 50.0, 100.0]);
         assert!(scene[3].abs() < 1e-6 && backdrop[3] <= 100.0);
         assert_eq!(band.rows(100), 100);
+    }
+
+    /// Room below the widget lets the water hang out of it. The scene and
+    /// the water keep the in-band proportions and share the band plus the
+    /// room, so the waterline sinks as the room grows, meets the widget's
+    /// bottom edge once the room holds a whole reflection (the scene then
+    /// fills the band), and never sinks past it. The water always ends at
+    /// the canvas bottom.
+    #[test]
+    fn room_below_the_widget_lets_the_water_hang_out_of_it() {
+        let (headroom, canvas_h, w) = (25.0, 125.0, 400.0);
+        let band_h = canvas_h - headroom;
+        let whole = band_h * (1.0 - WATER_LINE) / WATER_LINE;
+        let scene_of = |b: BandLayout| b.rects([0.0, 0.0, w, canvas_h + b.spill()]).1[3];
+
+        let mut last_line = BandLayout::new(headroom, canvas_h, IN_BAND).water_line() * canvas_h;
+        for room in [5.0, whole * 0.5, whole * 0.99] {
+            let b = BandLayout::new(headroom, canvas_h, Water::Reflection { room });
+            let total = canvas_h + b.spill();
+            assert!(
+                (b.spill() - room).abs() < 1e-3,
+                "takes the room it is given"
+            );
+            let scene = scene_of(b);
+            assert!((scene - (band_h + room) * WATER_LINE).abs() < 1e-3);
+            let line = b.water_line() * total;
+            assert!((line - (headroom + scene)).abs() < 1e-3);
+            assert!(line > last_line, "the waterline sinks as the room grows");
+            assert!(
+                line < canvas_h,
+                "short of a whole reflection it stays on the widget"
+            );
+            last_line = line;
+            // The water below the line fills the rest of the canvas.
+            assert!(((total - line) - scene * (1.0 - WATER_LINE) / WATER_LINE).abs() < 1e-2);
+        }
+
+        for room in [whole, whole * 3.0] {
+            let b = BandLayout::new(headroom, canvas_h, Water::Reflection { room });
+            assert!(
+                (b.spill() - whole).abs() < 1e-3,
+                "only a whole reflection hangs out"
+            );
+            assert!(
+                (scene_of(b) - band_h).abs() < 1e-3,
+                "the scene fills the band"
+            );
+            let line = b.water_line() * (canvas_h + b.spill());
+            assert!(
+                (line - canvas_h).abs() < 1e-3,
+                "the waterline is the widget's edge"
+            );
+        }
+
+        // A floor above the widget's edge is no room at all, and without
+        // the Reflection there is no water to hang out.
+        let squeezed = BandLayout::new(headroom, canvas_h, Water::Reflection { room: -40.0 });
+        assert_eq!(squeezed, BandLayout::new(headroom, canvas_h, IN_BAND));
+        let dry = BandLayout::new(headroom, canvas_h, Water::Dry);
+        assert_eq!(dry.spill(), 0.0);
+        assert!((scene_of(dry) - band_h).abs() < 1e-3);
+    }
+
+    /// The spill's scissor starts on the row where the scene's clip ends:
+    /// iced snaps that clip from the widget's bounds (nudged, then rounded,
+    /// `iced_wgpu::nudge`), and both halves of the canvas share one
+    /// viewport origin, so the water meets itself at the cover's edge
+    /// without a gap or a doubled row. It is clamped to the target.
+    #[test]
+    fn the_spill_scissor_meets_the_scenes_clip() {
+        use iced::{Point, Size, Vector};
+
+        for (bounds, scale) in [
+            (
+                Rectangle::new(Point::new(0.0, 33.0), Size::new(608.0, 243.2)),
+                1.0,
+            ),
+            (
+                Rectangle::new(Point::new(10.25, 5.25), Size::new(300.5, 100.25)),
+                2.0,
+            ),
+            (
+                Rectangle::new(Point::new(3.3, 7.7), Size::new(200.0, 80.4)),
+                1.25,
+            ),
+        ] {
+            let target = Size::new(4000, 4000);
+            let clip = (bounds * scale + Vector::new(0.001, 0.001))
+                .snap()
+                .expect("a visible widget");
+            let plan = spill_scissor(&bounds, 50.0, scale, target).expect("room below");
+            assert_eq!(plan.x, clip.x);
+            assert_eq!(plan.width, clip.width);
+            assert_eq!(plan.y, clip.y + clip.height, "starts where the clip ends");
+            assert_eq!(
+                spill_origin(&bounds, scale),
+                [clip.x as f32, clip.y as f32],
+                "one viewport origin for both halves"
+            );
+        }
+
+        let bounds = Rectangle::new(iced::Point::new(0.0, 900.0), iced::Size::new(400.0, 100.0));
+        let clamped = spill_scissor(&bounds, 300.0, 1.0, iced::Size::new(300, 1080))
+            .expect("partly on screen");
+        assert_eq!((clamped.width, clamped.y, clamped.height), (300, 1000, 80));
+        assert_eq!(
+            spill_scissor(&bounds, 300.0, 1.0, iced::Size::new(300, 1000)),
+            None,
+            "entirely below the target"
+        );
+        assert_eq!(
+            spill_scissor(&bounds, 0.0, 1.0, iced::Size::new(300, 1080)),
+            None
+        );
     }
 }

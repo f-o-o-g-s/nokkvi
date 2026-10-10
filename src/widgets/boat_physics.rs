@@ -115,15 +115,11 @@ pub(crate) fn rope_stroke_for(boat_h: f32) -> f32 {
 /// damping it's not visually distinguishable from the unpadded
 /// formula.
 ///
-/// With the Reflection on, the line is drawn in the band above the waterline
-/// (`WATER_LINE` of the area from the top), so the same geometry applies to
-/// that band and the boat rides the line rather than the water below it.
+/// With the Reflection on, the line is drawn in the band above the waterline,
+/// which leaves `line.water` of the area below it, so the same geometry
+/// applies to that band and the boat rides the line rather than the water.
 pub(crate) fn wave_baseline_and_scale(area_height: f32, line: LineGeometry) -> (f32, f32) {
-    let band = if line.reflection {
-        area_height * crate::widgets::visualizer::WATER_LINE
-    } else {
-        area_height
-    };
+    let band = area_height * (1.0 - line.water.clamp(0.0, 1.0));
     if line.mirror {
         (band * 0.5, band * 0.5)
     } else {
@@ -132,12 +128,30 @@ pub(crate) fn wave_baseline_and_scale(area_height: f32, line: LineGeometry) -> (
 }
 
 /// How the Lines wave sits in the visualizer area: mirrored about its centre
-/// (`lines.mirror`) and/or standing above the Reflection's waterline
+/// (`lines.mirror`) and/or standing on the Reflection's waterline
 /// (`lines.reflection`). The Trawl's sea is neither (`default()`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct LineGeometry {
     pub(crate) mirror: bool,
-    pub(crate) reflection: bool,
+    /// Share of the area under the Reflection's waterline: 0 without it,
+    /// `1 - WATER_LINE` while the water stays in the area, less as an
+    /// over-cover Reflection hangs its water below the cover.
+    pub(crate) water: f32,
+}
+
+impl LineGeometry {
+    /// The wave over an area that keeps the Reflection's water inside it
+    /// (the bottom band, or with `reflection` off).
+    pub(crate) fn in_band(mirror: bool, reflection: bool) -> Self {
+        Self {
+            mirror,
+            water: if reflection {
+                1.0 - crate::widgets::visualizer::WATER_LINE
+            } else {
+                0.0
+            },
+        }
+    }
 }
 
 // --- physics tuning constants ---------------------------------------------

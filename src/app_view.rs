@@ -16,7 +16,8 @@ use crate::{
 };
 
 /// Layers [`Nokkvi::bottom_band_layers`] always pushes: the bottom-band
-/// visualizer and its surfing boat, each real or a placeholder.
+/// visualizer and its surfing boat (or, over the cover, the Reflection's
+/// spill), each real or a placeholder.
 const BOTTOM_BAND_LAYERS: usize = 2;
 
 // ============================================================================
@@ -1096,6 +1097,12 @@ impl Nokkvi {
     /// `bar_reserved` is the height kept free below the band (the player bar;
     /// `0.0` in Theater Mode, where the bar floats over the band) and `inset`
     /// the width kept free on the left (the side nav).
+    ///
+    /// Over the cover, a Bars / Lines Reflection takes the first layer for
+    /// its spill (`widgets::visualizer::reflection_spill`): the water it
+    /// hangs below the cover draws here, above the content around the cover
+    /// and under the modals, toasts and menus, which a layer inside the
+    /// cover panel could not be.
     fn bottom_band_layers<'a>(
         &'a self,
         mut stack: Stack<Element<'a, Message>>,
@@ -1110,15 +1117,22 @@ impl Nokkvi {
         // placement setting, Scope always draws over the cover, Off shows
         // nothing. It is the single source of truth shared with the over-cover
         // render site below, so the two can never disagree.
-        let bottom_band_mode = {
+        let (bottom_band_mode, spills) = {
             let cfg = self.visualizer_config.read();
-            widgets::visualizer::resolve_placement(
+            let slots = widgets::visualizer::resolve_placement(
                 self.settings.visualization_mode,
                 cfg.bars.placement,
                 cfg.lines.placement,
-            )
-            .bottom_band
+            );
+            let spills = slots
+                .over_art
+                .is_some_and(|mode| widgets::visualizer::reflection_spills(&cfg, mode));
+            (slots.bottom_band, spills)
         };
+        if spills {
+            stack = stack.push(widgets::visualizer::reflection_spill());
+            pushed += 1;
+        }
         if let (Some(widget_mode), Some(viz)) = (bottom_band_mode, self.visualizer.as_ref()) {
             let viz_with_mode = viz
                 .clone()
@@ -1133,10 +1147,8 @@ impl Nokkvi {
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
             let viz_opacity = cfg.opacity;
-            let lines_geometry = crate::widgets::boat::LineGeometry {
-                mirror: cfg.lines.mirror,
-                reflection: cfg.lines.reflection,
-            };
+            let lines_geometry =
+                crate::widgets::boat::LineGeometry::in_band(cfg.lines.mirror, cfg.lines.reflection);
             drop(cfg);
 
             let visualizer_width = (self.window.width - inset).max(0.0);
@@ -1735,7 +1747,7 @@ impl Nokkvi {
         // stacks cover → lyrics scrim → visualizer → boat → haloed lyric
         // text, so both hero surfaces stay visible at once (owner-directed;
         // the per-glyph halo is what keeps text readable over the motion).
-        let (over_art_mode, height_percent, opacity, line) = {
+        let (over_art_mode, height_percent, opacity, mirror, reflection, spills) = {
             let cfg = self.visualizer_config.read();
             let mode = widgets::visualizer::resolve_placement(
                 self.settings.visualization_mode,
@@ -1743,29 +1755,65 @@ impl Nokkvi {
                 cfg.lines.placement,
             )
             .over_art;
-            let line = crate::widgets::boat::LineGeometry {
-                mirror: cfg.lines.mirror,
-                reflection: cfg.lines.reflection,
-            };
-            (mode, cfg.height_percent, cfg.opacity, line)
+            (
+                mode,
+                cfg.height_percent,
+                cfg.opacity,
+                cfg.lines.mirror,
+                cfg.lines.reflection,
+                mode.is_some_and(|m| widgets::visualizer::reflection_spills(&cfg, m)),
+            )
         };
+        // With Reflection Below Cover on, the water may hang below the cover
+        // over the UI under it (the `bottom_band_layers` spill draws it),
+        // down to this floor; off, it stays on the cover.
+        let spill_floor = spills.then(|| self.reflection_spill_floor());
         let visualizer = over_art_mode.and_then(|mode| {
-            self.visualizer
-                .clone()
-                .map(|viz| (viz, mode, height_percent))
+            self.visualizer.clone().map(|viz| {
+                let viz = match spill_floor {
+                    Some(floor) => viz.spill_floor(floor),
+                    None => viz,
+                };
+                (viz, mode, height_percent)
+            })
         });
         let boat = if over_art_mode == Some(widgets::visualizer::VisualizationMode::Lines)
             && self.boat.visible
         {
+            // The line stands where the last frame put the waterline: in the
+            // band, or as far down as the water hangs below the cover.
+            let water = if reflection {
+                1.0 - self.visualizer.as_ref().map_or(
+                    widgets::visualizer::WATER_LINE,
+                    widgets::visualizer::Visualizer::scene_share,
+                )
+            } else {
+                0.0
+            };
             Some(crate::widgets::base_slot_list_layout::OverCoverBoat {
                 state: &self.boat,
                 opacity,
-                line,
+                line: crate::widgets::boat::LineGeometry { mirror, water },
             })
         } else {
             None
         };
         (visualizer, boat)
+    }
+
+    /// The lowest window y a spilling over-cover Reflection may hang its
+    /// water down to: the top of the player bar where the bar runs under
+    /// the artwork, else the window's bottom edge (Theater Mode, whose bar
+    /// slides in over it, and the lowered bar, which docks beside the
+    /// artwork column instead).
+    pub(crate) fn reflection_spill_floor(&self) -> f32 {
+        let bar_under_artwork = !self.theater.active && self.lowered_player_bar_width().is_none();
+        let bar = if bar_under_artwork {
+            widgets::player_bar::player_bar_height()
+        } else {
+            0.0
+        };
+        (self.window.height - bar).max(0.0)
     }
 
     /// Whether the queue renders in the split view's left pane: the browsing

@@ -5,12 +5,15 @@
 // cover, the reflection is the scene flipped about the waterline (compressed so
 // the whole skyline fits the band), wobbled by wavelets that grow with depth
 // and on the bass, smeared downward like lights on water, broken into ripple
-// lines, and pushed sideways by the kick ripples the CPU spawns.
+// lines, and pushed sideways by the kick ripples the CPU spawns. Over the cover
+// the water may hang below it, over the UI there (the canvas runs past the
+// cover's edge); that part dissolves toward its end.
 
 struct ReflectionParams {
     // waterline (uv y, 0 = top), clock s, beat pulse, bass level
     surface: vec4<f32>,
-    // widget width px, height px, mirror compression, unused
+    // canvas width px, height px, mirror compression, the cover's bottom edge
+    // (uv y; 1 while the water stays on the cover)
     size: vec4<f32>,
     // water body colour
     tint: vec4<f32>,
@@ -68,6 +71,18 @@ const KICK_SPEED: f32 = 0.30;      // ripple front speed (uv / s)
 const KICK_WIDTH: f32 = 0.05;      // ripple packet half-width (uv)
 const KICK_PUSH: f32 = 7.0;        // ripple sideways push (px)
 const KICK_DECAY: f32 = 1.3;       // ripple fade per second
+const SPILL_HOLD: f32 = 0.2;       // share of the water below the cover before it dissolves
+
+// How much of the water to keep at canvas height `y`: all of it on the cover
+// (above `edge`), then dissolving to nothing by the end of the water hanging
+// below it, so it never stops in a hard edge across the UI there.
+fn spill_keep(y: f32, edge: f32) -> f32 {
+    if (edge >= 0.999) {
+        return 1.0;
+    }
+    let s = clamp((y - edge) / (1.0 - edge), 0.0, 1.0);
+    return 1.0 - smoothstep(SPILL_HOLD, 1.0, s);
+}
 
 @fragment
 fn fs_reflection(in: VOut) -> @location(0) vec4<f32> {
@@ -149,5 +164,5 @@ fn fs_reflection(in: VOut) -> @location(0) vec4<f32> {
     let spark = smoothstep(0.88, 0.99, g) * (refl.a * 0.6 + 0.6 * lift) * (1.0 - 0.7 * d);
     col += water.glint.rgb * spark * 0.6;
     col += water.glint.rgb * lift * 0.08 * (1.0 - d);
-    return vec4<f32>(col, clamp(a, 0.0, 1.0));
+    return vec4<f32>(col, clamp(a, 0.0, 1.0)) * spill_keep(uv.y, water.size.w);
 }

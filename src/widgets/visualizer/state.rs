@@ -23,7 +23,7 @@ use super::{
     horizon::{HorizonRows, RowShape},
     milkdrop::MilkdropShared,
     particles::ParticleSystem,
-    reflection::{KickRipples, RIPPLE_SLOTS},
+    reflection::{KickRipples, RIPPLE_SLOTS, WATER_LINE},
     tunnel::TunnelRings,
 };
 use crate::visualizer_config::VisualizerConfig;
@@ -573,6 +573,11 @@ pub(crate) struct VisualizerState {
     /// Bars / Lines Reflection kick ripples (reflection.rs), stepped each
     /// `tick()` while the active mode's Reflection is on.
     ripples: Arc<Mutex<KickRipples>>,
+    /// How much of its band the scene took in the last frame drawn with the
+    /// Reflection on (f32 bits): `WATER_LINE` while the water stays in the
+    /// band, up to 1 as it hangs below the cover (`BandLayout`). Written by
+    /// the shader's `prepare`; the over-cover boat rides this line.
+    scene_share: Arc<AtomicU32>,
 
     /// Master feed gate — `false` when the visualizer is toggled Off.
     ///
@@ -801,6 +806,7 @@ impl VisualizerState {
             horizon: Arc::new(Mutex::new(HorizonRows::new())),
             tunnel: Arc::new(Mutex::new(TunnelRings::new())),
             ripples: Arc::new(Mutex::new(KickRipples::new())),
+            scene_share: Arc::new(AtomicU32::new(WATER_LINE.to_bits())),
             // Feed gate — on by default; the handler flips it off when Off
             feed_active: Arc::new(AtomicBool::new(true)),
             // Onset envelope
@@ -1422,6 +1428,19 @@ impl VisualizerState {
     /// The Reflection's kick ripples for the shader.
     pub(crate) fn reflection_ripples(&self) -> [[f32; 4]; RIPPLE_SLOTS] {
         self.ripples.lock().events()
+    }
+
+    /// Record how much of its band the scene took this frame (see
+    /// `scene_share`).
+    pub(crate) fn set_scene_share(&self, share: f32) {
+        self.scene_share
+            .store(share.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    /// How much of its band the scene took in the last frame drawn with the
+    /// Reflection on: the waterline, as a share of the band from its top.
+    pub(crate) fn scene_share(&self) -> f32 {
+        f32::from_bits(self.scene_share.load(Ordering::Relaxed))
     }
 
     /// The Horizon rows snapshot (see `horizon.rs`). Empty mid-clear so the

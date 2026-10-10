@@ -968,6 +968,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             msaa_size: (0, 0),
             band: BandLayout::default(),
             canvas_px: [0.0; 4],
+            spill: None,
             format,
             bloom_bright_pipeline,
             bloom_blur_v_pipeline,

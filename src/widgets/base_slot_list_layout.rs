@@ -621,7 +621,10 @@ fn cover_layer<'a, Message: 'a>(
 ///    of the height, bottom-anchored (cover art shows above), the same knob the
 ///    bottom band uses. With the Horizon on, the layer reaches higher by
 ///    `Visualizer::horizon_headroom` so its far rows crest over the cover;
-///    the bars / line keep the band.
+///    the bars / line keep the band. With the Reflection on, the water may
+///    hang below the panel (`Visualizer::spill_floor`): this layer draws the
+///    part on the cover, and the view's root draws the rest over the UI
+///    below it (`visualizer::reflection_spill`).
 /// 4. The surfing boat, confined to the Lines band so it rides the rendered
 ///    waveform.
 /// 5. The haloed lyric text, topmost.

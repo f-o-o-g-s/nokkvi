@@ -262,6 +262,7 @@ mod tests {
                 vkeys::BARS_TRAILS,
                 vkeys::BARS_ECHO,
                 vkeys::BARS_REFLECTION,
+                vkeys::BARS_REFLECTION_BELOW_COVER,
                 vkeys::BARS_HORIZON,
             ],
         );
@@ -306,6 +307,7 @@ mod tests {
                 vkeys::LINES_TRAILS,
                 vkeys::LINES_ECHO,
                 vkeys::LINES_REFLECTION,
+                vkeys::LINES_REFLECTION_BELOW_COVER,
                 vkeys::LINES_HORIZON,
             ],
         );
@@ -347,9 +349,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 7 + 4 + 25 + 5 + 5 + 16 + 18 + 6 = 86. Catches an item landing OUTSIDE
+        // 7 + 4 + 26 + 5 + 5 + 17 + 18 + 6 = 88. Catches an item landing OUTSIDE
         // the pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 86);
+        assert_eq!(count_items(&entries), 88);
     }
 
     /// Every dispatchable Visualizer-table key renders exactly one UI row —

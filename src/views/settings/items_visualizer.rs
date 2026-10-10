@@ -198,6 +198,7 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::BARS_TRAILS));
     e.push(m.take(keys::BARS_ECHO));
     e.push(m.take(keys::BARS_REFLECTION));
+    e.push(m.take(keys::BARS_REFLECTION_BELOW_COVER));
     e.push(m.take(keys::BARS_HORIZON));
 
     // --- Bar Colors (Dark / Light) ---
@@ -240,6 +241,7 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::LINES_TRAILS));
     e.push(m.take(keys::LINES_ECHO));
     e.push(m.take(keys::LINES_REFLECTION));
+    e.push(m.take(keys::LINES_REFLECTION_BELOW_COVER));
     e.push(m.take(keys::LINES_HORIZON));
 
     // --- Scope section (circular oscilloscope) ---
