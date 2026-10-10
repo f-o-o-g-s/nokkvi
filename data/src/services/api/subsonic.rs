@@ -110,15 +110,29 @@ pub async fn subsonic_post_ok(
     check_subsonic_response_status(status, &body, operation_label)
 }
 
+/// Subsonic error codes that mean the credential itself was rejected, so the
+/// session is dead: 40 (wrong username or password, which is also what
+/// Navidrome answers a stale token with) and the OpenSubsonic 44 (invalid API
+/// key). 41 (token auth not supported) stays a plain error: it is a server
+/// setup problem that logging in again cannot fix.
+const SESSION_REJECTED_CODES: [i64; 2] = [40, 44];
+
 /// Apply Subsonic response status/body policy.
 ///
 /// Pure (no I/O) so it can be unit-tested without an HTTP server. Returns:
 /// - `Err(NokkviError::Unauthorized)` for HTTP 401, so the UI drops to login on
 ///   JWT expiry (mirrors [`crate::services::api::client::ApiClient`]).
 /// - `Err(anyhow!(...))` for any other non-2xx status.
-/// - `Err(anyhow!(...))` when the body wraps a Subsonic-envelope error
-///   (`subsonic-response.status == "failed"`) inside an HTTP 200.
+/// - `Err(NokkviError::Unauthorized)` when the body wraps a Subsonic-envelope
+///   error (`subsonic-response.status == "failed"`) inside an HTTP 200 whose
+///   code is in [`SESSION_REJECTED_CODES`]: a rejected token arrives this way,
+///   not as a 401.
+/// - `Err(anyhow!(...))` for any other failed envelope.
 /// - `Ok(())` otherwise.
+///
+/// Shared by the checked readers and every Subsonic write (star, rating,
+/// playlist and radio edits, the play-queue save), so a dead credential on
+/// any of them routes to the login screen.
 pub(crate) fn check_subsonic_response_status(
     status: reqwest::StatusCode,
     body: &str,
@@ -139,11 +153,18 @@ pub(crate) fn check_subsonic_response_status(
         && let Some(subsonic) = json.get("subsonic-response")
         && subsonic.get("status").and_then(|s| s.as_str()) == Some("failed")
     {
-        let error_msg = subsonic
-            .get("error")
+        let error = subsonic.get("error");
+        let error_msg = error
             .and_then(|e| e.get("message"))
             .and_then(|m| m.as_str())
             .unwrap_or("unknown error");
+        let code = error.and_then(|e| e.get("code")).and_then(|c| c.as_i64());
+        if code.is_some_and(|c| SESSION_REJECTED_CODES.contains(&c)) {
+            // The typed error carries no detail, so keep the server's reason
+            // in the file log for "why was I logged out".
+            tracing::debug!("{operation_label}: credential rejected ({code:?}): {error_msg}");
+            return Err(NokkviError::Unauthorized.into());
+        }
         return Err(anyhow::anyhow!("{operation_label}: {error_msg}"));
     }
 
@@ -363,6 +384,48 @@ pub(crate) mod tests {
         assert!(msg.contains("Song not found"));
     }
 
+    /// A rejected credential comes back as HTTP 200 with a failed envelope:
+    /// code 40 (wrong username or password, which is also what a stale token
+    /// gets) or the OpenSubsonic code 44 (invalid API key). Both mean the
+    /// session is dead, so they route to login like HTTP 401, on reads and
+    /// writes alike.
+    #[test]
+    fn check_subsonic_response_status_routes_auth_codes_to_unauthorized() {
+        for code in [40, 44] {
+            let body = format!(
+                r#"{{"subsonic-response":{{"status":"failed","error":{{"code":{code},"message":"rejected"}}}}}}"#
+            );
+            let err = check_subsonic_response_status(StatusCode::OK, &body, "star song")
+                .expect_err("a failed envelope must produce an error");
+            assert!(
+                matches!(
+                    err.downcast_ref::<NokkviError>(),
+                    Some(NokkviError::Unauthorized)
+                ),
+                "code {code} should be Unauthorized, got: {err:#}"
+            );
+        }
+    }
+
+    /// Every other failure code stays a plain error: 41 (token auth not
+    /// supported) is a server setup problem a re-login cannot fix, and 50
+    /// (not authorized) is a permission refusal on one operation.
+    #[test]
+    fn check_subsonic_response_status_keeps_other_codes_plain() {
+        for code in [0, 41, 50, 70] {
+            let body = format!(
+                r#"{{"subsonic-response":{{"status":"failed","error":{{"code":{code},"message":"nope"}}}}}}"#
+            );
+            let err = check_subsonic_response_status(StatusCode::OK, &body, "star song")
+                .expect_err("a failed envelope must produce an error");
+            assert!(
+                err.downcast_ref::<NokkviError>().is_none(),
+                "code {code} must stay a plain error, got: {err:#}"
+            );
+            assert!(format!("{err}").contains("nope"), "got: {err}");
+        }
+    }
+
     /// A JSON array deserializes element-for-element into the target Vec —
     /// both scalar and struct element types round-trip.
     #[test]
@@ -490,24 +553,45 @@ pub(crate) mod tests {
         }
     }
 
-    const FAILED_ENVELOPE: &str = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong username or password"}}}"#;
+    /// Navidrome's answer to a rejected token: HTTP 200, failed envelope,
+    /// code 40.
+    pub(crate) const FAILED_ENVELOPE: &str = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong username or password"}}}"#;
 
-    /// A rejected token comes back as HTTP 200 with a failed envelope. The
-    /// lenient reader hands it on as a payload (a playlist would read as
-    /// empty); the checked one makes it an error.
+    /// Navidrome's answer to an unknown id: HTTP 200, failed envelope, code 70.
+    pub(crate) const NOT_FOUND_ENVELOPE: &str = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":70,"message":"data not found"}}}"#;
+
+    /// A failed envelope comes back as HTTP 200. The lenient reader hands it
+    /// on as a payload (a playlist would read as empty); the checked one
+    /// makes it an error that carries the server's message.
     #[tokio::test]
     async fn checked_envelope_turns_a_failed_envelope_into_an_error() {
         let lenient =
-            get_playlist_envelope(&one_shot_server("200 OK", FAILED_ENVELOPE).await, false)
+            get_playlist_envelope(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await, false)
                 .await
                 .expect("the lenient reader never looks at the status");
         assert_eq!(lenient["status"], "failed");
 
-        let err = get_playlist_envelope(&one_shot_server("200 OK", FAILED_ENVELOPE).await, true)
+        let err = get_playlist_envelope(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await, true)
             .await
             .expect_err("a failed envelope must be an error");
         assert!(
-            format!("{err:#}").contains("Wrong username or password"),
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+    }
+
+    /// A rejected token (code 40 inside HTTP 200) routes to the
+    /// session-expired path through the checked reader, like a 401.
+    #[tokio::test]
+    async fn checked_envelope_routes_a_rejected_token_to_unauthorized() {
+        let err = get_playlist_envelope(&one_shot_server("200 OK", FAILED_ENVELOPE).await, true)
+            .await
+            .expect_err("a rejected token must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
             "got: {err:#}"
         );
     }

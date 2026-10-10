@@ -74,7 +74,8 @@ pub(super) use artwork_prefetch::{
 ///
 /// Pair partner of `subsonic_post_ok` / `ApiClient::{get,post_json,put_json,
 /// delete}`, which route HTTP 401 → `NokkviError::Unauthorized` at the API
-/// boundary. This helper consolidates the inverse: catching the typed error
+/// boundary (the Subsonic side also maps a rejected token's code 40/44
+/// envelope). This helper consolidates the inverse: catching the typed error
 /// inside `Result<_, anyhow::Error>` results bubbled back to UI handlers.
 pub(crate) fn session_expired_message(e: &anyhow::Error) -> Option<Message> {
     e.downcast_ref::<NokkviError>()
