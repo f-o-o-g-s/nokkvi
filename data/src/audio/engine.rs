@@ -1780,8 +1780,12 @@ impl CustomAudioEngine {
             }
         } else {
             trace!(" AudioEngine: decoder already initialized, seeking to start");
-            // Seek back to the beginning for replay
-            if !decoder.seek(0) {
+            // Seek back to the beginning for replay. Chunk 0 may have left
+            // the reader's chunk cache on a long track, so this can be a
+            // blocking range request: hand the worker off like `seek()`
+            // does (every `play()` caller runs on the multi-thread runtime;
+            // the prebuffer below already relies on it).
+            if !tokio::task::block_in_place(|| decoder.seek(0)) {
                 trace!(" AudioEngine: seek to start failed");
             } else {
                 trace!(" AudioEngine: seek to start completed");
@@ -1802,7 +1806,9 @@ impl CustomAudioEngine {
         if let Some(pending_ms) = self.pending_start_ms.take() {
             let target = pending_ms.min(self.duration);
             if target > 0 {
-                if decoder.seek(target) {
+                // A blocking range request on a cache miss (always, for a
+                // mid-song resume): hand the worker off, as `seek()` does.
+                if tokio::task::block_in_place(|| decoder.seek(target)) {
                     self.position = target;
                     start_offset = Some(target);
                     debug!("🎵 AudioEngine: start offset applied: {target}ms");
