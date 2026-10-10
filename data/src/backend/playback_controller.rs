@@ -16,7 +16,9 @@ use crate::{
     audio::engine::CustomAudioEngine,
     backend::{queue::QueueService, settings::SettingsService},
     services::{
-        playback::{QueueNavigator, RemovalAftermath, StageStart, StagedSong, StreamSession},
+        playback::{
+            PreviousStep, QueueNavigator, RemovalAftermath, StageStart, StagedSong, StreamSession,
+        },
         queue::PreviousOutcome,
         task_manager::TaskManager,
     },
@@ -383,20 +385,26 @@ impl PlaybackController {
 
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
-
-        // Stamp this skip as the latest (any in-flight skip-fade build is
-        // superseded), and resolve the effective mode under the locks.
-        let seq = self
-            .skip_fade_seq
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
         let skip_fade = engine.skip_fade_mode();
 
-        match queue_navigator
+        let outcome = queue_navigator
             .play_next(&mut engine, &session, skip_fade)
-            .await
-        {
-            Ok(NextOutcome::NoNext) => {
+            .await;
+        // A skip that moved the cursor or the engine is the latest one: stamp
+        // it while both locks are still held, so an in-flight skip-fade build
+        // (which checks the stamp under the engine lock) is superseded. A
+        // Next that moved nothing (end of the queue) must NOT stamp: the
+        // in-flight build would abandon and leave the engine on the outgoing
+        // while the queue names its target.
+        let seq = match &outcome {
+            Ok(NextOutcome::Played(..) | NextOutcome::FadePlanned(_) | NextOutcome::Drained) => {
+                self.stamp_skip()
+            }
+            Ok(NextOutcome::NoNext) | Err(_) => 0,
+        };
+
+        match outcome {
+            Ok(NextOutcome::NoNext | NextOutcome::Drained) => {
                 drop(queue_navigator);
                 drop(engine);
                 // Sync reactive current_index for UI highlighting
@@ -432,6 +440,16 @@ impl PlaybackController {
         }
     }
 
+    /// Stamp a manual skip as the latest one (`skip_fade_seq`): an in-flight
+    /// skip-fade build with an older stamp abandons at its fire. Call it with
+    /// the engine lock held, and only for a skip that moved the queue cursor
+    /// or the engine.
+    fn stamp_skip(&self) -> u64 {
+        self.skip_fade_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
     /// Play previous track
     pub async fn previous(&self) -> Result<PreviousOutcome> {
         let Some(session) = self.queue_service.stream_session().await else {
@@ -440,30 +458,41 @@ impl PlaybackController {
 
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
-
-        let seq = self
-            .skip_fade_seq
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
         let skip_fade = engine.skip_fade_mode();
 
-        match queue_navigator
+        let step = queue_navigator
             .play_previous(&mut engine, &session, skip_fade)
-            .await
-        {
-            Ok((outcome, plan)) => {
-                let generation = engine.source_generation();
+            .await;
+        // Stamp only a Previous that moved something (see `next`).
+        let seq = match &step {
+            Ok(PreviousStep::Played | PreviousStep::FadePlanned(_)) => self.stamp_skip(),
+            Ok(PreviousStep::Stayed(_)) | Err(_) => 0,
+        };
+
+        match step {
+            Ok(PreviousStep::Stayed(outcome)) => {
                 drop(queue_navigator);
                 drop(engine);
-                // A blocked step-back changed nothing, so skip the reactive
-                // refresh; otherwise sync current_index for UI highlighting.
+                // Nothing to step back to still refreshes, as it always did;
+                // a blocked step-back changed nothing.
                 if outcome == PreviousOutcome::Stepped {
                     self.queue_service.refresh_from_queue().await?;
                 }
-                if let Some(plan) = plan {
-                    self.complete_skip_fade(plan, generation, seq).await?;
-                }
                 Ok(outcome)
+            }
+            Ok(PreviousStep::Played) => {
+                drop(queue_navigator);
+                drop(engine);
+                self.queue_service.refresh_from_queue().await?;
+                Ok(PreviousOutcome::Stepped)
+            }
+            Ok(PreviousStep::FadePlanned(plan)) => {
+                let generation = engine.source_generation();
+                drop(queue_navigator);
+                drop(engine);
+                self.queue_service.refresh_from_queue().await?;
+                self.complete_skip_fade(*plan, generation, seq).await?;
+                Ok(PreviousOutcome::Stepped)
             }
             Err(e) => {
                 drop(queue_navigator);
@@ -1472,10 +1501,10 @@ async fn complete_skip_fade(
     if skip_fade_seq.load(std::sync::atomic::Ordering::SeqCst) != seq {
         debug!("🔀 [SKIP FADE] Superseded by a newer skip — abandoning build");
         // The superseding action normally owns the engine and closes the
-        // window with its own generation bump — but a NO-OP skip (Next at
-        // the end of the queue, Previous with nothing to step back to)
-        // stamps the sequence without ever touching the engine, and THIS
-        // plan's latch would stay matched to the live generation forever,
+        // window with its own generation bump — but a consuming Next at the
+        // end of the queue (`NextOutcome::Drained`) stamps the sequence and
+        // only STOPS the engine, which bumps nothing, and THIS plan's latch
+        // would stay matched to the live generation forever,
         // deferring every end-of-track completion at `on_renderer_finished`
         // (silence, no advance, UI stuck playing). Close the plan's own
         // window; the generation gate inside leaves a newer plan's re-latch
@@ -1805,11 +1834,12 @@ mod tests {
         );
     }
 
-    /// M10 review cycle 1 — a competing NO-OP skip must not strand the
-    /// pending window. Next at the end of the queue (or Previous with
-    /// nothing to step back to) stamps `skip_fade_seq` WITHOUT touching the
-    /// engine, so no generation bump ever un-matches an in-flight plan's
-    /// latch. When that plan's build is then abandoned at the seq gate, the
+    /// M10 review cycle 1 — a competing skip that stamps the sequence but
+    /// bumps no generation must not strand the pending window. A consuming
+    /// Next at the end of the queue (`NextOutcome::Drained`) stamps
+    /// `skip_fade_seq` and only stops the engine (a no-op Next or Previous
+    /// no longer stamps at all, bug 3), so no generation bump un-matches an
+    /// in-flight plan's latch. When that plan's build is then abandoned at the seq gate, the
     /// abandon must close its own window — otherwise every end-of-track
     /// completion defers forever at `on_renderer_finished` (silence, no
     /// advance, UI stuck playing) until the next source-changing action.
@@ -1825,8 +1855,8 @@ mod tests {
             e.plan_skip_fade().await;
             generation = e.source_generation();
         }
-        // A competing no-op skip stamps the sequence counter — exactly what
-        // `next()`'s NoNext arm does engine-wise: no plan, no load, no bump.
+        // A competing skip stamps the sequence counter without a plan, a
+        // load or a bump (`next()`'s Drained arm, engine-wise).
         seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 1).await;
@@ -1844,6 +1874,84 @@ mod tests {
             "the seq-abandon must close the plan's own pending window — a \
              stranded latch defers every end-of-track completion forever"
         );
+    }
+
+    /// Plan a skip-fade to "b" (the last queue row, already the queue's
+    /// current song) while the engine still plays "a", as Next from "a"
+    /// leaves it. Returns the plan's generation and sequence stamp.
+    async fn skip_to_b_in_flight(fx: &ClickFixture) -> Result<(u64, u64)> {
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(1))
+            .await?;
+        let engine_arc = fx.playback.audio_engine();
+        let mut e = engine_arc.lock().await;
+        e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=a&_=1", None, None)
+            .await;
+        e.force_playing_for_test();
+        let seq = fx
+            .playback
+            .skip_fade_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        e.plan_skip_fade().await;
+        Ok((e.source_generation(), seq))
+    }
+
+    /// The engine must end on the skip target "b" once the in-flight build
+    /// completes (here the unreachable build falls back to a hard load,
+    /// which stages "b" before its play() fails).
+    async fn assert_in_flight_skip_lands(fx: &ClickFixture, generation: u64, seq: u64) {
+        let _ = complete_skip_fade(
+            &fx.playback.audio_engine(),
+            &fx.playback.skip_fade_seq,
+            unreachable_plan(),
+            generation,
+            seq,
+        )
+        .await;
+        let engine_arc = fx.playback.audio_engine();
+        let e = engine_arc.lock().await;
+        assert!(
+            e.source().contains("id=b"),
+            "the engine must end on the track the queue names, got {:?}",
+            e.source()
+        );
+    }
+
+    /// Bug 3: Next pressed again on the last song while the first Next's
+    /// skip-fade still builds does nothing, so it must not supersede that
+    /// build. It used to stamp the sequence first, the build abandoned, and
+    /// the engine stayed on the old song while the queue named the last one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_no_op_next_does_not_strand_an_in_flight_skip() -> Result<()> {
+        let fx = click_fixture().await?;
+        let (generation, seq) = skip_to_b_in_flight(&fx).await?;
+
+        assert!(!fx.playback.next().await?, "nothing after the last song");
+
+        assert_in_flight_skip_lands(&fx, generation, seq).await;
+        Ok(())
+    }
+
+    /// Bug 3, the Previous side: a Previous with nothing to step back to
+    /// (here an empty history and a single-row queue would do; a blocked
+    /// consume+shuffle step-back is the other case) must not supersede the
+    /// in-flight skip either.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_no_op_previous_does_not_strand_an_in_flight_skip() -> Result<()> {
+        let fx = click_fixture().await?;
+        let (generation, seq) = skip_to_b_in_flight(&fx).await?;
+        // Nothing to step back to: the queue is "b" alone.
+        let _ = fx.queue.set_queue(vec![click_song("b")], Some(0)).await?;
+
+        assert_eq!(
+            fx.playback.previous().await?,
+            crate::services::queue::PreviousOutcome::Stepped
+        );
+
+        assert_in_flight_skip_lands(&fx, generation, seq).await;
+        Ok(())
     }
 
     /// The abandon-side close must touch ONLY the abandoned plan's window: a

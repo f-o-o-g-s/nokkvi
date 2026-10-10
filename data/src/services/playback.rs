@@ -134,15 +134,39 @@ impl<'a> StagedSong<'a> {
 /// What a manual Next resolved to at the queue layer (M7).
 #[derive(Debug)]
 pub enum NextOutcome {
-    /// End of order — nothing to advance to (under consume the queue was
-    /// drained and the engine stopped, exactly as before).
+    /// End of order — nothing to advance to. Neither the queue cursor nor
+    /// the engine moved.
     NoNext,
+    /// End of order under consume: the finished song was consumed, the
+    /// cursor emptied and the engine stopped.
+    Drained,
     /// The queue advanced and the engine was told to play (hard cut or
     /// boundary fade) — the historical behavior.
     Played(Song, TransitionReason),
     /// The queue advanced; the caller must complete the skip-crossfade
     /// (see [`SkipFadePlan`]). The engine is still playing the outgoing.
     FadePlanned(SkipFadePlan),
+}
+
+/// What a manual Previous resolved to at the queue layer (M7).
+#[derive(Debug)]
+pub enum PreviousStep {
+    /// Nothing to step back to, or a step-back blocked under consume +
+    /// shuffle ([`PreviousOutcome::BlockedConsumeShuffle`]): neither the
+    /// queue cursor nor the engine moved.
+    Stayed(PreviousOutcome),
+    /// The cursor stepped back and the engine was told to play it (hard cut
+    /// or boundary fade).
+    Played,
+    /// The cursor stepped back; the caller must complete the skip-crossfade
+    /// (see [`SkipFadePlan`]). The engine is still playing the outgoing.
+    FadePlanned(Box<SkipFadePlan>),
+}
+
+impl PreviousStep {
+    fn stepped(plan: Option<SkipFadePlan>) -> Self {
+        plan.map_or(Self::Played, |plan| Self::FadePlanned(Box::new(plan)))
+    }
 }
 
 /// Plan describing what the audio engine still needs to do after the queue
@@ -796,9 +820,9 @@ impl QueueNavigator {
                 }
                 reposition_effect.apply_locked(engine).await;
                 engine.stop().await;
-            } else {
-                drop(queue_manager);
+                return Ok(NextOutcome::Drained);
             }
+            drop(queue_manager);
             return Ok(NextOutcome::NoNext);
         };
         drop(queue_manager);
@@ -835,15 +859,15 @@ impl QueueNavigator {
     /// Play previous song (manual skip via button/hotkey/MPRIS).
     ///
     /// `skip_fade` mirrors [`Self::play_next`]: the effective "Fade on Skip"
-    /// mode, resolved by the controller. Returns the outcome plus an
-    /// optional [`SkipFadePlan`] the caller must complete (Crossfade mode
-    /// with an audible finite outgoing).
+    /// mode, resolved by the controller. The [`PreviousStep`] says whether
+    /// anything moved and carries the [`SkipFadePlan`] the caller must
+    /// complete (Crossfade mode with an audible finite outgoing).
     pub async fn play_previous(
         &self,
         engine: &mut CustomAudioEngine,
         session: &StreamSession,
         skip_fade: FadeOnSkip,
-    ) -> Result<(PreviousOutcome, Option<SkipFadePlan>)> {
+    ) -> Result<PreviousStep> {
         use crate::services::queue::PreviousSongResult;
 
         let mut queue_manager = self.queue_manager.lock().await;
@@ -893,7 +917,7 @@ impl QueueNavigator {
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
-                Ok((PreviousOutcome::Stepped, plan))
+                Ok(PreviousStep::stepped(plan))
             }
             PreviousSongResult::Removed(song) => {
                 debug!(
@@ -923,7 +947,7 @@ impl QueueNavigator {
                     "▶️ Now Playing (re-inserted): {} - {}",
                     song.title, song.artist
                 );
-                Ok((PreviousOutcome::Stepped, plan))
+                Ok(PreviousStep::stepped(plan))
             }
             PreviousSongResult::BlockedConsumeShuffle => {
                 // Consumed-track step-back under shuffle. History was left
@@ -931,12 +955,12 @@ impl QueueNavigator {
                 // signal the UI to surface an explanatory toast.
                 drop(queue_manager);
                 debug!("⏮️ Previous blocked: consumed track under shuffle");
-                Ok((PreviousOutcome::BlockedConsumeShuffle, None))
+                Ok(PreviousStep::Stayed(PreviousOutcome::BlockedConsumeShuffle))
             }
             PreviousSongResult::None => {
                 drop(queue_manager);
                 debug!("⏮️ No previous song available");
-                Ok((PreviousOutcome::Stepped, None))
+                Ok(PreviousStep::Stayed(PreviousOutcome::Stepped))
             }
         }
     }
@@ -1227,8 +1251,8 @@ mod tests {
             .expect("play_next ok");
 
         assert!(
-            matches!(result, NextOutcome::NoNext),
-            "no next track at end of queue"
+            matches!(result, NextOutcome::Drained),
+            "no next track at end of queue: drained"
         );
         let q = qm.lock().await;
         assert!(q.is_queue_empty(), "the finished song must be consumed",);
@@ -1251,7 +1275,7 @@ mod tests {
             .await
             .expect("play_next ok");
 
-        assert!(matches!(result, NextOutcome::NoNext));
+        assert!(matches!(result, NextOutcome::Drained));
         let q = qm.lock().await;
         assert_eq!(q.song_ids_snapshot(), vec!["a"], "b consumed");
         assert_eq!(q.current_index(), None);
@@ -1428,7 +1452,7 @@ mod tests {
         engine.force_playing_for_test();
         let gen_before = engine.source_generation();
 
-        let (outcome, plan) = nav
+        let step = nav
             .play_previous(
                 &mut engine,
                 &session("http://server"),
@@ -1437,8 +1461,9 @@ mod tests {
             .await
             .expect("play_previous ok");
 
-        assert_eq!(outcome, PreviousOutcome::Stepped);
-        let plan = plan.expect("a fade plan for the step-back");
+        let PreviousStep::FadePlanned(plan) = step else {
+            panic!("a fade plan for the step-back, got {step:?}");
+        };
         assert_eq!(plan.song.id, "a");
         assert_eq!(plan.reason, TransitionReason::Previous);
         assert_eq!(

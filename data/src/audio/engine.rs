@@ -664,7 +664,7 @@ struct DecodeLoopChannels {
     /// generation (the fire, the fallback's `set_source`, any competing
     /// source change) or closes the latch explicitly
     /// (`close_skip_fade_window` on the seq-abandon exit, whose superseding
-    /// no-op skip never touches the engine), so a stale latch can never
+    /// consume-drain Next only stops the engine), so a stale latch can never
     /// suppress a later completion.
     skip_fade_pending: Arc<AtomicU64>,
     /// M8 positive "Gap / Overlap Trim": milliseconds of silence to inject
@@ -3303,8 +3303,8 @@ impl CustomAudioEngine {
     ///    either moves the generation past it (the fire's bump, the
     ///    fallback's `set_source`, any competing source change) or closes it
     ///    explicitly ([`Self::close_skip_fade_window`] on the seq-abandon
-    ///    exit — a superseding NO-OP skip stamps the sequence without ever
-    ///    bumping the generation).
+    ///    exit — a superseding consume-drain Next stamps the sequence and
+    ///    stops the engine without bumping the generation).
     pub async fn plan_skip_fade(&mut self) {
         if self.crossfade.is_crossfade_live(&self.renderer) {
             self.cancel_crossfade().await;
@@ -3358,9 +3358,8 @@ impl CustomAudioEngine {
     /// Close a planned skip fade's pending window WITHOUT a source change —
     /// the controller's `complete_skip_fade` seq-abandon exit. The
     /// superseding action normally owns the engine and bumps the generation
-    /// itself, but a NO-OP skip (Next at the end of the queue, Previous with
-    /// nothing to step back to) stamps the sequence counter without ever
-    /// touching the engine: no bump will un-match the abandoned plan's
+    /// itself, but a consuming Next at the end of the queue stamps the
+    /// sequence counter and only stops the engine: no bump will un-match the abandoned plan's
     /// latch, so the abandon must close it here or every end-of-track
     /// completion defers forever at [`Self::on_renderer_finished`]. Gated on
     /// the abandoned plan's OWN generation snapshot: a newer plan re-latches
@@ -4228,7 +4227,7 @@ impl CustomAudioEngine {
         // strand — every exit from the window bumps the generation (which
         // un-matches it), except the seq-abandon exit, which closes the
         // latch explicitly via `close_skip_fade_window` (its superseding
-        // no-op skip never touches the engine).
+        // consume-drain Next only stops the engine).
         if self.skip_fade_window_pending() {
             debug!(
                 " [RENDERER FINISHED] Deferred — a planned skip fade owns the transition \
