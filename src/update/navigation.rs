@@ -161,7 +161,7 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
-        info!(" [SESSION] Session expired (401 Unauthorized)");
+        info!(" [SESSION] Session expired (the server rejected the session)");
         // Shared session teardown — see `Nokkvi::reset_session_state` in
         // `update/components.rs`. Session-expired surfaces a user-facing
         // toast (the user didn't take this action, so they need to know
@@ -537,12 +537,17 @@ impl Nokkvi {
         // on_login_error via handle_login_result.
         self.login_page.login_in_progress = true;
 
-        // Re-source username from the credential's u= field — login_page.username
-        // can be empty when resuming a session predating save_credentials writes.
-        if let Some(parsed) =
+        // Show the stored username; fall back to the credential's u= field
+        // when it is empty (a session predating save_credentials writes).
+        // The stored one comes first: a credential saved before the username
+        // was form-encoded holds it raw, and decoding would turn a `+` into
+        // a space.
+        if !username.is_empty() {
+            self.login_page.username.clone_from(&username);
+        } else if let Some(parsed) =
             nokkvi_data::credentials::parse_username_from_credential(&subsonic_credential)
         {
-            self.login_page.username = parsed.to_string();
+            self.login_page.username = parsed;
         }
 
         // Take cached storage from previous logout (if any)

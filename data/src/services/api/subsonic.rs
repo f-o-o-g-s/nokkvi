@@ -84,8 +84,9 @@ fn subsonic_post_request(
 
 /// Send a POST request and verify the response was successful.
 ///
-/// Convenience wrapper around [`subsonic_post`] that checks the HTTP status code
-/// and returns a descriptive error on failure. Use for fire-and-forget mutation
+/// Convenience wrapper around [`subsonic_post`] that applies
+/// [`check_subsonic_response_status`] (HTTP status and the envelope's own
+/// status) and returns a descriptive error on failure. Use for fire-and-forget mutation
 /// endpoints (star, setRating, createPlaylist, deletePlaylist, updatePlaylist).
 pub async fn subsonic_post_ok(
     http_client: &Arc<reqwest::Client>,

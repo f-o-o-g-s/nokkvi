@@ -114,11 +114,11 @@ fn save_credentials_at(
 
 // ── Subsonic credential parsing ─────────────────────────────────────────────
 
-/// Extract the username (`u=` field) from a stored Subsonic credential string.
-pub fn parse_username_from_credential(credential: &str) -> Option<&str> {
-    credential
-        .split('&')
-        .find_map(|p| p.strip_prefix("u="))
+/// Extract the username (`u=` field, form-decoded) from a stored Subsonic
+/// credential string.
+pub fn parse_username_from_credential(credential: &str) -> Option<String> {
+    url::form_urlencoded::parse(credential.as_bytes())
+        .find_map(|(key, value)| (key == "u").then(|| value.into_owned()))
         .filter(|s| !s.is_empty())
 }
 
@@ -267,7 +267,10 @@ mod tests {
     #[test]
     fn parse_username_extracts_u_field() {
         let creds = "u=foogs&s=abc123&t=md5hash";
-        assert_eq!(parse_username_from_credential(creds), Some("foogs"));
+        assert_eq!(
+            parse_username_from_credential(creds).as_deref(),
+            Some("foogs")
+        );
     }
 
     #[test]
@@ -283,10 +286,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_username_decodes_an_encoded_username() {
+        let creds = "u=a%2Bb%40x.com&s=abc123&t=md5hash";
+        assert_eq!(
+            parse_username_from_credential(creds).as_deref(),
+            Some("a+b@x.com")
+        );
+    }
+
+    #[test]
     fn parse_username_handles_u_not_first() {
         // Defensive: don't assume u= is positionally first
         let creds = "s=abc123&u=foogs&t=md5hash";
-        assert_eq!(parse_username_from_credential(creds), Some("foogs"));
+        assert_eq!(
+            parse_username_from_credential(creds).as_deref(),
+            Some("foogs")
+        );
     }
 
     #[test]

@@ -1429,3 +1429,29 @@ fn similar_songs_rejected_token_routes_to_login() {
     ));
     assert_eq!(app.screen, crate::Screen::Login);
 }
+
+/// Resuming shows the stored username, not one decoded from the credential:
+/// a credential saved before the username was form-encoded holds it raw, and
+/// decoding would show `a+b@x.com` as `a b@x.com`.
+#[test]
+fn resume_shows_the_stored_username() {
+    let mut app = test_app();
+    app.stored_session = Some(crate::state::StoredSession {
+        server_url: "http://test".into(),
+        username: "a+b@x.com".into(),
+        jwt_token: "jwt".into(),
+        subsonic_credential: "u=a+b@x.com&s=salt&t=tok".into(),
+    });
+    let _ = app.update(crate::app_message::Message::ResumeSession);
+    assert_eq!(app.login_page.username, "a+b@x.com");
+
+    // With no stored username, the credential's (encoded) u= field fills in.
+    app.stored_session = Some(crate::state::StoredSession {
+        server_url: "http://test".into(),
+        username: String::new(),
+        jwt_token: "jwt".into(),
+        subsonic_credential: "u=a%2Bb%40x.com&s=salt&t=tok".into(),
+    });
+    let _ = app.update(crate::app_message::Message::ResumeSession);
+    assert_eq!(app.login_page.username, "a+b@x.com");
+}

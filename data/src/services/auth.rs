@@ -153,9 +153,10 @@ impl AuthService {
             self.username = username.to_string();
             self.token = login_response.token;
             self.user_id = login_response.id.unwrap_or_default();
-            self.subsonic_credential = format!(
-                "u={}&s={}&t={}",
-                username, login_response.subsonic_salt, login_response.subsonic_token
+            self.subsonic_credential = subsonic_token_credential(
+                username,
+                &login_response.subsonic_salt,
+                &login_response.subsonic_token,
             );
             self.client = Some(ApiClient::new(base, self.token.clone()));
 
@@ -187,6 +188,7 @@ impl AuthService {
         subsonic_credential: String,
     ) -> Result<()> {
         self.server_url = server_url.clone();
+        self.subsonic_credential = reencode_stored_credential(&username, &subsonic_credential);
         self.username = username;
         self.token = jwt_token.clone();
         // No login response on resume — recover the user id from the JWT's
@@ -194,7 +196,6 @@ impl AuthService {
         // empty id, which the ownership gate reads as "not owned"
         // (conservative — feature-hidden, never a wrong grant).
         self.user_id = crate::services::api::client::decode_jwt_uid(&jwt_token).unwrap_or_default();
-        self.subsonic_credential = subsonic_credential;
 
         let base_url = Url::parse(&server_url)?;
         self.client = Some(ApiClient::new(base_url, self.token.clone()));
@@ -299,6 +300,38 @@ impl AuthService {
     }
 }
 
+/// The Subsonic token credential (`u=…&s=…&t=…`) every `/rest` request
+/// carries in its form body or query string. The username is form-encoded:
+/// raw, Navidrome's form parser reads `+` as a space and `&` as the end of the
+/// field, so the user lookup fails with code 40, which drops the session.
+/// The salt and token are hex.
+pub(crate) fn subsonic_token_credential(username: &str, salt: &str, token: &str) -> String {
+    let username: String = url::form_urlencoded::byte_serialize(username.as_bytes()).collect();
+    format!("u={username}&s={salt}&t={token}")
+}
+
+/// Rebuild a stored token credential with `username` encoded: sessions saved
+/// before the encoding fix stored the username raw. A credential without a
+/// salt/token pair (or with no username to rebuild from) is kept as stored.
+fn reencode_stored_credential(username: &str, stored: &str) -> String {
+    if username.is_empty() {
+        return stored.to_string();
+    }
+    let mut salt = None;
+    let mut token = None;
+    for part in stored.split('&') {
+        if let Some(value) = part.strip_prefix("s=") {
+            salt = Some(value);
+        } else if let Some(value) = part.strip_prefix("t=") {
+            token = Some(value);
+        }
+    }
+    match (salt, token) {
+        (Some(salt), Some(token)) => subsonic_token_credential(username, salt, token),
+        _ => stored.to_string(),
+    }
+}
+
 /// Inner payload of the Subsonic ping envelope — only the `serverVersion`
 /// leaf is consulted; everything else (status, error, ...) is ignored by
 /// default serde behavior.
@@ -335,6 +368,47 @@ pub(crate) fn extract_server_version(json: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The credential is a query-string / form fragment, so the username is
+    /// form-encoded: raw, Navidrome's form parser reads `+` as a space and
+    /// `&` as the end of the field, rejects the user with code 40, and that
+    /// now drops the session to the login screen on every request.
+    #[test]
+    fn token_credential_form_encodes_the_username() {
+        assert_eq!(
+            subsonic_token_credential("a+b@x.com", "salt", "tok"),
+            "u=a%2Bb%40x.com&s=salt&t=tok"
+        );
+        assert_eq!(
+            subsonic_token_credential("foogs", "salt", "tok"),
+            "u=foogs&s=salt&t=tok"
+        );
+    }
+
+    /// A session saved before the encoding fix stored the username raw;
+    /// resuming it rebuilds the credential with the encoded username.
+    #[test]
+    fn resume_re_encodes_a_stored_raw_username() {
+        let mut auth = AuthService::new().expect("auth service");
+        auth.resume_session(
+            "http://localhost:4533".into(),
+            "a+b&c".into(),
+            "jwt".into(),
+            "u=a+b&c&s=salt&t=tok".into(),
+        )
+        .expect("resume");
+        assert_eq!(auth.get_subsonic_credential(), "u=a%2Bb%26c&s=salt&t=tok");
+
+        // A credential without a token pair is kept as stored.
+        auth.resume_session(
+            "http://localhost:4533".into(),
+            "foogs".into(),
+            "jwt".into(),
+            "u=foogs&p=enc:abcd".into(),
+        )
+        .expect("resume");
+        assert_eq!(auth.get_subsonic_credential(), "u=foogs&p=enc:abcd");
+    }
 
     #[test]
     fn test_extract_server_version_success() {

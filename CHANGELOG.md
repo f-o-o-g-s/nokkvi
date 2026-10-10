@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - A Top Songs request the server fails now shows an error instead of "No similar songs found".
 - Starring, rating and scrobbling no longer make every other user's open Navidrome sessions refresh.
 - A rejected or expired server token now returns you to the login screen instead of showing an error toast.
+- Accounts whose username contains characters like + or & now play songs, load covers and stay signed in.
 - A playlist the server fails to send now shows an error when played, expanded or edited, instead of opening as empty.
 - A radio station list the server fails to send now shows an error instead of an empty Radios view.
 - A failed library list fetch no longer clears your library selection; it shows an error instead.
