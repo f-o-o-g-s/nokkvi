@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use rand::seq::SliceRandom;
 
-use crate::types::{batch::BatchItem, song::Song};
+use crate::types::{batch::BatchItem, genre::GenreRef, song::Song};
 
 /// Sample cap applied to artist and genre seeds before blending. Albums,
 /// playlists and hand-picked songs go in whole — they are bounded and
@@ -346,14 +346,13 @@ pub enum TrawlSeedKind {
     Playlist,
 }
 
-/// Identity key for a [`BatchItem`]: kind + id (genres are name-keyed, like
-/// the batch pipeline itself).
+/// Identity key for a [`BatchItem`]: kind + id (a genre's tag id).
 pub fn batch_item_key(item: &BatchItem) -> (TrawlSeedKind, &str) {
     match item {
         BatchItem::Song(song) => (TrawlSeedKind::Song, song.id.as_str()),
         BatchItem::Album(id) => (TrawlSeedKind::Album, id.as_str()),
         BatchItem::Artist(id) => (TrawlSeedKind::Artist, id.as_str()),
-        BatchItem::Genre(name) => (TrawlSeedKind::Genre, name.as_str()),
+        BatchItem::Genre(genre) => (TrawlSeedKind::Genre, genre.id.as_str()),
         BatchItem::Playlist(id) => (TrawlSeedKind::Playlist, id.as_str()),
     }
 }
@@ -406,12 +405,11 @@ impl TrawlSeed {
         Self::new(BatchItem::Artist(id.into()), name, "Artist")
     }
 
-    /// A genre seed (name-keyed, like the batch pipeline): its name over its
-    /// album count.
-    pub fn from_genre(name: impl Into<String>, album_count: u32) -> Self {
-        let name = name.into();
+    /// A genre seed: its name over its album count.
+    pub fn from_genre(genre: GenreRef, album_count: u32) -> Self {
+        let name = genre.name.clone();
         let sublabel = count_label(album_count, "album", "albums");
-        Self::new(BatchItem::Genre(name.clone()), name, sublabel)
+        Self::new(BatchItem::Genre(genre), name, sublabel)
     }
 
     /// A playlist seed: its name over its song count.
@@ -660,15 +658,20 @@ mod tests {
             (TrawlSeedKind::Artist, "Band".into(), "Artist".into())
         );
         assert_eq!(
-            chip(&TrawlSeed::from_genre("Rock", 1)),
+            chip(&TrawlSeed::from_genre(GenreRef::new("g-rock", "Rock"), 1)),
             (TrawlSeedKind::Genre, "Rock".into(), "1 album".into())
         );
         assert_eq!(
             chip(&TrawlSeed::from_playlist("pl1", "Mix", 12)),
             (TrawlSeedKind::Playlist, "Mix".into(), "12 songs".into())
         );
-        // Genres are name-keyed, like the batch pipeline.
-        assert_eq!(TrawlSeed::from_genre("Rock", 3).key().1, "Rock");
+        // Genres are keyed by their tag id, like every other kind's id.
+        assert_eq!(
+            TrawlSeed::from_genre(GenreRef::new("g-rock", "Rock"), 3)
+                .key()
+                .1,
+            "g-rock"
+        );
     }
 
     // ---- enums / labels -------------------------------------------------
@@ -724,9 +727,10 @@ mod tests {
     #[test]
     fn crate_toggle_adds_then_removes() {
         let mut c = TrawlCrate::default();
-        assert!(c.toggle(seed(BatchItem::Genre("Phonk".into()))));
-        assert!(c.contains(&BatchItem::Genre("Phonk".into())));
-        assert!(!c.toggle(seed(BatchItem::Genre("Phonk".into()))));
+        let phonk = || BatchItem::Genre(GenreRef::new("g-phonk", "Phonk"));
+        assert!(c.toggle(seed(phonk())));
+        assert!(c.contains(&phonk()));
+        assert!(!c.toggle(seed(phonk())));
         assert!(c.is_empty());
     }
 

@@ -24,6 +24,7 @@ use crate::{
     services::api::{playlists::PlaylistsApiService, songs::SongsApiService},
     types::{
         batch::{BatchItem, BatchPayload},
+        genre::GenreRef,
         song::Song,
         song_source::SongSource,
         trawl::TrawlCrate,
@@ -90,7 +91,7 @@ impl<'a> LibraryOrchestrator<'a> {
         match source {
             SongSource::Album(id) => self.resolve_album(&id).await,
             SongSource::Artist(id) => self.resolve_artist(&id).await,
-            SongSource::Genre(name) => self.resolve_genre(&name).await,
+            SongSource::Genre(genre) => self.resolve_genre(&genre).await,
             SongSource::Playlist(id) => self.resolve_playlist(&id).await,
             SongSource::Preloaded(songs) => Ok(songs),
             SongSource::Batch(payload) => self.resolve_batch(payload).await,
@@ -105,15 +106,12 @@ impl<'a> LibraryOrchestrator<'a> {
         self.artists.load_artist_songs(artist_id).await
     }
 
-    /// Genre is keyed by NAME: `load_songs_by_genre` sends the bare `genre`
-    /// tag filter, which still matches the tag value via `json_tree` (unlike
-    /// `genre_id`, which takes the tag id; see gotchas.md "Genre identity").
-    /// Constructs
-    /// `SongsApiService` on demand through the shared
+    /// Fetches by the genre's tag id (`genre_id`; see gotchas.md "Genre
+    /// identity"). Constructs `SongsApiService` on demand through the shared
     /// [`AuthGateway::build_native_api`] factory path.
-    pub(crate) async fn resolve_genre(&self, genre_name: &str) -> Result<Vec<Song>> {
+    pub(crate) async fn resolve_genre(&self, genre: &GenreRef) -> Result<Vec<Song>> {
         let songs_api = self.auth.build_native_api(SongsApiService::new).await?;
-        let (songs, _) = songs_api.load_songs_by_genre(genre_name).await?;
+        let (songs, _) = songs_api.load_songs_by_genre(genre).await?;
         Ok(songs)
     }
 
@@ -137,7 +135,7 @@ impl<'a> LibraryOrchestrator<'a> {
 
     /// Flatten + dedup a `BatchPayload` to `Vec<Song>`. Per-item dispatch goes
     /// through the per-entity `resolve_*` methods so the entity quirks (genre's
-    /// name-not-id, playlist's on-demand API construction) stay encapsulated.
+    /// tag-id filter, playlist's on-demand API construction) stay encapsulated.
     ///
     /// Skip-on-fail: items that error are logged at `warn!` and dropped — matches
     /// today's `AppService::resolve_batch` behavior. Empty result is a hard error.
@@ -150,7 +148,7 @@ impl<'a> LibraryOrchestrator<'a> {
                 BatchItem::Song(song) => Ok(vec![*song]),
                 BatchItem::Album(id) => self.resolve_album(&id).await,
                 BatchItem::Artist(id) => self.resolve_artist(&id).await,
-                BatchItem::Genre(name) => self.resolve_genre(&name).await,
+                BatchItem::Genre(genre) => self.resolve_genre(&genre).await,
                 BatchItem::Playlist(id) => self.resolve_playlist(&id).await,
             };
             match songs_result {
@@ -199,7 +197,7 @@ impl<'a> LibraryOrchestrator<'a> {
                 BatchItem::Song(song) => Ok(vec![(**song).clone()]),
                 BatchItem::Album(id) => self.resolve_album(id).await,
                 BatchItem::Artist(id) => self.resolve_artist(id).await,
-                BatchItem::Genre(name) => self.resolve_genre(name).await,
+                BatchItem::Genre(genre) => self.resolve_genre(genre).await,
                 BatchItem::Playlist(id) => self.resolve_playlist(id).await,
             };
             match songs_result {
@@ -320,12 +318,12 @@ mod tests {
     /// check with "Not authenticated" — proves the auth dance ran
     /// before any network call.
     #[tokio::test]
-    async fn resolve_genre_constructs_songs_api_with_correct_name() {
+    async fn resolve_genre_constructs_songs_api_on_demand() {
         let (auth, albums, artists) = make_orchestrator_fixtures();
         let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
 
         let err = orch
-            .resolve_genre("Jazz")
+            .resolve_genre(&GenreRef::new("g-jazz", "Jazz"))
             .await
             .expect_err("unauthenticated genre resolve must error");
         assert!(

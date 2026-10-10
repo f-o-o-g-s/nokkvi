@@ -185,27 +185,28 @@ impl Nokkvi {
         }
 
         match action {
-            GenresAction::PlayGenre(genre_name, force) => {
+            GenresAction::PlayGenre(genre, force) => {
                 // Browsing panel: redirect play → add to queue (insert at
                 // drag-drop position when one is pending, else append). An
                 // add, so it runs before the play prologue.
-                let name_ref = genre_name.as_str();
+                let genre_ref = &genre;
                 if let Some(task) = self.redirect_play_to_queue_in_browsing_panel(
                     |app| {
-                        let label = format!("Added '{name_ref}' to queue");
-                        let name = name_ref.to_string();
+                        let label = format!("Added '{}' to queue", genre_ref.name);
+                        let genre = genre_ref.clone();
                         app.shell_fire_and_forget_task(
-                            move |shell| async move { shell.add_genre_to_queue(&name).await },
+                            move |shell| async move { shell.add_genre_to_queue(&genre).await },
                             label,
                             "add genre to queue",
                         )
                     },
                     |app, pos| {
-                        let label = format!("Inserted '{name_ref}' at position {}", pos + 1);
-                        let name = name_ref.to_string();
+                        let label =
+                            format!("Inserted '{}' at position {}", genre_ref.name, pos + 1);
+                        let genre = genre_ref.clone();
                         app.shell_fire_and_forget_task(
                             move |shell| async move {
-                                shell.insert_genre_at_position(&name, pos).await
+                                shell.insert_genre_at_position(&genre, pos).await
                             },
                             label,
                             "insert genre to queue",
@@ -222,11 +223,11 @@ impl Nokkvi {
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
                     self.clear_active_playlist();
-                    let name = genre_name.clone();
+                    let label = format!("Playing '{}'", genre.name);
                     let shuffle = self.activate_shuffle_directive(force, false);
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_genre_and_play(&name, shuffle).await },
-                        format!("Playing '{genre_name}'"),
+                        move |shell| async move { shell.add_genre_and_play(&genre, shuffle).await },
+                        label,
                         "append genre and play",
                     );
                 }
@@ -234,7 +235,7 @@ impl Nokkvi {
                 self.enter_new_playback_context();
                 let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_genre(&genre_name, shuffle).await },
+                    move |shell| async move { shell.play_genre(&genre, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play genre",
                 );

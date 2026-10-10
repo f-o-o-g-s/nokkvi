@@ -8,6 +8,7 @@
 
 use nokkvi_data::types::{
     batch::BatchItem,
+    genre::GenreRef,
     library_search::LibrarySearchResults,
     trawl::{TrawlBlend, TrawlMinLength, TrawlSeed},
 };
@@ -188,7 +189,7 @@ fn click_result_row_toggles_seed_in_and_out() {
     assert!(
         app.trawl
             .mix
-            .contains(&BatchItem::Genre("Phonk".to_string())),
+            .contains(&BatchItem::Genre(GenreRef::new("phonk", "Phonk"))),
         "click adds the seed"
     );
     let _ = app.handle_trawl_modal(TrawlModalMessage::ClickRow(1));
@@ -478,7 +479,7 @@ fn enter_in_modal_toggles_centered_seed_not_play() {
     assert!(
         app.trawl
             .mix
-            .contains(&BatchItem::Genre("Phonk".to_string())),
+            .contains(&BatchItem::Genre(GenreRef::new("phonk", "Phonk"))),
         "Enter toggles the centered result into the crate"
     );
 }
@@ -1356,7 +1357,7 @@ fn enter_toggles_seed_with_tray_cursor_active() {
     assert!(
         app.trawl
             .mix
-            .contains(&BatchItem::Genre("Phonk".to_string())),
+            .contains(&BatchItem::Genre(GenreRef::new("phonk", "Phonk"))),
         "Enter keeps seeding the centered row — the tray ring never captures it"
     );
     assert_eq!(

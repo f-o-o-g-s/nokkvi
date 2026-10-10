@@ -14,6 +14,7 @@
 
 use iced::Widget as _;
 use nokkvi_data::types::{
+    genre::GenreRef,
     library_search::LibrarySearchResults,
     trawl::{TrawlCrate, TrawlSeed},
 };
@@ -256,7 +257,7 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
         for g in &results.genres {
             push_result(
                 &mut rows,
-                TrawlSeed::from_genre(g.name.clone(), g.album_count),
+                TrawlSeed::from_genre(GenreRef::from(g), g.album_count),
                 None,
             );
         }
@@ -1349,7 +1350,10 @@ mod tests {
         assert_eq!(seeds[1].sublabel, "Burial");
         assert_eq!(seeds[2].label, "Phonk");
         assert_eq!(seeds[2].sublabel, "12 albums");
-        assert!(matches!(seeds[2].item, BatchItem::Genre(ref n) if n == "Phonk"));
+        assert!(matches!(
+            seeds[2].item,
+            BatchItem::Genre(ref g) if g.id == "phonk" && g.name == "Phonk"
+        ));
     }
 
     #[test]
@@ -1370,7 +1374,7 @@ mod tests {
         // Toggle the genre in; the SAME state re-derives with the flag set —
         // this is the property the crate-as-param design exists for.
         mix.add(TrawlSeed::new(
-            BatchItem::Genre("Phonk".into()),
+            BatchItem::Genre(GenreRef::new("phonk", "Phonk")),
             "Phonk",
             "12 albums",
         ));

@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - Resizing the window no longer crashes the app while the rules JSON editor's cursor is scrolled out of view.
 - The Horizon's receding waves and bars now crest above the visualizer instead of being cut off along a straight line at its top.
 - Typing in the Queue's search while a playlist plays no longer knocks focus out of the field after the first letter.
+- Playing or queueing a genre, or mixing one in Trawl, now includes songs tagged with a different capitalization of its name.
 
 ### Removed
 

@@ -16,11 +16,10 @@ use crate::widgets::context_menu::LibraryContextEntry;
 type GenresRow<'a> = SlotListEntry<&'a GenreUIViewData, &'a AlbumUIViewData>;
 
 impl GenresPage {
-    /// What a row stands for in a play / queue / playlist batch (genres are
-    /// name-keyed, like the batch pipeline).
+    /// What a row stands for in a play / queue / playlist batch.
     fn batch_item(row: GenresRow<'_>) -> BatchItem {
         match row {
-            SlotListEntry::Parent(genre) => BatchItem::Genre(genre.name.clone()),
+            SlotListEntry::Parent(genre) => BatchItem::Genre(genre.genre_ref()),
             SlotListEntry::Child(album, _) => BatchItem::Album(album.id.clone()),
         }
     }
@@ -29,7 +28,7 @@ impl GenresPage {
     fn trawl_seed(row: GenresRow<'_>) -> TrawlSeed {
         match row {
             SlotListEntry::Parent(genre) => {
-                TrawlSeed::from_genre(genre.name.clone(), genre.album_count)
+                TrawlSeed::from_genre(genre.genre_ref(), genre.album_count)
             }
             SlotListEntry::Child(album, _) => {
                 TrawlSeed::from_album(album.id.clone(), album.name.clone(), album.artist.clone())
@@ -160,7 +159,7 @@ impl GenresPage {
             slot_list: GenresMessage::SlotList,
             on_center: |_center| self.resolve_artwork_action(genres),
             activate: |row, _row_idx, force| match row {
-                SlotListEntry::Parent(genre) => GenresAction::PlayGenre(genre.name.clone(), force),
+                SlotListEntry::Parent(genre) => GenresAction::PlayGenre(genre.genre_ref(), force),
                 SlotListEntry::Child(album, _) => GenresAction::PlayAlbum(album.id.clone(), force),
             },
             batch_item: Self::batch_item,

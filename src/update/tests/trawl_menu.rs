@@ -80,8 +80,8 @@ fn genres_menu_add_to_mix_seeds_the_crate() {
 
     assert_eq!(
         crate_keys(&app),
-        vec![(TrawlSeedKind::Genre, "Phonk".to_string())],
-        "genre seeds key on the NAME (batch pipeline contract)"
+        vec![(TrawlSeedKind::Genre, "g1".to_string())],
+        "genre seeds key on the tag id"
     );
     assert_eq!(app.trawl.mix.seeds[0].label, "Phonk");
 }

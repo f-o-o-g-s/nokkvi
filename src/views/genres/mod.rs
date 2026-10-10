@@ -134,7 +134,7 @@ pub enum GenresMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum GenresAction {
-    PlayGenre(String, bool), // (genre_id, force_shuffle) - replace queue and play
+    PlayGenre(nokkvi_data::types::genre::GenreRef, bool), // (genre, force_shuffle) - replace queue and play
     /// Context-menu Shuffle Play: replace the queue with the clicked row, or
     /// the selection it belongs to, and play it shuffled once (`true`).
     PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),

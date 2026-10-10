@@ -9,7 +9,7 @@
 //! dispatch over trait + ZST. 5 actions × 1 dispatch = 5 methods. Caller
 //! writes `app.play(SongSource::Album(id)).await?`.
 
-use crate::types::{batch::BatchPayload, song::Song};
+use crate::types::{batch::BatchPayload, genre::GenreRef, song::Song};
 
 #[derive(Debug, Clone)]
 pub enum SongSource {
@@ -17,9 +17,9 @@ pub enum SongSource {
     Album(String),
     /// Resolve via `artists_service.load_artist_songs(artist_id)`.
     Artist(String),
-    /// Resolve via on-demand `SongsApiService::load_songs_by_genre(genre_name)`.
-    /// Note: genre is keyed by NAME, not ID, per Navidrome API.
-    Genre(String),
+    /// Resolve via on-demand `SongsApiService::load_songs_by_genre`, which
+    /// filters on the tag id; the name is for labels and logs.
+    Genre(GenreRef),
     /// Resolve via on-demand `PlaylistsApiService::load_playlist_songs(playlist_id)`.
     Playlist(String),
     /// Already-resolved songs — skip the load step entirely.
@@ -55,7 +55,7 @@ impl SongSource {
         match self {
             SongSource::Album(id) => format!("album {id}"),
             SongSource::Artist(id) => format!("artist {id}"),
-            SongSource::Genre(name) => format!("genre '{name}'"),
+            SongSource::Genre(genre) => format!("genre '{}'", genre.name),
             SongSource::Playlist(id) => format!("playlist {id}"),
             SongSource::Preloaded(songs) => format!("{} preloaded songs", songs.len()),
             SongSource::Batch(_) => "batch".to_string(),
@@ -82,7 +82,7 @@ mod tests {
             "No songs found for artist"
         );
         assert_eq!(
-            SongSource::Genre("Jazz".into()).empty_error_message(),
+            SongSource::Genre(GenreRef::new("g-jazz", "Jazz")).empty_error_message(),
             "No songs found in genre"
         );
         assert_eq!(
@@ -104,7 +104,10 @@ mod tests {
     fn log_label_names_the_source() {
         assert_eq!(SongSource::Album("al-1".into()).log_label(), "album al-1");
         assert_eq!(SongSource::Artist("ar-1".into()).log_label(), "artist ar-1");
-        assert_eq!(SongSource::Genre("Jazz".into()).log_label(), "genre 'Jazz'");
+        assert_eq!(
+            SongSource::Genre(GenreRef::new("g-jazz", "Jazz")).log_label(),
+            "genre 'Jazz'"
+        );
         assert_eq!(
             SongSource::Playlist("pl-1".into()).log_label(),
             "playlist pl-1"

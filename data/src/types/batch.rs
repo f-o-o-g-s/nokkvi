@@ -1,4 +1,4 @@
-use crate::types::song::Song;
+use crate::types::{genre::GenreRef, song::Song};
 
 /// Length anchor used by `ItemKind`'s drift checks. Update in lockstep
 /// with the `enum BatchItem` variant count.
@@ -12,7 +12,7 @@ pub enum BatchItem {
     Song(Box<Song>),
     Album(String),
     Artist(String),
-    Genre(String),
+    Genre(GenreRef),
     Playlist(String),
 }
 
@@ -68,7 +68,7 @@ mod tests {
             BatchItem::Song(Box::new(Song::test_default("s", "t"))),
             BatchItem::Album("a".to_string()),
             BatchItem::Artist("ar".to_string()),
-            BatchItem::Genre("g".to_string()),
+            BatchItem::Genre(GenreRef::new("g", "g")),
             BatchItem::Playlist("p".to_string()),
         ];
         let mut seen: Vec<usize> = samples.iter().map(discriminant_id).collect();

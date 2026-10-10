@@ -37,8 +37,8 @@ use crate::{
         task_manager::TaskManager,
     },
     types::{
-        library::Library, library_query::LibraryQuery, one_shot_shuffle::OneShotShuffle,
-        queue_sort_mode::QueueSortMode, song_source::SongSource,
+        genre::GenreRef, library::Library, library_query::LibraryQuery,
+        one_shot_shuffle::OneShotShuffle, queue_sort_mode::QueueSortMode, song_source::SongSource,
     },
 };
 
@@ -514,9 +514,9 @@ impl AppService {
     /// Play all songs in a genre.
     ///
     /// Loads all songs in this genre, sets queue, and starts playback.
-    pub async fn play_genre(&self, genre_name: &str, shuffle: OneShotShuffle) -> Result<()> {
+    pub async fn play_genre(&self, genre: &GenreRef, shuffle: OneShotShuffle) -> Result<()> {
         self.dispatch_shuffled(
-            SongSource::Genre(genre_name.to_owned()),
+            SongSource::Genre(genre.clone()),
             QueueVerb::Play(StartPosition::First),
             shuffle,
         )
@@ -526,9 +526,9 @@ impl AppService {
     /// Roulette variant of [`Self::play_genre`]: load all genre songs, then
     /// start playback from a random index. Used by the slot-machine
     /// roulette pick on the Genres view.
-    pub async fn play_genre_random(&self, genre_name: &str) -> Result<()> {
+    pub async fn play_genre_random(&self, genre: &GenreRef) -> Result<()> {
         self.dispatch(
-            SongSource::Genre(genre_name.to_owned()),
+            SongSource::Genre(genre.clone()),
             QueueVerb::Play(StartPosition::Random),
         )
         .await
@@ -707,8 +707,8 @@ impl AppService {
     }
 
     /// Add all songs in a genre to the queue (without starting playback).
-    pub async fn add_genre_to_queue(&self, genre_name: &str) -> Result<()> {
-        self.dispatch(SongSource::Genre(genre_name.to_owned()), QueueVerb::Enqueue)
+    pub async fn add_genre_to_queue(&self, genre: &GenreRef) -> Result<()> {
+        self.dispatch(SongSource::Genre(genre.clone()), QueueVerb::Enqueue)
             .await
     }
 
@@ -754,11 +754,11 @@ impl AppService {
     /// Append a genre's songs to the queue and start playing the first one.
     pub async fn add_genre_and_play(
         &self,
-        genre_name: &str,
+        genre: &GenreRef,
         shuffle: OneShotShuffle,
     ) -> Result<()> {
         self.dispatch_shuffled(
-            SongSource::Genre(genre_name.to_owned()),
+            SongSource::Genre(genre.clone()),
             QueueVerb::EnqueueAndPlay,
             shuffle,
         )
@@ -818,9 +818,9 @@ impl AppService {
     }
 
     /// Insert all songs in a genre at a specific position in the queue.
-    pub async fn insert_genre_at_position(&self, genre_name: &str, position: usize) -> Result<()> {
+    pub async fn insert_genre_at_position(&self, genre: &GenreRef, position: usize) -> Result<()> {
         self.dispatch(
-            SongSource::Genre(genre_name.to_owned()),
+            SongSource::Genre(genre.clone()),
             QueueVerb::InsertAt(position),
         )
         .await

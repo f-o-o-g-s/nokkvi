@@ -1,6 +1,9 @@
 //! Genres — UI view data and collage artwork support
 
-use crate::types::{filter::LibraryFilter, genre::Genre};
+use crate::types::{
+    filter::LibraryFilter,
+    genre::{Genre, GenreRef},
+};
 
 /// UI-specific view data for genres
 /// UI-projected data
@@ -48,6 +51,11 @@ impl GenreUIViewData {
             id: self.id.clone(),
             name: self.name.clone(),
         }
+    }
+
+    /// The genre as the play / queue / Trawl pipeline carries it.
+    pub fn genre_ref(&self) -> GenreRef {
+        GenreRef::new(self.id.clone(), self.name.clone())
     }
 }
 

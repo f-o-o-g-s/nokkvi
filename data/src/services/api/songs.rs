@@ -8,7 +8,7 @@ use crate::{
         parse,
         sort::{self, SortDomain},
     },
-    types::{library_query::LibraryQuery, song::Song},
+    types::{filter::LibraryFilter, genre::GenreRef, library_query::LibraryQuery, song::Song},
 };
 
 #[derive(Clone)]
@@ -248,39 +248,29 @@ impl SongsApiService {
         Ok(songs)
     }
 
-    /// Load every song for a specific genre.
+    /// Load every song in a genre, in album order.
     ///
-    /// # Arguments
-    /// * `genre_name` — The genre name to filter by.
-    ///
-    /// Pages through `/api/song` in `FULL_LOAD_PAGE_SIZE` chunks until
-    /// exhausted. Replaces the legacy `_end=50000` ceiling, which silently
-    /// truncated genres with more than 50_000 songs.
-    pub async fn load_songs_by_genre(&self, genre_name: &str) -> Result<(Vec<Song>, usize)> {
-        let client = self.client.clone();
-        let genre_filter = genre_name.to_string();
+    /// Filters on the genre's tag id through [`Self::load_songs`], which
+    /// pages through `/api/song` in `FULL_LOAD_PAGE_SIZE` chunks until
+    /// exhausted. See [`Self::genre_songs_query`].
+    pub async fn load_songs_by_genre(&self, genre: &GenreRef) -> Result<(Vec<Song>, usize)> {
+        let filter = genre.songs_filter();
+        self.load_songs(&Self::genre_songs_query(&filter), None, None)
+            .await
+            .context("Failed to fetch genre songs from API")
+    }
 
-        pagination::fetch_all_pages(FULL_LOAD_PAGE_SIZE, |start, end| {
-            let client = client.clone();
-            let genre_filter = genre_filter.clone();
-            async move {
-                let start_str = start.to_string();
-                let end_str = end.to_string();
-                let params = vec![
-                    ("genre", genre_filter.as_str()),
-                    ("_sort", "album"),
-                    ("_order", "ASC"),
-                    ("_start", start_str.as_str()),
-                    ("_end", end_str.as_str()),
-                ];
-                let response = client
-                    .get_with_headers("/api/song", &params)
-                    .await
-                    .context("Failed to fetch genre songs from API")?;
-                Self::parse_response_with_total(&response.0, response.1)
-            }
-        })
-        .await
+    /// The query [`Self::load_songs_by_genre`] pages through: the genre's
+    /// `genre_id` filter (an indexed join since Navidrome 0.64) sorted by
+    /// album, with no library scope, so Navidrome limits it to the
+    /// libraries the user can access.
+    fn genre_songs_query(filter: &LibraryFilter) -> LibraryQuery<'_> {
+        LibraryQuery {
+            sort_mode: "album",
+            sort_order: "ASC",
+            filter: Some(filter),
+            ..Default::default()
+        }
     }
 
     /// Parse response that may be array or object with content
@@ -346,7 +336,6 @@ pub(crate) fn collect_library_id_strings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::filter::LibraryFilter;
 
     /// Empty `library_ids` slice + no `LibraryFilter::LibraryIds` means
     /// `collect_library_id_strings` produces an empty Vec, and
@@ -462,6 +451,27 @@ mod tests {
         let params = SongsApiService::build_song_params(&query, "0", "100", &library_id_strings);
         assert!(params.contains(&("genre_id", "g-1")));
         assert!(!params.iter().any(|(_, v)| *v == "Trip-Hop"));
+    }
+
+    /// A genre's songs are fetched by its tag id (`genre_id`) in album order,
+    /// never by its name: the bare `genre=<name>` key is an unindexed,
+    /// exact-case `json_tree` match that misses the other casings the
+    /// Genres row counts.
+    #[test]
+    fn genre_songs_query_filters_on_the_tag_id_in_album_order() {
+        let genre = crate::types::genre::GenreRef::new("g-1", "Trip-Hop");
+        let filter = genre.songs_filter();
+        let query = SongsApiService::genre_songs_query(&filter);
+        let library_id_strings = SongsApiService::collect_library_id_strings(&query);
+        let params = SongsApiService::build_song_params(&query, "0", "100", &library_id_strings);
+        assert!(params.contains(&("genre_id", "g-1")));
+        assert!(params.contains(&("_sort", "album")));
+        assert!(params.contains(&("_order", "ASC")));
+        assert!(
+            !params
+                .iter()
+                .any(|(k, v)| *k == "genre" || *v == "Trip-Hop")
+        );
     }
 
     /// The module-level free fn (shared by albums / artists / genres) folds

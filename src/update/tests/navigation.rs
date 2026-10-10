@@ -803,8 +803,9 @@ fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
         &genres,
     );
     match action {
-        crate::views::GenresAction::PlayGenre(name, force) => {
-            assert_eq!(name, "Rock");
+        crate::views::GenresAction::PlayGenre(genre, force) => {
+            assert_eq!(genre.id, "g1", "plays by the tag id");
+            assert_eq!(genre.name, "Rock");
             assert!(force, "Ctrl+Enter must force shuffle (force = true)");
         }
         other => panic!("Expected PlayGenre(.., true), got {other:?}"),
@@ -921,9 +922,9 @@ enter_with_selection_plays_it!(
     parents: vec![make_genre("g1", "Rock"), make_genre("g2", "Jazz")],
     expanded: "g1",
     children: vec![make_album("a1", "Record", "Band")],
-    // Genres batch by name, like the rest of the batch pipeline.
-    expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Genre, "Jazz")],
-    clicked: crate::views::GenresAction::PlayGenre(ref name, false) if name == "Jazz",
+    // A genre batch item is keyed by its tag id.
+    expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Genre, "g2")],
+    clicked: crate::views::GenresAction::PlayGenre(ref genre, false) if genre.id == "g2",
 );
 
 enter_with_selection_plays_it!(

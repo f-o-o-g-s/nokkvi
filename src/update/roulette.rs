@@ -384,11 +384,11 @@ impl Nokkvi {
                 let Some(genre) = self.library.genres.get(target_idx) else {
                     return Task::none();
                 };
-                let name = genre.name.clone();
+                let genre = genre.genre_ref();
                 self.guard_play_action();
                 self.enter_new_playback_context();
                 self.shell_action_task(
-                    move |shell| async move { shell.play_genre_random(&name).await },
+                    move |shell| async move { shell.play_genre_random(&genre).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play random song from genre",
                 )
