@@ -409,6 +409,30 @@ fn list_verbs_in_theater_leave_it_without_acting() {
 }
 
 #[test]
+fn queue_verbs_under_a_modal_over_theater_do_nothing() {
+    // The keyboard's modal gate swallows Shift+A and Ctrl+D under EQ (and the
+    // MilkDrop picker, Info, About, a dialog), and theater stays put. The
+    // verbs must not reach the hidden queue either.
+    for (verb, idle) in [
+        ("add-to-queue", json!({ "added": null })),
+        ("remove-from-queue", json!({ "removed": null })),
+    ] {
+        let mut app = queue_app_with_songs();
+        let _ = app.enter_theater();
+        app.eq_modal.open = true;
+        let queue_len = app.library.queue_songs.len();
+        let toasts_before = app.toast.toasts.len();
+
+        let resp = drive_on(&mut app, verb);
+
+        assert_eq!(resp.data, Some(idle), "{verb}");
+        assert!(app.theater.active, "{verb}: the modal keeps the key");
+        assert_eq!(app.library.queue_songs.len(), queue_len, "{verb}");
+        assert_eq!(app.toast.toasts.len(), toasts_before, "{verb}");
+    }
+}
+
+#[test]
 fn list_verb_twins_are_exit_only() {
     // `leave_theater_instead` handles only the ExitOnly class; a twin moved to
     // ExitThenPerform would need the verb to run after the exit.

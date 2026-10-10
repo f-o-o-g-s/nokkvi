@@ -165,8 +165,10 @@
 //! `"theater":"exited"`: `{"ok":true,"theater":"exited"}` for the three
 //! navigation verbs, `{"added":null,"theater":"exited"}` and
 //! `{"removed":null,"theater":"exited"}` for the queue pair. Run the verb again
-//! to act on the list that is now visible. A modal open over theater (the
-//! MilkDrop picker) still takes the navigation verbs, as it takes the keys.
+//! to act on the list that is now visible. A modal open over theater keeps
+//! owning them, as it owns the keys: the navigation verbs reach the modal (the
+//! MilkDrop picker) or do nothing, `add-to-queue` adds the Trawl mix, and
+//! otherwise the queue pair replies with its null payload and theater stays.
 
 use iced::Task;
 use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction};
@@ -177,7 +179,7 @@ use crate::{
     Nokkvi, View,
     app_message::{Message, NavigationMessage, PlaybackMessage, SlotListMessage},
     services::ipc::IpcIncoming,
-    update::theater::TheaterKeyPolicy,
+    update::{modals::ActiveModal, theater::TheaterKeyPolicy},
 };
 
 /// Generate the IPC dispatcher plus three companion consts that
@@ -683,10 +685,15 @@ define_commands! {
 /// Theater Mode's key policy, applied to a verb whose keyboard twin is `twin`.
 ///
 /// Mirrors `handle_raw_key_event`: while theater is active and no modal is on
-/// top (a modal keeps owning its keys over theater), an `ExitOnly` twin leaves
-/// theater and the verb does not act. Returns the exit task and `idle` (the
-/// verb's "nothing done" payload) with `"theater":"exited"` added, or `None`
-/// when the verb should run as usual.
+/// top, an `ExitOnly` twin leaves theater and the verb does not act. Returns
+/// the exit task and `idle` (the verb's "nothing done" payload) with
+/// `"theater":"exited"` added, or `None` when the verb should run as usual.
+///
+/// A modal open over theater keeps owning its keys and theater stays. The
+/// navigation verbs then run, because their `SlotList` route hands them to the
+/// modal (or drops them) exactly as the keys; Shift+A under Trawl adds the
+/// mix, which `handle_add_to_queue` routes. Any other queue verb gets `idle`
+/// with no exit, as the modal gate swallows its key.
 ///
 /// Every twin routed here (the five list verbs) is `ExitOnly`, which
 /// `list_verb_twins_are_exit_only` pins. A twin reclassified to
@@ -697,8 +704,16 @@ fn leave_theater_instead(
     twin: HotkeyAction,
     mut idle: serde_json::Value,
 ) -> Option<(Task<Message>, serde_json::Value)> {
-    if !app.theater.active || app.top_modal().is_some() {
+    if !app.theater.active {
         return None;
+    }
+    if let Some(modal) = app.top_modal() {
+        let routed_to_modal = matches!(
+            twin,
+            HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
+        ) || (twin == HotkeyAction::AddToQueue
+            && modal == ActiveModal::Trawl);
+        return (!routed_to_modal).then(|| (Task::none(), idle));
     }
     match app.theater_key_policy_here(twin) {
         TheaterKeyPolicy::ExitOnly => {
