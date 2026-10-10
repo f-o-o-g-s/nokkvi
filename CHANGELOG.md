@@ -64,6 +64,8 @@ All notable changes to this project will be documented in this file.
 - An artist biography's link now names the site it opens instead of always saying Last.fm.
 - Clicking an artist off the centre row now loads that artist's full-size artwork instead of a blurry thumbnail.
 - Scrolling an expanded artist's albums no longer loads another artist's artwork in the background.
+- Several server rejections at once now return you to the login screen once, with one toast, instead of wiping the form repeatedly.
+- A server rejection left over from an earlier login no longer logs out the session that replaced it.
 
 ### Removed
 

@@ -18,7 +18,7 @@
 ## Error Handling
 
 - Backend services return `Result<T, E>` — propagate with `?`.
-- UI handlers run async `AppService` work through `shell_task` / `shell_spawn` (methods on `Nokkvi` in `src/main.rs`).
+- UI handlers run async `AppService` work through `shell_task` / `shell_spawn` (methods on `Nokkvi` in `src/main.rs`). A `shell_task` result arrives as `Message::SessionScoped`, stamped with the session generation of dispatch time; the root drops one from an ended session (gotchas.md "Optimistic UI & Race Conditions").
 - Log at the boundary that finally handles, not at every propagation layer.
 - User-facing errors get `toast_error()` / `toast_warn()`. Confirmations get `toast_success()` / `toast_info()`.
 

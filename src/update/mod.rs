@@ -192,6 +192,23 @@ impl Nokkvi {
             Message::LoginResult(res) => self.handle_login_result(*res),
             Message::ResumeSession => self.handle_resume_session(),
             Message::SessionExpired => self.handle_session_expired(),
+            Message::SessionScoped {
+                generation,
+                message,
+            } => {
+                if self.session_generation.accepts(generation) {
+                    self.dispatch_message(*message)
+                } else {
+                    // The session this task belonged to has ended (logout or
+                    // an earlier rejection); its result must not act on the
+                    // one that replaced it.
+                    tracing::debug!(
+                        " [SESSION] Dropped a result from an ended session (dispatched under {generation}, now {})",
+                        self.session_generation.current()
+                    );
+                    Task::none()
+                }
+            }
             Message::ServerVersionFetched(ver) => {
                 match &ver {
                     Some(version) => {

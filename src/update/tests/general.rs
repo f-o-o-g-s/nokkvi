@@ -750,6 +750,7 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
     app.similar_songs_generation = crate::state::StaleDropGen::at(7);
+    app.session_generation = crate::state::StaleDropGen::at(13);
     let add = crate::state::PendingAppend {
         playlist_name: "Mix".into(),
         song_ids: vec!["s1".into()],
@@ -868,6 +869,12 @@ fn reset_session_state_clears_all_session_bound_fields() {
         8,
         "similar generation carries forward bumped (seeded 7) — zeroing it \
          would let a pre-logout in-flight fetch match a fresh post-login load"
+    );
+    assert_eq!(
+        app.session_generation.current(),
+        14,
+        "the session generation carries forward bumped (seeded 13): a result \
+         still in flight from this session must be dropped by the next"
     );
     assert!(app.harbour.shelves_empty(), "harbour shelves reset");
     assert!(app.harbour.search_query.is_empty(), "harbour query reset");
@@ -1076,6 +1083,7 @@ fn logout_and_session_expired_reach_identical_state() {
     // Server-specific data
     assert_eq_fields!(
         similar_songs_generation,
+        session_generation,
         server_version,
         open_subsonic_extensions,
         queue_current,

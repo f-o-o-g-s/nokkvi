@@ -161,6 +161,16 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
+        // Several requests can be rejected together (a scrolling view's page
+        // loads; a star and a scrobble). The first one ends the session; the
+        // rest find none and must not toast again or wipe a login form the
+        // user is already typing into. A rejection from a session that has
+        // ended never gets this far: `shell_task` stamps its results and the
+        // root drops a stale one (`Message::SessionScoped`).
+        if self.screen != Screen::Home {
+            debug!(" [SESSION] Rejection ignored: no session to end");
+            return Task::none();
+        }
         info!(" [SESSION] Session expired (the server rejected the session)");
         // Shared session teardown — see `Nokkvi::reset_session_state` in
         // `update/components.rs`. Session-expired surfaces a user-facing
@@ -685,6 +695,10 @@ impl Nokkvi {
 
                 self.app_service = Some(shell.clone());
                 self.screen = Screen::Home;
+                // This session's own generation: every `shell_task` result from
+                // here on carries it, and a result from an earlier session is
+                // dropped at the root (`Message::SessionScoped`).
+                self.session_generation.bump();
 
                 // Take the repeat-one loop receiver from the shell and register it
                 // with the loop subscription service (global OnceLock) so the
@@ -707,10 +721,9 @@ impl Nokkvi {
 
                 // Initialize scrobble state from persisted queue to prevent spurious
                 // now-playing scrobbles on startup
-                let shell_for_scrobble = shell.clone();
-                let init_scrobble_task = Task::perform(
-                    async move {
-                        let queue_manager = shell_for_scrobble.queue().queue_manager();
+                let init_scrobble_task = self.shell_task(
+                    |shell| async move {
+                        let queue_manager = shell.queue().queue_manager();
                         let qm = queue_manager.lock().await;
                         qm.current_index()
                             .and_then(|idx| qm.song_id_at(idx))
@@ -727,87 +740,77 @@ impl Nokkvi {
                 // default-sort results overwrite correctly-sorted data.
                 // Note: PlayerSettingsLoaded may also trigger a load for start_view
                 // to avoid an empty-state flash before prefs arrive.
-                let shell_for_player = shell.clone();
-                let shell_for_prefs = shell.clone();
-                let shell_for_hotkeys = shell.clone();
-                let shell_for_libraries = shell.clone();
-                return Task::batch([
-                    Task::done(Message::LoadQueue), // Queue is always needed (sort-independent)
-                    Task::perform(
-                        async move { shell_for_player.settings().get_player_settings().await },
-                        |settings| {
-                            Message::Playback(PlaybackMessage::PlayerSettingsLoaded(Box::new(
-                                settings,
-                            )))
-                        },
-                    ),
-                    Task::perform(
-                        async move { shell_for_prefs.settings().get_view_preferences().await },
-                        Message::ViewPreferencesLoaded,
-                    ),
-                    Task::perform(
-                        async move { shell_for_hotkeys.settings().get_hotkey_config().await },
-                        Message::HotkeyConfigUpdated,
-                    ),
-                    init_scrobble_task,
-                    Task::perform(
-                        {
-                            let shell_for_version = shell.clone();
-                            async move { shell_for_version.auth().fetch_server_version().await.ok() }
-                        },
-                        Message::ServerVersionFetched,
-                    ),
-                    Task::perform(
-                        {
-                            let shell_for_extensions = shell.clone();
-                            async move {
-                                shell_for_extensions
-                                    .auth()
-                                    .fetch_open_subsonic_extensions()
-                                    .await
-                                    .ok()
-                            }
-                        },
-                        Message::OpenSubsonicExtensionsFetched,
-                    ),
-                    // Fetch the multi-library list at login so the nav-bar
-                    // trigger knows the count (and hides itself when
-                    // N<=1). Persisted active_library_ids was already
-                    // restored by AppService::new_with_storage; this
-                    // refresh prunes any now-deleted libraries from that
-                    // set against the live server (plan §14.4).
-                    Task::perform(
-                        async move { shell_for_libraries.refresh_libraries().await },
-                        |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
-                            match result {
-                                Ok(libs) => Message::Library(
-                                    crate::app_message::LibraryMessage::Loaded(libs),
-                                ),
-                                Err(e) => {
-                                    // This runs on EVERY login, so a rejected
-                                    // token here must route to the session-
-                                    // expired teardown rather than a generic
-                                    // toast that leaves a dead session looking
-                                    // alive.
-                                    if let Some(msg) =
-                                        crate::update::components::session_expired_message(&e)
-                                    {
-                                        return msg;
+                // Every post-login load is a `shell_task`, so it is stamped
+                // with this session's generation (see `session_generation`).
+                return Task::batch(
+                    [
+                        Task::done(Message::LoadQueue), // Queue is always needed (sort-independent)
+                        self.shell_task(
+                            |shell| async move { shell.settings().get_player_settings().await },
+                            |settings| {
+                                Message::Playback(PlaybackMessage::PlayerSettingsLoaded(Box::new(
+                                    settings,
+                                )))
+                            },
+                        ),
+                        self.shell_task(
+                            |shell| async move { shell.settings().get_view_preferences().await },
+                            Message::ViewPreferencesLoaded,
+                        ),
+                        self.shell_task(
+                            |shell| async move { shell.settings().get_hotkey_config().await },
+                            Message::HotkeyConfigUpdated,
+                        ),
+                        init_scrobble_task,
+                        self.shell_task(
+                            |shell| async move { shell.auth().fetch_server_version().await.ok() },
+                            Message::ServerVersionFetched,
+                        ),
+                        self.shell_task(
+                            |shell| async move {
+                                shell.auth().fetch_open_subsonic_extensions().await.ok()
+                            },
+                            Message::OpenSubsonicExtensionsFetched,
+                        ),
+                        // Fetch the multi-library list at login so the nav-bar
+                        // trigger knows the count (and hides itself when
+                        // N<=1). Persisted active_library_ids was already
+                        // restored by AppService::new_with_storage; this
+                        // refresh prunes any now-deleted libraries from that
+                        // set against the live server (plan §14.4).
+                        self.shell_task(
+                            |shell| async move { shell.refresh_libraries().await },
+                            |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
+                                match result {
+                                    Ok(libs) => Message::Library(
+                                        crate::app_message::LibraryMessage::Loaded(libs),
+                                    ),
+                                    Err(e) => {
+                                        // This runs on EVERY login, so a rejected
+                                        // token here must route to the session-
+                                        // expired teardown rather than a generic
+                                        // toast that leaves a dead session looking
+                                        // alive.
+                                        if let Some(msg) =
+                                            crate::update::components::session_expired_message(&e)
+                                        {
+                                            return msg;
+                                        }
+                                        Message::Library(
+                                            crate::app_message::LibraryMessage::LoadFailed(
+                                                format!("{e:#}"),
+                                            ),
+                                        )
                                     }
-                                    Message::Library(
-                                        crate::app_message::LibraryMessage::LoadFailed(format!(
-                                            "{e:#}"
-                                        )),
-                                    )
                                 }
-                            }
-                        },
-                    ),
-                    // Sweep stray smart-playlist draft workspaces once per
-                    // auth — including the re-login after a 401, the exact
-                    // moment the own-pid orphan arm exists for.
-                    self.orphan_sweep_task(shell.clone()),
-                ]);
+                            },
+                        ),
+                        // Sweep stray smart-playlist draft workspaces once per
+                        // auth — including the re-login after a 401, the exact
+                        // moment the own-pid orphan arm exists for.
+                        self.orphan_sweep_task(shell.clone()),
+                    ],
+                );
             }
             Err(e) => {
                 error!(target: "nokkvi::auth", "Login failed: {e}");

@@ -1509,6 +1509,16 @@ pub enum Message {
     LyricsLoader(LyricsLoaderMessage),
     /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
     SessionExpired,
+    /// A `shell_task` result, stamped with `Nokkvi::session_generation` as it
+    /// stood when the task was dispatched. The root dispatcher hands `message`
+    /// on while that session is current and drops it once the session has
+    /// ended: iced Tasks outlive a logout, so a late result (a rejection that
+    /// would log the next session out, a reload, a toast) must not act on the
+    /// session that replaced the one it belongs to.
+    SessionScoped {
+        generation: u64,
+        message: Box<Message>,
+    },
 
     // --- Data Loading ---
     /// SSE: Navidrome library scan completed with changes.

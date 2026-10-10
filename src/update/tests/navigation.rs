@@ -1822,3 +1822,90 @@ fn artists_row_top_songs_carries_the_artist_id() {
         other => panic!("expected TopSongs, got {other:?}"),
     }
 }
+
+// ============================================================================
+// Session-expired staleness gate (navigation.rs `handle_session_expired`,
+// main.rs `shell_task`, update/mod.rs `SessionScoped`)
+// ============================================================================
+
+/// Two rejections from one session land one after the other (a scrolling
+/// view's page loads; a star and a scrobble failing together). The first ends
+/// the session and toasts; the second finds no session and must not toast
+/// again or wipe a login form the user is already typing into.
+#[test]
+fn a_second_rejection_from_the_same_session_toasts_and_wipes_once() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.login_page.password = "hunter2".into();
+
+    let _ = app.handle_session_expired();
+    assert_eq!(app.screen, crate::Screen::Login);
+    assert!(
+        app.login_page.password.is_empty(),
+        "the first rejection wipes the form"
+    );
+    assert_eq!(app.toast.toasts.len(), 1, "the first rejection toasts");
+
+    app.login_page.password = "typing".into();
+    let _ = app.handle_session_expired();
+    assert_eq!(app.toast.toasts.len(), 1, "the repeat toasts nothing");
+    assert_eq!(
+        app.login_page.password, "typing",
+        "the repeat leaves the form alone"
+    );
+}
+
+/// A rejection dispatched under a session that has since ended (the user
+/// logged out, or an earlier rejection logged them out, and they logged in
+/// again) must not tear down the session that replaced it. Every
+/// `shell_task` result arrives stamped with the generation it was dispatched
+/// under; the root drops a stale one.
+#[test]
+fn a_rejection_from_a_previous_session_leaves_the_current_one_alone() {
+    use crate::app_message::Message;
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.session_generation = crate::state::StaleDropGen::at(5);
+
+    let _ = app.update(Message::SessionScoped {
+        generation: 4,
+        message: Box::new(Message::SessionExpired),
+    });
+    assert_eq!(
+        app.screen,
+        crate::Screen::Home,
+        "a rejection from an ended session is dropped"
+    );
+    assert!(app.toast.toasts.is_empty(), "and toasts nothing");
+
+    let _ = app.update(Message::SessionScoped {
+        generation: 5,
+        message: Box::new(Message::SessionExpired),
+    });
+    assert_eq!(
+        app.screen,
+        crate::Screen::Login,
+        "the current session's rejection still logs out"
+    );
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+/// A current-session result passes through the stamp unchanged: the
+/// envelope is transparent to every handler.
+#[test]
+fn a_current_session_result_is_dispatched_through_the_stamp() {
+    use crate::app_message::Message;
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    let generation = app.session_generation.current();
+
+    let _ = app.update(crate::Nokkvi::session_scoped(
+        generation,
+        Message::Navigation(crate::app_message::NavigationMessage::SwitchView(
+            View::Songs,
+        )),
+    ));
+    assert_eq!(app.current_view, View::Songs);
+}

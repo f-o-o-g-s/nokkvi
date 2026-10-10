@@ -59,7 +59,7 @@ Key shared infrastructure:
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components/`.
 - `impl_expansion_update!` macro — owns the expansion views' shared `update()` arms (every `SlotList` message, sort/search, expand/collapse), with per-view closures.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
-- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (pre-play hook: transition radio playback back to queue mode; never blocks), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
+- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`; a `shell_task` result arrives as `Message::SessionScoped`, stamped with the session generation, and the root drops one from an ended session); `guard_play_action` (pre-play hook: transition radio playback back to queue mode; never blocks), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
 
 Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `NavigationMessage`, `HotkeyMessage`, …) plus per-domain backend loader carriers (`{Name}LoaderMessage`); flat variants remain only for cross-cutting concerns. The authoritative list is `src/app_message.rs` — don't trust any doc's enumeration of it.
 

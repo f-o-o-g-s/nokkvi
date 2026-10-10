@@ -214,6 +214,13 @@ pub struct Nokkvi {
     pub similar_songs: Option<crate::state::SimilarSongsState>,
     /// Generation counter for stale response rejection
     pub similar_songs_generation: crate::state::StaleDropGen,
+    /// The session's generation: bumped by every login, carried forward by
+    /// `reset_session_state`. `shell_task` stamps each result with the value
+    /// its task was dispatched under (`Message::SessionScoped`), and the root
+    /// drops a result from a session that has ended, so a late rejection
+    /// cannot log the next session out, and a late reload or toast cannot
+    /// act on it.
+    pub session_generation: crate::state::StaleDropGen,
     /// The `getArtistInfo2` answers fetched this session (the Artists
     /// view's biography and link), keyed by artist id.
     pub artist_info: crate::state::ArtistInfoState,
@@ -457,6 +464,7 @@ impl Default for Nokkvi {
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: crate::state::StaleDropGen::default(),
+            session_generation: crate::state::StaleDropGen::default(),
             artist_info: crate::state::ArtistInfoState::default(),
             harbour: crate::state::HarbourState::default(),
             // Persisted player settings (overridden by PlayerSettingsLoaded).
@@ -846,6 +854,16 @@ impl Nokkvi {
     // SECTION: Shell Helpers (KEEP IN main.rs)
     // =========================================================================
 
+    /// Stamp a task result with the session generation it was dispatched
+    /// under. The root dispatcher (`Message::SessionScoped`) hands the inner
+    /// message on while that session is current and drops it otherwise.
+    pub(crate) fn session_scoped(generation: u64, message: Message) -> Message {
+        Message::SessionScoped {
+            generation,
+            message: Box::new(message),
+        }
+    }
+
     /// Run an async operation on `AppService`, returning a `Task<Message>`.
     ///
     /// Encapsulates the pervasive pattern:
@@ -857,6 +875,11 @@ impl Nokkvi {
     /// ```
     ///
     /// Returns `Task::none()` if `app_service` is not yet initialized (pre-login).
+    ///
+    /// The mapped message arrives wrapped in `Message::SessionScoped` with the
+    /// `session_generation` of dispatch time, so the root can drop a result
+    /// from a session that has since ended. A task built on a bare
+    /// `Task::perform` over a shell handle is outside that gate.
     pub(crate) fn shell_task<F, Fut, T>(
         &self,
         f: F,
@@ -869,7 +892,10 @@ impl Nokkvi {
     {
         if let Some(shell) = &self.app_service {
             let shell = shell.clone();
-            Task::perform(async move { f(shell).await }, map)
+            let generation = self.session_generation.current();
+            Task::perform(async move { f(shell).await }, move |output| {
+                Self::session_scoped(generation, map(output))
+            })
         } else {
             // Logged at debug, not warn: this fires during expected transition
             // windows (boot before session resume completes, logout while
