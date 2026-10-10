@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - With Fade on Skip set to Crossfade, a song reached with Previous now crossfades into the next one instead of cutting.
 - With Fade on Skip set to Crossfade, pressing Next twice quickly on the second-to-last song now plays the last song.
 - Seeking at the instant a crossfade finishes no longer jumps back into the previous song.
+- Clearing the queue while a radio station plays now leaves the station playing, as removing every song already did.
 
 ### Removed
 

@@ -746,6 +746,13 @@ impl Visualizer {
         self.state.mode()
     }
 
+    /// Whether a [`Self::reset`] is still waiting for the FFT worker (close
+    /// the feed gate first, or the worker may consume it).
+    #[cfg(test)]
+    pub(crate) fn reset_pending(&self) -> bool {
+        self.state.reset_pending()
+    }
+
     /// Whether the feed gate is open (the visualizer is not Off).
     #[cfg(test)]
     pub(crate) fn feed_active(&self) -> bool {

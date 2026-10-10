@@ -287,6 +287,19 @@ impl RemovalTransport {
     }
 }
 
+/// What [`crate::backend::app_service::AppService::clear_queue`] did to the
+/// audio engine, so the UI can follow the same verdict (it clears the
+/// visualizer only when the engine stopped).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearQueueOutcome {
+    /// The queue owned the engine (or nothing was playing): the engine was
+    /// stopped and its source dropped.
+    EngineStopped,
+    /// A station owns the engine ([`RemovalTransport::StreamingRadio`]): only
+    /// the queue was cleared, and the stream plays on.
+    StationKept,
+}
+
 /// Decide what the audio engine must do after a queue-removal mutation has
 /// already moved the queue play cursor (from which the physical index derives).
 ///

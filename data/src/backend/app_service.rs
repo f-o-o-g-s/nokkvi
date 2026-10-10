@@ -1903,20 +1903,53 @@ impl AppService {
         Ok(())
     }
 
-    /// Clear the queue: stop the engine, drop its source, clear the queue
-    /// model, and refresh the projection. Discharges the
-    /// `NextTrackResetEffect` produced by `set_queue` so a previously
-    /// prepared gapless decoder doesn't outlive the cleared queue.
-    pub async fn clear_queue(&self) -> Result<()> {
+    /// Clear the queue: empty the queue model and refresh the projection,
+    /// stop the engine and drop its source unless a station owns it, and
+    /// point the navigator at no song. Discharges the `NextTrackResetEffect`
+    /// produced by `set_queue` so a previously prepared gapless decoder
+    /// doesn't outlive the cleared queue.
+    ///
+    /// `radio_stream_url` is the station the UI is in radio mode for, if any
+    /// (`ActivePlayback::radio_station()`'s `stream_url`), classified through
+    /// the same [`RemovalTransport::from_engine`] as
+    /// [`Self::remove_queue_entries`]: when that stream is what the engine is
+    /// producing, the queue is just a list the user is editing, so clearing
+    /// it leaves the stream playing, the same as removing every row by hand.
+    /// The classification and the stop share one engine lock, so a source
+    /// change can't land between them. The returned outcome tells the UI
+    /// which way it went, so it clears the visualizer only when the engine
+    /// stopped.
+    ///
+    /// [`RemovalTransport::from_engine`]: crate::services::playback::RemovalTransport::from_engine
+    pub async fn clear_queue(
+        &self,
+        radio_stream_url: Option<&str>,
+    ) -> Result<crate::services::playback::ClearQueueOutcome> {
+        use crate::services::playback::{ClearQueueOutcome, RemovalTransport};
+
         let engine_arc = self.audio_engine();
-        {
+        let outcome = {
             let mut engine = engine_arc.lock().await;
-            let _ = engine.stop().await;
-            engine.set_source(String::new(), None).await;
-        }
+            let transport = RemovalTransport::from_engine(
+                radio_stream_url,
+                engine.source(),
+                matches!(engine.state(), crate::audio::engine::PlaybackState::Playing),
+            );
+            if transport == RemovalTransport::StreamingRadio {
+                ClearQueueOutcome::StationKept
+            } else {
+                engine.stop().await;
+                engine.set_source(String::new(), None).await;
+                ClearQueueOutcome::EngineStopped
+            }
+        };
         let effect = self.queue_service.set_queue(Vec::new(), None).await?;
+        // The cleared queue holds no song, so the navigator must not keep
+        // naming the pre-clear one (it would record a phantom history entry
+        // on the next play).
+        self.playback.clear_current_song_id().await;
         effect.apply_to(&engine_arc).await;
-        Ok(())
+        Ok(outcome)
     }
 }
 
@@ -2512,6 +2545,107 @@ mod tests {
         assert!(
             !engine_arc.lock().await.is_next_track_prepared().await,
             "the removed row must not stay prepared as the next track"
+        );
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    const CLEAR_STATION: &str = "http://127.0.0.1:9/stream.mp3";
+
+    /// A test app whose queue holds a/b/c with the navigator on "a" and the
+    /// engine audibly playing `engine_source` (a station or a queue song).
+    /// `load_track_with_rg` does no network I/O on a stopped engine.
+    async fn app_playing_for_clear(engine_source: &str) -> (AppService, std::path::PathBuf) {
+        let (app, db_path) = test_app().await;
+        let seeded = app
+            .queue_service
+            .set_queue(dispatch_test_songs(&["a", "b", "c"]), Some(0))
+            .await
+            .expect("seed the queue");
+        seeded.apply_to(&app.audio_engine()).await;
+        app.playback
+            .apply_removal_aftermath(
+                crate::services::playback::RemovalAftermath::RetargetNavigator {
+                    new_song_id: Some("a".to_string()),
+                },
+            )
+            .await
+            .expect("name the navigator's song");
+        {
+            let engine_arc = app.audio_engine();
+            let mut engine = engine_arc.lock().await;
+            engine.load_track_with_rg(engine_source, None, None).await;
+            engine.force_playing_for_test();
+        }
+        (app, db_path)
+    }
+
+    /// Clear Queue under a playing station clears only the queue, exactly as
+    /// removing every row does: the station stays the engine's source and
+    /// keeps playing, and the navigator names no song.
+    #[tokio::test]
+    async fn clearing_the_queue_keeps_a_playing_station_streaming() {
+        let (app, db_path) = app_playing_for_clear(CLEAR_STATION).await;
+
+        let outcome = app
+            .clear_queue(Some(CLEAR_STATION))
+            .await
+            .expect("clear the queue");
+
+        assert_eq!(
+            outcome,
+            crate::services::playback::ClearQueueOutcome::StationKept
+        );
+        assert!(dispatch_queue_ids(&app).is_empty(), "the queue is cleared");
+        {
+            let engine_arc = app.audio_engine();
+            let engine = engine_arc.lock().await;
+            assert_eq!(
+                engine.source(),
+                CLEAR_STATION,
+                "the station stays the source"
+            );
+            assert!(engine.playing(), "the station must not be stopped");
+        }
+        assert_eq!(
+            app.playback.current_song_id().await,
+            None,
+            "a cleared queue names no song"
+        );
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Radio mode alone is not enough: when a queue song is what the engine
+    /// produces (a cold-start Play leaves the app in radio mode), Clear Queue
+    /// stops it and drops its source, and the navigator names no song.
+    #[tokio::test]
+    async fn clearing_the_queue_stops_a_playing_queue_song_even_in_radio_mode() {
+        const QUEUE_SONG: &str = "http://127.0.0.1:9/rest/stream?id=a";
+        let (app, db_path) = app_playing_for_clear(QUEUE_SONG).await;
+
+        let outcome = app
+            .clear_queue(Some(CLEAR_STATION))
+            .await
+            .expect("clear the queue");
+
+        assert_eq!(
+            outcome,
+            crate::services::playback::ClearQueueOutcome::EngineStopped
+        );
+        assert!(dispatch_queue_ids(&app).is_empty(), "the queue is cleared");
+        {
+            let engine_arc = app.audio_engine();
+            let engine = engine_arc.lock().await;
+            assert_eq!(engine.source(), "", "the queue song's source is dropped");
+            assert!(!engine.playing(), "the queue song is stopped");
+        }
+        assert_eq!(
+            app.playback.current_song_id().await,
+            None,
+            "a cleared queue names no song"
         );
 
         drop(app);

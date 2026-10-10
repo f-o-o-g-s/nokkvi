@@ -1831,6 +1831,13 @@ impl VisualizerState {
         self.pending_clear.store(true, Ordering::SeqCst);
         self.pending_engine_reinit.store(true, Ordering::SeqCst);
     }
+
+    /// Whether a [`Self::reset`] is still waiting for the FFT thread. Only
+    /// deterministic with the feed gate closed: `tick` leaves the flag set.
+    #[cfg(test)]
+    pub(crate) fn reset_pending(&self) -> bool {
+        self.pending_clear.load(Ordering::SeqCst)
+    }
 }
 
 /// Monstercat filter (ported from cava.c, with Catmull-Rom post-smoothing)

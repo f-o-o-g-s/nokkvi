@@ -595,6 +595,86 @@ fn clear_queue_stops_a_running_songs_load() {
     );
 }
 
+/// A test app with a real visualizer whose feed gate is closed, so its FFT
+/// worker leaves a pending reset in place for the test to read.
+fn app_with_idle_visualizer() -> crate::Nokkvi {
+    let mut app = test_app();
+    let viz = crate::widgets::visualizer::Visualizer::new(
+        192,
+        app.visualizer_config.clone(),
+        app.milkdrop.shared.clone(),
+    );
+    viz.set_feed_active(false);
+    app.visualizer = Some(viz);
+    app
+}
+
+fn visualizer_reset_pending(app: &crate::Nokkvi) -> bool {
+    app.visualizer.as_ref().expect("visualizer").reset_pending()
+}
+
+/// Clear Queue under a playing station clears only the queue: the station
+/// stays the active playback and its bars keep running. Whether the engine
+/// stops is the backend's call (`AppService::clear_queue`), so the handler
+/// must not clear the visualizer ahead of that verdict.
+#[test]
+fn clear_queue_under_a_station_leaves_the_station_and_its_visualizer() {
+    let mut app = app_with_idle_visualizer();
+    let station = nokkvi_data::types::radio_station::RadioStation {
+        id: "r1".into(),
+        name: "KEXP".into(),
+        stream_url: "http://example.invalid/kexp".into(),
+        home_page_url: None,
+        cover_art: None,
+    };
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station: station.clone(),
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+
+    let _ = app.clear_queue_action();
+
+    assert_eq!(
+        app.active_playback.radio_station(),
+        Some(&station),
+        "clearing the queue must not leave radio mode"
+    );
+    assert!(
+        !visualizer_reset_pending(&app),
+        "the station is still playing, so its bars must not be cleared"
+    );
+}
+
+/// The backend stopped the engine: the bars clear, as on Stop.
+#[test]
+fn queue_cleared_with_the_engine_stopped_resets_the_visualizer() {
+    let mut app = app_with_idle_visualizer();
+
+    let _ = app.update(crate::app_message::Message::QueueLoader(
+        crate::app_message::QueueLoaderMessage::Cleared(
+            nokkvi_data::services::playback::ClearQueueOutcome::EngineStopped,
+        ),
+    ));
+
+    assert!(visualizer_reset_pending(&app));
+}
+
+/// The backend left a station playing: the bars keep running.
+#[test]
+fn queue_cleared_with_the_station_kept_leaves_the_visualizer() {
+    let mut app = app_with_idle_visualizer();
+
+    let _ = app.update(crate::app_message::Message::QueueLoader(
+        crate::app_message::QueueLoaderMessage::Cleared(
+            nokkvi_data::services::playback::ClearQueueOutcome::StationKept,
+        ),
+    ));
+
+    assert!(!visualizer_reset_pending(&app));
+}
+
 #[test]
 fn starting_a_queue_pull_keeps_the_songs_load_running() {
     // A pull with no saved queue, or a failed one, replaces nothing; the

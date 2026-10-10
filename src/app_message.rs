@@ -1205,6 +1205,9 @@ pub enum QueueLoaderMessage {
     /// (decided from the live play cursor), for the UI to mirror. Empty
     /// when the queue held no duplicates.
     DuplicatesRemoved(Vec<u64>),
+    /// Clear Queue finished: whether the backend stopped the engine or left
+    /// a playing station alone, for the UI to follow the same verdict.
+    Cleared(nokkvi_data::services::playback::ClearQueueOutcome),
 }
 
 /// All Harbour shelves, delivered by one joined fetch. Boxed inside

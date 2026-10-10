@@ -1198,6 +1198,16 @@ impl PlaybackController {
             .await
     }
 
+    /// Point the navigator at no song (the queue was cleared). Takes only the
+    /// navigator lock.
+    pub async fn clear_current_song_id(&self) {
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(None)
+            .await;
+    }
+
     /// Snapshot whether the engine is *genuinely producing audio* right now
     /// (`PlaybackState::Playing`) — as opposed to merely having a navigator
     /// `current_song_id`, which is populated from the persisted queue at

@@ -87,37 +87,41 @@ impl Nokkvi {
         self.clear_queue_action()
     }
 
-    /// The actual clear-queue work without the in-Queue-view gate: reset the
-    /// visualizer, drop the active playlist context, success toast, async
-    /// shell call, and a `LoadQueue` follow-up.
+    /// The actual clear-queue work without the in-Queue-view gate: drop the
+    /// active playlist context, success toast, async shell call, and a
+    /// `QueueLoaderMessage::Cleared` follow-up that reloads the queue.
+    ///
+    /// A playing station survives the clear (only the queue empties, as when
+    /// every row is removed by hand). The backend decides whether the engine
+    /// stops, from the station URL passed here and the engine's live source,
+    /// and the visualizer reset waits for that verdict
+    /// (`handle_queue_cleared`), so the two can't disagree.
     ///
     /// Shared by `handle_clear_queue` (in-app `Shift+D` hotkey, gated to the
     /// Queue view) and the `nokkvi clear-queue` IPC verb (ungated — external
     /// commands run from any view).
     pub(crate) fn clear_queue_action(&mut self) -> Task<Message> {
-        // Reset visualizer to clear bars (same as stop)
-        if let Some(ref viz) = self.visualizer {
-            viz.reset();
-        }
-
         // Clear playlist context bar: the playlist's queue is gone, and so is
         // whatever a running Songs progressive load was filling.
         self.clear_active_playlist();
         self.cancel_progressive_queue_load();
 
         self.toast_success("Queue cleared");
+        let radio_stream_url = self
+            .active_playback
+            .radio_station()
+            .map(|s| s.stream_url.clone());
         self.shell_task(
             move |shell| async move {
-                // `AppService::clear_queue` bundles the engine stop +
-                // source clear + queue set_queue empty + engine gapless
-                // prep reset.
-                shell.clear_queue().await?;
-                Ok::<_, anyhow::Error>(())
+                // `AppService::clear_queue` bundles the engine stop + source
+                // clear (skipped while the station owns the engine) + queue
+                // set_queue empty + engine gapless prep reset.
+                shell.clear_queue(radio_stream_url.as_deref()).await
             },
             |result| match result {
-                Ok(()) => {
-                    info!(" Queue cleared successfully");
-                    Message::LoadQueue
+                Ok(outcome) => {
+                    info!(" Queue cleared successfully ({outcome:?})");
+                    Message::QueueLoader(crate::app_message::QueueLoaderMessage::Cleared(outcome))
                 }
                 Err(e) => {
                     error!(" Failed to clear queue: {}", e);
@@ -130,6 +134,25 @@ impl Nokkvi {
                 }
             },
         )
+    }
+
+    /// Clear Queue's backend half finished: clear the bars if it stopped the
+    /// engine (same as Stop; a playing station keeps them), then reload the
+    /// now-empty queue.
+    pub(crate) fn handle_queue_cleared(
+        &mut self,
+        outcome: nokkvi_data::services::playback::ClearQueueOutcome,
+    ) -> Task<Message> {
+        use nokkvi_data::services::playback::ClearQueueOutcome;
+        match outcome {
+            ClearQueueOutcome::EngineStopped => {
+                if let Some(ref viz) = self.visualizer {
+                    viz.reset();
+                }
+            }
+            ClearQueueOutcome::StationKept => {}
+        }
+        self.handle_load_queue()
     }
 
     pub(crate) fn handle_save_queue_as_playlist(&mut self) -> Task<Message> {

@@ -1046,6 +1046,7 @@ impl Nokkvi {
             QueueLoaderMessage::DuplicatesRemoved(dropped) => {
                 self.handle_queue_duplicates_removed(dropped)
             }
+            QueueLoaderMessage::Cleared(outcome) => self.handle_queue_cleared(outcome),
         }
     }
 }
