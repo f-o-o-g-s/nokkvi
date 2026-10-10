@@ -59,6 +59,7 @@ All notable changes to this project will be documented in this file.
 - A song the server transcodes on the fly now ends and moves to the next song instead of restarting.
 - Seeking a song the server transcodes on the fly is now refused up front, with no seek handle and no media-widget seek bar.
 - A song the server transcodes on the fly is no longer labelled bit-perfect, and shows the codec the server actually sends.
+- A radio station whose server reports a stream length now reconnects when it drops instead of ending like a song.
 
 ### Removed
 

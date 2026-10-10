@@ -682,50 +682,58 @@ impl AudioDecoder {
                 .build()
                 .context("Failed to create HTTP client")?;
 
-            let mut is_radio = false;
+            // A station is a live stream whatever its server says about
+            // length: skip the sizing probes, so a Content-Length (a plain
+            // HTTP server or a proxy) can't turn it into a finite file that
+            // ends and never reconnects.
+            let mut is_radio = self.source_kind == SourceKind::Station;
 
             // Try HEAD request first
-            let mut content_length = match client.head(&self.url).send().await {
-                Ok(head_response) if head_response.status().is_success() => {
-                    let headers = head_response.headers();
-                    // Navidrome answers Subsonic errors with HTTP **200** and an
-                    // error envelope in the body (`sendResponseWithStatus` is
-                    // called with status 0, so `WriteHeader` never runs). A
-                    // track id the server can't resolve therefore sails past
-                    // `is_success()` and hands Symphonia a JSON document, which
-                    // surfaces as an opaque "format probe failed" rather than
-                    // "the server doesn't have this track" — exactly the wrong
-                    // diagnostic when a server-side id migration has invalidated
-                    // a persisted queue. Content-type is a safe discriminator:
-                    // no audio stream, including ICY radio, is served as
-                    // JSON/XML, so this cannot reject a working stream.
-                    if let Some(ct) = headers
-                        .get(reqwest::header::CONTENT_TYPE)
-                        .and_then(|v| v.to_str().ok())
-                    {
-                        let lowered = ct.to_ascii_lowercase();
-                        if lowered.starts_with("application/json")
-                            || lowered.starts_with("text/xml")
-                            || lowered.starts_with("application/xml")
+            let mut content_length = if is_radio {
+                None
+            } else {
+                match client.head(&self.url).send().await {
+                    Ok(head_response) if head_response.status().is_success() => {
+                        let headers = head_response.headers();
+                        // Navidrome answers Subsonic errors with HTTP **200** and an
+                        // error envelope in the body (`sendResponseWithStatus` is
+                        // called with status 0, so `WriteHeader` never runs). A
+                        // track id the server can't resolve therefore sails past
+                        // `is_success()` and hands Symphonia a JSON document, which
+                        // surfaces as an opaque "format probe failed" rather than
+                        // "the server doesn't have this track" — exactly the wrong
+                        // diagnostic when a server-side id migration has invalidated
+                        // a persisted queue. Content-type is a safe discriminator:
+                        // no audio stream, including ICY radio, is served as
+                        // JSON/XML, so this cannot reject a working stream.
+                        if let Some(ct) = headers
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|v| v.to_str().ok())
                         {
-                            anyhow::bail!(
-                                "server returned an error response instead of audio \
+                            let lowered = ct.to_ascii_lowercase();
+                            if lowered.starts_with("application/json")
+                                || lowered.starts_with("text/xml")
+                                || lowered.starts_with("application/xml")
+                            {
+                                anyhow::bail!(
+                                    "server returned an error response instead of audio \
                                  (content-type {ct}); the track may no longer exist \
                                  on the server"
-                            );
+                                );
+                            }
+                        }
+                        is_radio = is_radio_response(headers);
+                        header_duration_ms = x_content_duration_ms(headers);
+
+                        if is_radio {
+                            trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
+                            None
+                        } else {
+                            head_response.content_length().filter(|&len| len > 0)
                         }
                     }
-                    is_radio = is_radio_response(headers);
-                    header_duration_ms = x_content_duration_ms(headers);
-
-                    if is_radio {
-                        trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
-                        None
-                    } else {
-                        head_response.content_length().filter(|&len| len > 0)
-                    }
+                    _ => None,
                 }
-                _ => None,
             };
 
             // If HEAD didn't give us content-length, try a Range request with bytes=0-0
@@ -2463,6 +2471,47 @@ pub(crate) mod tests {
         decoder.init(&url).await.expect("the station must open");
 
         assert!(decoder.is_infinite_stream());
+        assert_eq!(decoder.delivery(), StreamDelivery::Live);
+    }
+
+    /// A station whose server answers with a Content-Length (no ICY
+    /// headers, a plain HTTP server or proxy) is still a live stream: read
+    /// as a sized file it would end at that length and never reconnect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_station_whose_server_sends_a_length_stays_live() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = [0u8; 2048];
+                    let len = socket.read(&mut request).await.unwrap_or(0);
+                    let body = transcode_body();
+                    let headers = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n\
+                         Accept-Ranges: bytes\r\nContent-Length: {}\r\n\
+                         Connection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = socket.write_all(headers.as_bytes()).await;
+                    if request[..len].starts_with(b"GET") {
+                        let _ = socket.write_all(body).await;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        let url = format!("http://{addr}/stream.mp3");
+
+        let mut decoder = AudioDecoder::default();
+        decoder.set_source_kind(SourceKind::Station);
+        decoder.init(&url).await.expect("the station must open");
+
         assert_eq!(decoder.delivery(), StreamDelivery::Live);
     }
 

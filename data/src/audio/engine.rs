@@ -242,6 +242,11 @@ pub(crate) struct CrossfadeCoordinator {
     /// it to spare a live skip blend: its incoming is the queue's current
     /// track, not a next track.
     skip_fade: bool,
+    /// How the live skip blend's incoming (the track the queue names)
+    /// delivers its bytes, set at the fire. Read only while `skip_fade`
+    /// holds: `seekable()` and `seek` judge the target by it, not by the
+    /// outgoing's delivery.
+    skip_target_delivery: StreamDelivery,
     /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0). Negative =
     /// extra overlap: the renderer's Armed trigger fires |offset| early
     /// (mirrored to `renderer.crossfade_lead_ms` by `set_crossfade_offset`).
@@ -283,6 +288,7 @@ impl CrossfadeCoordinator {
             album_continuity: false,
             suppress_this_transition: false,
             skip_fade: false,
+            skip_target_delivery: StreamDelivery::Sized,
             offset_secs: 0,
             bar_snap: false,
             skip_silence: false,
@@ -1759,18 +1765,33 @@ impl CustomAudioEngine {
 
     /// Whether the track the queue names can seek. A track the server sends
     /// without a length (its live transcode) can't, and neither can a
-    /// station; [`Self::seek`] refuses them. While a skip lands the target
-    /// is not known yet and reads seekable (`seek` checks again once it has
-    /// promoted the target).
+    /// station; [`Self::seek`] refuses them. During a skip blend that is the
+    /// incoming's; while a skip's decoder builds it is not known yet and
+    /// reads seekable (the seek is deferred to the target, which judges it
+    /// when it lands).
     pub fn seekable(&self) -> bool {
-        self.skip_landing_pending() || self.delivery == StreamDelivery::Sized
+        self.queue_track_delivery()
+            .is_none_or(|delivery| delivery == StreamDelivery::Sized)
     }
 
     /// Whether the track the queue names is a server's live transcode
     /// ([`StreamDelivery::Unsized`]): lossy whatever the original was, and
     /// not seekable.
     pub fn is_live_transcode(&self) -> bool {
-        !self.skip_landing_pending() && self.delivery == StreamDelivery::Unsized
+        self.queue_track_delivery() == Some(StreamDelivery::Unsized)
+    }
+
+    /// How the track the queue names delivers its bytes: the now-playing
+    /// track's, the incoming's during a skip blend, and unknown (`None`)
+    /// while a skip's decoder is still building.
+    fn queue_track_delivery(&self) -> Option<StreamDelivery> {
+        if self.skip_fade_window_pending() {
+            None
+        } else if self.crossfade.skip_fade {
+            Some(self.crossfade.skip_target_delivery)
+        } else {
+            Some(self.delivery)
+        }
     }
 
     /// Whether a manual skip or click has moved the queue to a target the
@@ -1859,10 +1880,11 @@ impl CustomAudioEngine {
                 }
             }
         } else if decoder.delivery() != StreamDelivery::Sized {
-            // A replay (Stop then Play) of a track that can't seek: open it
-            // again, which starts it from the beginning. A seek to 0 would
-            // fail and leave the decoder wherever it stopped reading, ahead
-            // of a clock that restarts at 0.
+            // A replay (Stop then Play) of a stream that can't seek, a live
+            // transcode or a station: open it again, which starts a track
+            // from the beginning and a station live. A seek to 0 would fail
+            // and leave the decoder wherever it stopped reading, ahead of a
+            // clock that restarts at 0.
             debug!(" AudioEngine: replaying a track that can't seek, reopening it");
             decoder.stop();
             if let Err(e) = decoder.init(&self.source).await {
@@ -2522,14 +2544,12 @@ impl CustomAudioEngine {
         // A track the server sends without a length (a live transcode) is
         // read once from front to back: a format reader can't go back, and
         // going forward means reading through every byte up to the target
-        // under the engine lock. Refuse, and leave playback untouched. Inside
-        // a skip blend the outgoing's delivery says nothing about the
-        // target; that case is checked below, once the target is promoted.
-        if !self.crossfade.skip_fade && self.delivery != StreamDelivery::Sized {
-            debug!(
-                "🔍 [SEEK] Refused - this track can't seek ({:?})",
-                self.delivery
-            );
+        // under the engine lock. Refuse, and leave playback untouched: an
+        // auto blend keeps running, and a skip blend toward such a target is
+        // not cut short by a promotion. (The build window returned above, so
+        // the target's delivery is known here.)
+        if !self.seekable() {
+            debug!("🔍 [SEEK] Refused - the track the queue names can't seek");
             return SeekOutcome::Settled;
         }
 
@@ -2588,8 +2608,9 @@ impl CustomAudioEngine {
             BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
             BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
         };
-        // A promoted skip target that can't seek: the promotion already
-        // started its decode loop, so refuse here and leave it playing.
+        // Belt and braces: the check above already judged a skip target by
+        // its delivery. Had a promotion still brought in one that can't
+        // seek, its decode loop is already running: refuse and leave it.
         if self.delivery != StreamDelivery::Sized {
             debug!(
                 "🔍 [SEEK] Refused - the promoted track can't seek ({:?})",
@@ -3678,6 +3699,7 @@ impl CustomAudioEngine {
         }
 
         let incoming_format = decoder.format().clone();
+        let incoming_delivery = decoder.delivery();
         if self
             .renderer
             .lock()
@@ -3722,6 +3744,7 @@ impl CustomAudioEngine {
             incoming_source: incoming_url,
         };
         self.crossfade.skip_fade = true;
+        self.crossfade.skip_target_delivery = incoming_delivery;
 
         // A manual skip is a user-driven source change: invalidate stale
         // completion dispatches for the outgoing (set_source does the same
@@ -6858,6 +6881,54 @@ mod tests {
             engine.source_generation(),
             gen_before,
             "seek must not bump the source generation"
+        );
+    }
+
+    /// A seek inside a skip blend toward a live transcode is refused before
+    /// the promotion: the blend keeps running instead of being cut short for
+    /// a seek that can't happen. The engine reads the target unseekable.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_during_a_skip_blend_toward_a_live_transcode_leaves_the_blend() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let target = "http://example.test/target";
+        let _keepalive = force_live_skip_fade(&mut engine, target);
+        engine.crossfade.skip_target_delivery = StreamDelivery::Unsized;
+
+        assert!(!engine.seekable(), "the target can't seek");
+        assert!(engine.is_live_transcode());
+        let outcome = engine.seek(30_000).await;
+
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "the blend must keep running"
+        );
+        assert!(engine.crossfade.skip_fade);
+        assert!(
+            !engine.is_playing_source(target),
+            "the target must not be promoted by a refused seek"
+        );
+    }
+
+    /// The reverse: a skip blend out of a live transcode toward a seekable
+    /// track seeks the target, as any skip blend does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_during_a_skip_blend_out_of_a_live_transcode_seeks_the_target() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.delivery = StreamDelivery::Unsized;
+        let target = "http://example.test/target";
+        let _keepalive = force_live_skip_fade(&mut engine, target);
+        engine.crossfade.skip_target_delivery = StreamDelivery::Sized;
+
+        assert!(engine.seekable(), "the target can seek");
+        engine.seek(30_000).await;
+
+        assert!(
+            engine.is_playing_source(target),
+            "the seek must land on the skip target; source is {}",
+            engine.source()
         );
     }
 

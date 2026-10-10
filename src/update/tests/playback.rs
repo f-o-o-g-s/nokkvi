@@ -2103,3 +2103,25 @@ fn a_live_transcode_is_labelled_with_its_own_codec() {
     assert_eq!(song_format_label("/m/a/01.FLAC", None, true), "flac");
     assert_eq!(song_format_label("", None, false), "");
 }
+
+/// With rewind-on-previous on, Previous on a song the server transcodes on
+/// the fly can't rewind it, so it steps back as it does within the
+/// threshold: no "can't seek" toast and no dead button.
+#[test]
+fn prev_track_steps_back_on_a_live_transcode_instead_of_rewinding() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(live_transcode_tick());
+    app.settings.rewind_on_previous = true;
+    app.playback.position = 8;
+    app.scrobble.last_position = 99.0;
+    let toasts_before = app.toast.toasts.len();
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(app.scrobble.last_position, 99.0, "no rewind seek");
+    assert_eq!(
+        app.toast.toasts.len(),
+        toasts_before,
+        "Previous stepped back; it must not refuse a rewind"
+    );
+}

@@ -1527,7 +1527,11 @@ impl Nokkvi {
         // `handle_seek` so the anti-seek-fraud guard (advancing
         // `scrobble.last_position` to the target) and the radio gate both apply
         // unchanged, and no queue navigation / consume-removal is reached.
-        if self.settings.rewind_on_previous && self.playback.position >= PREV_RESTART_THRESHOLD_SECS
+        // A song the server transcodes on the fly can't rewind (no seeking),
+        // so Previous steps back instead, as it does within the threshold.
+        if self.settings.rewind_on_previous
+            && self.playback.position >= PREV_RESTART_THRESHOLD_SECS
+            && self.seek_available()
         {
             return self.handle_seek(0.0);
         }
@@ -2049,9 +2053,9 @@ impl Nokkvi {
             return Task::none();
         }
         // A song the server transcodes on the fly can only play front to
-        // back (the engine refuses the seek too). Say so: this is reached by
-        // a deliberate act (Previous's rewind; the slider and MPRIS are
-        // already disarmed), never by a held key.
+        // back (the engine refuses the seek too). The slider, MPRIS, the IPC
+        // verb and Previous's rewind check first, so this backstop fires on a
+        // deliberate act that beat the tick (never a held key): say why.
         if !self.seek_available() {
             self.toast_info("Can't seek: the server is transcoding this song");
             return Task::none();
