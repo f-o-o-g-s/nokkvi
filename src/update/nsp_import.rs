@@ -11,9 +11,14 @@
 //!
 //! Parsing itself is the data crate's `parse_nsp_envelope` — the same
 //! 100 KB cap + comment-strip + flat-envelope split the server applies.
+//! Before the server-write flow routes a file, its refresh delay gets the
+//! editor's own check (`refresh_delay_diagnostic`): a delay the server can't
+//! parse refuses the file, and an older server's drop of the key is a warning.
 
 use iced::Task;
-use nokkvi_data::types::smart_criteria::{NSP_MAX_BYTES, parse_nsp_envelope};
+use nokkvi_data::types::smart_criteria::{
+    NSP_MAX_BYTES, Severity, SmartRules, parse_nsp_envelope, refresh_delay_diagnostic,
+};
 
 use crate::{Nokkvi, app_message::Message, widgets::text_input_dialog::TextInputDialogAction};
 
@@ -132,6 +137,23 @@ impl Nokkvi {
             }
             NspPickResult::Parsed(payload) => payload,
         };
+
+        // The editor's refresh-delay check, before anything is uploaded: a
+        // delay 0.64 can't parse fails the whole rules decode server-side,
+        // and an older server silently drops the key.
+        let caps = self.rules_editor.caps_state.caps();
+        match refresh_delay_diagnostic(&SmartRules::parse(&payload.rules), &caps) {
+            Some(d) if d.severity == Severity::Error => {
+                self.toast_error(format!(
+                    "Not a valid smart-playlist file — its refreshDelay isn't a duration \
+                     Navidrome accepts. {}",
+                    d.message
+                ));
+                return Task::none();
+            }
+            Some(d) => self.toast_warn(d.message),
+            None => {}
+        }
 
         let collision = nokkvi_data::services::api::playlists::duplicate_playlist_name(
             &payload.name,

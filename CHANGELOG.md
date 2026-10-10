@@ -31,6 +31,8 @@ All notable changes to this project will be documented in this file.
 - The Horizon's receding waves and bars now crest above the visualizer instead of being cut off along a straight line at its top.
 - Typing in the Queue's search while a playlist plays no longer knocks focus out of the field after the first letter.
 - Playing or queueing a genre, or mixing one in Trawl, now includes songs tagged with a different capitalization of its name.
+- Importing a .nsp file whose refresh delay Navidrome can't read now stops with an explanation before anything is uploaded.
+- Importing a .nsp file with a refresh delay now warns when the server is older than 0.64 and will ignore it.
 
 ### Removed
 

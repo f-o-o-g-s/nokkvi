@@ -1414,6 +1414,38 @@ pub fn is_valid_refresh_delay(s: &str) -> bool {
     true
 }
 
+/// The refresh-delay diagnostic for `rules` on a server with `caps`, if any.
+/// Shared by [`validate`] and the `.nsp` import, which checks a file before
+/// uploading it.
+///
+/// `""` is unset server-side, and so is a raw JSON `null` (Go leaves the
+/// string empty). Anything else 0.64 can't parse, a non-string included,
+/// fails the WHOLE rules decode there (`model/criteria/criteria.go`): an
+/// Error, also on an unknown version that may be 0.64. A server KNOWN to
+/// predate 0.64 re-marshals the rules through a struct without the key and
+/// drops it, so there any delay only warns.
+pub fn refresh_delay_diagnostic(rules: &SmartRules, caps: &ServerCaps) -> Option<Diagnostic> {
+    let typed = rules.refresh_delay.as_deref().filter(|d| !d.is_empty());
+    let raw = rules.raw_refresh_delay().filter(|v| !v.is_null());
+    if typed.is_none() && raw.is_none() {
+        return None;
+    }
+    let valid = raw.is_none() && typed.is_some_and(is_valid_refresh_delay);
+    if caps.version.is_some() && !caps.per_playlist_refresh_delay {
+        Some(Diagnostic::warning(
+            DiagnosticLocation::RefreshDelay,
+            "This server ignores the refresh delay (needs Navidrome 0.64+)",
+        ))
+    } else if !valid {
+        Some(Diagnostic::error(
+            DiagnosticLocation::RefreshDelay,
+            "Use a duration like 90m, 12h, 1d or 1w",
+        ))
+    } else {
+        None
+    }
+}
+
 /// Validate a rule set. Errors block Preview/Save; warnings render dimmed.
 pub fn validate(
     rules: &SmartRules,
@@ -1484,28 +1516,7 @@ pub fn validate(
             "Offset only applies together with a limit — the server ignores it otherwise",
         ));
     }
-    // `""` is unset server-side, and so is a raw JSON `null` (Go leaves the
-    // string empty). Anything else 0.64 can't parse, a non-string included,
-    // fails the WHOLE rules decode there (`model/criteria/criteria.go`): an
-    // Error, also on an unknown version that may be 0.64. A server KNOWN to
-    // predate 0.64 re-marshals the rules through a struct without the key
-    // and drops it, so there any delay only warns.
-    let typed = rules.refresh_delay.as_deref().filter(|d| !d.is_empty());
-    let raw = rules.raw_refresh_delay().filter(|v| !v.is_null());
-    if typed.is_some() || raw.is_some() {
-        let valid = raw.is_none() && typed.is_some_and(is_valid_refresh_delay);
-        if ctx.caps.version.is_some() && !ctx.caps.per_playlist_refresh_delay {
-            out.push(Diagnostic::warning(
-                DiagnosticLocation::RefreshDelay,
-                "This server ignores the refresh delay (needs Navidrome 0.64+)",
-            ));
-        } else if !valid {
-            out.push(Diagnostic::error(
-                DiagnosticLocation::RefreshDelay,
-                "Use a duration like 90m, 12h, 1d or 1w",
-            ));
-        }
-    }
+    out.extend(refresh_delay_diagnostic(rules, &ctx.caps));
 
     // --- Name -------------------------------------------------------------
     if ctx.name.trim().is_empty() {

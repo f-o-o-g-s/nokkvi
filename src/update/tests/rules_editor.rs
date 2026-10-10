@@ -1287,6 +1287,80 @@ fn nsp_import_owned_regular_collision_creates_only() {
     );
 }
 
+/// A parsed .nsp whose rules carry `refreshDelay: delay`.
+fn nsp_payload_with_delay(
+    name: &str,
+    delay: serde_json::Value,
+) -> crate::update::nsp_import::NspPickResult {
+    let crate::update::nsp_import::NspPickResult::Parsed(mut payload) = nsp_payload(name) else {
+        unreachable!("nsp_payload always parses");
+    };
+    if let Some(rules) = payload.rules.as_object_mut() {
+        rules.insert("refreshDelay".into(), delay);
+    }
+    crate::update::nsp_import::NspPickResult::Parsed(payload)
+}
+
+/// A refresh delay Navidrome 0.64 can't parse fails its whole rules decode,
+/// so the import refuses the file before any upload: an error toast that
+/// names the key, and no dialog even on a name collision.
+#[test]
+fn nsp_import_refuses_an_invalid_refresh_delay() {
+    for delay in [serde_json::json!("soon"), serde_json::json!(90)] {
+        let mut app = capable_app_064();
+        app.library
+            .playlists
+            .append_page(vec![smart_row("sp1", "Loved", "user-9")], 1);
+        let _ = app.update(Message::NspImportPicked(nsp_payload_with_delay(
+            "Loved",
+            delay.clone(),
+        )));
+        assert!(
+            !app.text_input_dialog.visible,
+            "{delay}: refused, no dialog"
+        );
+        let toast = app.toast.toasts.back().expect("refusal toast");
+        assert_eq!(toast.level, ToastLevel::Error);
+        assert!(toast.message.contains("refreshDelay"), "{}", toast.message);
+    }
+}
+
+/// A valid delay on 0.64 imports as before, with nothing to say.
+#[test]
+fn nsp_import_accepts_a_valid_refresh_delay() {
+    let mut app = capable_app_064();
+    app.library
+        .playlists
+        .append_page(vec![smart_row("sp1", "Loved", "user-9")], 1);
+    let _ = app.update(Message::NspImportPicked(nsp_payload_with_delay(
+        "Loved",
+        serde_json::json!("12h"),
+    )));
+    assert!(
+        app.text_input_dialog.visible,
+        "routes to the collision dialog"
+    );
+    assert!(app.toast.toasts.is_empty());
+}
+
+/// A server older than 0.64 drops the delay, so the import goes ahead and
+/// says so, whatever the delay reads.
+#[test]
+fn nsp_import_warns_that_an_older_server_drops_the_delay() {
+    let mut app = capable_app();
+    app.library
+        .playlists
+        .append_page(vec![smart_row("sp1", "Loved", "user-9")], 1);
+    let _ = app.update(Message::NspImportPicked(nsp_payload_with_delay(
+        "Loved",
+        serde_json::json!("soon"),
+    )));
+    assert!(app.text_input_dialog.visible, "still imports");
+    let toast = app.toast.toasts.back().expect("warning toast");
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert!(toast.message.contains("0.64"), "{}", toast.message);
+}
+
 /// A failed pick/parse toasts the reason and opens nothing.
 #[test]
 fn nsp_import_failure_toasts() {
