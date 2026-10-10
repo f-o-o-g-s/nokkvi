@@ -33,6 +33,19 @@ fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
             .is_some_and(|v| v.to_str().unwrap_or("").to_lowercase().contains("icecast"))
 }
 
+/// The stream's length in ms from an `X-Content-Duration` header (seconds,
+/// as a float), or `None` when absent or unusable.
+fn x_content_duration_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    let secs: f64 = headers
+        .get("x-content-duration")?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    (secs.is_finite() && secs > 0.0).then(|| (secs * 1000.0).round() as u64)
+}
+
 /// Bounded backoff (ms) between transient-I/O-error retries inside
 /// `read_buffer`. The retry sleep is a synchronous `std::thread::sleep` run
 /// under `block_in_place`, so it parks a tokio worker thread; capping it keeps
@@ -647,6 +660,10 @@ impl AudioDecoder {
         // Set by the radio branch: its buffer waits PROBE_RECV_TIMEOUT for the
         // stream's first bytes and drops to READ_RECV_TIMEOUT after the probe.
         let mut radio_recv_timeout: Option<RecvTimeout> = None;
+        // The server's length for the stream (`X-Content-Duration`), from the
+        // first answer that carries one. Used only for an `Unsized` track,
+        // whose probe has no byte length to read one from.
+        let mut header_duration_ms: Option<u64> = None;
 
         // Determine if URL is HTTP/HTTPS or file path
         let (mss, hint_from_data) = if self.url.starts_with("http://")
@@ -699,6 +716,7 @@ impl AudioDecoder {
                         }
                     }
                     is_radio = is_radio_response(headers);
+                    header_duration_ms = x_content_duration_ms(headers);
 
                     if is_radio {
                         trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
@@ -723,6 +741,8 @@ impl AudioDecoder {
                     Ok(range_response) => {
                         let headers = range_response.headers();
                         is_radio = is_radio_response(headers);
+                        header_duration_ms =
+                            header_duration_ms.or_else(|| x_content_duration_ms(headers));
 
                         if is_radio {
                             trace!(
@@ -769,6 +789,8 @@ impl AudioDecoder {
                     Ok(response) if response.status().is_success() => {
                         let headers = response.headers();
                         is_radio = is_radio_response(headers);
+                        header_duration_ms =
+                            header_duration_ms.or_else(|| x_content_duration_ms(headers));
 
                         if is_radio {
                             trace!(" [DECODER] ICEcast / Radio stream detected from GET headers.");
@@ -852,6 +874,9 @@ impl AudioDecoder {
                     // `{}`, which prints only the top context, so it never showed the URL.
                     .map_err(reqwest::Error::without_url)
                     .context("Failed to open the stream connection")?;
+
+                header_duration_ms =
+                    header_duration_ms.or_else(|| x_content_duration_ms(response.headers()));
 
                 // An answer with ICY headers is a station whatever the caller
                 // loaded it as.
@@ -984,8 +1009,14 @@ impl AudioDecoder {
         );
 
         // Cross-check against server metadata: Symphonia's probe can hand back
-        // a bitrate-extrapolated MP3 estimate that is several times off.
-        let duration_ms = sanitize_probed_duration(probed_ms, self.expected_duration_ms);
+        // a bitrate-extrapolated MP3 estimate that is several times off. A
+        // live transcode's own header wins over the caller's metadata: it is
+        // the server's word on this stream.
+        let expected_ms = match self.delivery {
+            StreamDelivery::Unsized => header_duration_ms.or(self.expected_duration_ms),
+            StreamDelivery::Sized | StreamDelivery::Live => self.expected_duration_ms,
+        };
+        let duration_ms = sanitize_probed_duration(probed_ms, expected_ms);
         // When the probe was overridden, the format reader still believes the
         // probed timeline — seeks must be mapped into it (see seek()).
         self.seek_scale = compute_seek_scale(probed_ms, duration_ms);
@@ -2369,6 +2400,55 @@ pub(crate) mod tests {
 
         drain_to_eof(&mut decoder);
         assert!(decoder.is_eof(), "the transcode's end must read as EOF");
+    }
+
+    /// A live transcode's length comes from its `X-Content-Duration` header
+    /// (Navidrome sets it on every `/rest/stream` answer): the probe can't
+    /// read one from a stream with no Xing header and no byte length, and
+    /// without it the progress bar and the crossfade timing have nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_takes_its_length_from_x_content_duration() {
+        let (url, _requests) = spawn_live_transcode(Some("245.5")).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the transcode must open");
+
+        assert_eq!(decoder.duration(), 245_500);
+    }
+
+    /// With no `X-Content-Duration`, a live transcode falls back to the
+    /// server's metadata length passed in by the caller.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_without_the_header_uses_the_metadata_length() {
+        let (url, _requests) = spawn_live_transcode(None).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.set_expected_duration_ms(Some(200_000));
+        decoder.init(&url).await.expect("the transcode must open");
+
+        assert_eq!(decoder.duration(), 200_000);
+    }
+
+    /// The header's parse: Navidrome writes seconds as a float (Go's `'G'`
+    /// format); anything unusable is ignored.
+    #[test]
+    fn x_content_duration_parses_seconds() {
+        let ms = |value: &str| {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("x-content-duration", value.parse().unwrap());
+            x_content_duration_ms(&headers)
+        };
+        assert_eq!(ms("245.5"), Some(245_500));
+        assert_eq!(ms("300"), Some(300_000));
+        assert_eq!(ms("1.2E+06"), Some(1_200_000_000));
+        assert_eq!(ms("0"), None);
+        assert_eq!(ms("-3"), None);
+        assert_eq!(ms("NaN"), None);
+        assert_eq!(ms("soon"), None);
+        assert_eq!(
+            x_content_duration_ms(&reqwest::header::HeaderMap::new()),
+            None
+        );
     }
 
     /// A station is live however its server answers: one with no length and
