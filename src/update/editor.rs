@@ -568,13 +568,7 @@ impl Nokkvi {
         let id = playlist_id.to_string();
         self.shell_task(
             move |shell| async move { shell.resolve_playlist_for_editor(&id).await },
-            |result| match result {
-                Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
-                Err(e) => {
-                    tracing::error!(" Failed to re-resolve editor buffer after append: {}", e);
-                    Message::NoOp
-                }
-            },
+            editor_reload_result_message,
         )
     }
 
@@ -705,5 +699,23 @@ impl Nokkvi {
         editor.common.clear_selection_for_refresh();
         // Fetch art for the newly dropped rows.
         self.editor_artwork_prefetch_tasks()
+    }
+}
+
+/// Map the post-append editor re-resolve's result. A rejected credential
+/// goes to the session-expired teardown; any other failure leaves the
+/// session as it is (see [`Nokkvi::editor_reload_task_if_clean_match`]).
+pub(crate) fn editor_reload_result_message(
+    result: anyhow::Result<Vec<nokkvi_data::backend::queue::QueueSongUIViewData>>,
+) -> Message {
+    match result {
+        Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
+        Err(e) => {
+            if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                return msg;
+            }
+            tracing::error!(" Failed to re-resolve editor buffer after append: {}", e);
+            Message::NoOp
+        }
     }
 }

@@ -182,14 +182,18 @@ impl PlaylistsApiService {
         params
     }
 
-    /// Load songs from a playlist (for playback), plus the playlist-level
-    /// attributes ([`SubsonicPlaylistAttrs`] — OpenSubsonic `readonly`)
-    /// captured from the same envelope.
+    /// Load songs from a playlist (for playback, expansion and the editor),
+    /// plus the playlist-level attributes ([`SubsonicPlaylistAttrs`] —
+    /// OpenSubsonic `readonly`) captured from the same envelope.
+    ///
+    /// Status-checked: a failed response is an error (a rejected token is
+    /// `NokkviError::Unauthorized`), never an empty playlist that would play
+    /// nothing or seed the editor with a buffer whose Save wipes the tracks.
     pub async fn load_playlist_songs(
         &self,
         playlist_id: &str,
     ) -> Result<(Vec<crate::types::song::Song>, SubsonicPlaylistAttrs)> {
-        let inner: PlaylistInner = subsonic::subsonic_get_envelope(
+        let inner: PlaylistInner = subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getPlaylist",
@@ -210,10 +214,9 @@ impl PlaylistsApiService {
     }
 
     /// The ids of the songs a playlist holds, for the check before songs are
-    /// added to it. Unlike [`Self::load_playlist_songs`], a failed response
-    /// is an error (HTTP 401 → `NokkviError::Unauthorized`), never an empty
-    /// playlist: the check must not read a failure as "none of these are
-    /// there yet" and add without asking.
+    /// added to it. Like [`Self::load_playlist_songs`], a failed response is
+    /// an error, never an empty playlist: the check must not read a failure
+    /// as "none of these are there yet" and add without asking.
     pub async fn playlist_song_ids(&self, playlist_id: &str) -> Result<HashSet<String>> {
         let inner: PlaylistInner = subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
@@ -229,9 +232,10 @@ impl PlaylistsApiService {
     }
 
     /// Load album IDs from a playlist (for artwork collage)
-    /// Returns up to 9 unique album IDs
+    /// Returns up to 9 unique album IDs. Status-checked like every
+    /// `getPlaylist` read; the collage callers show no art on `Err`.
     pub async fn load_playlist_albums(&self, playlist_id: &str) -> Result<Vec<String>> {
-        let inner: PlaylistInner = subsonic::subsonic_get_envelope(
+        let inner: PlaylistInner = subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getPlaylist",
@@ -835,6 +839,71 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::{
+        services::api::subsonic::tests::{FAILED_ENVELOPE, NOT_FOUND_ENVELOPE, one_shot_server},
+        types::error::NokkviError,
+    };
+
+    fn service_at(base_url: &str) -> PlaylistsApiService {
+        let url = url::Url::parse(base_url).expect("one-shot server url");
+        PlaylistsApiService::new(
+            ApiClient::new(url, String::new()),
+            base_url.to_string(),
+            "u=x".into(),
+        )
+    }
+
+    const EMPTY_PLAYLIST: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","playlist":{"id":"pl1","name":"Empty"}}}"#;
+
+    /// Playing, expanding or editing a playlist reads its tracks here. A
+    /// failed envelope must be an error: read as an empty playlist it plays
+    /// nothing, shows no rows, or opens the editor on an empty buffer whose
+    /// next Save would overwrite the real tracks.
+    #[tokio::test]
+    async fn load_playlist_songs_turns_a_failed_envelope_into_an_error() {
+        let err = service_at(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+            .load_playlist_songs("pl1")
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("data not found"),
+            "got: {err:#}"
+        );
+
+        let err = service_at(&one_shot_server("200 OK", FAILED_ENVELOPE).await)
+            .load_playlist_songs("pl1")
+            .await
+            .expect_err("a rejected token must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+
+        let (songs, _) = service_at(&one_shot_server("200 OK", EMPTY_PLAYLIST).await)
+            .load_playlist_songs("pl1")
+            .await
+            .expect("a playlist with no entries is not an error");
+        assert!(songs.is_empty());
+    }
+
+    /// The collage read takes the same checked path, so a failed envelope is
+    /// an error its callers can tell from a playlist with no songs.
+    #[tokio::test]
+    async fn load_playlist_albums_turns_a_failed_envelope_into_an_error() {
+        service_at(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+            .load_playlist_albums("pl1")
+            .await
+            .expect_err("a failed envelope must be an error");
+
+        let ids = service_at(&one_shot_server("200 OK", EMPTY_PLAYLIST).await)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("a playlist with no entries is not an error");
+        assert!(ids.is_empty());
+    }
 
     /// The typed envelope navigation shared by `load_playlist_songs` and
     /// `load_playlist_albums`: envelope → playlist → entry, with the

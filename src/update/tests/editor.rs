@@ -1675,6 +1675,25 @@ fn enter_edit_seeds_staleness_token_from_active_context_when_list_empty() {
 // --- Append-to-open-editor refresh decision (UI-not-refreshing bug) ---------
 
 #[test]
+fn append_reload_routes_a_rejected_credential_to_session_expired() {
+    // The re-resolve reads the playlist through the checked reader, so a dead
+    // session arrives as `Unauthorized` and must reach the login screen;
+    // any other failure stays a quiet no-op that leaves the editor alone.
+    let expired = crate::update::editor::editor_reload_result_message(Err(
+        nokkvi_data::types::error::NokkviError::Unauthorized.into(),
+    ));
+    assert!(
+        matches!(expired, Message::SessionExpired),
+        "got {expired:?}"
+    );
+
+    let other = crate::update::editor::editor_reload_result_message(Err(anyhow::anyhow!(
+        "Subsonic playlist: data not found"
+    )));
+    assert!(matches!(other, Message::NoOp), "got {other:?}");
+}
+
+#[test]
 fn append_reload_matches_clean_open_editor() {
     // A backend append to the playlist currently open (clean, loaded) in the
     // editor must be eligible for a buffer re-resolve so the new tracks appear.
