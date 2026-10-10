@@ -364,8 +364,15 @@ pub enum HotkeyMessage {
     SeekStep(bool),
     CenterOnPlaying,
     ToggleStar,
-    /// Update starred status locally (song_id, new_starred_status)
+    /// The user's own star change on a song (song_id, starred): `true` is
+    /// a love, which also rates the song five stars locally and on the
+    /// server.
     SongStarredStatusUpdated(String, bool),
+    /// The server refused a song's star change: put the flag back to the
+    /// given state and nothing else. A plain restore, unlike
+    /// [`SongStarredStatusUpdated`](Self::SongStarredStatusUpdated), so a
+    /// failed unstar cannot rate the song.
+    SongStarredStatusReverted(String, bool),
     /// Update starred status locally (album_id, new_starred_status)
     AlbumStarredStatusUpdated(String, bool),
     /// Update starred status locally for artist (artist_id, new_starred_status)

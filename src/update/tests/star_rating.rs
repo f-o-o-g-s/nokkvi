@@ -148,6 +148,60 @@ fn unstarring_song_does_not_touch_rating() {
     );
 }
 
+/// A failed unstar must put the star back and nothing else. The revert used
+/// to be the love message, whose `true` also rates five stars locally and on
+/// the server, so a server hiccup during an unstar rewrote the song's rating.
+#[test]
+fn a_failed_unstar_restores_the_star_and_leaves_the_rating_alone() {
+    use nokkvi_data::types::ItemKind;
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    // The optimistic unstar has already landed: flag off, rating untouched.
+    let mut song = make_song("s1", "Rated Song", "Artist");
+    song.is_starred = false;
+    song.rating = Some(3);
+    app.library.songs.set_from_vec(vec![song]);
+    let mut queue_song = make_queue_song("s1", "Rated Song", "Artist", "Album");
+    queue_song.starred = false;
+    queue_song.rating = Some(3);
+    app.library.queue_songs = vec![queue_song];
+
+    let revert = crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        false,
+    );
+    let _ = app.update(revert);
+
+    assert!(app.library.songs[0].is_starred, "the star is back");
+    assert!(app.library.queue_songs[0].starred, "in the queue too");
+    assert_eq!(
+        app.library.songs[0].rating,
+        Some(3),
+        "the revert never rates"
+    );
+    assert_eq!(app.library.queue_songs[0].rating, Some(3));
+}
+
+/// The user's own love still rates five stars (the revert path above is the
+/// only one that must not).
+#[test]
+fn a_real_love_still_rates_five_stars() {
+    let mut app = test_app();
+    let mut song = make_song("s1", "Song", "Artist");
+    song.rating = Some(3);
+    app.library.songs.set_from_vec(vec![song]);
+    app.library.queue_songs = vec![make_queue_song("s1", "Song", "Artist", "Album")];
+
+    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
+
+    assert!(app.library.songs[0].is_starred);
+    assert_eq!(app.library.songs[0].rating, Some(5));
+    assert_eq!(app.library.queue_songs[0].rating, Some(5));
+}
+
 // ============================================================================
 // Revert-message routing truth table
 // ============================================================================
@@ -184,8 +238,9 @@ fn starred_revert_message_routes_artist_to_artist_handler() {
     );
 }
 
+/// A song's revert is a plain restore of the flag, never the love path.
 #[test]
-fn starred_revert_message_routes_song_to_song_handler() {
+fn starred_revert_message_routes_song_to_the_plain_restore() {
     use nokkvi_data::types::ItemKind;
 
     use crate::app_message::{HotkeyMessage, Message};
@@ -193,15 +248,15 @@ fn starred_revert_message_routes_song_to_song_handler() {
     assert!(
         matches!(
             msg,
-            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            Message::Hotkey(HotkeyMessage::SongStarredStatusReverted(ref id, true))
             if id == "s1"
         ),
-        "Song kind must route to SongStarredStatusUpdated"
+        "Song kind must route to SongStarredStatusReverted, got {msg:?}"
     );
 }
 
 #[test]
-fn starred_revert_message_routes_playlist_through_song_handler_for_now() {
+fn starred_revert_message_routes_playlist_through_the_song_restore_for_now() {
     use nokkvi_data::types::ItemKind;
 
     use crate::app_message::{HotkeyMessage, Message};
@@ -209,10 +264,36 @@ fn starred_revert_message_routes_playlist_through_song_handler_for_now() {
     assert!(
         matches!(
             msg,
-            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            Message::Hotkey(HotkeyMessage::SongStarredStatusReverted(ref id, true))
             if id == "pl1"
         ),
-        "Playlist kind must collapse into SongStarredStatusUpdated until playlist starring ships"
+        "Playlist kind must collapse into the song restore until playlist starring ships"
+    );
+}
+
+/// The user's own change is the love path for songs: `true` rates five stars.
+#[test]
+fn starred_optimistic_message_routes_song_to_the_love_path() {
+    use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
+    let msg = crate::Nokkvi::starred_optimistic_message("s1".to_string(), ItemKind::Song, true);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            if id == "s1"
+        ),
+        "got {msg:?}"
+    );
+    let msg = crate::Nokkvi::starred_optimistic_message("a1".to_string(), ItemKind::Album, true);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::AlbumStarredStatusUpdated(ref id, true))
+            if id == "a1"
+        ),
+        "albums have no love path; the optimistic and revert messages are the same, got {msg:?}"
     );
 }
 

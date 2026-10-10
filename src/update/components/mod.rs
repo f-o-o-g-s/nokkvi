@@ -920,9 +920,10 @@ impl Nokkvi {
         }
     }
 
-    /// Build the appropriate starred-status-updated message for a given item kind.
-    /// Used to revert optimistic star updates on API failure.
-    pub(crate) fn starred_revert_message(id: String, kind: ItemKind, starred: bool) -> Message {
+    /// The message for the user's own star change on an item: the optimistic
+    /// update. For a song, `true` is the love path (`SongStarredStatusUpdated`
+    /// also rates it five stars); albums and artists only flip the flag.
+    pub(crate) fn starred_optimistic_message(id: String, kind: ItemKind, starred: bool) -> Message {
         use HotkeyMessage::{
             AlbumStarredStatusUpdated, ArtistStarredStatusUpdated, SongStarredStatusUpdated,
         };
@@ -939,6 +940,23 @@ impl Nokkvi {
         })
     }
 
+    /// The message that puts an item's starred flag back after the server
+    /// refused the change. A plain restore: for a song it is
+    /// `SongStarredStatusReverted`, never the love path, so a failed unstar
+    /// cannot rate the song. Albums and artists have no love path, so their
+    /// revert is their optimistic message.
+    pub(crate) fn starred_revert_message(id: String, kind: ItemKind, starred: bool) -> Message {
+        match kind {
+            ItemKind::Album | ItemKind::Artist => {
+                Self::starred_optimistic_message(id, kind, starred)
+            }
+            // Playlists ride the song restore for the reason given above.
+            ItemKind::Song | ItemKind::Playlist => {
+                Message::Hotkey(HotkeyMessage::SongStarredStatusReverted(id, starred))
+            }
+        }
+    }
+
     /// Toggle a star on any item, applying an optimistic UI update that reverts on API failure.
     pub(crate) fn toggle_star_with_revert_task(
         &self,
@@ -946,7 +964,7 @@ impl Nokkvi {
         kind: ItemKind,
         star: bool,
     ) -> Task<Message> {
-        let optimistic_msg = Self::starred_revert_message(id.clone(), kind, star);
+        let optimistic_msg = Self::starred_optimistic_message(id.clone(), kind, star);
         Task::batch(vec![
             Task::done(optimistic_msg),
             self.star_item_task(id, kind, star),
@@ -1529,7 +1547,7 @@ impl Nokkvi {
 
         // Optimistic update
         let optimistic_msg =
-            Self::starred_revert_message(song_id.clone(), ItemKind::Song, new_starred);
+            Self::starred_optimistic_message(song_id.clone(), ItemKind::Song, new_starred);
 
         // API call
         let api_task = self.star_item_task(song_id, ItemKind::Song, new_starred);

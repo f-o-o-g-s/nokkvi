@@ -327,6 +327,9 @@ impl Nokkvi {
             HotkeyMessage::SongStarredStatusUpdated(song_id, new_starred_status) => {
                 self.handle_song_starred_status_updated(song_id, new_starred_status)
             }
+            HotkeyMessage::SongStarredStatusReverted(song_id, starred) => {
+                self.handle_song_starred_status_reverted(song_id, starred)
+            }
             HotkeyMessage::AlbumStarredStatusUpdated(album_id, new_starred_status) => {
                 self.handle_album_starred_status_updated(album_id, new_starred_status)
             }

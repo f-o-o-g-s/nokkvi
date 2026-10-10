@@ -222,23 +222,19 @@ impl Nokkvi {
             "🔄 Updating starred status for song {} to {}",
             song_id, new_starred_status
         );
-        // Update all collections that may contain this song
-        for_each_song_collection!(self, |items, label| {
-            nokkvi_data::backend::update_starred_in_list(
-                items,
-                &song_id,
-                new_starred_status,
-                label,
-            );
-        });
+        let restore = self.apply_song_starred(song_id.clone(), new_starred_status);
+        if !new_starred_status {
+            return restore;
+        }
 
-        let mut tasks: Vec<Task<Message>> = Vec::new();
-
-        // Loving a song → also rate it 5 stars (local + API)
-        if new_starred_status {
-            tasks.push(Task::done(Message::Hotkey(
-                crate::app_message::HotkeyMessage::SongRatingUpdated(song_id.clone(), 5),
-            )));
+        // Loving a song → also rate it 5 stars (local + API). Only the
+        // user's own change comes here: a failed write's revert takes
+        // `handle_song_starred_status_reverted`, which never rates.
+        // The local five stars land now (the same handler the rating hotkeys
+        // use); the server write follows.
+        let mut tasks: Vec<Task<Message>> =
+            vec![self.handle_song_rating_updated(song_id.clone(), 5)];
+        {
             let sid = song_id.clone();
             let sid_done = song_id.clone();
             tasks.push(self.shell_task(
@@ -274,25 +270,41 @@ impl Nokkvi {
                 },
             ));
         }
+        tasks.push(restore);
+        Task::batch(tasks)
+    }
 
-        // Persist to queue storage
-        let sid = song_id.clone();
-        tasks.push(self.shell_task(
+    /// The server refused a song's star change: put the flag back and
+    /// nothing else (no rating, no notification).
+    pub(crate) fn handle_song_starred_status_reverted(
+        &mut self,
+        song_id: String,
+        starred: bool,
+    ) -> Task<Message> {
+        debug!(
+            "🔄 Restoring starred status for song {} to {} after a failed write",
+            song_id, starred
+        );
+        self.apply_song_starred(song_id, starred)
+    }
+
+    /// Set a song's starred flag in every loaded collection and persist it
+    /// to the queue storage. Shared by the user's own change and a failed
+    /// write's revert.
+    fn apply_song_starred(&mut self, song_id: String, starred: bool) -> Task<Message> {
+        for_each_song_collection!(self, |items, label| {
+            nokkvi_data::backend::update_starred_in_list(items, &song_id, starred, label);
+        });
+        self.shell_task(
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                if let Err(e) = qm.update_song_starred(&sid, new_starred_status) {
+                if let Err(e) = qm.update_song_starred(&song_id, starred) {
                     warn!(" Saving the queue's love flag failed: {e:#}");
                 }
             },
             |_| Message::NoOp,
-        ));
-
-        if tasks.is_empty() {
-            Task::none()
-        } else {
-            Task::batch(tasks)
-        }
+        )
     }
 
     pub(crate) fn handle_album_starred_status_updated(

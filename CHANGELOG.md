@@ -69,6 +69,7 @@ All notable changes to this project will be documented in this file.
 - A genre or playlist list the server fails to send now shows an error and keeps the rows, instead of an empty view.
 - A rejected session while loading genres or playlists now returns you to the login screen.
 - Playing several items at once, or a Trawl mix, on a rejected session now returns you to the login screen instead of saying "No songs found".
+- A failed unstar now only puts the star back; it no longer rates the song five stars locally and on the server.
 
 ### Removed
 
