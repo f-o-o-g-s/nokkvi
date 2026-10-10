@@ -174,17 +174,6 @@ impl Nokkvi {
                     album_ids,
                 )
             }
-            ArtworkMessage::CollageBatchReady(target, ids, server_url, cred) => {
-                Task::batch(ids.into_iter().map(|id| {
-                    Task::done(Message::Artwork(ArtworkMessage::LoadCollage(
-                        target,
-                        id,
-                        server_url.clone(),
-                        cred.clone(),
-                        Vec::new(),
-                    )))
-                }))
-            }
             // Song artwork
             ArtworkMessage::SongMiniLoaded(album_id, updated_at, art) => {
                 self.handle_song_artwork_loaded(album_id, updated_at, art)

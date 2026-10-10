@@ -209,63 +209,6 @@ where
     (pending_inserts, tasks)
 }
 
-/// Generate tasks to preload collage artwork for the slot list viewport
-///
-/// This handles the PreloadArtwork action pattern - fetches credentials once
-/// then emits a batch-ready message with all IDs that need loading.
-///
-/// # Arguments
-/// * `items` - Full list of items
-/// * `ctx` - Context with cache/state references  
-/// * `auth_vm` - Auth view model for fetching credentials
-/// * `create_batch_message` - Closure to create the batch-ready Message variant
-///
-/// # Returns
-/// * `pending_inserts` - Item IDs to mark as pending immediately
-/// * `task` - Optional task to fetch credentials and emit batch message
-pub(crate) fn preload_artwork<T, F>(
-    items: &[T],
-    ctx: &CollageArtworkContext,
-    auth_vm: AuthGateway,
-    create_batch_message: F,
-) -> (Vec<String>, Option<Task<Message>>)
-where
-    T: CollageArtworkItem,
-    F: Fn(Vec<String>, String, String) -> Message + Send + 'static,
-{
-    let total = items.len();
-    if total == 0 {
-        return (Vec::new(), None);
-    }
-
-    let mut ids_to_load: Vec<String> = Vec::new();
-
-    for idx in ctx.slot_list.prefetch_indices(total) {
-        if let Some(item) = items.get(idx) {
-            let id = item.id();
-            if !ctx.memory_artwork.contains_key(id) && !ctx.pending_ids.contains(id) {
-                ids_to_load.push(id.to_string());
-            }
-        }
-    }
-
-    if ids_to_load.is_empty() {
-        return (Vec::new(), None);
-    }
-
-    let pending_inserts = ids_to_load.clone();
-
-    let task = Task::perform(
-        async move {
-            let (server_url, subsonic_credential) = auth_vm.server_config().await;
-            (ids_to_load, server_url, subsonic_credential)
-        },
-        move |(ids, url, cred)| create_batch_message(ids, url, cred),
-    );
-
-    (pending_inserts, Some(task))
-}
-
 #[cfg(test)]
 mod tests {
     use nokkvi_data::backend::auth::AuthGateway;

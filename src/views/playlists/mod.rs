@@ -223,7 +223,6 @@ pub enum PlaylistsAction {
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
     PlayPlaylistFromTrack(String, usize, bool), // (playlist_id, track_index, force_shuffle)
     LoadArtwork(String),    // playlist_id - load artwork for centered playlist on slot list scroll
-    PreloadArtwork(usize),  // viewport_offset - preload artwork for visible + buffer
     SearchChanged(String),  // trigger reload
     SortModeChanged(crate::widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload

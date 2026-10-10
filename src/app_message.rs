@@ -488,7 +488,6 @@ pub enum ArtworkMessage {
         Vec<image::Handle>,
         Vec<String>,
     ),
-    CollageBatchReady(CollageTarget, Vec<String>, String, String),
 
     // --- Song Artwork ---
     /// `(album_id, updated_at, MiniArt)`. See [`ArtworkMessage::Loaded`] — the

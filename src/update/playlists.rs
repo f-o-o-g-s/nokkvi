@@ -405,47 +405,6 @@ impl Nokkvi {
                     }
                 }
             }
-            views::PlaylistsAction::PreloadArtwork(_viewport_offset) => {
-                // Preload artwork for visible playlists around viewport
-                use crate::services::collage_artwork::{self, CollageArtworkContext};
-
-                let total = self.library.playlists.len();
-                if total == 0 {
-                    return Task::none();
-                }
-
-                if let Some(shell) = &self.app_service {
-                    let ctx = CollageArtworkContext {
-                        slot_list: &self.playlists_page.common.slot_list,
-                        pending_ids: &self.artwork.playlist.pending,
-                        memory_artwork: &self.artwork.playlist.mini.snapshot,
-                        memory_collage: &self.artwork.playlist.collage.snapshot,
-                    };
-
-                    let (pending_inserts, task) = collage_artwork::preload_artwork(
-                        &self.library.playlists,
-                        &ctx,
-                        shell.auth().clone(),
-                        |ids, url, cred| {
-                            Message::Artwork(ArtworkMessage::CollageBatchReady(
-                                CollageTarget::Playlist,
-                                ids,
-                                url,
-                                cred,
-                            ))
-                        },
-                    );
-
-                    // Mark items as pending
-                    for id in pending_inserts {
-                        self.artwork.playlist.pending.insert(id);
-                    }
-
-                    if let Some(task) = task {
-                        return task;
-                    }
-                }
-            }
             PlaylistsAction::ToggleStar(item_id, kind, star) => {
                 return self.toggle_star_with_revert_task(item_id, kind, star);
             }

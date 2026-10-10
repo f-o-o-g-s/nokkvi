@@ -384,47 +384,6 @@ impl Nokkvi {
                     }
                 }
             }
-            GenresAction::PreloadArtwork(_viewport_offset) => {
-                // Preload artwork for visible genres around viewport using collage artwork service
-                use crate::services::collage_artwork::{self, CollageArtworkContext};
-
-                let total = self.library.genres.len();
-                if total == 0 {
-                    return Task::none();
-                }
-
-                if let Some(shell) = &self.app_service {
-                    let ctx = CollageArtworkContext {
-                        slot_list: &self.genres_page.common.slot_list,
-                        pending_ids: &self.artwork.genre.pending,
-                        memory_artwork: &self.artwork.genre.mini.snapshot,
-                        memory_collage: &self.artwork.genre.collage.snapshot,
-                    };
-
-                    let (pending_inserts, task) = collage_artwork::preload_artwork(
-                        &self.library.genres,
-                        &ctx,
-                        shell.auth().clone(),
-                        |ids, url, cred| {
-                            Message::Artwork(ArtworkMessage::CollageBatchReady(
-                                CollageTarget::Genre,
-                                ids,
-                                url,
-                                cred,
-                            ))
-                        },
-                    );
-
-                    // Mark items as pending
-                    for id in pending_inserts {
-                        self.artwork.genre.pending.insert(id);
-                    }
-
-                    if let Some(task) = task {
-                        return task;
-                    }
-                }
-            }
             GenresAction::ToggleStar(item_id, kind, star) => {
                 return self.toggle_star_with_revert_task(item_id, kind, star);
             }

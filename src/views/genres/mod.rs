@@ -150,7 +150,6 @@ pub enum GenresAction {
     /// Switch to Albums view and prime the named album for inline expansion.
     NavigateAndExpandAlbum(String),
     LoadArtwork(String), // genre_id - load artwork for centered genre on slot list scroll
-    PreloadArtwork(usize), // viewport_offset - preload artwork for visible + buffer
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
