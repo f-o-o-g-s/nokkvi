@@ -339,6 +339,118 @@ fn status_reports_theater_mode() {
 }
 
 // ----------------------------------------------------------------------------
+// The list verbs in Theater Mode mirror their keys (`theater_key_policy`)
+// ----------------------------------------------------------------------------
+
+/// A Queue view with songs, so the centered row is a real song: the verbs
+/// below would have something on the hidden list to act on.
+fn queue_app_with_songs() -> Nokkvi {
+    let mut app = home_app();
+    app.current_view = crate::View::Queue;
+    app.library.queue_songs = (0..20)
+        .map(|i| {
+            crate::test_helpers::make_queue_song(&format!("s{i}"), &format!("T{i}"), "A", "Al")
+        })
+        .collect();
+    app
+}
+
+#[test]
+fn remove_from_queue_outside_theater_names_the_centered_song() {
+    // Control for the theater test below: with theater off, the same app
+    // reports a real removal, so a `null` there is not green by construction.
+    let mut app = queue_app_with_songs();
+    let resp = drive_on(&mut app, "remove-from-queue");
+    let removed = resp.data.as_ref().and_then(|d| d.get("removed"));
+    assert!(
+        removed.is_some_and(|v| !v.is_null()),
+        "control: the centered song is removed, got {:?}",
+        resp.data
+    );
+}
+
+#[test]
+fn list_verbs_in_theater_leave_it_without_acting() {
+    // Their keys (Tab / Backspace / Enter / Shift+A / Ctrl+D) are ExitOnly in
+    // theater: they leave and are swallowed, because the list they aim at is
+    // hidden. The verbs must do the same, and say so in the reply.
+    for (verb, idle) in [
+        ("nav-up", json!({ "ok": true })),
+        ("nav-down", json!({ "ok": true })),
+        ("enter", json!({ "ok": true })),
+        ("add-to-queue", json!({ "added": null })),
+        ("remove-from-queue", json!({ "removed": null })),
+    ] {
+        let mut app = queue_app_with_songs();
+        let _ = app.enter_theater();
+        assert!(app.theater.active);
+        let queue_len = app.library.queue_songs.len();
+        let toasts_before = app.toast.toasts.len();
+
+        let resp = drive_on(&mut app, verb);
+
+        assert!(resp.error.is_none(), "{verb}: {:?}", resp.error);
+        let mut expected = idle;
+        expected["theater"] = json!("exited");
+        assert_eq!(resp.data, Some(expected), "{verb} reports the exit");
+        assert!(!app.theater.active, "{verb} leaves theater");
+        assert_eq!(
+            app.library.queue_songs.len(),
+            queue_len,
+            "{verb} never edits the hidden queue"
+        );
+        assert_eq!(
+            app.toast.toasts.len(),
+            toasts_before,
+            "{verb} does not act (no toast)"
+        );
+        assert_eq!(app.current_view, crate::View::Queue);
+    }
+}
+
+#[test]
+fn list_verb_twins_are_exit_only() {
+    // `leave_theater_instead` handles only the ExitOnly class; a twin moved to
+    // ExitThenPerform would need the verb to run after the exit.
+    use nokkvi_data::types::hotkey_config::HotkeyAction as A;
+
+    use crate::update::theater::{TheaterKeyPolicy, theater_key_policy};
+    for twin in [
+        A::SlotListUp,
+        A::SlotListDown,
+        A::Activate,
+        A::AddToQueue,
+        A::RemoveFromQueue,
+    ] {
+        assert_eq!(
+            theater_key_policy(twin),
+            TheaterKeyPolicy::ExitOnly,
+            "{twin:?}"
+        );
+    }
+}
+
+#[test]
+fn list_verbs_outside_theater_keep_their_replies() {
+    let mut app = queue_app_with_songs();
+    for verb in ["nav-up", "nav-down", "enter"] {
+        let resp = drive_on(&mut app, verb);
+        assert_eq!(resp.data, Some(json!({ "ok": true })), "{verb}");
+    }
+}
+
+#[test]
+fn clear_queue_keeps_acting_in_theater() {
+    // Deliberately NOT mirrored: Shift+D is ExitOnly, but the verb acts on the
+    // whole queue, so there is no hidden row it could hit by mistake.
+    let mut app = queue_app_with_songs();
+    let _ = app.enter_theater();
+    let resp = drive_on(&mut app, "clear-queue");
+    assert_eq!(resp.data, Some(json!({ "ok": true })));
+    assert!(app.theater.active, "clear-queue stays in theater");
+}
+
+// ----------------------------------------------------------------------------
 // show — the one "bring the window back" entry point (`Nokkvi::show_window`)
 // ----------------------------------------------------------------------------
 

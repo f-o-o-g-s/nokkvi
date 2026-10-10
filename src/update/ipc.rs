@@ -116,17 +116,18 @@
 //! | `repeat`      | act       | `{"repeat":"off"\|"one"\|"queue"}`; cycles.     |
 //! | `consume`     | act       | `{"consume":bool}`; calls `handle_toggle_consume`.|
 //! | `clear-queue` | act       | `{"ok":true}`; `clear_queue_action()` (gate-free).|
+//! |               |           | Acts in Theater Mode too (whole queue, no row). |
 //! | `add-to-queue`| act       | `{"added":name\|null}`; enqueue the focused item|
-//! |               |           | (Shift+A); null when nothing is selected.       |
+//! |               |           | (Shift+A); null when nothing is selected. ‡     |
 //! | `remove-from-queue` | act | `{"removed":name\|null}`; remove the centered    |
 //! |               |           | queue song (Ctrl+D); `not_in_queue_view` error |
-//! |               |           | outside the queue view.                        |
+//! |               |           | outside the queue view. ‡                      |
 //! | `switch-view` | act_str   | `{"view":name}`; arg `view`, any name that     |
 //! |               |           | `switchable_view_names()` yields (`--help`     |
 //! |               |           | lists them). Invalid → `invalid_args`.         |
-//! | `nav-up`      | dispatch  | `{"ok":true}`; move focused list up (async).   |
-//! | `nav-down`    | dispatch  | `{"ok":true}`; move focused list down (async). |
-//! | `enter`       | dispatch  | `{"ok":true}`; activate centered item.         |
+//! | `nav-up`      | act       | `{"ok":true}`; move focused list up (async). ‡ |
+//! | `nav-down`    | act       | `{"ok":true}`; move focused list down (async).‡|
+//! | `enter`       | act       | `{"ok":true}`; activate centered item. ‡       |
 //! | `selection`   | act       | `{view,kind,name,artist,rating,starred}` of    |
 //! |               |           | the centered item; `kind:null` if none. Read.  |
 //! | `love`        | act       | `{"loved":bool}`; toggle star on playing track.|
@@ -156,9 +157,19 @@
 //! |               |           | preset on screen, nothing eligible (next) or   |
 //! |               |           | no history (previous); bad word →              |
 //! |               |           | `invalid_args`.                                |
+//!
+//! ‡ **Theater Mode.** These five verbs aim at the focused list, which Theater
+//! Mode hides, so they follow their keys' `theater_key_policy` (all
+//! `ExitOnly`): with no modal on top, the verb leaves theater and does NOT act,
+//! and the reply is the verb's "nothing done" payload plus
+//! `"theater":"exited"`: `{"ok":true,"theater":"exited"}` for the three
+//! navigation verbs, `{"added":null,"theater":"exited"}` and
+//! `{"removed":null,"theater":"exited"}` for the queue pair. Run the verb again
+//! to act on the list that is now visible. A modal open over theater (the
+//! MilkDrop picker) still takes the navigation verbs, as it takes the keys.
 
 use iced::Task;
-use nokkvi_data::types::ItemKind;
+use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction};
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
@@ -166,6 +177,7 @@ use crate::{
     Nokkvi, View,
     app_message::{Message, NavigationMessage, PlaybackMessage, SlotListMessage},
     services::ipc::IpcIncoming,
+    update::theater::TheaterKeyPolicy,
 };
 
 /// Generate the IPC dispatcher plus three companion consts that
@@ -482,6 +494,10 @@ define_commands! {
     // IPC bypasses handle_clear_queue's "not in queue view" gate — external
     // callers expect `nokkvi clear-queue` to clear from any view. The shared
     // clear_queue_action() lives in src/update/hotkeys/queue.rs.
+    // Unlike its Shift+D key it is NOT routed through Theater Mode's key
+    // policy: the key is ExitOnly because the in-window clear is gated on the
+    // (hidden) queue view, but the verb clears the whole queue from anywhere
+    // and aims at no row, so there is nothing hidden for it to hit by mistake.
     "clear-queue" => act      (|app: &mut Nokkvi| Ok((app.clear_queue_action(), json!({ "ok": true }))));
     // Add the focused item (centered song/album/artist/genre/playlist) to the
     // queue — the in-app Shift+A hotkey. `add_to_queue_message()` resolving to
@@ -490,6 +506,11 @@ define_commands! {
     // or null when nothing is selected (mirrors the "No item selected" toast).
     // The actual enqueue + "Added 'X' to queue" toast run via the real handler.
     "add-to-queue" => act      (|app: &mut Nokkvi| {
+        if let Some(exited) =
+            leave_theater_instead(app, HotkeyAction::AddToQueue, json!({ "added": null }))
+        {
+            return Ok(exited);
+        }
         let will_add = app
             .current_view_page()
             .and_then(|page| page.add_to_queue_message())
@@ -509,6 +530,12 @@ define_commands! {
     // filtered-center song handle_remove_from_queue removes, so the echo is
     // exact; null when the queue is empty (no song centered).
     "remove-from-queue" => act (|app: &mut Nokkvi| {
+        // Theater first, like its key: Ctrl+D leaves theater in any view.
+        if let Some(exited) =
+            leave_theater_instead(app, HotkeyAction::RemoveFromQueue, json!({ "removed": null }))
+        {
+            return Ok(exited);
+        }
         if app.current_view != View::Queue {
             return Err((
                 "not_in_queue_view",
@@ -537,11 +564,18 @@ define_commands! {
     // play gate): an open picker or Trawl takes the key, and under EQ, About,
     // Info or a dialog it does nothing, like the keyboard. The move is async (a further per-page message), so the resulting
     // center can't be echoed here — query `selection` to read where it landed.
-    "nav-up"      => dispatch (Message::SlotList(SlotListMessage::NavigateUp));
-    "nav-down"    => dispatch (Message::SlotList(SlotListMessage::NavigateDown));
+    // In Theater Mode they leave theater instead, like their keys.
+    "nav-up"      => act      (|app: &mut Nokkvi| {
+        Ok(list_verb(app, HotkeyAction::SlotListUp, SlotListMessage::NavigateUp))
+    });
+    "nav-down"    => act      (|app: &mut Nokkvi| {
+        Ok(list_verb(app, HotkeyAction::SlotListDown, SlotListMessage::NavigateDown))
+    });
     // Activate the centered item (Enter): plays in Queue/Songs, expands or
     // navigates in Albums/Artists/Genres/Playlists, edits a Settings row.
-    "enter"       => dispatch (Message::SlotList(SlotListMessage::ActivateCenter));
+    "enter"       => act      (|app: &mut Nokkvi| {
+        Ok(list_verb(app, HotkeyAction::Activate, SlotListMessage::ActivateCenter))
+    });
     // Read-only: the focused view's currently-centered item (or a null-valued
     // record when nothing is selectable — empty list, Settings, editor).
     "selection"   => act      (|app: &mut Nokkvi| Ok((Task::none(), selection_json(app))));
@@ -644,6 +678,47 @@ define_commands! {
         })?;
         app.milkdrop_ipc_control(action)
     });
+}
+
+/// Theater Mode's key policy, applied to a verb whose keyboard twin is `twin`.
+///
+/// Mirrors `handle_raw_key_event`: while theater is active and no modal is on
+/// top (a modal keeps owning its keys over theater), an `ExitOnly` twin leaves
+/// theater and the verb does not act. Returns the exit task and `idle` (the
+/// verb's "nothing done" payload) with `"theater":"exited"` added, or `None`
+/// when the verb should run as usual.
+///
+/// Every twin routed here (the five list verbs) is `ExitOnly`, which
+/// `list_verb_twins_are_exit_only` pins. A twin reclassified to
+/// `ExitThenPerform` would need the verb to run after the exit; revisit this
+/// helper before relying on that class.
+fn leave_theater_instead(
+    app: &mut Nokkvi,
+    twin: HotkeyAction,
+    mut idle: serde_json::Value,
+) -> Option<(Task<Message>, serde_json::Value)> {
+    if !app.theater.active || app.top_modal().is_some() {
+        return None;
+    }
+    match app.theater_key_policy_here(twin) {
+        TheaterKeyPolicy::ExitOnly => {
+            idle["theater"] = json!("exited");
+            Some((app.exit_theater(), idle))
+        }
+        TheaterKeyPolicy::ExitThenPerform | TheaterKeyPolicy::Passthrough => None,
+    }
+}
+
+/// The three navigation verbs: Theater Mode's key policy first, then the
+/// slot-list message the key would send, through the normal update loop
+/// (async, so the reply is the content-free `{"ok":true}`).
+fn list_verb(
+    app: &mut Nokkvi,
+    twin: HotkeyAction,
+    msg: SlotListMessage,
+) -> (Task<Message>, serde_json::Value) {
+    leave_theater_instead(app, twin, json!({ "ok": true }))
+        .unwrap_or_else(|| (Task::done(Message::SlotList(msg)), json!({ "ok": true })))
 }
 
 /// Shared guard for the queue-sync verbs: the server must advertise the
