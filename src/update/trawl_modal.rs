@@ -442,7 +442,7 @@ impl Nokkvi {
         let albums_vm = shell.albums().clone();
 
         let mut id_slices: Vec<Vec<String>> = Vec::new();
-        let mut artist_ids: Vec<String> = Vec::new();
+        let mut artists: Vec<(String, Option<String>)> = Vec::new();
         if let Some(state) = &self.trawl.modal
             && let Some(r) = &state.search_results
         {
@@ -454,11 +454,10 @@ impl Nokkvi {
                     id_slices.push(vec![id.clone()]);
                 }
             }
-            artist_ids = r
+            artists = r
                 .artists
                 .iter()
-                .filter(|a| !a.image.image_absent)
-                .map(|a| a.id.clone())
+                .filter_map(|a| nokkvi_data::types::image_info::artist_art_entry(&a.id, &a.image))
                 .collect();
         }
 
@@ -466,7 +465,7 @@ impl Nokkvi {
         if !id_slices.is_empty() {
             tasks.extend(self.warm_harbour_quad_ids(&albums_vm, id_slices));
         }
-        tasks.extend(self.artist_mini_warm_tasks(artist_ids, &albums_vm));
+        tasks.extend(self.artist_mini_warm_tasks(artists, &albums_vm));
         Task::batch(tasks)
     }
 }

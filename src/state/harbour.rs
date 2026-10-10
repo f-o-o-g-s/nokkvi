@@ -11,7 +11,10 @@ use std::collections::HashMap;
 
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, genres::GenreUIViewData, playlists::PlaylistUIViewData},
-    types::{artist::Artist, library_search::LibrarySearchResults, song::Song},
+    types::{
+        artist::Artist, image_info::artist_art_entry, library_search::LibrarySearchResults,
+        song::Song,
+    },
 };
 
 /// All Harbour data: shelves + live search.
@@ -114,23 +117,22 @@ impl HarbourState {
             && self.random_playlist.is_none()
     }
 
+    /// The `(artist_id, version)` entries of the shelf artists whose
+    /// `ar-{id}` mini needs warming: every Most Played artist plus the Random
+    /// Artist pick, minus art the server marked absent.
+    pub fn shelf_artist_minis(&self) -> Vec<(String, Option<String>)> {
+        self.most_played_artists
+            .iter()
+            .chain(self.random_artist.iter())
+            .filter_map(|a| artist_art_entry(&a.id, &a.image))
+            .collect()
+    }
+
     /// Distinct album ids across the album shelves (Recently Added, Most
     /// Played Albums) plus the Random Album pick, in a stable order — the set
     /// whose 80px covers the shelf renderer needs warmed. The song shelves
     /// warm their covers by `album_id` through the quad-id warmer instead
     /// (see `warm_harbour_artwork`).
-    /// The shelf artists whose `ar-{id}` mini needs warming: every Most
-    /// Played artist plus the Random Artist pick, minus art the server marked
-    /// absent.
-    pub fn shelf_artist_ids(&self) -> Vec<String> {
-        self.most_played_artists
-            .iter()
-            .chain(self.random_artist.iter())
-            .filter(|a| !a.image.image_absent)
-            .map(|a| a.id.clone())
-            .collect()
-    }
-
     pub fn shelf_album_art_triples(&self) -> Vec<(String, Option<String>, String)> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();

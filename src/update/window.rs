@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::Task;
-use nokkvi_data::{audio, utils::artwork_url::THUMBNAIL_SIZE};
+use nokkvi_data::audio;
 
 use super::components::{
     passive_artwork_version, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
@@ -372,12 +372,8 @@ impl Nokkvi {
             .slot_list
             .prefetch_indices(total)
             .filter_map(|idx| self.library.artists.get(idx))
-            .filter(|artist| !artist.image.image_absent)
-            .map(|artist| {
-                (
-                    artist.id.clone(),
-                    nokkvi_data::types::image_info::artwork_version(&artist.image, None),
-                )
+            .filter_map(|artist| {
+                nokkvi_data::types::image_info::artist_art_entry(&artist.id, &artist.image)
             })
             .filter(|(id, version)| {
                 crate::update::components::should_refetch(
@@ -407,26 +403,7 @@ impl Nokkvi {
             .artist_minis_to_fetch()
             .into_iter()
             .map(|(id, version)| {
-                let art_id = format!("ar-{id}");
-                let vm = albums_vm.clone();
-                Task::perform(
-                    async move {
-                        let art = crate::app_message::MiniArt::from_fetch(
-                            vm.fetch_album_artwork(
-                                &art_id,
-                                Some(THUMBNAIL_SIZE),
-                                version.as_deref(),
-                            )
-                            .await,
-                        );
-                        (id, version, art)
-                    },
-                    |(id, version, art)| {
-                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(
-                            id, version, art,
-                        ))
-                    },
-                )
+                crate::update::components::artist_mini_task(albums_vm.clone(), id, version)
             });
         Task::batch(tasks)
     }

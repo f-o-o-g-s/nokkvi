@@ -266,16 +266,6 @@ impl Default for ArtworkState {
     }
 }
 
-impl ArtworkState {
-    /// True when `id`'s cover fetch already failed at exactly `version`, so the
-    /// membership-based prefetch gates should skip re-queuing it. A different
-    /// `version` (server cover changed) is deliberately NOT suppressed. Used by
-    /// the artist gate (which has no version) with `version == &None`.
-    pub fn art_failed_at(&self, id: &str, version: &Option<String>) -> bool {
-        self.failed_art.get(id) == Some(version)
-    }
-}
-
 impl std::fmt::Debug for ArtworkState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArtworkState")

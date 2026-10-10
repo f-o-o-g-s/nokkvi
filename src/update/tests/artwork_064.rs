@@ -199,7 +199,13 @@ fn harbour_absent_artists_are_not_warmed() {
     };
     app.harbour.most_played_artists = vec![raw("h1", false), raw("h2", true)];
     app.harbour.random_artist = Some(raw("h3", true));
-    assert_eq!(app.harbour.shelf_artist_ids(), vec!["h1"]);
+    let ids: Vec<String> = app
+        .harbour
+        .shelf_artist_minis()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ids, vec!["h1"]);
 }
 
 // --- The image hash is the version --------------------------------------------
@@ -562,6 +568,62 @@ mod background_reload {
         let _ = app.handle_load_large_artwork("a1".into());
         assert!(!app.artwork.large_artwork_hashes.contains_key("a1"));
     }
+}
+
+// --- Harbour's artist warm records the image hash -----------------------------
+
+/// A raw Harbour shelf artist with image hash `hash`.
+fn shelf_artist(id: &str, hash: &str) -> Artist {
+    serde_json::from_value(serde_json::json!({ "id": id, "name": id, "imageHash": hash }))
+        .expect("artist")
+}
+
+/// Land every mini Harbour's artist warm would fetch, at the version it
+/// would record.
+fn warm_harbour_artists(app: &mut crate::Nokkvi) {
+    let entries = app.harbour.shelf_artist_minis();
+    for (id, version) in app.artist_minis_to_warm(entries) {
+        let _ = app.handle_artwork_loaded(
+            id,
+            version,
+            crate::app_message::MiniArt::Loaded(iced::widget::image::Handle::from_bytes(
+                Vec::<u8>::new(),
+            )),
+        );
+    }
+}
+
+/// An artist mini Harbour warmed is current for the Artists view, which
+/// keys the same `ar-` mini on the artist's image hash: no second fetch.
+#[test]
+fn harbour_warmed_artist_needs_no_artists_view_refetch() {
+    const A: &str = "aaaaaaaaaaaaaaaa";
+    let mut app = test_app();
+    app.harbour.most_played_artists = vec![shelf_artist("h1", A)];
+    warm_harbour_artists(&mut app);
+
+    let mut row = make_artist("h1", "h1");
+    row.image.image_hash = Some(A.to_owned());
+    app.library.artists.set_from_vec(vec![row]);
+    assert!(app.artist_minis_to_fetch().is_empty());
+}
+
+/// A Harbour artist whose image changed since its mini was cached is warmed
+/// again; one at the cached hash is not.
+#[test]
+fn harbour_artist_warm_refetches_only_a_changed_hash() {
+    const A: &str = "aaaaaaaaaaaaaaaa";
+    const B: &str = "bbbbbbbbbbbbbbbb";
+    let mut app = test_app();
+    app.harbour.most_played_artists = vec![shelf_artist("h1", A), shelf_artist("h2", A)];
+    warm_harbour_artists(&mut app);
+
+    app.harbour.most_played_artists = vec![shelf_artist("h1", A), shelf_artist("h2", B)];
+    let entries = app.harbour.shelf_artist_minis();
+    assert_eq!(
+        app.artist_minis_to_warm(entries),
+        vec![("h2".to_owned(), Some(B.to_owned()))]
+    );
 }
 
 /// A centered Harbour search album the server marked absent loads no large

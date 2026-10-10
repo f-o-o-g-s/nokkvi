@@ -114,6 +114,15 @@ pub fn artwork_version(image: &ImageInfo, updated_at: Option<&str>) -> Option<St
     image.valid_hash().or(updated_at).map(str::to_owned)
 }
 
+/// The `(id, version)` an artist's `ar-{id}` cover is fetched and cached
+/// under, the same for every surface that shows one. Artists carry no
+/// `updated_at`, so the version is the image hash, or `None` on servers older
+/// than 0.64. `None` overall when the server marked the art absent: there is
+/// nothing to fetch.
+pub fn artist_art_entry(id: &str, image: &ImageInfo) -> Option<(String, Option<String>)> {
+    (!image.image_absent).then(|| (id.to_owned(), artwork_version(image, None)))
+}
+
 // Serde's `skip_serializing_if` hands the field by reference.
 fn is_false(b: &bool) -> bool {
     !*b

@@ -61,9 +61,10 @@ pub(super) fn duplicates_removed_text(count: usize) -> String {
 #[cfg(test)]
 pub(super) use artwork_prefetch::plan_album_artwork_fetches;
 pub(super) use artwork_prefetch::{
-    album_prefetch_entry, expansion_album_artwork_tasks, expansion_child_album_ids,
-    passive_artwork_version, prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks,
-    prefetch_song_artwork_tasks, quad_album_artwork_tasks_for_ids,
+    album_prefetch_entry, artist_mini_task, expansion_album_artwork_tasks,
+    expansion_child_album_ids, passive_artwork_version, prefetch_album_artwork_tasks,
+    prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
+    quad_album_artwork_tasks_for_ids,
 };
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its

@@ -192,6 +192,29 @@ pub(crate) fn album_prefetch_entry(album: &AlbumUIViewData) -> (String, Option<S
     )
 }
 
+/// Fetch one artist's 80px `ar-{id}` mini into `album_art[id]`, recording
+/// `version` (its `artist_art_entry` version) beside it. Shared by the
+/// Artists view's prefetch and Harbour's artist warm, so both request the
+/// same URL and record the same version.
+pub(crate) fn artist_mini_task(
+    albums_vm: AlbumsService,
+    id: String,
+    version: Option<String>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let art_id = format!("ar-{id}");
+            let art = MiniArt::from_fetch(
+                albums_vm
+                    .fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), version.as_deref())
+                    .await,
+            );
+            (id, version, art)
+        },
+        |(id, version, art)| Message::Artwork(ArtworkMessage::Loaded(id, version, art)),
+    )
+}
+
 /// Generate song artwork prefetch tasks for a slot list viewport.
 ///
 /// Variant of `prefetch_album_artwork_tasks` for songs that have

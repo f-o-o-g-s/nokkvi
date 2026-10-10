@@ -19,6 +19,7 @@ use nokkvi_data::{
     },
     types::{
         batch::{BatchItem, BatchPayload},
+        image_info::artist_art_entry,
         library_query::LibraryQuery,
         one_shot_shuffle::OneShotShuffle,
     },
@@ -1473,9 +1474,8 @@ impl Nokkvi {
         // The artist rows (Most Played Artists shelf + the Random Artist pick):
         // warm each artist's `ar-{id}` 80px mini into album_art (the rows' only
         // cover source — the album/song warmers don't cover artist ids).
-        let artist_ids = self.harbour.shelf_artist_ids();
-        let artist_tasks = self.artist_mini_warm_tasks(artist_ids, &albums_vm);
-        tasks.extend(artist_tasks);
+        let artists = self.harbour.shelf_artist_minis();
+        tasks.extend(self.artist_mini_warm_tasks(artists, &albums_vm));
 
         // The Random Playlist pick's album-id fan-out feeding
         // PlaylistQuadIdsLoaded, which then warms the individual quad tiles.
@@ -1585,40 +1585,49 @@ impl Nokkvi {
         Task::batch(self.warm_harbour_quad_ids(&albums_vm, id_groups))
     }
 
-    /// Warm the 80px `ar-{id}` cover for each artist id into `album_art` (keyed
-    /// by the artist id — the single-mini path the Artists view uses), dedup-gated
-    /// on cache/pending/failed. Shared by the search rows and the Most Played
-    /// Artists shelf so both warm identically.
+    /// The `(artist_id, version)` minis [`Self::artist_mini_warm_tasks`]
+    /// would fetch from `artists` (entries from `artist_art_entry`): each one
+    /// the shared version gate passes, the gate the Artists view's prefetch
+    /// uses, minus ids already in flight. A mini cached at another hash is
+    /// warmed again; one at the same hash is current for every surface.
+    pub(crate) fn artist_minis_to_warm(
+        &self,
+        artists: impl IntoIterator<Item = (String, Option<String>)>,
+    ) -> Vec<(String, Option<String>)> {
+        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        artists
+            .into_iter()
+            .filter(|(id, version)| {
+                !self.artwork.album_art_pending.contains(id)
+                    && super::components::should_refetch(
+                        &cached,
+                        &self.artwork.album_art_versions,
+                        &self.artwork.failed_art,
+                        id,
+                        version,
+                    )
+            })
+            .collect()
+    }
+
+    /// Warm the 80px `ar-{id}` cover for each `(artist_id, version)` entry
+    /// into `album_art` (keyed by the artist id — the single-mini path the
+    /// Artists view uses), planned by [`Self::artist_minis_to_warm`] and
+    /// marked pending. Shared by the search rows and the Most Played Artists
+    /// shelf so both warm identically.
     pub(crate) fn artist_mini_warm_tasks(
         &mut self,
-        artist_ids: impl IntoIterator<Item = String>,
+        artists: impl IntoIterator<Item = (String, Option<String>)>,
         albums_vm: &AlbumsService,
     ) -> Vec<Task<Message>> {
-        use nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE;
-
-        let mut tasks = Vec::new();
-        for id in artist_ids {
-            if self.artwork.album_art.contains(&id)
-                || self.artwork.album_art_pending.contains(&id)
-                || self.artwork.art_failed_at(&id, &None)
-            {
-                continue;
-            }
-            self.artwork.album_art_pending.insert(id.clone());
-            let art_id = format!("ar-{id}");
-            let vm = albums_vm.clone();
-            tasks.push(Task::perform(
-                async move {
-                    let art = crate::app_message::MiniArt::from_fetch(
-                        vm.fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), None)
-                            .await,
-                    );
-                    (id, art)
-                },
-                |(id, art)| Message::Artwork(ArtworkMessage::Loaded(id, None, art)),
-            ));
-        }
-        tasks
+        let planned = self.artist_minis_to_warm(artists);
+        planned
+            .into_iter()
+            .map(|(id, version)| {
+                self.artwork.album_art_pending.insert(id.clone());
+                super::components::artist_mini_task(albums_vm.clone(), id, version)
+            })
+            .collect()
     }
 
     /// Warm artwork for the whole-library search results. The shelves batch-warm
@@ -1646,7 +1655,7 @@ impl Nokkvi {
         // 80px thumbnail id sets: albums + songs (by album id), plus the resolved
         // quad tiles of genre/playlist rows present in the current results.
         let mut id_slices: Vec<Vec<String>> = Vec::new();
-        let mut artist_ids: Vec<String> = Vec::new();
+        let mut artists: Vec<(String, Option<String>)> = Vec::new();
         if let Some(r) = &self.harbour.search_results {
             id_slices.extend(search_warm_album_ids(r).into_iter().map(|id| vec![id]));
             for g in &r.genres {
@@ -1659,11 +1668,10 @@ impl Nokkvi {
                     id_slices.push(ids.clone());
                 }
             }
-            artist_ids = r
+            artists = r
                 .artists
                 .iter()
-                .filter(|a| !a.image.image_absent)
-                .map(|a| a.id.clone())
+                .filter_map(|a| artist_art_entry(&a.id, &a.image))
                 .collect();
         }
 
@@ -1673,7 +1681,7 @@ impl Nokkvi {
         }
 
         // Artist images: the `ar-{id}` cover endpoint → `album_art[artist_id]`.
-        tasks.extend(self.artist_mini_warm_tasks(artist_ids, &albums_vm));
+        tasks.extend(self.artist_mini_warm_tasks(artists, &albums_vm));
 
         // Large cover for the centered search row (the thumbnails cover the rest).
         let (rows, center) = self.harbour_centered_rows();
