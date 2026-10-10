@@ -655,9 +655,11 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        *T::count_mut(self) = total_count;
         match result {
             Ok(items) => {
+                // The header count follows the rows: a failed reload keeps
+                // both, instead of "0 genres" above the rows it kept.
+                *T::count_mut(self) = total_count;
                 debug!(
                     "✅ Loaded {} {} (total: {})",
                     items.len(),

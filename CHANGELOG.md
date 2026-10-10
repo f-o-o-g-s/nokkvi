@@ -72,6 +72,7 @@ All notable changes to this project will be documented in this file.
 - A failed unstar now only puts the star back; it no longer rates the song five stars locally and on the server.
 - The "already in playlist" confirm now re-checks the playlist when it adds, so a song added meanwhile is not added twice.
 - A star, rating or scrobble confirmed after logging out no longer shows "Library refreshed automatically" on the login screen.
+- A library list that fails to reload now keeps its header count instead of showing 0 above the rows it kept.
 
 ### Removed
 

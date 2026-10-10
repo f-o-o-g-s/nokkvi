@@ -745,6 +745,7 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
     app.library
         .genres
         .set_from_vec(vec![make_genre("g1", "Jazz")]);
+    app.library.counts.genres = 1;
     app.library.genres.set_loading(true);
     let _ = app.handle_genres_loaded(
         Err("API GET /api/genre failed with status 500: boom".into()),
@@ -752,6 +753,10 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
     );
     assert_eq!(app.screen, crate::Screen::Home);
     assert_eq!(app.library.genres.len(), 1, "the genre rows stay");
+    assert_eq!(
+        app.library.counts.genres, 1,
+        "the header count stays with the rows"
+    );
     assert!(!app.library.genres.is_loading());
     let toast = app.toast.toasts.back().expect("an error toast");
     assert_eq!(toast.level, ToastLevel::Error);
@@ -766,12 +771,14 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
     app.library
         .playlists
         .set_from_vec(vec![super::playlists::playlist_row("pl1", "Mix", false)]);
+    app.library.counts.playlists = 1;
     app.library.playlists.set_loading(true);
     let _ = app.handle_playlists_loaded(
         Err("API GET /api/playlist failed with status 500: boom".into()),
         0,
     );
     assert_eq!(app.library.playlists.len(), 1, "the playlist rows stay");
+    assert_eq!(app.library.counts.playlists, 1);
     assert!(!app.library.playlists.is_loading());
     let toast = app.toast.toasts.back().expect("an error toast");
     assert_eq!(toast.level, ToastLevel::Error);
