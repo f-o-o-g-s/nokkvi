@@ -225,9 +225,10 @@ impl SongsPage {
                 Task::none(),
                 SongsAction::NavigateAndExpandArtist(artist_id),
             ),
-            SongsMessage::NavigateAndExpandGenre(genre_id) => {
-                (Task::none(), SongsAction::NavigateAndExpandGenre(genre_id))
-            }
+            SongsMessage::NavigateAndExpandGenre(genre_name) => (
+                Task::none(),
+                SongsAction::NavigateAndExpandGenre(genre_name),
+            ),
             SongsMessage::ToggleColumnVisible(col) => {
                 let new_value = self.column_visibility.toggle(col);
                 (

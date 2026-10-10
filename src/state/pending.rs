@@ -20,8 +20,11 @@ pub enum PendingExpand {
         artist_id: String,
         for_browsing_pane: bool,
     },
+    /// Keyed by the genre NAME: the click sites (a song's or album's genre
+    /// text) hold no tag id. The resolver matches it against
+    /// `GenreUIViewData::name`.
     Genre {
-        genre_id: String,
+        genre_name: String,
         for_browsing_pane: bool,
     },
     /// Songs aren't expandable, so this variant exists solely to support the
@@ -63,15 +66,16 @@ impl PendingExpand {
         }
     }
 
-    /// Target id carried by this variant. Each variant's id field has a
-    /// distinct name (`album_id`/`artist_id`/`genre_id`/`song_id`) — this
-    /// accessor lets entity-agnostic call sites read the id without a
+    /// The value this variant's target is matched on: the id for albums,
+    /// artists and songs, the name for genres. Each variant's field has a
+    /// distinct name (`album_id`/`artist_id`/`genre_name`/`song_id`); this
+    /// accessor lets entity-agnostic call sites read it without a
     /// per-variant match.
-    pub fn entity_id(&self) -> &str {
+    pub fn match_key(&self) -> &str {
         match self {
             Self::Album { album_id, .. } => album_id,
             Self::Artist { artist_id, .. } => artist_id,
-            Self::Genre { genre_id, .. } => genre_id,
+            Self::Genre { genre_name, .. } => genre_name,
             Self::Song { song_id, .. } => song_id,
         }
     }
@@ -122,7 +126,7 @@ mod tests {
     #[test]
     fn load_message_picks_loadgenres_for_genre_variant() {
         let p = PendingExpand::Genre {
-            genre_id: id("Rock"),
+            genre_name: id("Rock"),
             for_browsing_pane: false,
         };
         assert!(matches!(p.load_message(), Message::LoadGenres));
@@ -138,13 +142,13 @@ mod tests {
     }
 
     #[test]
-    fn entity_id_returns_inner_id_for_every_variant() {
+    fn match_key_returns_the_matched_value_for_every_variant() {
         assert_eq!(
             PendingExpand::Album {
                 album_id: id("a1"),
                 for_browsing_pane: false,
             }
-            .entity_id(),
+            .match_key(),
             "a1",
         );
         assert_eq!(
@@ -152,15 +156,15 @@ mod tests {
                 artist_id: id("ar2"),
                 for_browsing_pane: false,
             }
-            .entity_id(),
+            .match_key(),
             "ar2",
         );
         assert_eq!(
             PendingExpand::Genre {
-                genre_id: id("Jazz"),
+                genre_name: id("Jazz"),
                 for_browsing_pane: false,
             }
-            .entity_id(),
+            .match_key(),
             "Jazz",
         );
         assert_eq!(
@@ -168,7 +172,7 @@ mod tests {
                 song_id: id("s7"),
                 for_browsing_pane: false,
             }
-            .entity_id(),
+            .match_key(),
             "s7",
         );
     }

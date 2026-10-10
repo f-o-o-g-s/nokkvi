@@ -187,7 +187,7 @@ pub enum AlbumsAction {
     TopSongs(String),     // artist_name - open similar tab for top songs
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
-    NavigateAndExpandGenre(String),  // genre_id - navigate to Genres and auto-expand
+    NavigateAndExpandGenre(String),  // genre name - navigate to Genres and auto-expand
     ColumnVisibilityChanged(AlbumsColumn, bool),
     None,
 }

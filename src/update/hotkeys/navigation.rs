@@ -424,7 +424,7 @@ impl Nokkvi {
                     for_browsing_pane: false,
                 },
                 View::Genres => crate::state::PendingExpand::Genre {
-                    genre_id: qs.genre.clone(),
+                    genre_name: qs.genre.clone(),
                     for_browsing_pane: false,
                 },
                 View::Queue

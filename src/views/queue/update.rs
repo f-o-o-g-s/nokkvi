@@ -87,9 +87,10 @@ impl QueuePage {
                 Task::none(),
                 QueueAction::NavigateAndExpandArtist(artist_id),
             ),
-            QueueMessage::NavigateAndExpandGenre(genre_id) => {
-                (Task::none(), QueueAction::NavigateAndExpandGenre(genre_id))
-            }
+            QueueMessage::NavigateAndExpandGenre(genre_name) => (
+                Task::none(),
+                QueueAction::NavigateAndExpandGenre(genre_name),
+            ),
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
                 (Task::none(), QueueAction::SortModeChanged(sort_mode))

@@ -393,7 +393,7 @@ pub enum QueueAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
-    NavigateAndExpandGenre(String), // genre_id - navigate to Genres and auto-expand
+    NavigateAndExpandGenre(String), // genre name - navigate to Genres and auto-expand
     /// User toggled a queue column's visibility — persist to config.toml.
     ColumnVisibilityChanged(QueueColumn, bool),
     /// Bubble to root: open the default-playlist picker overlay.

@@ -96,7 +96,7 @@ macro_rules! for_each_expandable_entity {
             page_field:              genres_page,
             library_field:           genres,
             pending_var:             crate::state::PendingExpand::Genre,
-            pending_field:           genre_id,
+            pending_field:           genre_name,
             pending_factory:         pending_genre,
             pin_var:                 crate::state::PendingTopPin::Genre,
             view_const:              crate::View::Genres,

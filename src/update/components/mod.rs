@@ -791,18 +791,18 @@ impl Nokkvi {
                     },
                 ))))
             }
-            views::CommonViewAction::NavigateAndExpandGenre(genre_id) => {
+            views::CommonViewAction::NavigateAndExpandGenre(genre_name) => {
                 if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
                     return Some(Task::done(Message::Navigation(NavigationMessage::Expand(
                         crate::state::PendingExpand::Genre {
-                            genre_id,
+                            genre_name,
                             for_browsing_pane: true,
                         },
                     ))));
                 }
                 Some(Task::done(Message::Navigation(NavigationMessage::Expand(
                     crate::state::PendingExpand::Genre {
-                        genre_id,
+                        genre_name,
                         for_browsing_pane: false,
                     },
                 ))))

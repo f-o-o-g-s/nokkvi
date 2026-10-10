@@ -154,7 +154,7 @@ impl ResolveSpec for GenreSpec {
 
     fn target_id(pending: &PendingExpand) -> Option<String> {
         match pending {
-            PendingExpand::Genre { genre_id, .. } => Some(genre_id.clone()),
+            PendingExpand::Genre { genre_name, .. } => Some(genre_name.clone()),
             _ => None,
         }
     }
@@ -167,12 +167,12 @@ impl ResolveSpec for GenreSpec {
         &mut app.genres_page.common.slot_list
     }
 
-    /// Genre's quirk: Navidrome's `/api/genre` returns internal UUIDs that
-    /// differ from the display names; click sites only have access to the
-    /// display name. The lookup matches against `item.name`, but the
-    /// `pending_top_pin` and downstream `AlbumsLoaded(genre_id, …)` messages
-    /// carry the resolved internal UUID — that's what `Cow::Owned(item.id)`
-    /// surfaces back to the generic body.
+    /// Genre's quirk: Navidrome's `/api/genre` ids are tag ids (a hash of
+    /// the lowercased name) that differ from the display names; click sites
+    /// only have access to the display name. The lookup matches against
+    /// `item.name`, but the `pending_top_pin` and downstream
+    /// `AlbumsLoaded(genre_id, …)` messages carry the resolved tag id —
+    /// that's what `Cow::Owned(item.id)` surfaces back to the generic body.
     fn match_target<'a>(item: &'a Self::Item, target: &'a str) -> Option<Cow<'a, str>> {
         (item.name == target).then(|| Cow::Owned(item.id.clone()))
     }

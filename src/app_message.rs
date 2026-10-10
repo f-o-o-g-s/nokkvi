@@ -2033,15 +2033,15 @@ mod tests {
         // intentionally lacks a Genre variant. Reusing `PendingExpand` is
         // why the namespace doesn't need a parallel `ItemKind`-shaped enum.
         let msg = Message::Navigation(NavigationMessage::Expand(PendingExpand::Genre {
-            genre_id: "Rock".into(),
+            genre_name: "Rock".into(),
             for_browsing_pane: true,
         }));
         match msg {
             Message::Navigation(NavigationMessage::Expand(PendingExpand::Genre {
-                genre_id,
+                genre_name,
                 for_browsing_pane,
             })) => {
-                assert_eq!(genre_id, "Rock");
+                assert_eq!(genre_name, "Rock");
                 assert!(for_browsing_pane);
             }
             _ => panic!(

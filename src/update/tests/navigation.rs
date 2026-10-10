@@ -1374,7 +1374,7 @@ fn start_center_on_playing_chain_installs_genre_target() {
     seed_genres(&mut app, vec![make_genre("stale", "Stale Genre")]);
 
     let _ = app.start_center_on_playing_chain(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
+        genre_name: "Rock".to_string(),
         for_browsing_pane: false,
     });
 
@@ -1382,8 +1382,8 @@ fn start_center_on_playing_chain_installs_genre_target() {
     assert!(app.library.genres.is_empty());
     assert!(matches!(
         app.pending_expand.target,
-        Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false })
-            if genre_id == "Rock"
+        Some(crate::state::PendingExpand::Genre { ref genre_name, for_browsing_pane: false })
+            if genre_name == "Rock"
     ));
     assert!(app.pending_expand.center_only);
 }

@@ -802,10 +802,10 @@ impl Nokkvi {
                     },
                 )));
             }
-            QueueAction::NavigateAndExpandGenre(genre_id) => {
+            QueueAction::NavigateAndExpandGenre(genre_name) => {
                 return Task::done(Message::Navigation(NavigationMessage::Expand(
                     crate::state::PendingExpand::Genre {
-                        genre_id,
+                        genre_name,
                         for_browsing_pane: false,
                     },
                 )));

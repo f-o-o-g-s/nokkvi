@@ -265,10 +265,10 @@ pub(crate) fn pending_artist(id: &str) -> crate::state::PendingExpand {
     }
 }
 
-/// Build a top-pane `PendingExpand::Genre` with the given id.
-pub(crate) fn pending_genre(id: &str) -> crate::state::PendingExpand {
+/// Build a top-pane `PendingExpand::Genre` for the given genre name.
+pub(crate) fn pending_genre(name: &str) -> crate::state::PendingExpand {
     crate::state::PendingExpand::Genre {
-        genre_id: id.to_string(),
+        genre_name: name.to_string(),
         for_browsing_pane: false,
     }
 }
@@ -292,8 +292,8 @@ pub(crate) fn arm_pending_artist(app: &mut Nokkvi, id: &str) {
 }
 
 /// Arm `pending_expand` for a Genre target (top-pane, not browsing).
-pub(crate) fn arm_pending_genre(app: &mut Nokkvi, id: &str) {
-    app.pending_expand.target = Some(pending_genre(id));
+pub(crate) fn arm_pending_genre(app: &mut Nokkvi, name: &str) {
+    app.pending_expand.target = Some(pending_genre(name));
 }
 
 /// Arm `pending_expand` for a Song target (top-pane, not browsing).

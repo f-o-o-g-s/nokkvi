@@ -161,7 +161,7 @@ pub enum SongsAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand this artist
-    NavigateAndExpandGenre(String), // genre_id - navigate to Genres and auto-expand this genre
+    NavigateAndExpandGenre(String), // genre name - navigate to Genres and auto-expand this genre
     ColumnVisibilityChanged(SongsColumn, bool),
     None,
 }

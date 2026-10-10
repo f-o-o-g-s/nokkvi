@@ -263,9 +263,10 @@ impl AlbumsPage {
                     Task::none(),
                     AlbumsAction::NavigateAndExpandArtist(artist_id),
                 ),
-                AlbumsMessage::NavigateAndExpandGenre(genre_id) => {
-                    (Task::none(), AlbumsAction::NavigateAndExpandGenre(genre_id))
-                }
+                AlbumsMessage::NavigateAndExpandGenre(genre_name) => (
+                    Task::none(),
+                    AlbumsAction::NavigateAndExpandGenre(genre_name),
+                ),
                 AlbumsMessage::ToggleColumnVisible(col) => {
                     let new_value = self.column_visibility.toggle(col);
                     (

@@ -34,12 +34,12 @@ pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) 
 /// is ignored). Called by the collapsed `handle_pending_expand_timeout`
 /// dispatcher — superseded clicks stay silent because the active target
 /// has already been replaced or cleared. Discriminant equality plus
-/// `entity_id()` covers the "same variant + same id" contract without an
+/// `match_key()` covers the "same variant + same id" contract without an
 /// N×N pairing match.
 fn pending_expand_timeout_toast(app: &mut Nokkvi, expected: &crate::state::PendingExpand) {
     let id_matches = app.pending_expand.target.as_ref().is_some_and(|active| {
         std::mem::discriminant(active) == std::mem::discriminant(expected)
-            && active.entity_id() == expected.entity_id()
+            && active.match_key() == expected.match_key()
     });
     if id_matches {
         let label = match expected {
@@ -143,13 +143,13 @@ impl Nokkvi {
                 for_browsing_pane: true,
             }) => self.handle_browser_pane_navigate_and_expand_artist(artist_id),
             NavigationMessage::Expand(PendingExpand::Genre {
-                genre_id,
+                genre_name,
                 for_browsing_pane: false,
-            }) => self.handle_navigate_and_expand_genre(genre_id),
+            }) => self.handle_navigate_and_expand_genre(genre_name),
             NavigationMessage::Expand(PendingExpand::Genre {
-                genre_id,
+                genre_name,
                 for_browsing_pane: true,
-            }) => self.handle_browser_pane_navigate_and_expand_genre(genre_id),
+            }) => self.handle_browser_pane_navigate_and_expand_genre(genre_name),
             // Songs aren't an Expand call site today — `Expand(Song)` is a
             // forward-compatible shape. The CenterOnPlaying flow primes Song
             // targets via `start_center_on_playing_chain` (not Expand).
@@ -977,9 +977,9 @@ impl Nokkvi {
 
     /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
     /// chain is single-shot since genres don't paginate.
-    pub(crate) fn handle_navigate_and_expand_genre(&mut self, genre_id: String) -> Task<Message> {
+    pub(crate) fn handle_navigate_and_expand_genre(&mut self, genre_name: String) -> Task<Message> {
         let pending = crate::state::PendingExpand::Genre {
-            genre_id,
+            genre_name,
             for_browsing_pane: false,
         };
         self.prime_expand(pending.clone());
@@ -990,10 +990,10 @@ impl Nokkvi {
     /// Browsing-pane variant of `handle_navigate_and_expand_genre`.
     pub(crate) fn handle_browser_pane_navigate_and_expand_genre(
         &mut self,
-        genre_id: String,
+        genre_name: String,
     ) -> Task<Message> {
         let pending = crate::state::PendingExpand::Genre {
-            genre_id,
+            genre_name,
             for_browsing_pane: true,
         };
         self.prime_expand(pending.clone());
