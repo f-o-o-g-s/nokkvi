@@ -1688,10 +1688,19 @@ impl CustomAudioEngine {
     /// promotion, so callers fall back to the song's metadata length (the UI
     /// tick does) instead of showing the outgoing's. See [`Self::position`].
     pub fn duration(&self) -> u64 {
-        if self.skip_fade_window_pending() || self.crossfade.skip_fade {
+        if self.skip_landing_pending() {
             return 0;
         }
         self.duration
+    }
+
+    /// Whether a manual skip or click has moved the queue to a target the
+    /// engine has not promoted yet: its decoder is building (the
+    /// `skip_fade_pending` window) or it is blending in (a skip blend, until
+    /// its finalize). The engine's [`Self::source`] still names the
+    /// OUTGOING here, so it is behind the queue, never ahead of it.
+    pub fn skip_landing_pending(&self) -> bool {
+        self.skip_fade_window_pending() || self.crossfade.skip_fade
     }
 
     /// Get volume (0.0-1.0)

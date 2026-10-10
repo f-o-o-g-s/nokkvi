@@ -35,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Importing a .nsp file with a refresh delay now warns when the server is older than 0.64 and will ignore it.
 - Adding, removing or moving songs late in a track no longer turns the next crossfade or gapless join into a hard cut.
 - Changing a crossfade or bit-perfect setting late in a track no longer turns the next transition into a hard cut.
+- With Fade on Skip set to Crossfade, a song reached with Previous now crossfades into the next one instead of cutting.
 
 ### Removed
 

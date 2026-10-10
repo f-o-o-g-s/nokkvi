@@ -823,9 +823,22 @@ impl PlaybackController {
         // contains a unique `_=timestamp` parameter that makes full-URL
         // comparison always fail even for the same song.
         // Skip this guard in repeat-track mode — same-song prep is intentional there.
+        //
+        // The guard is for an engine AHEAD of the queue: the inline gapless
+        // swap has already moved the engine onto the next song but the
+        // completion has not advanced the cursor yet, so the peek names the
+        // song now playing. While a manual skip or click is landing the
+        // engine is BEHIND the queue instead (its source is still the
+        // outgoing), and after Previous the song after the target IS that
+        // outgoing: it is the right next track, and the store keeps it for
+        // the target (its mid-window branch; finalize re-arms from it).
         if !is_repeat_track {
             let engine = self.audio_engine.lock().await;
-            let current_source = engine.source();
+            let current_source = if engine.skip_landing_pending() {
+                ""
+            } else {
+                engine.source()
+            };
             if !current_source.is_empty() {
                 let current_id = current_source
                     .find("id=")
@@ -2349,6 +2362,77 @@ mod tests {
         assert!(
             prep_spawned,
             "the seek must re-prepare the next track after abandoning the blend"
+        );
+        Ok(())
+    }
+
+    /// Bug 5: after Previous with Fade on Skip = Crossfade, the song after the
+    /// target IS the outgoing, which the engine still names until the blend
+    /// promotes the target. A prep in that window (the tick that straddles
+    /// the skip triggers one) must still prepare it: the old same-song guard
+    /// bailed, and the UI's latch then stayed shut for the whole target, so
+    /// its own ending was a hard cut.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_prep_inside_a_previous_skip_window_prepares_the_outgoing_as_next() -> Result<()> {
+        let fx = click_fixture().await?;
+        let mut status = fx
+            .tasks
+            .take_status_receiver()
+            .ok_or_else(|| anyhow::anyhow!("status receiver already taken"))?;
+        // Previous from "b" has moved the queue to "a"; the engine still
+        // plays "b" while the skip's decoder for "a" builds.
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(0))
+            .await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None)
+                .await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await;
+            assert!(e.skip_fade_window_pending(), "precondition: window open");
+        }
+
+        assert!(
+            fx.playback.prepare_next_for_gapless().await,
+            "the prep must go ahead while the engine is behind the queue"
+        );
+        let deadline = std::time::Duration::from_secs(5);
+        let mut prep_spawned = false;
+        while let Ok(Some((handle, _))) = tokio::time::timeout(deadline, status.recv()).await {
+            if handle.name.starts_with("gapless_prep") {
+                prep_spawned = true;
+                break;
+            }
+        }
+        assert!(prep_spawned, "the prep's decoder build must be spawned");
+        Ok(())
+    }
+
+    /// The guard bug 5 narrowed still protects what it was for: with no skip
+    /// in flight, a next song equal to the engine's source means the engine
+    /// is AHEAD of the queue (a gapless join the completion has not caught
+    /// up with yet), and preparing that song would play it twice.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_prep_while_the_engine_is_ahead_of_the_queue_does_nothing() -> Result<()> {
+        let fx = click_fixture().await?;
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(0))
+            .await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None)
+                .await;
+            e.force_playing_for_test();
+        }
+
+        assert!(
+            !fx.playback.prepare_next_for_gapless().await,
+            "the engine already plays the next song"
         );
         Ok(())
     }
