@@ -32,6 +32,10 @@ impl Nokkvi {
             MprisEvent::Connected(connection) => {
                 debug!(" MPRIS connected - storing connection handle");
                 self.mpris_connection = Some(connection);
+                // A fresh player starts with CanSeek false and no track id:
+                // forget what an earlier one was told, so the next tick's push
+                // republishes CanSeek instead of skipping it as unchanged.
+                self.mpris_track = crate::services::mpris::PublishedTrack::default();
                 Task::none()
             }
 
@@ -83,11 +87,27 @@ impl Nokkvi {
                 Task::done(Message::Playback(PlaybackMessage::SeekRelative(offset_s)))
             }
 
-            MprisEvent::SetPosition(position_us) => {
-                let position_s = (position_us as f64 / 1_000_000.0) as f32;
-                debug!(" MPRIS: SetPosition {position_us}µs → {position_s}s");
-                Task::done(Message::Playback(PlaybackMessage::Seek(position_s)))
-            }
+            MprisEvent::SetPosition {
+                track_id,
+                position_us,
+            } => match self.mpris_track.set_position_target(&track_id, position_us) {
+                Some(position_s) => {
+                    debug!(" MPRIS: SetPosition {position_us}µs → {position_s}s");
+                    self.handle_seek(position_s)
+                }
+                // The spec's "do nothing": a stale track id, a position
+                // outside the track, or nothing seekable (a station).
+                None => {
+                    debug!(
+                        " MPRIS: ignored SetPosition {position_us}µs for {track_id} \
+                         (current {}, length {}µs, can seek {})",
+                        self.mpris_track.track_id,
+                        self.mpris_track.length_us,
+                        self.mpris_track.can_seek
+                    );
+                    Task::none()
+                }
+            },
 
             MprisEvent::SetVolume(volume) => {
                 // Clamp to valid 0.0-1.0 range to prevent playerctl from going above 100%.

@@ -12,7 +12,7 @@
 use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};
-use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, Volume};
+use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, Volume};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, trace, warn};
 
@@ -49,8 +49,10 @@ pub enum MprisEvent {
     Previous,
     /// Seek method called (offset in microseconds, can be negative)
     Seek(i64),
-    /// SetPosition method called (absolute position in microseconds)
-    SetPosition(i64),
+    /// SetPosition method called: the `mpris:trackid` the client aims at
+    /// and the absolute position in microseconds. The app ignores it unless
+    /// [`PublishedTrack::set_position_target`] accepts it.
+    SetPosition { track_id: String, position_us: i64 },
     /// Volume property set (0.0–1.0)
     SetVolume(f64),
     /// LoopStatus property set
@@ -64,8 +66,10 @@ pub enum MprisEvent {
 pub(crate) enum MprisCommand {
     /// Update playback status (Playing/Paused/Stopped)
     SetPlaybackStatus(PlaybackStatus),
-    /// Update metadata (title, artist, album, duration_us, art_url)
+    /// Update metadata (track id, title, artist, album, duration_us, art_url)
     SetMetadata {
+        /// A D-Bus object path from [`track_id_path`].
+        track_id: String,
         title: String,
         artist: String,
         album: String,
@@ -82,6 +86,101 @@ pub(crate) enum MprisCommand {
     SetLoopStatus(LoopStatus),
     /// Update shuffle status
     SetShuffle(bool),
+    /// Update the CanSeek property
+    SetCanSeek(bool),
+}
+
+/// What a published `mpris:trackid` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MprisItem<'a> {
+    /// Nothing is loaded.
+    Nothing,
+    /// A queue song, by its server id.
+    Song(&'a str),
+    /// A radio station, by its server id.
+    Station(&'a str),
+}
+
+/// The `mpris:trackid` object path for `item`: `/org/nokkvi/track/<id>` for a
+/// song, `/org/nokkvi/station/<id>` for a station, the spec's `NoTrack` path
+/// for nothing (or an empty id).
+///
+/// An object path element may hold only `[A-Za-z0-9_]`, so the id is escaped
+/// injectively: ASCII letters and digits stay, every other byte (including
+/// `_` itself) becomes `_` plus two lowercase hex digits. Two distinct ids
+/// can never share a path, which `SetPosition`'s stale-id check relies on.
+pub(crate) fn track_id_path(item: MprisItem<'_>) -> String {
+    use std::fmt::Write as _;
+
+    let (prefix, id) = match item {
+        MprisItem::Song(id) if !id.is_empty() => ("/org/nokkvi/track/", id),
+        MprisItem::Station(id) if !id.is_empty() => ("/org/nokkvi/station/", id),
+        MprisItem::Nothing | MprisItem::Song(_) | MprisItem::Station(_) => {
+            return TrackId::NO_TRACK.as_str().to_string();
+        }
+    };
+    let mut path = String::with_capacity(prefix.len() + id.len());
+    path.push_str(prefix);
+    for byte in id.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            path.push(char::from(byte));
+        } else {
+            // Writing to a String cannot fail.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "fmt::Write for String is infallible"
+            )]
+            let _ = write!(path, "_{byte:02x}");
+        }
+    }
+    path
+}
+
+/// What nokkvi last published for the current item: the state a
+/// `SetPosition` call is judged against. Recorded by the tick's MPRIS push
+/// whether or not a D-Bus connection exists, so tests can read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PublishedTrack {
+    /// The published `mpris:trackid` ([`track_id_path`]).
+    pub track_id: String,
+    /// The published `mpris:length`, in microseconds.
+    pub length_us: i64,
+    /// The published `CanSeek`.
+    pub can_seek: bool,
+}
+
+impl Default for PublishedTrack {
+    fn default() -> Self {
+        Self {
+            track_id: track_id_path(MprisItem::Nothing),
+            length_us: 0,
+            can_seek: false,
+        }
+    }
+}
+
+impl PublishedTrack {
+    /// The record for one tick: `item` and its length. Seeking is possible
+    /// only for a queue song of known length; a station is a live stream,
+    /// and with nothing loaded there is nothing to seek in.
+    pub(crate) fn for_item(item: MprisItem<'_>, length_us: i64) -> Self {
+        Self {
+            track_id: track_id_path(item),
+            length_us,
+            can_seek: matches!(item, MprisItem::Song(_)) && length_us > 0,
+        }
+    }
+
+    /// The seek target, in seconds, for a `SetPosition(track_id, position)`
+    /// call, or `None` when the MPRIS spec says to ignore it: the id is not
+    /// the current track's (a stale request), seeking is not possible, or
+    /// the position is negative or past the track's length.
+    pub(crate) fn set_position_target(&self, track_id: &str, position_us: i64) -> Option<f32> {
+        let accepted = self.can_seek
+            && track_id == self.track_id
+            && (0..=self.length_us).contains(&position_us);
+        accepted.then(|| (position_us as f64 / 1_000_000.0) as f32)
+    }
 }
 
 /// Handle to push state updates to the MPRIS server.
@@ -111,6 +210,7 @@ impl MprisConnection {
     /// Update current track metadata
     pub fn set_metadata(
         &self,
+        track_id: &str,
         title: &str,
         artist: &str,
         album: &str,
@@ -118,6 +218,7 @@ impl MprisConnection {
         art_url: Option<&str>,
     ) {
         self.send(MprisCommand::SetMetadata {
+            track_id: track_id.to_string(),
             title: title.to_string(),
             artist: artist.to_string(),
             album: album.to_string(),
@@ -149,6 +250,11 @@ impl MprisConnection {
     /// Update shuffle status
     pub fn set_shuffle(&self, shuffle: bool) {
         self.send(MprisCommand::SetShuffle(shuffle));
+    }
+
+    /// Update the CanSeek property
+    pub fn set_can_seek(&self, can_seek: bool) {
+        self.send(MprisCommand::SetCanSeek(can_seek));
     }
 }
 
@@ -245,7 +351,8 @@ fn run_mpris_thread(
             .can_pause(true)
             .can_go_next(true)
             .can_go_previous(true)
-            .can_seek(true)
+            // Nothing is loaded yet; the first tick's push sets it.
+            .can_seek(false)
             .can_control(true)
             .build()
             .await
@@ -311,8 +418,14 @@ fn run_mpris_thread(
 
             // SetPosition
             let tx = event_tx.clone();
-            player.connect_set_position(move |_, _track_id, position| {
-                forward(&tx, MprisEvent::SetPosition(position.as_micros()));
+            player.connect_set_position(move |_, track_id, position| {
+                forward(
+                    &tx,
+                    MprisEvent::SetPosition {
+                        track_id: track_id.as_str().to_string(),
+                        position_us: position.as_micros(),
+                    },
+                );
             });
 
             // Volume setter
@@ -349,13 +462,18 @@ fn run_mpris_thread(
                     );
                 }
                 Ok(MprisCommand::SetMetadata {
+                    track_id,
                     title,
                     artist,
                     album,
                     duration_us,
                     art_url,
                 }) => {
+                    // `track_id_path` only builds valid object paths; the
+                    // fallback is unreachable but keeps a bad one off D-Bus.
+                    let track_id = TrackId::try_from(track_id).unwrap_or(TrackId::NO_TRACK);
                     let mut builder = Metadata::builder()
+                        .trackid(track_id)
                         .title(title)
                         .artist([artist])
                         .album(album)
@@ -390,6 +508,9 @@ fn run_mpris_thread(
                 }
                 Ok(MprisCommand::SetShuffle(shuffle)) => {
                     log_failed("Shuffle update", player.set_shuffle(shuffle).await);
+                }
+                Ok(MprisCommand::SetCanSeek(can_seek)) => {
+                    log_failed("CanSeek update", player.set_can_seek(can_seek).await);
                 }
                 Err(std_mpsc::TryRecvError::Empty) => {
                     // No commands, yield for a bit

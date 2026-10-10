@@ -52,6 +52,9 @@ All notable changes to this project will be documented in this file.
 - Adding the same song to a playlist twice in quick succession now adds it once, then asks about the duplicate.
 - In Theater Mode, the `nav-up`, `nav-down`, `enter`, `add-to-queue` and `remove-from-queue` commands now leave Theater Mode instead of acting on the hidden list.
 - Switching between a radio station and the queue no longer briefly shows the previous item's cover in desktop media widgets.
+- Desktop media widgets no longer show a seek bar while a radio station plays.
+- Desktop media widgets now receive a track ID for the playing song or station.
+- A media-widget seek aimed at a previous song, or past the song's end, is now ignored instead of moving the playhead.
 
 ### Removed
 

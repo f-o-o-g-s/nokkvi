@@ -196,6 +196,8 @@ struct MprisUpdate<'a> {
     /// down for this tick and the next one publishes the right item. Status,
     /// loop, shuffle and position still apply.
     metadata_current: bool,
+    /// The item this tick describes, for `mpris:trackid` and `CanSeek`.
+    item: crate::services::mpris::MprisItem<'a>,
     art_url: Option<&'a str>,
     repeat: bool,
     repeat_queue: bool,
@@ -964,6 +966,11 @@ impl Nokkvi {
                 station_id.as_deref(),
                 &self.active_playback,
             ),
+            item: match (station_id.as_deref(), song_id.as_deref()) {
+                (Some(station), _) => crate::services::mpris::MprisItem::Station(station),
+                (None, Some(song)) => crate::services::mpris::MprisItem::Song(song),
+                (None, None) => crate::services::mpris::MprisItem::Nothing,
+            },
             art_url: art_url.as_deref(),
             repeat,
             repeat_queue,
@@ -1169,6 +1176,19 @@ impl Nokkvi {
 
     /// Push playback state to MPRIS D-Bus interface.
     fn push_mpris_state(&mut self, u: MprisUpdate<'_>) {
+        // Record what this tick describes before the connection check, so
+        // `SetPosition` is judged against it (and tests can read it). A stale
+        // tick leaves the record on the item it last described.
+        let mut can_seek_changed = false;
+        if u.metadata_current {
+            let published = crate::services::mpris::PublishedTrack::for_item(
+                u.item,
+                i64::from(u.duration) * 1_000_000,
+            );
+            can_seek_changed = published.can_seek != self.mpris_track.can_seek;
+            self.mpris_track = published;
+        }
+
         let Some(ref conn) = self.mpris_connection else {
             return;
         };
@@ -1209,7 +1229,17 @@ impl Nokkvi {
         // Push state via channel (synchronous, non-blocking)
         conn.set_playback_status(status);
         if u.metadata_current {
-            conn.set_metadata(mpris_title, mpris_artist, u.album, duration_us, u.art_url);
+            conn.set_metadata(
+                &self.mpris_track.track_id,
+                mpris_title,
+                mpris_artist,
+                u.album,
+                duration_us,
+                u.art_url,
+            );
+        }
+        if can_seek_changed {
+            conn.set_can_seek(self.mpris_track.can_seek);
         }
         conn.set_loop_status(loop_status);
         conn.set_shuffle(u.random);

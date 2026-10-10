@@ -324,6 +324,9 @@ pub struct Nokkvi {
     pub mpris_connection: Option<services::mpris::MprisConnection>,
     /// Last position (µs) pushed to MPRIS — used to detect seek discontinuities
     pub last_mpris_position_us: i64,
+    /// The track id, length and CanSeek last published to MPRIS: what an
+    /// MPRIS `SetPosition` call is checked against.
+    pub(crate) mpris_track: services::mpris::PublishedTrack,
     /// Handle to push rate-this-track reminders to the notification service.
     /// `None` until the subscription connects (or while the feature is off).
     pub notification_connection: Option<services::notifications::NotificationConnection>,
@@ -513,6 +516,7 @@ impl Default for Nokkvi {
             harbour_scene: crate::state::HarbourScene::default(),
             mpris_connection: None,
             last_mpris_position_us: 0,
+            mpris_track: services::mpris::PublishedTrack::default(),
             notification_connection: None,
             last_reminded_song_id: None,
             tray_connection: None,

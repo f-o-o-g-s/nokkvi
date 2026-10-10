@@ -1768,6 +1768,7 @@ impl Nokkvi {
             lyrics: _,
             last_reminded_song_id: _,
             last_mpris_position_us: _,
+            mpris_track: _,
             radio_scrobble: _,
             // ---- Kept: the session-expired toast must outlive this reset ----
             toast: _,
