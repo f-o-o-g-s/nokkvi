@@ -4,6 +4,7 @@
 //! star/rating functionality and Subsonic URL helpers.
 
 pub mod albums;
+pub mod artist_info;
 pub mod artists;
 pub mod client;
 pub mod genres;

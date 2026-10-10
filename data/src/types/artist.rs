@@ -88,3 +88,26 @@ impl std::fmt::Display for Artist {
         )
     }
 }
+
+/// What Subsonic `getArtistInfo2` reports about one artist: the external
+/// info Navidrome's agents fetched (Last.fm, or another configured agent).
+///
+/// Navidrome fills this lazily, only when a client asks: the native
+/// `/api/artist` row carries the same `biography` / `externalUrl` columns, but
+/// they stay empty for an artist no client has asked about. Every field is
+/// `None` when the server sent it empty or not at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistInfo {
+    /// The agent's biography, sanitized by Navidrome. Its Last.fm agent
+    /// strips Last.fm's trailing "Read more" link; another agent's text can
+    /// still carry an `<a>` tag, as the native row's `biography` can.
+    pub biography: Option<String>,
+    /// The agent's page for the artist. Subsonic names the key `lastFmUrl`,
+    /// but Navidrome fills it from whichever agent answered first, so it is
+    /// not always a Last.fm link.
+    pub external_url: Option<String>,
+    pub musicbrainz_id: Option<String>,
+    pub small_image_url: Option<String>,
+    pub medium_image_url: Option<String>,
+    pub large_image_url: Option<String>,
+}

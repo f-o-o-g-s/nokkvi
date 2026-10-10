@@ -72,8 +72,8 @@ AppService (orchestrator)
 ├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
 │                              (Albums/Artists/Songs lazy-init their API client via LazyAuthedService)
 ├── API factory methods      — songs_api(), albums_api(), artists_api(), tags_api() (native)
-│                              + genres_api(), libraries_api(), playlists_api(), radios_api(),
-│                              random_api(), similar_api(), lyrics_api(), play_queue_api()
+│                              + artist_info_api(), genres_api(), libraries_api(), playlists_api(),
+│                              radios_api(), random_api(), similar_api(), lyrics_api(), play_queue_api()
 │                              (Subsonic). Construct *ApiService instances on demand; not
 │                              stored on AppService. `ls data/src/services/api/` is canonical.
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications

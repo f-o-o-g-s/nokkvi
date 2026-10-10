@@ -993,6 +993,10 @@ impl AppService {
     );
 
     subsonic_api_factory!(
+        (
+            artist_info_api,
+            crate::services::api::artist_info::ArtistInfoApiService
+        ),
         (genres_api, crate::services::api::genres::GenresApiService),
         (
             libraries_api,
