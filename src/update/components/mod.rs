@@ -1924,6 +1924,13 @@ impl Nokkvi {
         self.playlist_appends.reset_for_session();
         self.roulette = None;
         self.playback.reset_for_session();
+        // The scrobble latches gate one submission per track. A submission in
+        // flight at logout never gets its result (the root drops it with the
+        // session, `Message::SessionScoped`), so release them here: the same
+        // track, resumed after re-login, would otherwise never scrobble. The
+        // track identity stays (kept list above).
+        self.scrobble.submission_in_flight = false;
+        self.radio_scrobble.release_in_flight();
 
         // Transient UI work tied to the prior session — including any
         // modals the user might have had open at logout. Without this

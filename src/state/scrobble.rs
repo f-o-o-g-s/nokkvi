@@ -286,6 +286,17 @@ impl RadioScrobbleState {
         }
     }
 
+    /// Release the submit latch without an outcome: the submit's result will
+    /// never arrive (its task was dispatched by a session that has ended and
+    /// the root drops it), and a latch held into the next session would keep
+    /// the same track from ever scrobbling. The per-target progress stays, so
+    /// a target already done is not sent again.
+    pub fn release_in_flight(&mut self) {
+        if let Some(cur) = &mut self.current {
+            cur.in_flight = false;
+        }
+    }
+
     /// Whether a now-playing keep-alive is due: returns the current `(artist,
     /// title)` (and resets the timer) when playing and `interval_secs` have
     /// elapsed since the last now-playing send, else `None`. Keeps the service's

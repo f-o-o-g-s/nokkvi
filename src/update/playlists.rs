@@ -593,13 +593,13 @@ impl Nokkvi {
             }
             PlaylistsAction::RetryCapsFetch => {
                 // Re-attempt the post-auth version fetch (the dimmed entry's
-                // whole purpose). Failure keeps FetchFailed → retry stays.
-                if let Some(shell) = self.app_service.clone() {
-                    return Task::perform(
-                        async move { shell.auth().fetch_server_version().await.ok() },
-                        Message::ServerVersionFetched,
-                    );
-                }
+                // whole purpose). Failure keeps FetchFailed → retry stays. A
+                // `shell_task`, so an answer landing after logout cannot set
+                // the next session's server version.
+                return self.shell_task(
+                    |shell| async move { shell.auth().fetch_server_version().await.ok() },
+                    Message::ServerVersionFetched,
+                );
             }
             PlaylistsAction::DeletePlaylist(playlist_id) => {
                 let row = self.library.playlists.iter().find(|p| p.id == playlist_id);

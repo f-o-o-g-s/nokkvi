@@ -152,3 +152,46 @@ fn navidrome_sse_register_never_silently_drops_under_contention() {
     // Leave the global slot clean for any subsequent test.
     navidrome_sse::clear();
 }
+
+/// A scrobble submission in flight at logout never gets its result: the
+/// task's answer is dropped with the session (`Message::SessionScoped`). The
+/// latches that gate one submission per track must be released, or the same
+/// track resumed after re-login would never scrobble. The track identity
+/// itself stays (it follows the now-playing track).
+#[test]
+fn reset_session_state_releases_the_scrobble_latches() {
+    use crate::state::RadioScrobbleAction;
+
+    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("s1".into());
+    app.scrobble.submission_in_flight = true;
+    // A radio track whose submit was dispatched (the latch is set).
+    let _ = app.radio_scrobble.observe("Artist", "Title", 100);
+    assert!(matches!(
+        app.radio_scrobble.tick(101, true, 1),
+        RadioScrobbleAction::Scrobble { .. }
+    ));
+    assert!(
+        matches!(
+            app.radio_scrobble.tick(102, true, 1),
+            RadioScrobbleAction::None
+        ),
+        "latched while the submit is in flight"
+    );
+
+    let _ = app.reset_session_state();
+
+    assert_eq!(app.scrobble.current_song_id.as_deref(), Some("s1"));
+    assert!(
+        !app.scrobble.submission_in_flight,
+        "the queue scrobble latch is released at logout"
+    );
+    assert!(
+        matches!(
+            app.radio_scrobble.tick(103, true, 1),
+            RadioScrobbleAction::Scrobble { .. }
+        ),
+        "the radio latch is released at logout"
+    );
+}
