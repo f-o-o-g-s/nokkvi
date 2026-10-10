@@ -1800,8 +1800,8 @@ impl AppService {
     /// never has to follow the queue, so this skips
     /// [`crate::services::playback::decide_removal_aftermath`] on purpose:
     /// that plan keys on the navigator's song, which can differ from the
-    /// cursor's (a station started after Clear Queue, Play Next on the
-    /// playing row) and would then stop a station or reload the engine.
+    /// cursor's (Play Next on the playing row) and would then stop a
+    /// station or reload the engine.
     /// Only the gapless prep is reset, since a dropped row may be the
     /// prepared next track.
     pub async fn remove_queue_duplicates(&self) -> Result<Vec<u64>> {
