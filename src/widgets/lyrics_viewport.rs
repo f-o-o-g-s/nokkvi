@@ -48,11 +48,12 @@ const LINE_HEIGHT: f32 = 22.0;
 const SLOT_PAD: f32 = 6.0;
 /// Horizontal inset of the text column from the panel edges.
 const H_PAD: f32 = 18.0;
-/// The panel side (shorter of width and height) at which a panel-fit sheet
-/// starts growing: about a Queue cover on a 1080p window, so theater never
-/// shows lyrics smaller than the Queue's.
+/// The panel side (shorter of width and height) at which the sheet starts
+/// growing: about a Queue cover on a 1080p window. Below it the text keeps the
+/// base size; above it the Queue cover and Theater Mode both scale up, so one
+/// panel size shows one text size wherever it is.
 const LYRICS_REFERENCE_SIDE: f32 = 540.0;
-/// The largest panel-fit scale (a 4K theater window).
+/// The largest panel-fit scale (a 1440p Queue cover, a 4K theater window).
 const LYRICS_MAX_SCALE: f32 = 2.5;
 /// Max wrapped rows a slot reserves; longer lines clip (honest trade — the
 /// corpus p95 line is 54 chars, well inside 2 rows at typical panel widths).
@@ -241,9 +242,6 @@ pub(crate) struct LyricsPanelData<'a> {
     /// The previous track's sheet dissolving out across a crossfaded
     /// transition (the incoming sheet fades in against it).
     pub dissolve: Option<DissolveView<'a>>,
-    /// Grow the text with the panel ([`panel_fit_scale`]) instead of the fixed
-    /// column size. Theater Mode sets it; the Queue cover keeps the fixed size.
-    pub fit_to_panel: bool,
     /// The lyric clock (`LyricsState::clock_ms`): the playhead the word-level
     /// highlight reads, run on per frame from the last position tick.
     pub clock_ms: u32,
@@ -251,9 +249,9 @@ pub(crate) struct LyricsPanelData<'a> {
     pub word_highlight: LyricsWordHighlight,
 }
 
-/// The lyric text scale for a panel of `width` × `height` when the sheet fits
-/// the panel: 1.0 up to a Queue-cover-sized panel, then growing with the
-/// panel's shorter side, capped.
+/// The lyric text scale for a panel of `width` × `height`: 1.0 up to a
+/// Queue-cover-sized panel, then growing with the panel's shorter side,
+/// capped.
 pub(crate) fn panel_fit_scale(width: f32, height: f32) -> f32 {
     (width.min(height) / LYRICS_REFERENCE_SIDE).clamp(1.0, LYRICS_MAX_SCALE)
 }
@@ -451,7 +449,7 @@ fn measure_words(
 /// (`elapsed_ms` / [`WORD_POP_MS`]). `Off`: nothing — the caller lights the
 /// line whole. `elapsed_ms` is how long the current word has been sung;
 /// `edge_px` is the width of one edge step (the text scale, so the bloom
-/// grows with a panel-fit sheet).
+/// grows with the panel).
 fn accent_fills(
     layout: &MeasuredWords,
     cursor: WordCursor,
@@ -777,16 +775,6 @@ impl<'a, M> LyricViewport<'a, M> {
         Self { data, on_wheel }
     }
 
-    /// The text scale for a viewport of `size`: 1.0 unless the sheet fits
-    /// the panel.
-    fn text_scale(&self, size: Size) -> f32 {
-        if self.data.fit_to_panel {
-            panel_fit_scale(size.width, size.height)
-        } else {
-            1.0
-        }
-    }
-
     /// The active line the word-level highlight applies to this frame: the
     /// setting is on, a line is active, and it carries word timing.
     fn worded_active_line(&self) -> Option<usize> {
@@ -862,7 +850,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         let state = tree.state.downcast_mut::<State>();
 
         // (Re-)shape the paragraphs when the doc or the panel width changes.
-        let text_scale = self.text_scale(bounds);
+        let text_scale = panel_fit_scale(bounds.width, bounds.height);
         let text_width = (bounds.width - 2.0 * H_PAD * text_scale).max(1.0);
         let scale = renderer.hint_factor();
         let scale_key = (text_scale * 100.0).round() as u32;
@@ -937,7 +925,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
     ) {
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let text_scale = self.text_scale(bounds.size());
+        let text_scale = panel_fit_scale(bounds.width, bounds.height);
         let h_pad = H_PAD * text_scale;
         let line_height = LINE_HEIGHT * text_scale;
 
@@ -1179,7 +1167,11 @@ mod tests {
 
     #[test]
     fn panel_fit_scale_grows_with_the_shorter_side_and_caps() {
-        assert_eq!(panel_fit_scale(400.0, 400.0), 1.0, "Queue-sized: unchanged");
+        assert_eq!(
+            panel_fit_scale(400.0, 400.0),
+            1.0,
+            "a small cover keeps the base size"
+        );
         assert_eq!(
             panel_fit_scale(3000.0, 300.0),
             1.0,
@@ -1547,7 +1539,7 @@ mod tests {
         assert_eq!(fills[1], fill(1, 10.0, 15.0, 1.0));
         assert_eq!(fills[2], fill(1, 15.0, 16.0, 0.6));
 
-        // A panel-fit sheet at twice the size gets edge steps twice as wide.
+        // A sheet scaled to twice the size gets edge steps twice as wide.
         let fills = accent_fills(
             &layout,
             WordCursor {

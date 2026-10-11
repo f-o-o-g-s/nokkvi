@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - With the Metadata Strip on Top Bar or Top Bar Under, the artwork column beside the list now reaches the window's top edge.
 - With Reflection Below Cover on, the Reflection's water now hangs below the cover over the UI, where there is room for it.
 - With Reflection Below Cover on, Bars and Lines now stand on the cover's bottom edge and fill Visualizer Height when their water fits below it.
+- Lyrics over a large Queue cover now grow with the cover, the same size Theater Mode shows at that size.
 
 ### Fixed
 
