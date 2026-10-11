@@ -108,11 +108,18 @@ impl Nokkvi {
         else {
             return Task::none();
         };
+        // Already on its way for this logo; the completion lands in the cache.
+        if self.artwork.radio_large_art_pending.get(&station_id) == Some(&token) {
+            return Task::none();
+        }
         let Some(shell) = &self.app_service else {
             return Task::none();
         };
         let albums_vm = shell.albums().clone();
         let artwork_size = self.settings.artwork_resolution.to_size();
+        self.artwork
+            .radio_large_art_pending
+            .insert(station_id.clone(), token.clone());
         Task::perform(
             async move {
                 let bytes = albums_vm
@@ -133,6 +140,8 @@ impl Nokkvi {
         station_id: String,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
+        // Release on every outcome so a failed fetch can be retried.
+        self.artwork.radio_large_art_pending.remove(&station_id);
         if let Some(h) = handle {
             self.artwork.radio_large_art.put(station_id, h);
         }
@@ -393,6 +402,10 @@ impl Nokkvi {
         let key = station_id.to_string();
         self.artwork.radio_art.pop(&key);
         self.artwork.radio_large_art.pop(&key);
+        // A fetch still in flight is for the old logo; the re-warm after the
+        // station-list reload must go out rather than wait on it (Refresh
+        // keeps the same token, so the token key alone would hold it back).
+        self.artwork.radio_large_art_pending.remove(&key);
 
         if self.app_service.is_none() {
             return Task::none();

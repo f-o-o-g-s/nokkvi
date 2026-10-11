@@ -666,3 +666,58 @@ fn custom_cover_upload_drops_the_stale_hash() {
         .expect("row");
     assert_eq!(row.image.valid_hash(), None);
 }
+
+// ============================================================================
+// Large custom-cover in-flight dedup
+// ============================================================================
+
+/// Re-centering a playlist whose large custom cover is still loading sends no
+/// second request, and a failed fetch releases the claim for the next
+/// centering.
+#[tokio::test]
+async fn custom_large_in_flight_is_not_requested_again() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    app.library
+        .playlists
+        .set_from_vec(vec![make_playlist("p1", "Road Trip", true)]);
+
+    assert!(
+        app.handle_load_playlist_custom_large("p1".into()).units() >= 1,
+        "the first centering fetches"
+    );
+    assert_eq!(
+        app.handle_load_playlist_custom_large("p1".into()).units(),
+        0,
+        "a repeat while the fetch is in flight sends nothing"
+    );
+
+    let _ = app.handle_playlist_custom_large_loaded("p1".into(), None);
+    assert!(
+        app.handle_load_playlist_custom_large("p1".into()).units() >= 1,
+        "a failed fetch must not block the retry"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// A custom cover replaced in the web UI while its old fetch is in flight is
+/// requested at the new version; only exact repeats are held back.
+#[tokio::test]
+async fn custom_large_at_a_new_version_is_requested_while_the_old_is_in_flight() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    let mut playlist = make_playlist("p1", "Road Trip", true);
+    app.library.playlists.set_from_vec(vec![playlist.clone()]);
+
+    let _ = app.handle_load_playlist_custom_large("p1".into());
+    playlist.updated_at = "2026-02-01T00:00:00Z".to_string();
+    app.library.playlists.set_from_vec(vec![playlist]);
+
+    assert!(
+        app.handle_load_playlist_custom_large("p1".into()).units() >= 1,
+        "the new version goes out"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}

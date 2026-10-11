@@ -148,6 +148,18 @@ pub struct ArtworkState {
     /// write `None` into `album_art_versions`. Unbounded like the version
     /// map; reset on logout via `Default`.
     pub large_artwork_hashes: HashMap<String, String>,
+    /// In-flight large-art fetches: album/artist id (the id space of
+    /// [`Self::large_artwork`]) -> the version the request carries (image
+    /// hash on Navidrome 0.64+, else `updated_at`). Every centering
+    /// re-dispatches the load, and a held arrow key at the end of a list
+    /// re-centers the same row on every repeat, so without this gate a slow
+    /// server stacks one full-size request per repeat. A centering at the
+    /// in-flight version sends nothing; a changed version (a cover replaced
+    /// mid-fetch) goes out, so the gate can't pin the old image. Inserted
+    /// only when the fetch task is built (never without a session, so a
+    /// claim can't outlive a logout into the next session), removed by the
+    /// `LargeLoaded` / `LargeArtistLoaded` handlers on success AND failure.
+    pub large_artwork_pending: HashMap<String, Option<String>>,
     /// Mini radio-station artwork (`station_id -> Handle`) for the Radios slot
     /// list. Holds either an admin-uploaded station logo (fetched via
     /// `getCoverArt?id=ra-…` when [`RadioStation::logo_cover_art`] is present)
@@ -165,6 +177,10 @@ pub struct ArtworkState {
     /// in-app identity. Falls back to [`Self::radio_art`] then the radio-tower
     /// glyph at the view layer.
     pub radio_large_art: SnapshottedLru<String, image::Handle>,
+    /// In-flight large-logo fetches: station id -> the logo token it
+    /// requests. Same contract as [`Self::large_artwork_pending`], released
+    /// by `RadioLargeLoaded`.
+    pub radio_large_art_pending: HashMap<String, String>,
     /// Per-station dedup of the last ICY `StreamUrl` we fetched now-playing art
     /// from (`station_id -> url`). The playback tick re-parses ICY metadata
     /// every ~100ms, so this gates the external fetch to fire only when the
@@ -191,6 +207,10 @@ pub struct ArtworkState {
     /// [`Self::playlist_custom_art`] at the view layer while loading.
     /// Mirrors [`Self::radio_large_art`]'s shape.
     pub playlist_custom_large_art: SnapshottedLru<String, image::Handle>,
+    /// In-flight large custom-cover fetches: playlist id -> the cache-buster
+    /// version it carries. Same contract as [`Self::large_artwork_pending`],
+    /// released by `PlaylistCustomLargeLoaded`.
+    pub playlist_custom_large_art_pending: HashMap<String, String>,
     /// Playlist ids with an in-flight custom-cover mini fetch. The viewport
     /// prefetch re-dispatches on every scroll step; without this gate a cold
     /// viewport duplicates every still-loading request per step. Inserted
@@ -210,7 +230,9 @@ pub struct ArtworkState {
     /// re-firing on every scroll step; a CHANGED updated_at bypasses the
     /// entry. Mirrors [`Self::failed_art`].
     pub playlist_custom_art_failed: HashMap<String, Option<String>>,
-    /// Currently loading large artwork album ID.
+    /// The most recent large-art request (album or artist id): what the
+    /// centered panel is waiting on. Not a dedup gate; that is
+    /// [`Self::large_artwork_pending`].
     pub loading_large_artwork: Option<String>,
     /// The one blurred variant of the now-playing cover for the lyrics
     /// backdrop (single slot, not an LRU: only the CURRENT track's cover is
@@ -246,8 +268,10 @@ impl Default for ArtworkState {
             failed_art: HashMap::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             large_artwork_hashes: HashMap::new(),
+            large_artwork_pending: HashMap::new(),
             radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
             radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
+            radio_large_art_pending: HashMap::new(),
             radio_icy_captured: HashMap::new(),
             radio_art_hydrated: false,
             genre: CollageArtworkCache::new(),
@@ -257,6 +281,7 @@ impl Default for ArtworkState {
                 PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY,
             ),
             playlist_custom_art_pending: HashSet::new(),
+            playlist_custom_large_art_pending: HashMap::new(),
             playlist_custom_art_versions: HashMap::new(),
             playlist_custom_art_failed: HashMap::new(),
             loading_large_artwork: None,

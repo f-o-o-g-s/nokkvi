@@ -75,6 +75,7 @@ impl Nokkvi {
                 // returned, B is now in flight (marker = Some(B)) and we
                 // must NOT clear it. Caching the late A handle is still
                 // fine — the cache is keyed by id.
+                self.artwork.large_artwork_pending.remove(&id);
                 if let Some(h) = handle {
                     self.artwork.large_artwork.put(id.clone(), h);
                 }

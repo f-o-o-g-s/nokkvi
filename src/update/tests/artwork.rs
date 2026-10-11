@@ -1,13 +1,21 @@
-//! Tests for the version-aware artwork prefetch dedup gate (N17).
+//! Tests for the artwork fetch dedup gates.
 //!
-//! Pins the invariant that a server-side cover change (a different
-//! `updated_at`) makes an already-warmed `album_art` slot a genuine prefetch
-//! MISS, so the passive mini-thumbnail path re-fetches the new cover instead
-//! of serving the stale one for the rest of the session.
+//! The version-aware prefetch gate (N17) pins the invariant that a
+//! server-side cover change (a different `updated_at`) makes an
+//! already-warmed `album_art` slot a genuine prefetch MISS, so the passive
+//! mini-thumbnail path re-fetches the new cover instead of serving the stale
+//! one for the rest of the session. The large-art in-flight gate (bottom)
+//! pins that re-centering a row whose large art is still loading sends no
+//! second request.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::update::components::{passive_artwork_version, should_refetch};
+use super::library::test_app_with_shell;
+use crate::{
+    app_message::ArtworkMessage,
+    test_helpers::{make_album, seed_albums, test_app},
+    update::components::{passive_artwork_version, should_refetch},
+};
 
 /// Empty negative cache — the default for the version-behaviour tests below
 /// (they assert `should_refetch`'s membership/version logic, not the
@@ -214,4 +222,116 @@ fn negative_cache_is_bypassed_when_the_version_changes() {
         should_refetch(&cached, &versions, &failed, &album, &Some("v2".to_string())),
         "a bumped updated_at must re-attempt a previously-failed cover",
     );
+}
+
+// ============================================================================
+// Large-art in-flight dedup
+// ============================================================================
+
+/// Re-centering an album whose large art is still loading sends no second
+/// request. On a slow server a held arrow key at the end of the Albums list
+/// stacked hundreds of full-size requests for the one centered album.
+#[tokio::test]
+async fn album_large_art_in_flight_is_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+
+    assert!(
+        app.handle_load_large_artwork("a1".into()).units() >= 1,
+        "the first centering fetches"
+    );
+    assert_eq!(
+        app.handle_load_large_artwork("a1".into()).units(),
+        0,
+        "a repeat while the fetch is in flight sends nothing"
+    );
+    assert!(
+        app.handle_load_large_artwork("a2".into()).units() >= 1,
+        "another album is not held up by the first"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// A failed fetch releases its claim, so the next centering retries.
+#[tokio::test]
+async fn album_large_art_failure_releases_the_claim() {
+    let (mut app, db_path) = test_app_with_shell().await;
+
+    let _ = app.handle_load_large_artwork("a1".into());
+    let _ = app.handle_large_artwork_loaded("a1".into(), None);
+
+    assert!(
+        app.handle_load_large_artwork("a1".into()).units() >= 1,
+        "a failed fetch must not block the retry"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// A cover replaced on the server while its old fetch is in flight is
+/// requested at the new version; the gate holds back only exact repeats, so
+/// it can never pin the old image in the cache.
+#[tokio::test]
+async fn album_large_art_at_a_new_version_is_requested_while_the_old_is_in_flight() {
+    let (mut app, db_path) = test_app_with_shell().await;
+    let mut album = make_album("a1", "Album", "Artist");
+    album.updated_at = Some("v1".into());
+    seed_albums(&mut app, vec![album.clone()]);
+
+    let _ = app.handle_load_large_artwork("a1".into());
+    album.updated_at = Some("v2".into());
+    seed_albums(&mut app, vec![album]);
+
+    assert!(
+        app.handle_load_large_artwork("a1".into()).units() >= 1,
+        "the new version goes out"
+    );
+    assert_eq!(
+        app.handle_load_large_artwork("a1".into()).units(),
+        0,
+        "and is then held like any other in-flight fetch"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// The artist panel shares the album gate (same cache, same id space).
+#[tokio::test]
+async fn artist_large_art_in_flight_is_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+
+    assert!(
+        app.handle_load_artist_large_artwork("ar1".into()).units() >= 1,
+        "the first centering fetches"
+    );
+    assert_eq!(
+        app.handle_load_artist_large_artwork("ar1".into()).units(),
+        0,
+        "a repeat while the fetch is in flight sends nothing"
+    );
+
+    let _ = app.dispatch_artwork(ArtworkMessage::LargeArtistLoaded("ar1".into(), None));
+    assert!(
+        app.handle_load_artist_large_artwork("ar1".into()).units() >= 1,
+        "a failed fetch must not block the retry"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// Without a session nothing is fetched, so nothing is claimed. Artwork state
+/// is reset at logout, not at login, so a claim made on the login screen
+/// would block that cover for the whole next session.
+#[test]
+fn large_art_without_a_session_claims_nothing() {
+    let mut app = test_app();
+
+    let _ = app.handle_load_large_artwork("a1".into());
+    let _ = app.handle_load_artist_large_artwork("ar1".into());
+
+    assert!(app.artwork.large_artwork_pending.is_empty());
 }

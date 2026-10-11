@@ -305,6 +305,15 @@ impl Nokkvi {
                 Some(handle),
             )));
         }
+        // Already on its way at this version; the completion lands in the cache.
+        if self
+            .artwork
+            .playlist_custom_large_art_pending
+            .get(&playlist_id)
+            == Some(&cache_buster)
+        {
+            return Task::none();
+        }
         self.fetch_playlist_custom_large_task(playlist_id, cache_buster)
     }
 
@@ -334,9 +343,10 @@ impl Nokkvi {
     /// is the cover's version, the same convention as the mini fetch (image
     /// hash on the id on 0.64+, else `updated_at` or a fresh post-upload
     /// token in `_u=`), so neither path can be served a stale
-    /// intermediary-cached image.
+    /// intermediary-cached image. Claims `playlist_custom_large_art_pending`;
+    /// the post-upload refetch calls this directly, past the in-flight gate.
     fn fetch_playlist_custom_large_task(
-        &self,
+        &mut self,
         playlist_id: String,
         cache_buster: String,
     ) -> Task<Message> {
@@ -345,6 +355,9 @@ impl Nokkvi {
         };
         let albums_vm = shell.albums().clone();
         let artwork_size = self.settings.artwork_resolution.to_size();
+        self.artwork
+            .playlist_custom_large_art_pending
+            .insert(playlist_id.clone(), cache_buster.clone());
         Task::perform(
             async move {
                 let bytes = albums_vm
@@ -372,6 +385,10 @@ impl Nokkvi {
         playlist_id: String,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
+        // Release on every outcome so a failed fetch can be retried.
+        self.artwork
+            .playlist_custom_large_art_pending
+            .remove(&playlist_id);
         if let Some(h) = handle {
             self.artwork.playlist_custom_large_art.put(playlist_id, h);
         }

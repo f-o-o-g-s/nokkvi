@@ -270,6 +270,13 @@ impl Nokkvi {
 
         self.artwork.loading_large_artwork = Some(album_id.clone());
         let version = self.album_art_version(&album_id);
+        // Already on its way at this version: the completion lands in the
+        // cache, where the panel picks it up. A held arrow key re-centers the
+        // same row on every repeat, and without this a slow server stacked a
+        // full-size request per repeat.
+        if self.artwork.large_artwork_pending.get(&album_id) == Some(&version) {
+            return Task::none();
+        }
         self.record_large_art_hash(&album_id, version.as_deref());
 
         if let Some(shell) = &self.app_service {
@@ -279,6 +286,9 @@ impl Nokkvi {
             // the `al-` prefix, plus its version (hash on 0.64+, else the
             // Albums view row's `updated_at`, else none).
             let art_id = album_id.clone();
+            self.artwork
+                .large_artwork_pending
+                .insert(album_id, version.clone());
 
             return Task::perform(
                 async move {
@@ -402,6 +412,8 @@ impl Nokkvi {
         id: String,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
+        // Release on every outcome so a failed fetch can be retried.
+        self.artwork.large_artwork_pending.remove(&id);
         // Always cache artwork that arrives (even if user navigated away)
         // This fixes the bug where rapid navigation discarded completed loads
         if let Some(h) = handle {

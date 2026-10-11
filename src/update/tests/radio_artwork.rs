@@ -568,3 +568,54 @@ fn rejected_token_on_station_load_routes_to_login() {
 
     assert_eq!(app.screen, crate::Screen::Login);
 }
+
+// ============================================================================
+// Large-logo in-flight dedup
+// ============================================================================
+
+/// Re-centering a station whose large logo is still loading sends no second
+/// request, and a failed fetch releases the claim for the next centering.
+#[tokio::test]
+async fn radio_large_logo_in_flight_is_not_requested_again() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    app.library.radio_stations = vec![station("s1", "Test", Some("ra-s1"))];
+
+    assert!(
+        app.handle_load_radio_large("s1".into()).units() >= 1,
+        "the first centering fetches"
+    );
+    assert_eq!(
+        app.handle_load_radio_large("s1".into()).units(),
+        0,
+        "a repeat while the fetch is in flight sends nothing"
+    );
+
+    let _ = app.handle_radio_large_loaded("s1".into(), None);
+    assert!(
+        app.handle_load_radio_large("s1".into()).units() >= 1,
+        "a failed fetch must not block the retry"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// Refresh / Set / Reset Artwork drop the claim with the cached logo, so the
+/// re-warm after the station-list reload goes out instead of waiting on a
+/// fetch for the old image (Refresh keeps the same token).
+#[tokio::test]
+async fn clearing_station_art_releases_the_large_logo_claim() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    app.library.radio_stations = vec![station("s1", "Test", Some("ra-s1"))];
+
+    let _ = app.handle_load_radio_large("s1".into());
+    let _ = app.clear_radio_station_artwork_caches("s1");
+
+    assert!(
+        app.handle_load_radio_large("s1".into()).units() >= 1,
+        "the re-warm goes out"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}

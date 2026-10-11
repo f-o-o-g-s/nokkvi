@@ -82,6 +82,7 @@ All notable changes to this project will be documented in this file.
 - Seeking in a variable-bitrate MP3 now resumes exactly where you aimed instead of seconds off.
 - After a gapless transition, the new song's position and lyrics no longer run up to a second ahead of its audio.
 - Pausing with lyrics on now keeps the Queue cover and its lyrics on the playing song.
+- Holding an arrow key in a list no longer requests the same full-size cover again while it is still loading.
 
 ### Removed
 
