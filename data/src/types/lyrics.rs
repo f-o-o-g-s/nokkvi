@@ -17,6 +17,11 @@ use crate::utils::search::build_searchable_lower;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WordSpan {
     pub start_ms: u32,
+    /// When the word stops being sung, if the source said so: a TTML cue's
+    /// `end`, or the trailing `<mm:ss.xx>` stamp an enhanced LRC line may end
+    /// with. `None` means the next word's start, or for a line's last word the
+    /// fallback [`LrcLine::word_cursor`] derives.
+    pub end_ms: Option<u32>,
     pub text: String,
 }
 
@@ -27,6 +32,89 @@ pub struct LrcLine {
     pub time_ms: u32,
     pub text: String,
     pub words: Vec<WordSpan>,
+}
+
+/// Where the playhead sits among a line's words — the input to the word-level
+/// highlight. Words `0..sung` are fully sung; `current` is the one being sung
+/// now, with how far through it the playhead is.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WordCursor {
+    /// Words fully sung, counted from the line's first word.
+    pub sung: usize,
+    /// The word being sung right now and the playhead's progress through it
+    /// (`0.0..1.0`). `None` before the first word, in a gap between two words
+    /// (a word with an explicit end that stops short of the next word's
+    /// start), and after the last word.
+    pub current: Option<(usize, f32)>,
+}
+
+/// Shortest a line's last word may be guessed to last, in milliseconds, when
+/// the source gave it no end: the clamp floor on the line's own word pace.
+const LAST_WORD_MIN_MS: u32 = 250;
+/// Longest a line's last word may be guessed to last when the source gave it
+/// no end — a held note sings out, a sheet's long gap to the next line does not.
+const LAST_WORD_MAX_MS: u32 = 1_500;
+/// A one-word line with no end stamp sings for this long.
+const LAST_WORD_SOLO_MS: u32 = 800;
+
+impl LrcLine {
+    /// The window `(start_ms, end_ms)` in which word `index` is sung, with
+    /// `end_ms >= start_ms`. A word ends at its explicit end when the source
+    /// gave one, cut at the next word's start so windows never overlap, else
+    /// at the next word's start. The LAST word, lacking an explicit end, ends
+    /// at the line's own word pace (the mean start-to-start gap, clamped to
+    /// [`LAST_WORD_MIN_MS`]..=[`LAST_WORD_MAX_MS`]; [`LAST_WORD_SOLO_MS`] for a
+    /// one-word line), never past `line_end_ms` (the next line's start) when
+    /// that is known. `None` when `index` names no word.
+    pub fn word_window(&self, index: usize, line_end_ms: Option<u32>) -> Option<(u32, u32)> {
+        let word = self.words.get(index)?;
+        let start = word.start_ms;
+        let end = match self.words.get(index + 1) {
+            Some(next) => word.end_ms.map_or(next.start_ms, |e| e.min(next.start_ms)),
+            None => {
+                let ceiling = line_end_ms.unwrap_or(u32::MAX);
+                match word.end_ms {
+                    Some(explicit) => explicit.min(ceiling),
+                    None => {
+                        let n = self.words.len() as u32;
+                        let pace = if n >= 2 {
+                            let first = self.words[0].start_ms;
+                            (start.saturating_sub(first) / (n - 1))
+                                .clamp(LAST_WORD_MIN_MS, LAST_WORD_MAX_MS)
+                        } else {
+                            LAST_WORD_SOLO_MS
+                        };
+                        start.saturating_add(pace).min(ceiling)
+                    }
+                }
+            }
+        };
+        Some((start, end.max(start)))
+    }
+
+    /// Where `position_ms` sits among this line's words (pure — a seek is just
+    /// a different position). Words are walked in text order, the karaoke
+    /// order: a word is sung once the playhead has passed its window's end,
+    /// current while inside it, and the walk stops at the first word still
+    /// ahead. A line with no word timing yields the default cursor.
+    pub fn word_cursor(&self, line_end_ms: Option<u32>, position_ms: u32) -> WordCursor {
+        let mut cursor = WordCursor::default();
+        for index in 0..self.words.len() {
+            let Some((start, end)) = self.word_window(index, line_end_ms) else {
+                break;
+            };
+            if position_ms >= end {
+                cursor.sung = index + 1;
+                continue;
+            }
+            if position_ms >= start {
+                let fraction = (position_ms - start) as f32 / (end - start) as f32;
+                cursor.current = Some((index, fraction));
+            }
+            break;
+        }
+        cursor
+    }
 }
 
 /// A parsed lyrics document. `synced` is false when the source carried no
@@ -67,6 +155,16 @@ impl LrcDocument {
         }
         let reached = self.lines.partition_point(|l| l.time_ms <= position_ms);
         (reached > 0).then(|| reached - 1)
+    }
+
+    /// When line `index` gives way to the next: the next line's stamp, the
+    /// ceiling [`LrcLine::word_cursor`] takes for the line's last word. `None`
+    /// for the last line (or a plain doc, whose stamps are all zero).
+    pub fn line_end_ms(&self, index: usize) -> Option<u32> {
+        if !self.synced {
+            return None;
+        }
+        self.lines.get(index + 1).map(|next| next.time_ms)
     }
 }
 
@@ -347,6 +445,7 @@ fn extract_words(text: &str, offset_ms: i64) -> (String, Vec<WordSpan>) {
                 if let Some(start_ms) = parse_timestamp(&after[..gt], offset_ms) {
                     words.push(WordSpan {
                         start_ms,
+                        end_ms: None,
                         text: String::new(),
                     });
                 }
@@ -370,6 +469,16 @@ fn extract_words(text: &str, offset_ms: i64) -> (String, Vec<WordSpan>) {
 
     for word in &mut words {
         word.text = word.text.trim().to_string();
+    }
+    // A bare stamp closing the line (`... <00:01.60>world <00:02.00>`) is the
+    // moment the last word stops, not an empty word: it becomes that word's
+    // end. Any other empty marker (two stamps back to back) is dropped below.
+    if words.len() >= 2
+        && words.last().is_some_and(|w| w.text.is_empty())
+        && let Some(closing) = words.pop()
+        && let Some(last) = words.last_mut()
+    {
+        last.end_ms = Some(closing.start_ms);
     }
     words.retain(|w| !w.text.is_empty());
     (display.trim().to_string(), words)
@@ -408,6 +517,9 @@ pub struct StructuredCueLine {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StructuredCue {
     pub start_ms: u32,
+    /// The cue's `end`, which Navidrome fills from a TTML cue or an enhanced
+    /// LRC line's trailing stamp and omits otherwise.
+    pub end_ms: Option<u32>,
     pub value: String,
 }
 
@@ -465,6 +577,7 @@ impl LrcDocument {
                                 .iter()
                                 .map(|cue| WordSpan {
                                     start_ms: apply_offset(cue.start_ms, offset),
+                                    end_ms: cue.end_ms.map(|end| apply_offset(end, offset)),
                                     text: cue.value.clone(),
                                 })
                                 .collect()
@@ -1169,6 +1282,7 @@ mod tests {
             doc.lines[0].words[0],
             WordSpan {
                 start_ms: 1_100,
+                end_ms: None,
                 text: "Hello".into()
             }
         );
@@ -1176,9 +1290,223 @@ mod tests {
             doc.lines[0].words[1],
             WordSpan {
                 start_ms: 1_600,
+                end_ms: None,
                 text: "world".into()
             }
         );
+    }
+
+    #[test]
+    fn trailing_word_stamp_ends_the_last_word() {
+        // Enhanced LRC may close a line with a bare `<mm:ss.xx>`: the moment
+        // the last word stops. It is an END, never an empty word, and never
+        // reaches the display text.
+        let doc = parse("[00:01.00]<00:01.10>Hello <00:01.60>world <00:02.00>");
+        assert_eq!(doc.lines[0].text, "Hello world");
+        assert_eq!(doc.lines[0].words.len(), 2);
+        assert_eq!(doc.lines[0].words[0].end_ms, None);
+        assert_eq!(doc.lines[0].words[1].end_ms, Some(2_000));
+
+        // The one-word form, and a trailing stamp under an [offset:].
+        let solo = parse("[00:01.00]<00:01.10>Hello<00:01.60>");
+        assert_eq!(solo.lines[0].words.len(), 1);
+        assert_eq!(solo.lines[0].words[0].text, "Hello");
+        assert_eq!(solo.lines[0].words[0].end_ms, Some(1_600));
+        let shifted = parse("[offset:+100]\n[00:01.00]<00:01.10>Hello <00:01.60>");
+        assert_eq!(shifted.lines[0].words[0].start_ms, 1_000);
+        assert_eq!(shifted.lines[0].words[0].end_ms, Some(1_500));
+
+        // An empty marker that is NOT last (two stamps back to back) is still
+        // dropped: only the closing stamp means an end.
+        let doubled = parse("[00:01.00]<00:01.10><00:01.20>Hello <00:01.60>world");
+        assert_eq!(doubled.lines[0].words.len(), 2);
+        assert_eq!(doubled.lines[0].words[0].start_ms, 1_200);
+        assert_eq!(doubled.lines[0].words[1].end_ms, None);
+    }
+
+    // --- word_window / word_cursor ---
+
+    fn worded(starts: &[u32]) -> LrcLine {
+        LrcLine {
+            time_ms: starts.first().copied().unwrap_or(0),
+            text: starts
+                .iter()
+                .map(|s| format!("w{s}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            words: starts
+                .iter()
+                .map(|&start_ms| WordSpan {
+                    start_ms,
+                    end_ms: None,
+                    text: format!("w{start_ms}"),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn word_window_ends_at_the_next_word_or_the_explicit_end() {
+        let mut line = worded(&[1_000, 1_500, 2_000]);
+        assert_eq!(line.word_window(0, None), Some((1_000, 1_500)));
+        assert_eq!(line.word_window(1, None), Some((1_500, 2_000)));
+        assert_eq!(line.word_window(3, None), None, "no fourth word");
+
+        // An explicit end that stops short of the next word leaves a gap; one
+        // that runs past it is cut at the next word's start (no overlap).
+        line.words[0].end_ms = Some(1_300);
+        assert_eq!(line.word_window(0, None), Some((1_000, 1_300)));
+        line.words[0].end_ms = Some(1_900);
+        assert_eq!(line.word_window(0, None), Some((1_000, 1_500)));
+        // An end before its own start collapses to an instant, never inverts.
+        line.words[0].end_ms = Some(900);
+        assert_eq!(line.word_window(0, None), Some((1_000, 1_000)));
+    }
+
+    #[test]
+    fn last_word_window_follows_the_line_pace_under_the_line_end() {
+        // Pace 500 ms (two gaps of 500) → the last word sings 2000..2500.
+        let line = worded(&[1_000, 1_500, 2_000]);
+        assert_eq!(line.word_window(2, None), Some((2_000, 2_500)));
+        assert_eq!(line.word_window(2, Some(9_000)), Some((2_000, 2_500)));
+        // The next line arriving sooner caps it.
+        assert_eq!(line.word_window(2, Some(2_200)), Some((2_000, 2_200)));
+        // A next line already past the start makes it an instant.
+        assert_eq!(line.word_window(2, Some(1_900)), Some((2_000, 2_000)));
+
+        // The pace is clamped: a crawl doesn't hold the last word for ages
+        // and a rapid-fire line still gives it a readable moment.
+        let slow = worded(&[0, 5_000, 10_000]);
+        assert_eq!(slow.word_window(2, None), Some((10_000, 10_000 + 1_500)));
+        let fast = worded(&[0, 50, 100]);
+        assert_eq!(fast.word_window(2, None), Some((100, 100 + 250)));
+
+        // A one-word line has no pace to read: the solo length applies.
+        let solo = worded(&[3_000]);
+        assert_eq!(solo.word_window(0, None), Some((3_000, 3_800)));
+        assert_eq!(solo.word_window(0, Some(3_200)), Some((3_000, 3_200)));
+
+        // An explicit end on the last word beats the guess, still under the
+        // line end.
+        let mut ended = worded(&[1_000, 1_500, 2_000]);
+        ended.words[2].end_ms = Some(3_000);
+        assert_eq!(ended.word_window(2, None), Some((2_000, 3_000)));
+        assert_eq!(ended.word_window(2, Some(2_600)), Some((2_000, 2_600)));
+    }
+
+    #[test]
+    fn word_cursor_walks_the_line() {
+        let line = worded(&[1_000, 1_500, 2_000]);
+        let at = |pos| line.word_cursor(Some(5_000), pos);
+
+        // Pre-roll: nothing sung, nothing current.
+        assert_eq!(at(900), WordCursor::default());
+        // Exactly on the first word's start: current at 0.0.
+        assert_eq!(
+            at(1_000),
+            WordCursor {
+                sung: 0,
+                current: Some((0, 0.0)),
+            }
+        );
+        // A quarter into the first word.
+        assert_eq!(
+            at(1_125),
+            WordCursor {
+                sung: 0,
+                current: Some((0, 0.25)),
+            }
+        );
+        // Into the second word: the first is sung.
+        assert_eq!(
+            at(1_750),
+            WordCursor {
+                sung: 1,
+                current: Some((1, 0.5)),
+            }
+        );
+        // Half through the last word (2000..2500 by pace).
+        assert_eq!(
+            at(2_250),
+            WordCursor {
+                sung: 2,
+                current: Some((2, 0.5)),
+            }
+        );
+        // Past the last word's end: everything sung, nothing current.
+        assert_eq!(
+            at(2_500),
+            WordCursor {
+                sung: 3,
+                current: None,
+            }
+        );
+        assert_eq!(
+            at(4_999),
+            WordCursor {
+                sung: 3,
+                current: None,
+            }
+        );
+        // A seek back is just an earlier position: recomputed from scratch.
+        assert_eq!(at(1_125).current, Some((0, 0.25)));
+    }
+
+    #[test]
+    fn word_cursor_rests_in_a_gap_and_skips_instants() {
+        let mut line = worded(&[1_000, 1_500, 2_000]);
+        // The first word stops at 1300; 1300..1500 is a gap: sung, not current.
+        line.words[0].end_ms = Some(1_300);
+        assert_eq!(
+            line.word_cursor(None, 1_400),
+            WordCursor {
+                sung: 1,
+                current: None,
+            }
+        );
+        // An instant word (end == start) counts as sung the moment it starts,
+        // and never divides by its zero length; the word after it is still
+        // ahead until its own start.
+        line.words[1].end_ms = Some(1_500);
+        assert_eq!(
+            line.word_cursor(None, 1_500),
+            WordCursor {
+                sung: 2,
+                current: None,
+            }
+        );
+        assert_eq!(
+            line.word_cursor(None, 2_000),
+            WordCursor {
+                sung: 2,
+                current: Some((2, 0.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn word_cursor_of_an_unworded_line_is_the_default() {
+        let line = LrcLine {
+            time_ms: 1_000,
+            text: "no word timing".into(),
+            words: vec![],
+        };
+        assert_eq!(line.word_cursor(Some(2_000), 1_500), WordCursor::default());
+        assert_eq!(line.word_window(0, None), None);
+    }
+
+    #[test]
+    fn line_end_is_the_next_stamp_of_a_synced_doc() {
+        let doc = parse("[00:01.00]one\n[00:02.00]two");
+        assert_eq!(doc.line_end_ms(0), Some(2_000));
+        assert_eq!(doc.line_end_ms(1), None, "the last line has no end");
+        assert_eq!(doc.line_end_ms(7), None);
+        // A plain doc's stamps are all zero: no line of it has an end.
+        let plain = LrcDocument {
+            lines: vec![LrcLine::default(), LrcLine::default()],
+            synced: false,
+        };
+        assert_eq!(plain.line_end_ms(0), None);
     }
 
     // --- read_metadata ---
@@ -1357,10 +1685,12 @@ mod tests {
                 cues: vec![
                     StructuredCue {
                         start_ms: 1_000,
+                        end_ms: Some(1_400),
                         value: "Hello".into(),
                     },
                     StructuredCue {
                         start_ms: 1_500,
+                        end_ms: None,
                         value: "world".into(),
                     },
                 ],
@@ -1373,6 +1703,35 @@ mod tests {
         assert_eq!(doc.lines[0].words.len(), 2);
         assert_eq!(doc.lines[0].words[1].text, "world");
         assert!(doc.lines[1].words.is_empty()); // no cueLine for index 1
+        // A cue's end rides along; a missing one stays unknown.
+        assert_eq!(doc.lines[0].words[0].end_ms, Some(1_400));
+        assert_eq!(doc.lines[0].words[1].end_ms, None);
+    }
+
+    #[test]
+    fn from_structured_shifts_cue_ends_by_the_offset() {
+        let s = StructuredLyrics {
+            synced: true,
+            offset_ms: 200,
+            kind: None,
+            lines: vec![StructuredLine {
+                start_ms: Some(1_000),
+                value: "Hello".into(),
+            }],
+            cue_lines: vec![StructuredCueLine {
+                index: 0,
+                agent_id: None,
+                cues: vec![StructuredCue {
+                    start_ms: 1_000,
+                    end_ms: Some(1_400),
+                    value: "Hello".into(),
+                }],
+            }],
+        };
+        let doc = LrcDocument::from_structured(&s);
+        // Positive offset shifts earlier, exactly as the line and word starts.
+        assert_eq!(doc.lines[0].words[0].start_ms, 800);
+        assert_eq!(doc.lines[0].words[0].end_ms, Some(1_200));
     }
 
     #[test]

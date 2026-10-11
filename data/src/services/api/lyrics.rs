@@ -63,6 +63,10 @@ struct WireCueLine {
 struct WireCue {
     #[serde(default)]
     start: u32,
+    /// Omitted unless the source timed the word's end (a TTML cue, an
+    /// enhanced LRC line's trailing stamp).
+    #[serde(default)]
+    end: Option<u32>,
     // `value` is the exact word text; `byteStart`/`byteEnd` are line-relative
     // inclusive offsets we deliberately ignore (see LrcDocument::from_structured).
     #[serde(default)]
@@ -94,6 +98,7 @@ impl From<WireStructured> for StructuredLyrics {
                         .into_iter()
                         .map(|c| StructuredCue {
                             start_ms: c.start,
+                            end_ms: c.end,
                             value: c.value,
                         })
                         .collect(),
@@ -235,7 +240,7 @@ mod tests {
                             "index": 0,
                             "agentId": "v1",
                             "cue": [
-                                { "start": 1000, "value": "Hello ", "byteStart": 0, "byteEnd": 5 },
+                                { "start": 1000, "end": 1400, "value": "Hello ", "byteStart": 0, "byteEnd": 5 },
                                 { "start": 1500, "value": "world", "byteStart": 6, "byteEnd": 10 }
                             ]
                         }]
@@ -258,6 +263,9 @@ mod tests {
         // cue.value used directly — trailing space preserved from the wire.
         assert_eq!(list[0].cue_lines[0].cues[0].value, "Hello ");
         assert_eq!(list[0].cue_lines[0].cues[1].start_ms, 1500);
+        // A cue's `end` is kept when sent and unknown when omitted.
+        assert_eq!(list[0].cue_lines[0].cues[0].end_ms, Some(1400));
+        assert_eq!(list[0].cue_lines[0].cues[1].end_ms, None);
     }
 
     #[test]
