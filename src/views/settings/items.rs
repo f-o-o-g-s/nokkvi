@@ -699,6 +699,7 @@ mod tests {
                 "general.lyrics_enabled",
                 "general.lyrics_fetch_online",
                 "general.lyrics_backdrop_blur",
+                "general.lyrics_word_highlight",
                 "general.crossfade_duration",
                 "general.crossfade_curve",
                 "general.crossfade_min_track",

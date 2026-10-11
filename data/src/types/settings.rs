@@ -7,11 +7,12 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
-            StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay, VerboseConfig,
-            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
+            LibraryPageSize, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            SlotRowHeight, StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay,
+            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -136,6 +137,10 @@ crate::player_settings_schema! {
     /// Cover-art blur strength behind the lyrics overlay (default: off).
     #[serde(default)]
     same lyrics_backdrop_blur: LyricsBackdropBlur = LyricsBackdropBlur::default(),
+    /// How the active lyric line lights its words when the sheet carries word
+    /// timing (default: sweep).
+    #[serde(default)]
+    same lyrics_word_highlight: LyricsWordHighlight = LyricsWordHighlight::default(),
     /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
     /// play at each track's native sample rate with the DSP chain (EQ / software
     /// volume / limiter) bypassed, letting PipeWire switch the device clock.

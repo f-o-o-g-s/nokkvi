@@ -163,6 +163,8 @@ pub struct PlaybackSettingsData {
     pub lyrics_fetch_online: bool,
     /// Cover-blur label ("Off" / "Light" / "Medium" / "Heavy").
     pub lyrics_backdrop_blur: Cow<'static, str>,
+    /// Word-highlight label ("Off" / "Sweep" / "Word").
+    pub lyrics_word_highlight: Cow<'static, str>,
     /// Bit-perfect mode label ("Off" / "Strict" / "Relaxed").
     pub bit_perfect: Cow<'static, str>,
     pub crossfade_duration_secs: i64,
@@ -248,6 +250,7 @@ impl Default for PlaybackSettingsData {
             lyrics_enabled: false,
             lyrics_fetch_online: false,
             lyrics_backdrop_blur: Cow::Borrowed("test-default"),
+            lyrics_word_highlight: Cow::Borrowed("test-default"),
             bit_perfect: Cow::Borrowed("test-default"),
             crossfade_duration_secs: 0,
             crossfade_curve: Cow::Borrowed("test-default"),

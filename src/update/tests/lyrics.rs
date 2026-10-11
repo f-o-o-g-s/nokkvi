@@ -569,6 +569,18 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     assert_eq!(data.active_index, Some(0));
     assert!(data.synced, "a timed sheet renders as synced");
 
+    // The word-level highlight reads the lyric clock and the setting through
+    // the same panel data.
+    app.lyrics.clock_ms = 1_234;
+    app.settings.lyrics_word_highlight =
+        nokkvi_data::types::player_settings::LyricsWordHighlight::Word;
+    let data = app.queue_lyrics_panel_data().expect("still enabled");
+    assert_eq!(data.clock_ms, 1_234);
+    assert_eq!(
+        data.word_highlight,
+        nokkvi_data::types::player_settings::LyricsWordHighlight::Word
+    );
+
     // A plain sheet renders with `synced == false`: no accent line, the flat
     // band falloff, and the drift center instead of the glide.
     app.lyrics.doc = plain_doc(4);

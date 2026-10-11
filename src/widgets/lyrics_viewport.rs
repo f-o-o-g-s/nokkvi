@@ -33,7 +33,10 @@ use iced::{
     mouse,
     widget::text::Wrapping,
 };
-use nokkvi_data::types::lyrics::LrcLine;
+use nokkvi_data::types::{
+    lyrics::{LrcLine, WordCursor, WordSpan},
+    player_settings::LyricsWordHighlight,
+};
 
 use crate::theme;
 
@@ -91,6 +94,14 @@ const HALO_INNER_OFFSETS: [(f32, f32); 8] = [
     (1.0, 1.0),
 ];
 const HALO_OUTER_OFFSETS: [(f32, f32); 4] = [(-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0)];
+
+/// How long a word takes to light up whole in the `Word` highlight, in
+/// milliseconds from its start.
+const WORD_POP_MS: f32 = 150.0;
+/// The sweep front's soft edge: extra accent fills, each one logical pixel
+/// further past the front and fainter, so the front reads as a bloom rather
+/// than a hard cut through a glyph. `(offset px, alpha factor)`.
+const SWEEP_EDGE_STEPS: [(f32, f32); 3] = [(1.0, 0.6), (2.0, 0.35), (3.0, 0.15)];
 
 /// Exponential ease-out — the glide curve driven by the per-frame tick.
 pub(crate) fn ease_out_expo(t: f32) -> f32 {
@@ -233,6 +244,11 @@ pub(crate) struct LyricsPanelData<'a> {
     /// Grow the text with the panel ([`panel_fit_scale`]) instead of the fixed
     /// column size. Theater Mode sets it; the Queue cover keeps the fixed size.
     pub fit_to_panel: bool,
+    /// The lyric clock (`LyricsState::clock_ms`): the playhead the word-level
+    /// highlight reads, run on per frame from the last position tick.
+    pub clock_ms: u32,
+    /// How the active line lights its words when it carries word timing.
+    pub word_highlight: LyricsWordHighlight,
 }
 
 /// The lyric text scale for a panel of `width` × `height` when the sheet fits
@@ -272,6 +288,234 @@ struct State {
     out_paragraphs: Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>,
     out_cache_key: (u64, u32, u32),
     out_slot_height: f32,
+    /// The active line's measured words for the word-level highlight; `None`
+    /// while the highlight is off or the active line has no word timing.
+    active_words: Option<ActiveWordLayout>,
+}
+
+/// One word's footprint on one wrapped row of its line, in logical px from the
+/// paragraph's origin. A word wrapped mid-way has one box per row it touches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WordBox {
+    row: usize,
+    x0: f32,
+    x1: f32,
+    /// The word runs right to left: its sweep fills from `x1` down.
+    rtl: bool,
+}
+
+/// A line's words as measured in its shaped paragraph.
+#[derive(Debug, Default)]
+struct MeasuredWords {
+    /// Per word, its boxes in row order. Empty when the line's words could
+    /// not be placed in its text: the line is then lit whole, as without
+    /// word timing.
+    words: Vec<Vec<WordBox>>,
+    /// Per wrapped row, `(top, height)` in logical px from the paragraph's
+    /// origin.
+    rows: Vec<(f32, f32)>,
+}
+
+/// The measured words of the ACTIVE line, rebuilt when the active line or the
+/// shaping cache changes.
+#[derive(Debug)]
+struct ActiveWordLayout {
+    line: usize,
+    /// The shaping cache key the boxes were measured against.
+    key: (u64, u32, u32),
+    measured: MeasuredWords,
+}
+
+/// One accent fill over the active line, in logical px from the paragraph's
+/// origin: the sung part of one row, or one step of the sweep front's edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AccentFill {
+    row: usize,
+    x0: f32,
+    x1: f32,
+    /// Scales the accent's alpha (1.0 for sung words).
+    alpha: f32,
+}
+
+/// The active line's word-level highlight for one frame.
+struct WordHighlightFrame<'a> {
+    line: usize,
+    rows: &'a [(f32, f32)],
+    fills: &'a [AccentFill],
+}
+
+/// Byte ranges of `words` inside `text`, found in order: each search starts
+/// where the previous word ended, so a repeated word lands on its own
+/// occurrence. `None` when a word is missing from the text, which means the
+/// timing and the text disagree and the line is better lit whole.
+fn word_byte_ranges(text: &str, words: &[WordSpan]) -> Option<Vec<std::ops::Range<usize>>> {
+    let mut ranges = Vec::with_capacity(words.len());
+    let mut cursor = 0usize;
+    for word in words {
+        let needle = word.text.trim();
+        if needle.is_empty() {
+            return None;
+        }
+        let at = cursor + text.get(cursor..)?.find(needle)?;
+        ranges.push(at..at + needle.len());
+        cursor = at + needle.len();
+    }
+    Some(ranges)
+}
+
+/// Where each of the line's words sits in its shaped paragraph: one box per
+/// wrapped row the word touches, read straight off the cosmic-text layout
+/// runs (so the wrapping, the centring and the bidi are the real ones) and
+/// scaled back from the buffer's hinted units to logical px. `None` when the
+/// words can't be placed in the text or a word shaped to no glyph.
+fn measure_words(
+    paragraph: &<iced::Renderer as TextRenderer>::Paragraph,
+    text: &str,
+    words: &[WordSpan],
+    font_px: f32,
+) -> Option<MeasuredWords> {
+    let ranges = word_byte_ranges(text, words)?;
+    let buffer = paragraph.buffer();
+    // The buffer is shaped at `font_px × hint factor`; undo that factor.
+    let hint = buffer.metrics().font_size / font_px;
+    let scale = if hint.is_finite() && hint > 0.0 {
+        1.0 / hint
+    } else {
+        1.0
+    };
+    let mut boxes: Vec<Vec<WordBox>> = vec![Vec::new(); ranges.len()];
+    let mut rows = Vec::new();
+    for (row, run) in buffer.layout_runs().enumerate() {
+        // A lyric line is one buffer line; glyph byte offsets are relative to
+        // it. A second one would restart them, so give up rather than misplace.
+        if run.line_i != 0 {
+            return None;
+        }
+        rows.push((run.line_top * scale, run.line_height * scale));
+        for glyph in run.glyphs {
+            let Some(word) = ranges.iter().position(|range| range.contains(&glyph.start)) else {
+                continue;
+            };
+            let (x0, x1) = (glyph.x * scale, (glyph.x + glyph.w) * scale);
+            match boxes.get_mut(word).and_then(|b| b.last_mut()) {
+                Some(last) if last.row == row => {
+                    last.x0 = last.x0.min(x0);
+                    last.x1 = last.x1.max(x1);
+                }
+                _ => {
+                    if let Some(word_boxes) = boxes.get_mut(word) {
+                        word_boxes.push(WordBox {
+                            row,
+                            x0,
+                            x1,
+                            rtl: glyph.level.is_rtl(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    if boxes.iter().any(Vec::is_empty) {
+        return None;
+    }
+    Some(MeasuredWords { words: boxes, rows })
+}
+
+/// The accent fills that light the sung part of the active line (pure).
+///
+/// `Sweep`: on every row, the union of the sung words and the current word up
+/// to the sweep front (an RTL word fills from its right), at full strength,
+/// then the front's soft edge ([`SWEEP_EDGE_STEPS`]). `Word`: the sung words
+/// at full strength, the current word's boxes whole at the pop ramp
+/// (`elapsed_ms` / [`WORD_POP_MS`]). `Off`: nothing — the caller lights the
+/// line whole. `elapsed_ms` is how long the current word has been sung.
+fn accent_fills(
+    layout: &MeasuredWords,
+    cursor: WordCursor,
+    mode: LyricsWordHighlight,
+    elapsed_ms: f32,
+) -> Vec<AccentFill> {
+    let mut fills = Vec::new();
+    if mode == LyricsWordHighlight::Off {
+        return fills;
+    }
+    // The union of fully lit boxes per row.
+    let mut by_row: Vec<Option<(f32, f32)>> = vec![None; layout.rows.len()];
+    let extend = |by_row: &mut Vec<Option<(f32, f32)>>, row: usize, x0: f32, x1: f32| {
+        if let Some(slot) = by_row.get_mut(row) {
+            let (lo, hi) = slot.get_or_insert((x0, x1));
+            *lo = lo.min(x0);
+            *hi = hi.max(x1);
+        }
+    };
+    for word in layout.words.iter().take(cursor.sung) {
+        for b in word {
+            extend(&mut by_row, b.row, b.x0, b.x1);
+        }
+    }
+
+    let current = cursor
+        .current
+        .and_then(|(index, fraction)| layout.words.get(index).map(|boxes| (boxes, fraction)));
+    let mut edge: Option<(usize, f32, bool)> = None;
+    let mut pops: Vec<AccentFill> = Vec::new();
+    match (mode, current) {
+        (LyricsWordHighlight::Sweep, Some((boxes, fraction))) => {
+            // Spread the word's progress across its boxes by width, so a word
+            // wrapped over two rows sweeps the first row out, then the second.
+            let total: f32 = boxes.iter().map(|b| (b.x1 - b.x0).max(0.0)).sum();
+            let mut filled = fraction.clamp(0.0, 1.0) * total;
+            for b in boxes {
+                let width = (b.x1 - b.x0).max(0.0);
+                let take = filled.min(width);
+                filled -= take;
+                if take > 0.0 {
+                    let (x0, x1) = if b.rtl {
+                        (b.x1 - take, b.x1)
+                    } else {
+                        (b.x0, b.x0 + take)
+                    };
+                    extend(&mut by_row, b.row, x0, x1);
+                }
+                if take < width {
+                    let front = if b.rtl { b.x1 - take } else { b.x0 + take };
+                    edge = Some((b.row, front, b.rtl));
+                    break;
+                }
+            }
+        }
+        (LyricsWordHighlight::Word, Some((boxes, _))) => {
+            let alpha = (elapsed_ms / WORD_POP_MS).clamp(0.0, 1.0);
+            pops.extend(boxes.iter().map(|b| AccentFill {
+                row: b.row,
+                x0: b.x0,
+                x1: b.x1,
+                alpha,
+            }));
+        }
+        (LyricsWordHighlight::Off | LyricsWordHighlight::Sweep | LyricsWordHighlight::Word, _) => {}
+    }
+
+    fills.extend(by_row.iter().enumerate().filter_map(|(row, span)| {
+        span.map(|(x0, x1)| AccentFill {
+            row,
+            x0,
+            x1,
+            alpha: 1.0,
+        })
+    }));
+    fills.extend(pops);
+    if let Some((row, front, rtl)) = edge {
+        fills.extend(SWEEP_EDGE_STEPS.iter().map(|&(offset, alpha)| {
+            let (x0, x1) = if rtl {
+                (front - offset, front - offset + 1.0)
+            } else {
+                (front + offset - 1.0, front + offset)
+            };
+            AccentFill { row, x0, x1, alpha }
+        }));
+    }
+    fills
 }
 
 /// Shape a doc's lines at `text_width`, returning the paragraphs plus the
@@ -399,6 +643,7 @@ fn draw_column(
     accent: Color,
     base: Color,
     text_scale: f32,
+    words: Option<&WordHighlightFrame<'_>>,
 ) {
     let center_y = bounds.y + bounds.height / 2.0;
     for (i, paragraph) in paragraphs.iter().enumerate() {
@@ -418,8 +663,11 @@ fn draw_column(
         };
         let alpha = falloff * alpha_factor.clamp(0.0, 1.0);
         // The active line's accent fades in as the center arrives.
-        let color = if active_index == Some(i) {
-            let arrive = (1.0 - distance).clamp(0.0, 1.0);
+        let arrive = (1.0 - distance).clamp(0.0, 1.0);
+        // With word timing the active line keeps its base ink and the accent
+        // is painted over its sung words below, word by word.
+        let word_frame = words.filter(|frame| active_index == Some(i) && frame.line == i);
+        let color = if active_index == Some(i) && word_frame.is_none() {
             Color {
                 r: base.r + (accent.r - base.r) * arrive,
                 g: base.g + (accent.g - base.g) * arrive,
@@ -447,6 +695,30 @@ fn draw_column(
         );
         renderer.with_translation(Vector::new(0.0, 0.0), |renderer| {
             fill_haloed_paragraph(renderer, paragraph.raw(), pos, color, visible, text_scale);
+            // The sung words: the same paragraph again in accent, clipped to
+            // each fill's rectangle (the text pipeline trims glyphs to the
+            // clip per pixel, so a sweep front cuts cleanly through a glyph).
+            let Some(frame) = word_frame else {
+                return;
+            };
+            for fill in frame.fills {
+                let Some(&(top, height)) = frame.rows.get(fill.row) else {
+                    continue;
+                };
+                let rect = Rectangle {
+                    x: pos.x + fill.x0,
+                    y: pos.y + top,
+                    width: (fill.x1 - fill.x0).max(0.0),
+                    height,
+                };
+                let Some(clip) = rect.intersection(&visible) else {
+                    continue;
+                };
+                let a = alpha * arrive * fill.alpha;
+                if a >= HALO_MIN_FILL_ALPHA {
+                    renderer.fill_paragraph(paragraph.raw(), pos, Color { a, ..accent }, clip);
+                }
+            }
         });
     }
 }
@@ -487,6 +759,54 @@ impl<'a, M> LyricViewport<'a, M> {
         } else {
             1.0
         }
+    }
+
+    /// The active line the word-level highlight applies to this frame: the
+    /// setting is on, a line is active, and it carries word timing.
+    fn worded_active_line(&self) -> Option<usize> {
+        if self.data.word_highlight == LyricsWordHighlight::Off {
+            return None;
+        }
+        self.data.active_index.filter(|&i| {
+            self.data
+                .lines
+                .get(i)
+                .is_some_and(|line| !line.words.is_empty())
+        })
+    }
+
+    /// The accent fills over the active line for this frame, read from the
+    /// lyric clock against the line's measured words. `None` when the
+    /// highlight doesn't apply or the words could not be placed in the text.
+    fn word_fills(&self, state: &State) -> Option<(usize, Vec<AccentFill>)> {
+        let index = self.worded_active_line()?;
+        let layout = state
+            .active_words
+            .as_ref()
+            .filter(|layout| layout.line == index && !layout.measured.words.is_empty())?;
+        let line = self.data.lines.get(index)?;
+        // The next line's stamp caps the last word; a plain sheet has none.
+        let line_end = self
+            .data
+            .synced
+            .then(|| self.data.lines.get(index + 1).map(|next| next.time_ms))
+            .flatten();
+        let cursor = line.word_cursor(line_end, self.data.clock_ms);
+        let elapsed_ms = cursor
+            .current
+            .and_then(|(word, _)| line.word_window(word, line_end))
+            .map_or(0.0, |(start, _)| {
+                self.data.clock_ms.saturating_sub(start) as f32
+            });
+        Some((
+            index,
+            accent_fills(
+                &layout.measured,
+                cursor,
+                self.data.word_highlight,
+                elapsed_ms,
+            ),
+        ))
     }
 }
 
@@ -529,6 +849,40 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 shape_lines(self.data.lines, text_width, scale, text_scale);
             state.paragraphs = paragraphs;
             state.slot_height = slot_height;
+        }
+
+        // Measure the active line's words for the word-level highlight, again
+        // whenever the active line or the shaping changes. A line whose words
+        // can't be placed in its text measures empty, and the draw lights it
+        // whole.
+        match self.worded_active_line() {
+            Some(i) => {
+                if state
+                    .active_words
+                    .as_ref()
+                    .is_none_or(|layout| (layout.line, layout.key) != (i, key))
+                {
+                    let measured = state
+                        .paragraphs
+                        .get(i)
+                        .zip(self.data.lines.get(i))
+                        .and_then(|(paragraph, line)| {
+                            measure_words(
+                                paragraph.raw(),
+                                &line.text,
+                                &line.words,
+                                LYRIC_FONT_SIZE * text_scale,
+                            )
+                        })
+                        .unwrap_or_default();
+                    state.active_words = Some(ActiveWordLayout {
+                        line: i,
+                        key,
+                        measured,
+                    });
+                }
+            }
+            None => state.active_words = None,
         }
 
         // Dissolving outgoing sheet (second cache; cleared when idle so a long
@@ -622,6 +976,19 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // one fades in against it (crossfade-coupled transition).
         let incoming_factor = self.data.dissolve.map_or(1.0, |d| d.progress);
 
+        // The word-level highlight over the active line, from the lyric clock.
+        let word_fills = self.word_fills(state);
+        let word_frame = word_fills.as_ref().and_then(|(line, fills)| {
+            state
+                .active_words
+                .as_ref()
+                .map(|layout| WordHighlightFrame {
+                    line: *line,
+                    rows: &layout.measured.rows,
+                    fills,
+                })
+        });
+
         renderer.with_layer(bounds, |renderer| {
             if let Some(dissolve) = self.data.dissolve {
                 // Clamp the frozen center to the OUTGOING doc, exactly as the
@@ -643,6 +1010,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                     accent,
                     base,
                     text_scale,
+                    None,
                 );
             }
             draw_column(
@@ -659,6 +1027,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 accent,
                 base,
                 text_scale,
+                word_frame.as_ref(),
             );
         });
     }
@@ -962,5 +1331,193 @@ mod tests {
         }];
         assert_ne!(doc_hash(&a), doc_hash(&b));
         assert_eq!(doc_hash(&a), doc_hash(&a));
+    }
+
+    // --- word-level highlight geometry ---
+
+    fn spans(words: &[&str]) -> Vec<WordSpan> {
+        words
+            .iter()
+            .enumerate()
+            .map(|(i, text)| WordSpan {
+                start_ms: i as u32 * 500,
+                end_ms: None,
+                text: (*text).to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn word_byte_ranges_follow_the_text_in_order() {
+        let ranges = word_byte_ranges("Hello world", &spans(&["Hello", "world"])).expect("placed");
+        assert_eq!(ranges, vec![0..5, 6..11]);
+        // A repeated word lands on its own occurrence, not the first again.
+        let ranges = word_byte_ranges("la la land", &spans(&["la", "la", "land"])).expect("placed");
+        assert_eq!(ranges, vec![0..2, 3..5, 6..10]);
+        // A server cue keeps its trailing space; the match trims it.
+        let ranges = word_byte_ranges("Hello world", &spans(&["Hello ", "world"])).expect("placed");
+        assert_eq!(ranges, vec![0..5, 6..11]);
+        // Timing that names a word the text lacks is a disagreement: no layout.
+        assert_eq!(
+            word_byte_ranges("Hello world", &spans(&["Hello", "there"])),
+            None
+        );
+        assert_eq!(
+            word_byte_ranges("Hello world", &spans(&["Hello", ""])),
+            None
+        );
+    }
+
+    /// Two words on one row: `w0` at 10..40, `w1` at 50..90.
+    fn two_word_layout() -> MeasuredWords {
+        MeasuredWords {
+            words: vec![
+                vec![WordBox {
+                    row: 0,
+                    x0: 10.0,
+                    x1: 40.0,
+                    rtl: false,
+                }],
+                vec![WordBox {
+                    row: 0,
+                    x0: 50.0,
+                    x1: 90.0,
+                    rtl: false,
+                }],
+            ],
+            rows: vec![(0.0, 22.0)],
+        }
+    }
+
+    fn fill(row: usize, x0: f32, x1: f32, alpha: f32) -> AccentFill {
+        AccentFill { row, x0, x1, alpha }
+    }
+
+    #[test]
+    fn sweep_floods_the_row_up_to_the_front_and_blooms_past_it() {
+        let layout = two_word_layout();
+        let at = |sung, current| {
+            accent_fills(
+                &layout,
+                WordCursor { sung, current },
+                LyricsWordHighlight::Sweep,
+                0.0,
+            )
+        };
+        // Nothing sung yet: nothing lit (the line sits in base ink).
+        assert!(at(0, None).is_empty());
+        // Half through the first word: 10..25 lit, then the three edge steps.
+        assert_eq!(
+            at(0, Some((0, 0.5))),
+            vec![
+                fill(0, 10.0, 25.0, 1.0),
+                fill(0, 25.0, 26.0, 0.6),
+                fill(0, 26.0, 27.0, 0.35),
+                fill(0, 27.0, 28.0, 0.15),
+            ]
+        );
+        // A quarter into the second: one union from 10 to 60 (the gap between
+        // the words is the space, nothing to paint).
+        assert_eq!(at(1, Some((1, 0.25)))[0], fill(0, 10.0, 60.0, 1.0));
+        // The word just starting: no fill, but the bloom sits at its start.
+        assert_eq!(at(1, Some((1, 0.0)))[0], fill(0, 10.0, 40.0, 1.0));
+        assert_eq!(at(1, Some((1, 0.0)))[1], fill(0, 50.0, 51.0, 0.6));
+        // Everything sung: the whole row, no front.
+        assert_eq!(at(2, None), vec![fill(0, 10.0, 90.0, 1.0)]);
+    }
+
+    #[test]
+    fn word_mode_pops_the_current_word_whole() {
+        let layout = two_word_layout();
+        let fills = accent_fills(
+            &layout,
+            WordCursor {
+                sung: 1,
+                current: Some((1, 0.9)),
+            },
+            LyricsWordHighlight::Word,
+            75.0,
+        );
+        // The sung word full, the current one whole at half the pop ramp —
+        // its fraction through the word plays no part.
+        assert_eq!(
+            fills,
+            vec![fill(0, 10.0, 40.0, 1.0), fill(0, 50.0, 90.0, 0.5)]
+        );
+        // Past the ramp it is full.
+        let fills = accent_fills(
+            &layout,
+            WordCursor {
+                sung: 1,
+                current: Some((1, 0.9)),
+            },
+            LyricsWordHighlight::Word,
+            WORD_POP_MS * 3.0,
+        );
+        assert_eq!(fills[1].alpha, 1.0);
+        // Off paints nothing whatever the cursor says.
+        assert!(
+            accent_fills(
+                &layout,
+                WordCursor {
+                    sung: 2,
+                    current: None,
+                },
+                LyricsWordHighlight::Off,
+                0.0,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn sweep_runs_an_rtl_word_from_its_right_and_a_wrapped_word_row_by_row() {
+        let mut layout = two_word_layout();
+        layout.words[0][0].rtl = true;
+        let fills = accent_fills(
+            &layout,
+            WordCursor {
+                sung: 0,
+                current: Some((0, 0.5)),
+            },
+            LyricsWordHighlight::Sweep,
+            0.0,
+        );
+        // Right half lit (25..40), the bloom steps leftwards from the front.
+        assert_eq!(fills[0], fill(0, 25.0, 40.0, 1.0));
+        assert_eq!(fills[1], fill(0, 24.0, 25.0, 0.6));
+        assert_eq!(fills[3], fill(0, 22.0, 23.0, 0.15));
+
+        // A word wrapped over two rows (40 px on row 0, 20 px on row 1) at
+        // three quarters: row 0 full, row 1 a quarter of its 20.
+        let layout = MeasuredWords {
+            words: vec![vec![
+                WordBox {
+                    row: 0,
+                    x0: 60.0,
+                    x1: 100.0,
+                    rtl: false,
+                },
+                WordBox {
+                    row: 1,
+                    x0: 10.0,
+                    x1: 30.0,
+                    rtl: false,
+                },
+            ]],
+            rows: vec![(0.0, 22.0), (22.0, 22.0)],
+        };
+        let fills = accent_fills(
+            &layout,
+            WordCursor {
+                sung: 0,
+                current: Some((0, 0.75)),
+            },
+            LyricsWordHighlight::Sweep,
+            0.0,
+        );
+        assert_eq!(fills[0], fill(0, 60.0, 100.0, 1.0));
+        assert_eq!(fills[1], fill(1, 10.0, 15.0, 1.0));
+        assert_eq!(fills[2], fill(1, 15.0, 16.0, 0.6));
     }
 }

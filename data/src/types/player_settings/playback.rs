@@ -368,6 +368,26 @@ impl LyricsBackdropBlur {
     }
 }
 
+define_labeled_enum! {
+    /// How the lyrics overlay lights the active line when the sheet carries
+    /// word timing (a TTML or enhanced-LRC sidecar, the server's cue layer).
+    /// A line without word timing keeps the whole-line accent whatever this
+    /// says, so a plain or line-synced sheet never changes.
+    ///
+    /// Serializes to lowercase strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum LyricsWordHighlight {
+        /// The whole active line in accent, as for a line-synced sheet.
+        Off { label: "Off", wire: "off" },
+        /// The accent floods each word left to right as it is sung (karaoke).
+        #[default]
+        Sweep { label: "Sweep", wire: "sweep" },
+        /// Each word lights up whole as its moment comes.
+        Word { label: "Word", wire: "word" },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2130,6 +2130,8 @@ impl Nokkvi {
                 empty_message: resolved_no_match.then_some("No lyrics for this track"),
                 dissolve,
                 fit_to_panel: false,
+                clock_ms: self.lyrics.clock_ms,
+                word_highlight: self.settings.lyrics_word_highlight,
             }
         })
     }

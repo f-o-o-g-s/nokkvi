@@ -30,6 +30,7 @@
   "lyrics_enabled": true,
   "lyrics_fetch_online": false,
   "lyrics_backdrop_blur": "light",
+  "lyrics_word_highlight": "word",
   "bit_perfect": "strict",
   "seek_step_secs": 17,
   "crossfade_duration_secs": 9,
