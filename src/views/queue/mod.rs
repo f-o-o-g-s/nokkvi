@@ -132,7 +132,11 @@ pub struct QueueViewData<'a> {
     /// by the header's "Center on Playing" button and by the auto-
     /// follow producers (see `FocusCurrentPlaying`).
     pub current_playing_entry_id: Option<u64>,
-    pub is_playing: bool, // True if playback is active (not stopped/paused)
+    /// The artwork panel locks to the playing track's cover: while playback
+    /// runs, and while paused under the lyrics layer (pausing must not swap
+    /// the sheet's cover for the centered row's). Otherwise it follows the
+    /// centered row.
+    pub cover_locks_to_playing: bool,
     /// MilkDrop is the over-cover mode: the cover menu gains the preset rows.
     pub milkdrop_on: bool,
     pub milkdrop_locked: bool,

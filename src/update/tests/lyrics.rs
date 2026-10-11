@@ -606,6 +606,42 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     );
 }
 
+/// Pausing keeps the Queue cover on the playing track while the lyrics layer
+/// is up. An unlocked panel follows the centered row, and the view's
+/// `cover_shows_now_playing` gate then drops the sheet whenever that row is
+/// not the playing track. Without lyrics a paused cover still follows the
+/// centered row, and a stop never locks.
+#[test]
+fn paused_cover_stays_on_the_playing_track_under_the_lyrics_layer() {
+    let locked = |app: &crate::Nokkvi| {
+        app.build_queue_view_data(crate::widgets::base_slot_list_layout::ArtworkBleed::NONE)
+            .cover_locks_to_playing
+    };
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000]));
+
+    app.playback.playing = true;
+    assert!(locked(&app), "playing locks the cover");
+
+    // A real pause keeps `playing` and raises `paused`.
+    app.playback.paused = true;
+    assert!(
+        locked(&app),
+        "paused under the lyrics layer keeps the playing track's cover"
+    );
+
+    app.settings.lyrics_enabled = false;
+    assert!(
+        !locked(&app),
+        "paused without lyrics follows the centered row"
+    );
+
+    app.settings.lyrics_enabled = true;
+    app.playback.playing = false;
+    app.playback.paused = false;
+    assert!(!locked(&app), "stopped follows the centered row");
+}
+
 #[test]
 fn toggle_lyrics_flips_live_mirror() {
     // The arm must flip the LIVE mirror synchronously — the async persist is

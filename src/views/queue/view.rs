@@ -282,21 +282,22 @@ pub(crate) fn queue_effective_chrome(inputs: &QueueChromeInputs<'_>) -> f32 {
 /// Whether the artwork panel is displaying the now-playing track's cover — the
 /// gate for overlaying its lyrics, keyed to what actually RENDERS, not intent.
 ///
-/// Playing: the locked branch shows the playing cover only when it's in the
-/// filtered list AND its handle resolved (`playing_art_shown`); during the
-/// cold-art window the panel falls back to the centered row, which only reads
-/// as the now-playing cover when that row shares the playing ALBUM (identical
-/// picture; `None` = no centered row → blank panel, lyrics harmless).
-/// Paused/stopped: the cover follows the centered row, so lyrics show only
-/// when the centered row IS the playing track. Pure and regression-pinned.
+/// Locked (`QueueViewData::cover_locks_to_playing`): the panel shows the
+/// playing cover only when it's in the filtered list AND its handle resolved
+/// (`playing_art_shown`); during the cold-art window the panel falls back to
+/// the centered row, which only reads as the now-playing cover when that row
+/// shares the playing ALBUM (identical picture; `None` = no centered row →
+/// blank panel, lyrics harmless). Unlocked: the cover follows the centered
+/// row, so lyrics show only when the centered row IS the playing track. Pure
+/// and regression-pinned.
 fn cover_shows_now_playing(
-    is_playing: bool,
+    locked_to_playing: bool,
     playing_in_list: bool,
     playing_art_shown: bool,
     fallback_same_album: Option<bool>,
     centered_is_playing: bool,
 ) -> bool {
-    if is_playing {
+    if locked_to_playing {
         playing_in_list && (playing_art_shown || fallback_same_album.unwrap_or(true))
     } else {
         centered_is_playing
@@ -1019,11 +1020,12 @@ impl QueuePage {
         // slot during a roulette spin's fast cruise where LoadLarge can't
         // keep up with offset changes (see Albums view for the same
         // pattern).
-        // The playing track's own cover, resolvable only while actively playing
-        // AND present in the FILTERED list (a search that hides it must not
-        // leak its cover while the panel menu targets the centered album). The
-        // frosted lyrics-backdrop variant wins when ready; sharp fallback.
-        let playing_song = if data.is_playing {
+        // The playing track's own cover, resolvable only while the panel locks
+        // to it (playing, or paused under the lyrics layer) AND present in the
+        // FILTERED list (a search that hides it must not leak its cover while
+        // the panel menu targets the centered album). The frosted
+        // lyrics-backdrop variant wins when ready; sharp fallback.
+        let playing_song = if data.cover_locks_to_playing {
             current_playing_song_id
                 .as_ref()
                 .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
@@ -1054,7 +1056,7 @@ impl QueuePage {
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu;
 
         // Build artwork column component — determine album_id for refresh action
-        let center_album_id: Option<String> = if data.is_playing {
+        let center_album_id: Option<String> = if data.cover_locks_to_playing {
             current_playing_song_id
                 .as_ref()
                 .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
@@ -1106,11 +1108,11 @@ impl QueuePage {
         // tick holds `visible` and the frozen position/handle while paused.
         let over_art_boat = data.over_art_boat;
         // Only overlay lyrics when the panel is actually DISPLAYING the
-        // now-playing cover — not merely intending to. While playing, the
-        // locked branch displays it only when its handle resolved; a cold-art
+        // now-playing cover — not merely intending to. While locked, the
+        // panel displays it only when its handle resolved; a cold-art
         // fallback to the centered row is fine only when that row shares the
-        // playing album (same picture) or shows nothing. Paused/stopped, the
-        // cover follows the centered row, so lyrics show only centered on the
+        // playing album (same picture) or shows nothing. Unlocked, the cover
+        // follows the centered row, so lyrics show only centered on the
         // playing track itself.
         let playing_id = current_playing_song_id.as_deref();
         let fallback_same_album =
@@ -1118,7 +1120,7 @@ impl QueuePage {
         let centered_is_playing = playing_id.is_some()
             && centered_song.is_some_and(|cs| Some(cs.id.as_str()) == playing_id);
         let cover_is_now_playing = cover_shows_now_playing(
-            data.is_playing,
+            data.cover_locks_to_playing,
             playing_song.is_some(),
             playing_handle.is_some(),
             fallback_same_album,

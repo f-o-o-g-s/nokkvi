@@ -109,7 +109,7 @@ Re-shuffles the order array when a shuffled queue with repeat-playlist wraps bac
 
 ## Lyrics Overlay
 
-A lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`, state `src/state/lyrics.rs`; resolve pipeline via `Message::LyricsLoader`, `LyricsIndexReady` / `LyricsBlurReady`). It is an **overlay, not a modal** — it renders only when the cover panel actually shows the now-playing track (the `cover_shows_now_playing` gate in `views/queue/view.rs`), behind a frosted-cover backdrop. Identity gates (transport-gate the layer; key it to the shown cover, not the playing track): see gotchas.md.
+A lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`, state `src/state/lyrics.rs`; resolve pipeline via `Message::LyricsLoader`, `LyricsIndexReady` / `LyricsBlurReady`). It is an **overlay, not a modal** — it renders only when the cover panel actually shows the now-playing track (the `cover_shows_now_playing` gate in `views/queue/view.rs`), behind a frosted-cover backdrop. The panel locks to the playing track's cover while playback runs, and while paused too whenever the layer is up (`QueueViewData::cover_locks_to_playing`); otherwise it follows the centered row, so a pause that unlocked it would drop the sheet. Identity gates (transport-gate the layer; key it to the shown cover, not the playing track): see gotchas.md.
 
 **Two kinds of sheet**, told apart by `LrcDocument.synced` and carried to the view as `LyricsPanelData.synced`:
 - **Synced** — the active line is accented and the column glides between lines (`eased_center`), snapping on seek-sized jumps (`LYRICS_SNAP_INDEX_DELTA`).

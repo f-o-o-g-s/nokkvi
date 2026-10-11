@@ -1732,8 +1732,8 @@ impl Nokkvi {
     /// cached blur matching the live `(album, source handle, level)` — the
     /// source-id check keeps a stale blur of a refreshed cover from
     /// displaying (sharp fallback until the fresh blur lands). The view
-    /// applies it only on the is-playing branch (the blur is keyed to the
-    /// PLAYING track's cover; the paused/centered panel stays sharp).
+    /// applies it only while the panel locks to the playing track (the blur is
+    /// keyed to the PLAYING track's cover; a centered-row panel stays sharp).
     pub(crate) fn lyrics_blurred_cover_for_view(&self) -> Option<&iced::widget::image::Handle> {
         if !self.settings.lyrics_enabled || !self.active_playback.is_queue() {
             return None;
@@ -2063,7 +2063,12 @@ impl Nokkvi {
             modifiers: self.window.keyboard_modifiers,
             current_playing_song_id: self.scrobble.current_song_id.clone(),
             current_playing_entry_id: self.queue_current.entry_id,
-            is_playing: self.playback.playing && !self.playback.paused,
+            // Playing locks the panel to the playing track's cover; so does a
+            // pause under the lyrics layer (`lyrics` is `Some` only while the
+            // transport is live), or pausing would swap the sheet's cover for
+            // the centered row's and the view would drop the lyrics.
+            cover_locks_to_playing: (self.playback.playing && !self.playback.paused)
+                || lyrics.is_some(),
             milkdrop_on: self.milkdrop_mode_active(),
             milkdrop_locked: self.milkdrop.locked,
             milkdrop_favorite: self
