@@ -1052,6 +1052,17 @@ impl AudioRenderer {
         }
     }
 
+    /// Reset position tracking for a track joined gaplessly on the live
+    /// stream: its first sample is the next one written, behind whatever the
+    /// ring still holds of the outgoing, so its position starts when that
+    /// tail has played (see [`ActiveStream::reset_position_at_join`]).
+    pub fn reset_position_at_join(&mut self) {
+        self.position_offset = 0;
+        if let Some(ref stream) = self.primary_stream {
+            stream.reset_position_at_join();
+        }
+    }
+
     /// Reset position tracking with an offset (e.g., after crossfade).
     pub fn reset_position_with_offset(&mut self, offset_ms: u64) {
         self.position_offset = offset_ms;

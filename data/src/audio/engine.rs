@@ -1217,12 +1217,13 @@ async fn try_gapless_swap(
             // Increment source generation for stale callback detection
             source_generation.bump_for_gapless();
 
-            // Reset renderer position for the new track, record its
-            // own tags as "current" and switch the kept stream to its
-            // gain from its first sample (the samples written next).
+            // Reset renderer position for the new track (from its first
+            // sample, the next one written: the outgoing's tail still in
+            // the ring plays first), record its own tags as "current" and
+            // switch the kept stream to its gain from that sample.
             {
                 let mut r = renderer.lock();
-                r.reset_position();
+                r.reset_position_at_join();
                 r.reset_finished_called();
                 r.adopt_gapless_replay_gain(next_replay_gain.clone());
             }
@@ -8107,6 +8108,60 @@ mod tests {
         assert!(
             engine.gapless_transition_info.lock().await.is_none(),
             "NotPrepared must not populate transition info"
+        );
+    }
+
+    /// The inline swap runs when the DECODER reaches the join; the outgoing's
+    /// last stretch (up to the decode cushion) is still waiting in the ring
+    /// then. The swapped-in track's clock must start when its first sample
+    /// plays, or the position, MPRIS and the word-timed lyrics run that far
+    /// ahead of its audio for the whole track.
+    #[tokio::test]
+    async fn a_gapless_join_starts_the_clock_when_the_join_is_heard() {
+        // One second of the outgoing still queued (48 kHz stereo).
+        const TAIL: usize = 48_000 * 2;
+        let engine = CustomAudioEngine::new();
+        let (mut source, _handle) = engine.renderer.lock().force_primary_stream_for_test(TAIL);
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(staged_decoder(matching_format(), 222_000, "mp3"));
+            slot.source = "http://example.test/next-gapless".to_string();
+            slot.prepared = true;
+        }
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped);
+
+        // The decode loop writes the incoming's first half second behind the
+        // tail.
+        engine.renderer.lock().write_samples(&[0.25; 48_000]);
+
+        for _ in 0..TAIL {
+            source.next();
+        }
+        assert_eq!(
+            engine.renderer.lock().position(),
+            0,
+            "the outgoing's tail played; the incoming has not started"
+        );
+
+        for _ in 0..48_000 {
+            source.next();
+        }
+        assert_eq!(
+            engine.renderer.lock().position(),
+            500,
+            "half a second of the incoming played"
         );
     }
 

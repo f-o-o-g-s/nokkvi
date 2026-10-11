@@ -175,6 +175,15 @@ impl ActiveStream {
         self.handle.reset_position();
     }
 
+    /// Reset the position for the track whose first sample is the next one
+    /// written (a gapless join): everything still in the ring is the
+    /// outgoing's tail, so the position starts once that has played.
+    pub fn reset_position_at_join(&self) {
+        use ringbuf::traits::Observer;
+        self.handle
+            .reset_position_at_join(self.producer.occupied_len() as u64);
+    }
+
     /// Stop and remove this stream from the mixer.
     pub fn stop(&self) {
         self.handle.stop();

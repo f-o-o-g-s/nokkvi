@@ -50,6 +50,11 @@ pub struct StreamHandle {
     pub(super) fade_coeff: Arc<AtomicU32>,
     /// Number of individual f32 samples consumed (frames × channels).
     pub(super) samples_consumed: Arc<AtomicU64>,
+    /// Samples that were still queued ahead of the current track's first
+    /// sample when its position was reset at a gapless join (the outgoing's
+    /// tail): the first this many consumed after that reset are not the
+    /// current track's. 0 after every other reset.
+    pub(super) join_lead_samples: Arc<AtomicU64>,
     /// Set to `true` to make the source return `None` (removes it from the mixer).
     pub(super) stopped: Arc<AtomicBool>,
     /// When true, emit silence without consuming from ring buffer.
@@ -114,13 +119,25 @@ impl StreamHandle {
         if sample_rate == 0 || channels == 0 {
             return 0;
         }
-        let total_samples = self.samples_consumed.load(Ordering::Relaxed);
+        let total_samples = self
+            .samples_consumed
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.join_lead_samples.load(Ordering::Relaxed));
         let frames = total_samples / channels as u64;
         (frames * 1000) / sample_rate as u64
     }
 
     /// Reset the samples-consumed counter (e.g., after seek or new track).
     pub fn reset_position(&self) {
+        self.reset_position_at_join(0);
+    }
+
+    /// Reset the position for a track whose first sample is `lead_samples`
+    /// behind the read end of the ring (a gapless join: the outgoing's tail
+    /// plays first). The position stays 0 until that tail has played.
+    pub fn reset_position_at_join(&self, lead_samples: u64) {
+        self.join_lead_samples
+            .store(lead_samples, Ordering::Relaxed);
         self.samples_consumed.store(0, Ordering::Relaxed);
     }
 
@@ -369,6 +386,7 @@ impl StreamingSource {
             volume: Arc::new(AtomicU32::new(volume.to_bits())),
             fade_coeff: Arc::new(AtomicU32::new(fade.to_bits())),
             samples_consumed: Arc::new(AtomicU64::new(0)),
+            join_lead_samples: Arc::new(AtomicU64::new(0)),
             stopped: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(false)),
             underrun_count: Arc::new(AtomicU64::new(0)),

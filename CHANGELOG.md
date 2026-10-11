@@ -80,6 +80,7 @@ All notable changes to this project will be documented in this file.
 - A library list that fails to reload now keeps its header count instead of showing 0 above the rows it kept.
 - With Navigation Layout set to Side, bottom-band Bars now fit beside the sidebar instead of losing their rightmost bars off the window's edge.
 - Seeking in a variable-bitrate MP3 now resumes exactly where you aimed instead of seconds off.
+- After a gapless transition, the new song's position and lyrics no longer run up to a second ahead of its audio.
 
 ### Removed
 
