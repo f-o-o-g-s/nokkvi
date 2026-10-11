@@ -18,6 +18,12 @@
 //! stream URL can be published; a failed cover or placeholder is retried
 //! after a minute, never on every tick.
 //!
+//! A cover is fetched on its own task. The tick that starts it waits
+//! [`COVER_WAIT`] for it, so a server that answers in time publishes the
+//! cover together with the new title; past that the tick publishes the
+//! placeholder and a later tick swaps the cover in once it lands. The state
+//! update behind the tick (title, position) is never held for a cover.
+//!
 //! ## Why this module exists
 //!
 //! `mpris-server` publishes `mpris:artUrl` on the public session bus, where
@@ -89,12 +95,16 @@ const HASH_SUFFIX_LEN: usize = 17;
 /// so no "next track" ever retries it.
 const RETRY_FAILED_AFTER: Duration = Duration::from_secs(60);
 
+/// How long one tick waits for a cover fetch before it publishes the
+/// placeholder and leaves the fetch to land on a later tick.
+const COVER_WAIT: Duration = Duration::from_millis(500);
+
 /// Tracks the most recently-written cache entry so repeat ticks for the
 /// same `(server_url, cover_id)` skip the fetch + write.
 ///
 /// The path is included so the next write can remove the file it superseded
 /// without re-deriving the previous filename.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ArtCacheState {
     last_written: Option<(String, String, PathBuf)>,
     /// Last `(server_url, cover_id)` that could not be published (no art,
@@ -119,6 +129,13 @@ pub(crate) struct ArtCacheState {
     /// would refetch that cover on the next tick) nor be deleted by the next
     /// cover write's supersede.
     placeholder: PlaceholderSlot,
+    /// How long a tick waits for a cover it has to fetch; [`COVER_WAIT`]
+    /// outside tests.
+    cover_wait: Duration,
+    /// The cover fetch a tick left running after `cover_wait` ran out. The
+    /// next tick for the same key harvests it without waiting; a tick for
+    /// another key drops it, which aborts the task.
+    in_flight: Option<InFlightCover>,
 }
 
 impl ArtCacheState {
@@ -127,6 +144,32 @@ impl ArtCacheState {
             last_written: None,
             last_failed: None,
             placeholder: PlaceholderSlot::Unwritten,
+            cover_wait: COVER_WAIT,
+            in_flight: None,
+        }
+    }
+}
+
+/// A cover fetch running on its own task, kept across ticks until it lands
+/// or the current item changes. Dropping it aborts the task, so an abandoned
+/// cover stops using the server and its artwork permit.
+#[derive(Debug)]
+struct InFlightCover {
+    server_url: String,
+    cover_id: String,
+    handle: Option<tokio::task::JoinHandle<anyhow::Result<Vec<u8>>>>,
+}
+
+impl InFlightCover {
+    fn is_for(&self, server_url: &str, cover_id: &str) -> bool {
+        self.server_url == server_url && self.cover_id == cover_id
+    }
+}
+
+impl Drop for InFlightCover {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
         }
     }
 }
@@ -348,6 +391,9 @@ fn art_candidates(item: &MprisArtItem) -> [Option<ArtCandidate<'_>>; 3] {
 /// result for the id, so the closure must defer its work into that future.
 /// Returns `None` for "Not Playing", or when nothing could be written (no
 /// cache dir, or the writes are failing) and no stream URL qualifies.
+/// Resolve the art for one tick. The lock is held across the cover wait on
+/// purpose: the ticks queue behind it in order, so a slower tick can never
+/// publish an older position after a newer one.
 pub(crate) async fn resolve_art_for_mpris<F, Fut>(
     server_url: &str,
     item: MprisArtItem,
@@ -355,7 +401,7 @@ pub(crate) async fn resolve_art_for_mpris<F, Fut>(
 ) -> Option<String>
 where
     F: FnOnce(String) -> Fut,
-    Fut: Future<Output = anyhow::Result<Vec<u8>>>,
+    Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
 {
     let cache_dir = cache_dir_path();
     let mut state = STATE.lock().await;
@@ -380,7 +426,7 @@ async fn resolve_art_inner<F, Fut>(
 ) -> Option<String>
 where
     F: FnOnce(String) -> Fut,
-    Fut: Future<Output = anyhow::Result<Vec<u8>>>,
+    Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
 {
     // Each item names at most one cover id, so the fetcher runs at most once.
     let mut fetch_cover = Some(fetch_cover);
@@ -547,6 +593,16 @@ async fn sweep_dir_where(dir: &Path, op: &'static str, should_remove: impl Fn(&s
 
 /// Pure-ish core: tests pass their own `ArtCacheState` and `cache_dir`. Keeps
 /// `cargo test` parallel-safe without a `#[serial]` lock around the global.
+///
+/// `None` sends the caller on to the next candidate: the cover failed
+/// (negative-cached for [`RETRY_FAILED_AFTER`]), or its fetch is still
+/// running. The fetch runs on its own task: the first tick for a cover waits
+/// [`ArtCacheState::cover_wait`] for it, so a server that answers in time
+/// publishes the cover with the title as before; a tick that finds the fetch
+/// still running only checks whether it has landed. Either way the state
+/// update behind the tick (title, position) is never held for the cover: on
+/// the one-core demo server a title once lagged the audio by a minute,
+/// queued behind the cover's wait in the artwork semaphore.
 async fn write_art_inner<F>(
     state: &mut ArtCacheState,
     cache_dir: &Path,
@@ -555,7 +611,7 @@ async fn write_art_inner<F>(
     fetcher: F,
 ) -> Option<String>
 where
-    F: Future<Output = anyhow::Result<Vec<u8>>>,
+    F: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
 {
     let new_path = cache_file_path_for(cache_dir, cover_id);
 
@@ -584,8 +640,29 @@ where
         return None;
     }
 
-    let bytes = match fetcher.await {
-        Ok(b) if b.is_empty() => {
+    let (mut handle, wait) = match state.in_flight.take() {
+        Some(mut flight) if flight.is_for(server_url, cover_id) => match flight.handle.take() {
+            Some(handle) => (handle, Duration::ZERO),
+            None => (tokio::spawn(fetcher), state.cover_wait),
+        },
+        // Another cover's fetch: dropping it aborts the task.
+        Some(_) | None => (tokio::spawn(fetcher), state.cover_wait),
+    };
+
+    let joined = match tokio::time::timeout(wait, &mut handle).await {
+        Ok(joined) => joined,
+        Err(_still_running) => {
+            state.in_flight = Some(InFlightCover {
+                server_url: server_url.to_string(),
+                cover_id: cover_id.to_string(),
+                handle: Some(handle),
+            });
+            return None;
+        }
+    };
+
+    let bytes = match joined {
+        Ok(Ok(b)) if b.is_empty() => {
             warn!(
                 target: "nokkvi::mpris::art",
                 server_url, cover_id, "art fetch returned empty body; skipping write"
@@ -593,11 +670,20 @@ where
             state.mark_failed(server_url, cover_id);
             return None;
         }
-        Ok(b) => b,
-        Err(err) => {
+        Ok(Ok(b)) => b,
+        Ok(Err(err)) => {
             warn!(
                 target: "nokkvi::mpris::art",
                 server_url, cover_id, %err, "art fetch failed; mpris falls back"
+            );
+            state.mark_failed(server_url, cover_id);
+            return None;
+        }
+        // The task panicked; it is never aborted while this handle is held.
+        Err(err) => {
+            warn!(
+                target: "nokkvi::mpris::art",
+                server_url, cover_id, %err, "art fetch task ended early; mpris falls back"
             );
             state.mark_failed(server_url, cover_id);
             return None;
@@ -1906,5 +1992,176 @@ mod tests {
         assert!(result.is_none(), "empty body must not be cached");
         assert!(state.last_written.is_none());
         assert!(!cache_file_path_for(dir.path(), "al-empty").exists());
+    }
+
+    // --- Bounded cover wait ----------------------------------------------------
+    //
+    // The tick resolves the art before every state update. A slow server
+    // once held the whole update (title included) for as long as the cover
+    // took: on the one-core demo server a title lagged the audio by a minute.
+    // The cover fetch now runs on its own task; the tick waits `cover_wait`
+    // for it, then publishes the placeholder and harvests the cover on a
+    // later tick.
+
+    /// A fetcher that answers only once `tx` fires, so a test can hold a
+    /// cover "in flight" for as long as it wants.
+    fn gated_fetcher(
+        calls: &Arc<AtomicU32>,
+        rx: tokio::sync::oneshot::Receiver<anyhow::Result<Vec<u8>>>,
+    ) -> impl Future<Output = anyhow::Result<Vec<u8>>> + Send + use<> {
+        let c = Arc::clone(calls);
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            rx.await.map_err(|_| anyhow::anyhow!("fetch abandoned"))?
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_cover_publishes_the_placeholder_then_the_cover() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        state.cover_wait = Duration::from_millis(20);
+        let calls = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut fetcher = Some(gated_fetcher(&calls, rx));
+
+        let started = Instant::now();
+        let uri = tokio::time::timeout(
+            Duration::from_secs(2),
+            resolve_art_inner(
+                &mut state,
+                Some(dir.path()),
+                SERVER,
+                song("al-slow"),
+                |_| fetcher.take().expect("one fetch"),
+            ),
+        )
+        .await
+        .expect("the tick must not wait for a slow cover");
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "the tick must not wait for a slow cover"
+        );
+        assert_eq!(
+            uri.as_deref(),
+            Some(placeholder_uri_in(dir.path()).as_str()),
+            "the placeholder stands in while the cover loads"
+        );
+
+        tx.send(Ok(b"cover".to_vec())).expect("fetch task alive");
+        tokio::task::yield_now().await;
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            song("al-slow"),
+            &calls,
+            Ok(vec![]),
+        )
+        .await;
+        assert_eq!(
+            uri.as_deref(),
+            Some(path_to_file_uri(&cache_file_path_for(dir.path(), "al-slow")).as_str()),
+            "a later tick publishes the landed cover"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the cover was fetched once"
+        );
+    }
+
+    #[tokio::test]
+    async fn song_change_abandons_the_in_flight_cover() {
+        struct DropFlag(Arc<AtomicU32>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        state.cover_wait = Duration::from_millis(20);
+        let calls = Arc::new(AtomicU32::new(0));
+        let dropped = Arc::new(AtomicU32::new(0));
+        let (_tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<Vec<u8>>>();
+        let flag = DropFlag(Arc::clone(&dropped));
+        let mut slow = Some(async move {
+            let _flag = flag;
+            rx.await.map_err(|_| anyhow::anyhow!("abandoned"))?
+        });
+
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            resolve_art_inner(&mut state, Some(dir.path()), SERVER, song("al-old"), |_| {
+                slow.take().expect("one fetch")
+            }),
+        )
+        .await
+        .expect("the tick must not wait for a slow cover");
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            song("al-new"),
+            &calls,
+            Ok(b"new".to_vec()),
+        )
+        .await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            uri.as_deref(),
+            Some(path_to_file_uri(&cache_file_path_for(dir.path(), "al-new")).as_str()),
+            "the new song's cover is fetched and published"
+        );
+        assert_eq!(
+            dropped.load(Ordering::SeqCst),
+            1,
+            "the superseded fetch is cancelled, not left running"
+        );
+    }
+
+    #[tokio::test]
+    async fn in_flight_cover_failure_is_negative_cached() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        state.cover_wait = Duration::from_millis(20);
+        let calls = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut fetcher = Some(gated_fetcher(&calls, rx));
+
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            resolve_art_inner(&mut state, Some(dir.path()), SERVER, song("al-bad"), |_| {
+                fetcher.take().expect("one fetch")
+            }),
+        )
+        .await
+        .expect("the tick must not wait for a slow cover");
+        tx.send(Err(anyhow::anyhow!("not an image")))
+            .expect("fetch task alive");
+        tokio::task::yield_now().await;
+
+        for _ in 0..3 {
+            let uri = resolve_with(
+                &mut state,
+                Some(dir.path()),
+                song("al-bad"),
+                &calls,
+                Ok(vec![]),
+            )
+            .await;
+            assert_eq!(
+                uri.as_deref(),
+                Some(placeholder_uri_in(dir.path()).as_str()),
+                "a failed cover falls back to the placeholder"
+            );
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a harvested failure is negative-cached like an inline one"
+        );
     }
 }

@@ -85,6 +85,7 @@ All notable changes to this project will be documented in this file.
 - Holding an arrow key in a list no longer requests the same full-size cover again while it is still loading.
 - Scrolling a list on a slow server no longer requests a thumbnail again while it is still loading.
 - The "Playing From" cover's 2×2 collage now loads even when its albums are scrolled out of view.
+- The playing song's title no longer waits for its cover to download before it shows in the app and desktop media widgets.
 
 ### Removed
 

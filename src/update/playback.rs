@@ -407,6 +407,8 @@ impl Nokkvi {
                 // or station always gets an artUrl (cover or logo as a
                 // `file://` cache path, else http(s) stream art, else the app
                 // icon), and no credentialed getCoverArt URL reaches D-Bus.
+                // A cover that takes longer than the writer's bounded wait
+                // lands on a later tick; this update is never held for it.
                 let art_url = {
                     let (server_url, _credential) = shell.queue().get_server_config().await;
                     let albums = shell.albums().clone();
