@@ -1228,7 +1228,11 @@ fn ms(n: u64) -> std::time::Duration {
     std::time::Duration::from_millis(n)
 }
 
+/// One frame tick. The whole tick also publishes the column center into the
+/// process-global atomic the motion tests above read, so it runs under their
+/// lock (held for the call only: the clock assertions never read the center).
 fn frame(app: &mut crate::Nokkvi, at: std::time::Instant) {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _ = crate::update::frame::handle_frame_tick(app, at);
 }
 

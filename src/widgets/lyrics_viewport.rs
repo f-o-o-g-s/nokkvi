@@ -323,7 +323,28 @@ struct ActiveWordLayout {
     line: usize,
     /// The shaping cache key the boxes were measured against.
     key: (u64, u32, u32),
+    /// [`words_hash`] of the line's word timing the boxes were cut for.
+    words_key: u64,
     measured: MeasuredWords,
+}
+
+/// FNV-1a over a line's word starts, ends and texts — the word-timing half of
+/// the active line's measuring key (`doc_hash` covers the text alone).
+fn words_hash(line: &LrcLine) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |bytes: &[u8]| {
+        for b in bytes {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    for word in &line.words {
+        mix(&word.start_ms.to_le_bytes());
+        mix(&word.end_ms.unwrap_or(u32::MAX).to_le_bytes());
+        mix(word.text.as_bytes());
+        mix(&[0x1f]);
+    }
+    h
 }
 
 /// One accent fill over the active line, in logical px from the paragraph's
@@ -372,12 +393,12 @@ fn measure_words(
     paragraph: &<iced::Renderer as TextRenderer>::Paragraph,
     text: &str,
     words: &[WordSpan],
-    font_px: f32,
 ) -> Option<MeasuredWords> {
     let ranges = word_byte_ranges(text, words)?;
     let buffer = paragraph.buffer();
-    // The buffer is shaped at `font_px × hint factor`; undo that factor.
-    let hint = buffer.metrics().font_size / font_px;
+    // The buffer is shaped in units scaled by the paragraph's hint factor
+    // (`None` = unhinted, 1.0); undo it to get logical px.
+    let hint = paragraph.hint_factor().unwrap_or(1.0);
     let scale = if hint.is_finite() && hint > 0.0 {
         1.0 / hint
     } else {
@@ -428,12 +449,15 @@ fn measure_words(
 /// then the front's soft edge ([`SWEEP_EDGE_STEPS`]). `Word`: the sung words
 /// at full strength, the current word's boxes whole at the pop ramp
 /// (`elapsed_ms` / [`WORD_POP_MS`]). `Off`: nothing — the caller lights the
-/// line whole. `elapsed_ms` is how long the current word has been sung.
+/// line whole. `elapsed_ms` is how long the current word has been sung;
+/// `edge_px` is the width of one edge step (the text scale, so the bloom
+/// grows with a panel-fit sheet).
 fn accent_fills(
     layout: &MeasuredWords,
     cursor: WordCursor,
     mode: LyricsWordHighlight,
     elapsed_ms: f32,
+    edge_px: f32,
 ) -> Vec<AccentFill> {
     let mut fills = Vec::new();
     if mode == LyricsWordHighlight::Off {
@@ -506,11 +530,13 @@ fn accent_fills(
     }));
     fills.extend(pops);
     if let Some((row, front, rtl)) = edge {
+        let step = edge_px.max(0.0);
         fills.extend(SWEEP_EDGE_STEPS.iter().map(|&(offset, alpha)| {
+            let (near, far) = ((offset - 1.0) * step, offset * step);
             let (x0, x1) = if rtl {
-                (front - offset, front - offset + 1.0)
+                (front - far, front - near)
             } else {
-                (front + offset - 1.0, front + offset)
+                (front + near, front + far)
             };
             AccentFill { row, x0, x1, alpha }
         }));
@@ -778,7 +804,7 @@ impl<'a, M> LyricViewport<'a, M> {
     /// The accent fills over the active line for this frame, read from the
     /// lyric clock against the line's measured words. `None` when the
     /// highlight doesn't apply or the words could not be placed in the text.
-    fn word_fills(&self, state: &State) -> Option<(usize, Vec<AccentFill>)> {
+    fn word_fills(&self, state: &State, text_scale: f32) -> Option<(usize, Vec<AccentFill>)> {
         let index = self.worded_active_line()?;
         let layout = state
             .active_words
@@ -786,11 +812,8 @@ impl<'a, M> LyricViewport<'a, M> {
             .filter(|layout| layout.line == index && !layout.measured.words.is_empty())?;
         let line = self.data.lines.get(index)?;
         // The next line's stamp caps the last word; a plain sheet has none.
-        let line_end = self
-            .data
-            .synced
-            .then(|| self.data.lines.get(index + 1).map(|next| next.time_ms))
-            .flatten();
+        let line_end =
+            nokkvi_data::types::lyrics::line_end_ms(self.data.lines, self.data.synced, index);
         let cursor = line.word_cursor(line_end, self.data.clock_ms);
         let elapsed_ms = cursor
             .current
@@ -805,6 +828,7 @@ impl<'a, M> LyricViewport<'a, M> {
                 cursor,
                 self.data.word_highlight,
                 elapsed_ms,
+                text_scale,
             ),
         ))
     }
@@ -857,27 +881,24 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // whole.
         match self.worded_active_line() {
             Some(i) => {
-                if state
-                    .active_words
-                    .as_ref()
-                    .is_none_or(|layout| (layout.line, layout.key) != (i, key))
-                {
+                // The shaping key hashes text only; two sheets with the same
+                // text but different word splits need their own boxes.
+                let words_key = self.data.lines.get(i).map_or(0, words_hash);
+                if state.active_words.as_ref().is_none_or(|layout| {
+                    (layout.line, layout.key, layout.words_key) != (i, key, words_key)
+                }) {
                     let measured = state
                         .paragraphs
                         .get(i)
                         .zip(self.data.lines.get(i))
                         .and_then(|(paragraph, line)| {
-                            measure_words(
-                                paragraph.raw(),
-                                &line.text,
-                                &line.words,
-                                LYRIC_FONT_SIZE * text_scale,
-                            )
+                            measure_words(paragraph.raw(), &line.text, &line.words)
                         })
                         .unwrap_or_default();
                     state.active_words = Some(ActiveWordLayout {
                         line: i,
                         key,
+                        words_key,
                         measured,
                     });
                 }
@@ -977,7 +998,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         let incoming_factor = self.data.dissolve.map_or(1.0, |d| d.progress);
 
         // The word-level highlight over the active line, from the lyric clock.
-        let word_fills = self.word_fills(state);
+        let word_fills = self.word_fills(state, text_scale);
         let word_frame = word_fills.as_ref().and_then(|(line, fills)| {
             state
                 .active_words
@@ -1402,6 +1423,7 @@ mod tests {
                 WordCursor { sung, current },
                 LyricsWordHighlight::Sweep,
                 0.0,
+                1.0,
             )
         };
         // Nothing sung yet: nothing lit (the line sits in base ink).
@@ -1437,6 +1459,7 @@ mod tests {
             },
             LyricsWordHighlight::Word,
             75.0,
+            1.0,
         );
         // The sung word full, the current one whole at half the pop ramp —
         // its fraction through the word plays no part.
@@ -1453,6 +1476,7 @@ mod tests {
             },
             LyricsWordHighlight::Word,
             WORD_POP_MS * 3.0,
+            1.0,
         );
         assert_eq!(fills[1].alpha, 1.0);
         // Off paints nothing whatever the cursor says.
@@ -1465,6 +1489,7 @@ mod tests {
                 },
                 LyricsWordHighlight::Off,
                 0.0,
+                1.0,
             )
             .is_empty()
         );
@@ -1482,6 +1507,7 @@ mod tests {
             },
             LyricsWordHighlight::Sweep,
             0.0,
+            1.0,
         );
         // Right half lit (25..40), the bloom steps leftwards from the front.
         assert_eq!(fills[0], fill(0, 25.0, 40.0, 1.0));
@@ -1515,9 +1541,24 @@ mod tests {
             },
             LyricsWordHighlight::Sweep,
             0.0,
+            1.0,
         );
         assert_eq!(fills[0], fill(0, 60.0, 100.0, 1.0));
         assert_eq!(fills[1], fill(1, 10.0, 15.0, 1.0));
         assert_eq!(fills[2], fill(1, 15.0, 16.0, 0.6));
+
+        // A panel-fit sheet at twice the size gets edge steps twice as wide.
+        let fills = accent_fills(
+            &layout,
+            WordCursor {
+                sung: 0,
+                current: Some((0, 0.75)),
+            },
+            LyricsWordHighlight::Sweep,
+            0.0,
+            2.0,
+        );
+        assert_eq!(fills[2], fill(1, 15.0, 17.0, 0.6));
+        assert_eq!(fills[4], fill(1, 19.0, 21.0, 0.15));
     }
 }

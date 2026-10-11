@@ -901,8 +901,19 @@ impl Nokkvi {
                 // is the only writer of `position_ms`, and it anchors the
                 // lyric clock the frame tick runs on between ticks.
                 self.lyrics.position_ms = position_ms;
-                self.lyrics.clock_anchor = Some(std::time::Instant::now());
+                let now = std::time::Instant::now();
+                self.lyrics.clock_anchor = Some(now);
                 self.lyrics.clock_running = playing && !paused;
+                // Bring the clock in line now rather than a frame later, so
+                // the active line this tick names never draws against a
+                // pre-seek reading.
+                self.lyrics.clock_ms = crate::state::lyric_clock_ms(
+                    self.lyrics.clock_ms,
+                    position_ms,
+                    self.lyrics.clock_anchor,
+                    self.lyrics.clock_running,
+                    now,
+                );
 
                 // The line cursor belongs to SYNCED sheets alone: a plain
                 // sheet's `active_line_at` is always `None`, so its
