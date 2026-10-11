@@ -83,7 +83,7 @@ mod boat_tests {
 
         // Lines in the bottom band (the non-default placement — the shipped
         // default is OverCover) → the boat surfs the band, with the
-        // window-derived wrap margin (distinct from the over-cover constant).
+        // band-derived wrap margin (distinct from the over-cover constant).
         {
             let mut cfg = app.visualizer_config.write();
             cfg.lines.placement = VisualizerPlacement::BottomBand;
@@ -97,12 +97,12 @@ mod boat_tests {
         // same inputs the handler uses), so a regression that wrongly applied the
         // over-cover constant to the bottom band would fail here.
         let hp = app.visualizer_config.read().height_percent;
-        let area_h = visualizer_area_height(app.window.width, app.window.height, hp);
-        let expected_band =
-            (boat_pixel_size(area_h).0 * BOAT_WRAP_MARGIN_BOAT_WIDTHS) / app.window.width;
+        let band_w = app.bottom_chrome_span().width;
+        let area_h = visualizer_area_height(band_w, app.window.height, hp);
+        let expected_band = (boat_pixel_size(area_h).0 * BOAT_WRAP_MARGIN_BOAT_WIDTHS) / band_w;
         assert!(
             (app.boat.x_wrap_margin - expected_band).abs() < 1e-6,
-            "bottom-band uses the window-derived margin, got {}",
+            "bottom-band uses the band-derived margin, got {}",
             app.boat.x_wrap_margin
         );
         assert!(

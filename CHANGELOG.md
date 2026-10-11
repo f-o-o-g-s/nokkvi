@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - With Reflection Below Cover on, the Reflection's water now hangs below the cover over the UI, where there is room for it.
 - With Reflection Below Cover on, Bars and Lines now stand on the cover's bottom edge and fill Visualizer Height when their water fits below it.
 - Lyrics over a large Queue cover now grow with the cover, the same size Theater Mode shows at that size.
+- With Bars or Lines in the bottom band, the visualizer now spans only the list beside the artwork column.
 
 ### Fixed
 
@@ -61,7 +62,8 @@ All notable changes to this project will be documented in this file.
 - Launching nokkvi twice in quick succession now opens one window instead of two.
 - A song the server transcodes on the fly now ends and moves to the next song instead of restarting.
 - Seeking a song the server transcodes on the fly is now refused up front, with no seek handle and no media-widget seek bar.
-- A song the server transcodes on the fly is no longer labelled bit-perfect, and shows the codec the server actually sends.
+- A song the server transcodes on the fly is no longer labelled bit-perfect.
+- A song the server transcodes on the fly now shows the codec the server actually sends.
 - A radio station whose server reports a stream length now reconnects when it drops instead of ending like a song.
 - The Artists view now shows an artist's biography even when no other app has opened that artist on the server before.
 - An artist biography's link now names the site it opens instead of always saying Last.fm.
@@ -71,11 +73,12 @@ All notable changes to this project will be documented in this file.
 - A server rejection left over from an earlier login no longer logs out the session that replaced it.
 - A genre or playlist list the server fails to send now shows an error and keeps the rows, instead of an empty view.
 - A rejected session while loading genres or playlists now returns you to the login screen.
-- Playing several items at once, or a Trawl mix, on a rejected session now returns you to the login screen instead of saying "No songs found".
+- Playing several items at once, or a Trawl mix, on a rejected session now returns to the login screen instead of saying "No songs found".
 - A failed unstar now only puts the star back; it no longer rates the song five stars locally and on the server.
 - The "already in playlist" confirm now re-checks the playlist when it adds, so a song added meanwhile is not added twice.
 - A star, rating or scrobble confirmed after logging out no longer shows "Library refreshed automatically" on the login screen.
 - A library list that fails to reload now keeps its header count instead of showing 0 above the rows it kept.
+- With Navigation Layout set to Side, bottom-band Bars now fit beside the sidebar instead of losing their rightmost bars off the window's edge.
 
 ### Removed
 

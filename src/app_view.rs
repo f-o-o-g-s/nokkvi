@@ -20,6 +20,18 @@ use crate::{
 /// spill), each real or a placeholder.
 const BOTTOM_BAND_LAYERS: usize = 2;
 
+/// The window's x-range under the docked player bar, which the chrome riding
+/// on the bar shares: the bottom-band visualizer and its boat, and the toast
+/// strip. From [`Nokkvi::bottom_chrome_span`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BottomChromeSpan {
+    /// Window x where the span starts: clear of the sidebar.
+    pub(crate) left: f32,
+    /// The span's width: the lowered bar's beside the artwork column, else
+    /// the rest of the window.
+    pub(crate) width: f32,
+}
+
 // ============================================================================
 // View ⇄ NavView conversions
 // ============================================================================
@@ -470,8 +482,9 @@ impl Nokkvi {
     /// Horizontal footprint of the sidebar on screen right now:
     /// `side_nav_total_width()` while the side nav is drawn (the Home screen
     /// outside Theater Mode), else 0. The sidebar runs the full window
-    /// height, so the window-wide overlays (the bottom-band visualizer, the
-    /// toast strip) start at this x instead of painting over its tabs.
+    /// height, so the chrome riding on the player bar (`bottom_chrome_span`:
+    /// the bottom-band visualizer, the toast strip) starts at this x instead
+    /// of painting over its tabs.
     pub(crate) fn side_nav_inset(&self) -> f32 {
         if self.screen == Screen::Home && !self.theater.active && crate::theme::is_side_nav() {
             crate::widgets::side_nav_bar::side_nav_total_width()
@@ -480,21 +493,33 @@ impl Nokkvi {
         }
     }
 
-    /// Left and right insets of the toast strip, which rides just above the
-    /// player bar: it starts clear of the sidebar (`side_nav_inset`) and,
-    /// while the bar is lowered beside the artwork column, ends where the bar
-    /// does, so the toast sits over the slot list instead of across the
-    /// artwork. Resolves the lowered width the way `home_view` does.
-    pub(crate) fn toast_insets(&self) -> (f32, f32) {
+    /// The x-range of the docked player bar (see [`BottomChromeSpan`]),
+    /// resolved the way `home_view` docks it: it starts clear of the sidebar
+    /// (`side_nav_inset`) and, while the bar is lowered beside the artwork
+    /// column, ends where the bar does, so the chrome riding on it sits over
+    /// the slot list instead of across the artwork. Theater Mode and the
+    /// login screen draw no lowered bar.
+    pub(crate) fn bottom_chrome_span(&self) -> BottomChromeSpan {
         let left = self.side_nav_inset();
-        // Theater Mode and the login screen draw no lowered bar.
-        if self.screen != Screen::Home || self.theater.active {
-            return (left, 0.0);
+        let lowered = if self.screen == Screen::Home && !self.theater.active {
+            self.lowered_player_bar_width()
+        } else {
+            None
+        };
+        BottomChromeSpan {
+            left,
+            width: lowered.unwrap_or_else(|| (self.window.width - left).max(0.0)),
         }
-        let right = self.lowered_player_bar_width().map_or(0.0, |bar_width| {
-            (self.window.width - left - bar_width).max(0.0)
-        });
-        (left, right)
+    }
+
+    /// Left and right insets of the toast strip, which rides just above the
+    /// player bar across its span (`bottom_chrome_span`).
+    pub(crate) fn toast_insets(&self) -> (f32, f32) {
+        let span = self.bottom_chrome_span();
+        (
+            span.left,
+            (self.window.width - span.left - span.width).max(0.0),
+        )
     }
 
     /// Width of the lowered player bar, or `None` when the bar spans the
@@ -910,13 +935,13 @@ impl Nokkvi {
             docked
         };
 
-        // In side-nav mode the sidebar is the full-height leftmost band; the
-        // visualizer (and boat) overlay must start to its RIGHT, not at x=0,
-        // or the bars/lines bleed under the icons.
+        // The visualizer (and boat) overlay rides on the player bar across
+        // its span: right of the side nav's full-height sidebar, or the
+        // bars/lines bleed under the icons, and beside a lowered bar over the
+        // list only, clear of the artwork column.
         self.bottom_band_layers(
             Stack::new().push(base_layer),
             widgets::player_bar::player_bar_height(),
-            self.side_nav_inset(),
         )
         .boxed()
     }
@@ -959,7 +984,7 @@ impl Nokkvi {
             },
         );
 
-        let stack = self.bottom_band_layers(Stack::new().push(panel.boxed()), 0.0, 0.0);
+        let stack = self.bottom_band_layers(Stack::new().push(panel.boxed()), 0.0);
 
         // The chrome is translated, never resized: a `Column` spacer would
         // squash a `Fixed`-height bar instead of moving it (and `pin` has the
@@ -1095,8 +1120,9 @@ impl Nokkvi {
     /// Push the bottom-band visualizer and its surfing boat onto `stack`:
     /// always exactly [`BOTTOM_BAND_LAYERS`] layers, real or placeholder.
     /// `bar_reserved` is the height kept free below the band (the player bar;
-    /// `0.0` in Theater Mode, where the bar floats over the band) and `inset`
-    /// the width kept free on the left (the side nav).
+    /// `0.0` in Theater Mode, where the bar floats over the band). The band
+    /// spans the bar's x-range ([`Nokkvi::bottom_chrome_span`]): clear of the
+    /// side nav, and beside the artwork column only as wide as the lowered bar.
     ///
     /// Over the cover, a Bars / Lines Reflection takes the first layer for
     /// its spill (`widgets::visualizer::reflection_spill`): the water it
@@ -1107,7 +1133,6 @@ impl Nokkvi {
         &'a self,
         mut stack: Stack<Element<'a, Message>>,
         bar_reserved: f32,
-        inset: f32,
     ) -> Stack<Element<'a, Message>> {
         let mut pushed = 0;
 
@@ -1134,11 +1159,14 @@ impl Nokkvi {
             pushed += 1;
         }
         if let (Some(widget_mode), Some(viz)) = (bottom_band_mode, self.visualizer.as_ref()) {
+            let span = self.bottom_chrome_span();
+            // The bar layout (count, width, edge spacing) fills the band's
+            // own width.
             let viz_with_mode = viz
                 .clone()
                 .mode(widget_mode)
                 .window_height(self.window.height)
-                .width(self.window.width);
+                .width(span.width);
 
             // Visualizer height scales with window (configurable via config.toml, min 80px)
             // Read height_percent from shared config (hot-reloadable). Sizing logic lives
@@ -1151,10 +1179,8 @@ impl Nokkvi {
                 crate::widgets::boat::LineGeometry::in_band(cfg.lines.mirror, cfg.lines.reflection);
             drop(cfg);
 
-            let visualizer_width = (self.window.width - inset).max(0.0);
-
             let visualizer_height = widgets::visualizer::visualizer_area_height(
-                visualizer_width,
+                span.width,
                 self.window.height,
                 height_percent,
             );
@@ -1171,10 +1197,10 @@ impl Nokkvi {
                     .width(Length::Fill)
                     .height(Length::Fixed(visualizer_height + headroom))
             ]
-            .width(Length::Fill)
+            .width(Length::Fixed(span.width))
             .height(Length::Fill);
             let visualizer_overlay = iced::widget::row![
-                iced::widget::Space::new().width(Length::Fixed(inset)),
+                iced::widget::Space::new().width(Length::Fixed(span.left)),
                 visualizer_inner,
             ]
             .width(Length::Fill)
@@ -1187,14 +1213,14 @@ impl Nokkvi {
             // shape above so the boat overlay's pixel coordinate space lines
             // up with the visualizer area. `boat_overlay()` returns a
             // fixed-size, self-clipping container, so we don't need an
-            // outer wrapper here. Insets the same `inset` so the
-            // boat sails over the visualizer, not the sidebar.
+            // outer wrapper here. Spans the same `span` so the boat sails
+            // over the visualizer, not the sidebar or the artwork column.
             if self.boat.visible && widget_mode == widgets::visualizer::VisualizationMode::Lines {
                 let boat_inner = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                     crate::widgets::boat::boat_overlay::<Message>(
                         &self.boat,
-                        visualizer_width,
+                        span.width,
                         visualizer_height,
                         // Bottom band is wide-short, so it sizes the boat off
                         // the band height (the constraining dimension).
@@ -1206,10 +1232,10 @@ impl Nokkvi {
                         None,
                     ),
                 ]
-                .width(Length::Fill)
+                .width(Length::Fixed(span.width))
                 .height(Length::Fill);
                 let boat_overlay_col = iced::widget::row![
-                    iced::widget::Space::new().width(Length::Fixed(inset)),
+                    iced::widget::Space::new().width(Length::Fixed(span.left)),
                     boat_inner,
                 ]
                 .width(Length::Fill)

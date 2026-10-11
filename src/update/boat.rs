@@ -99,15 +99,15 @@ pub(crate) fn step_boat(app: &mut Nokkvi, now: Instant) {
     // Size the off-screen wrap margin so the boat clears the visible area
     // before reappearing on the opposite side (`BOAT_WRAP_MARGIN_BOAT_WIDTHS`
     // boat-widths of pixel travel beyond the edge). The bottom band spans the
-    // full window width, so the margin is derived from the live sprite width vs
-    // that width (the visualizer area height is computed by the same helper
-    // `app_view::view()` uses, so it tracks any future scaling-curve changes).
-    // Over the cover the panel is ~square, so a size-independent constant
-    // applies — see the `else` arm.
+    // player bar's x-range (`bottom_chrome_span`, the width
+    // `bottom_band_layers` draws it at), so the margin is derived from the
+    // live sprite width vs that width (the visualizer area height is computed
+    // by the same helper the band uses, so it tracks any future scaling-curve
+    // changes). Over the cover the panel is ~square, so a size-independent
+    // constant applies — see the `else` arm.
     app.boat.x_wrap_margin = if lines_in_bottom_band {
-        let area_width = app.window.width;
-        let area_height =
-            visualizer_area_height(app.window.width, app.window.height, height_percent);
+        let area_width = app.bottom_chrome_span().width;
+        let area_height = visualizer_area_height(area_width, app.window.height, height_percent);
         let (boat_w, _boat_h) = boat::boat_pixel_size(area_height);
         if area_width > 0.0 {
             (boat_w * boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS) / area_width

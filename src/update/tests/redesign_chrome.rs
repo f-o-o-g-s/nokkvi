@@ -20,7 +20,8 @@
 //!
 //! And the lowered layout's geometry: the top chrome docked over the list
 //! (`top_chrome_height`, `Nokkvi::artwork_bleed`), the full-height artwork
-//! column beside it, and the toast insets that follow the lowered bar.
+//! column beside it, and the bottom chrome (the toast strip, the bottom-band
+//! visualizer and its boat) that follows the lowered bar.
 
 use nokkvi_data::types::player_settings::{
     ArtworkColumnMode, NavLayout, RoundedMode, TrackInfoDisplay,
@@ -454,6 +455,117 @@ fn toast_insets_follow_the_lowered_player_bar() {
     set_artwork_column_mode(ArtworkColumnMode::Auto);
     app.theater.active = true;
     assert!(app.toast_insets().1.abs() < f32::EPSILON);
+}
+
+#[test]
+fn bottom_band_spans_the_lowered_player_bar() {
+    // The bottom-band visualizer rides on the player bar. Lowered, the bar
+    // spans the list only and the artwork column runs down beside it to the
+    // window's bottom edge, so a window-wide band crossed the cover and its
+    // lyrics with its floor a bar's height above the cover's.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = lowered_queue_app();
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+
+    for layout in [NavLayout::Side, NavLayout::Top, NavLayout::None] {
+        set_nav_layout(layout);
+        let bar = app
+            .lowered_player_bar_width()
+            .expect("setup invariant: the queue's artwork column lowers the bar");
+        let span = app.bottom_chrome_span();
+        assert!(
+            (span.left - app.side_nav_inset()).abs() < f32::EPSILON,
+            "{layout:?}: the band starts clear of the sidebar",
+        );
+        assert!(
+            (span.width - bar).abs() < 0.5,
+            "{layout:?}: the band must span the lowered bar ({bar}), got {}",
+            span.width,
+        );
+    }
+
+    // No artwork column: the bar, and the band, run to the window's right edge.
+    set_nav_layout(NavLayout::Side);
+    set_artwork_column_mode(ArtworkColumnMode::Never);
+    let span = app.bottom_chrome_span();
+    assert!(
+        (span.left + span.width - app.window.width).abs() < 0.5,
+        "unlowered, the band runs to the window's right edge, got {span:?}",
+    );
+
+    // Theater Mode's bar floats over a band the whole window wide, and the
+    // toast strip on the login screen spans the window too.
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+    app.theater.active = true;
+    let window_wide = |span: crate::app_view::BottomChromeSpan, width: f32| {
+        span.left.abs() < f32::EPSILON && (span.width - width).abs() < f32::EPSILON
+    };
+    assert!(
+        window_wide(app.bottom_chrome_span(), app.window.width),
+        "theater: {:?}",
+        app.bottom_chrome_span(),
+    );
+    app.theater.active = false;
+    app.screen = crate::Screen::Login;
+    assert!(
+        window_wide(app.bottom_chrome_span(), app.window.width),
+        "login: {:?}",
+        app.bottom_chrome_span(),
+    );
+}
+
+#[test]
+fn bottom_band_boat_wraps_within_the_lowered_band() {
+    // The Lines boat sails off one edge of the band and back in at the other.
+    // Its wrap margin is a share of the band's width, so beside the lowered
+    // artwork it must come from the list-wide band the boat is drawn in.
+    use std::time::Instant;
+
+    use nokkvi_data::types::player_settings::VisualizationMode;
+
+    use crate::{
+        app_message::Message,
+        visualizer_config::VisualizerPlacement,
+        widgets::{
+            boat::{BOAT_WRAP_MARGIN_BOAT_WIDTHS, boat_pixel_size},
+            visualizer::visualizer_area_height,
+        },
+    };
+
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    let mut app = lowered_queue_app();
+    set_artwork_column_mode(ArtworkColumnMode::Auto);
+    set_nav_layout(NavLayout::Top);
+    app.settings.visualization_mode = VisualizationMode::Lines;
+    {
+        let mut cfg = app.visualizer_config.write();
+        cfg.lines.boat = true;
+        cfg.lines.placement = VisualizerPlacement::BottomBand;
+    }
+    let band = app
+        .lowered_player_bar_width()
+        .expect("setup invariant: the queue's artwork column lowers the bar");
+    assert!(
+        band < app.window.width - 1.0,
+        "setup invariant: the lowered band is narrower than the window",
+    );
+
+    let _ = app.update(Message::FrameTick(Instant::now()));
+
+    assert!(
+        app.boat.visible,
+        "setup invariant: the band's boat is shown"
+    );
+    let hp = app.visualizer_config.read().height_percent;
+    let area_h = visualizer_area_height(band, app.window.height, hp);
+    let expected = (boat_pixel_size(area_h).0 * BOAT_WRAP_MARGIN_BOAT_WIDTHS) / band;
+    assert!(
+        (app.boat.x_wrap_margin - expected).abs() < 1e-6,
+        "the wrap margin must come from the lowered band ({band} px): expected {expected}, got {}",
+        app.boat.x_wrap_margin,
+    );
 }
 
 #[test]
