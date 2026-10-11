@@ -898,8 +898,11 @@ impl Nokkvi {
                 // BOTH kinds of sheet follow the clock. A synced one needs it
                 // to find its current line; a plain one because the per-frame
                 // tick reads it back through `drift_center`. This block
-                // is the only writer of `position_ms`.
+                // is the only writer of `position_ms`, and it anchors the
+                // lyric clock the frame tick runs on between ticks.
                 self.lyrics.position_ms = position_ms;
+                self.lyrics.clock_anchor = Some(std::time::Instant::now());
+                self.lyrics.clock_running = playing && !paused;
 
                 // The line cursor belongs to SYNCED sheets alone: a plain
                 // sheet's `active_line_at` is always `None`, so its

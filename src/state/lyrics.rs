@@ -83,6 +83,46 @@ pub struct LyricsState {
     /// Written already clamped (no hidden overshoot past either end) and reset
     /// on every song change, so a scroll never carries into the next track.
     pub drift_offset: f32,
+    /// The lyric clock: the playhead in milliseconds as the frame tick last
+    /// published it, read by the word-level highlight. Runs on from
+    /// `position_ms` between position ticks (see [`lyric_clock_ms`]).
+    pub clock_ms: u32,
+    /// When `position_ms` was last written by the position tick, so the frame
+    /// tick can run the clock on from it. `None` until the first tick lands.
+    pub clock_anchor: Option<std::time::Instant>,
+    /// Whether the transport was running at that write: a paused clock holds.
+    pub clock_running: bool,
+}
+
+/// How far the position tick may fall behind the published clock before the
+/// clock follows it back. A tick that lags by less is the position
+/// round-trip's jitter (the clock holds and the tick catches up); one that
+/// lags by more is a seek backwards (the clock snaps to it).
+pub(crate) const LYRIC_CLOCK_SEEK_BACK_MS: u32 = 300;
+
+/// The lyric clock's reading at `now` (pure). Between position ticks the clock
+/// runs on from the anchored `anchor_ms` while the transport runs and holds it
+/// while paused; it never steps backwards for a tick that merely lags the
+/// extrapolation, only for one more than [`LYRIC_CLOCK_SEEK_BACK_MS`] behind.
+/// A stalled engine cannot run it away either: each tick re-anchors at the
+/// same position, so the clock saturates a tick's length ahead of it.
+pub(crate) fn lyric_clock_ms(
+    previous: u32,
+    anchor_ms: u32,
+    anchored_at: Option<std::time::Instant>,
+    running: bool,
+    now: std::time::Instant,
+) -> u32 {
+    let elapsed = match anchored_at {
+        Some(at) if running => now.saturating_duration_since(at).as_millis(),
+        _ => 0,
+    };
+    let target = anchor_ms.saturating_add(u32::try_from(elapsed).unwrap_or(u32::MAX));
+    if anchor_ms.saturating_add(LYRIC_CLOCK_SEEK_BACK_MS) < previous {
+        target
+    } else {
+        previous.max(target)
+    }
 }
 
 impl LyricsState {
@@ -98,8 +138,19 @@ impl LyricsState {
         // a match lands, so a stale value would snap-highlight the wrong line).
         self.position_ms = 0;
         self.drift_offset = 0.0;
+        self.reset_clock();
         self.reset_scroll();
         self.load_epoch.bump();
+    }
+
+    /// Zero the lyric clock. Load-bearing at every song change: the frame tick
+    /// only ever moves the clock forward, so a new sheet would otherwise read
+    /// the previous track's playhead until the first tick fell far enough
+    /// behind it to count as a seek.
+    fn reset_clock(&mut self) {
+        self.clock_ms = 0;
+        self.clock_anchor = None;
+        self.clock_running = false;
     }
 
     /// Park the column at line 0 with no glide in flight.
@@ -169,8 +220,10 @@ impl LyricsState {
                 self.matched_song_id = Some(id);
                 self.active_index = None;
                 // The incoming sheet starts unscrolled and unglided, whatever
-                // the user did to the one it replaces.
+                // the user did to the one it replaces, and its clock starts
+                // from the new track.
                 self.drift_offset = 0.0;
+                self.reset_clock();
                 self.reset_scroll();
                 self.load_epoch.bump();
                 true
@@ -235,5 +288,80 @@ mod tests {
         };
         assert!(!state.promote_next("s2"));
         assert!(state.doc.lines.is_empty());
+    }
+
+    #[test]
+    fn promote_next_and_clear_zero_the_clock() {
+        let mut state = LyricsState {
+            clock_ms: 42_000,
+            clock_anchor: Some(std::time::Instant::now()),
+            clock_running: true,
+            pending_next: Some(("s2".into(), LrcDocument::default())),
+            ..Default::default()
+        };
+        assert!(state.promote_next("s2"));
+        assert_eq!(
+            (state.clock_ms, state.clock_anchor, state.clock_running),
+            (0, None, false)
+        );
+
+        state.clock_ms = 42_000;
+        state.clock_anchor = Some(std::time::Instant::now());
+        state.clock_running = true;
+        state.clear();
+        assert_eq!(
+            (state.clock_ms, state.clock_anchor, state.clock_running),
+            (0, None, false)
+        );
+    }
+
+    #[test]
+    fn lyric_clock_runs_on_holds_and_never_jitters_backwards() {
+        use std::time::{Duration, Instant};
+        let at = Instant::now();
+        let later = |ms| at + Duration::from_millis(ms);
+
+        // Running: the anchor plus the time since it.
+        assert_eq!(lyric_clock_ms(0, 1_000, Some(at), true, later(60)), 1_060);
+        // Paused: the anchor, however long ago it was written.
+        assert_eq!(
+            lyric_clock_ms(0, 1_000, Some(at), false, later(5_000)),
+            1_000
+        );
+        // No anchor yet (a sheet that just landed): the position as seeded.
+        assert_eq!(lyric_clock_ms(0, 61_000, None, false, at), 61_000);
+
+        // A lagging tick (1050 against a clock at 1080) holds the clock...
+        assert_eq!(lyric_clock_ms(1_080, 1_050, Some(at), true, at), 1_080);
+        // ...until it catches up.
+        assert_eq!(
+            lyric_clock_ms(1_080, 1_050, Some(at), true, later(60)),
+            1_110
+        );
+        // A pause right after an over-run holds at the clock, never back.
+        assert_eq!(
+            lyric_clock_ms(1_080, 1_050, Some(at), false, later(900)),
+            1_080
+        );
+
+        // A tick far enough behind is a seek: the clock follows it down.
+        let seek_back = LYRIC_CLOCK_SEEK_BACK_MS + 1;
+        assert_eq!(
+            lyric_clock_ms(50_000, 50_000 - seek_back, Some(at), true, later(20)),
+            50_000 - seek_back + 20
+        );
+        // Exactly the slack is still jitter, not a seek.
+        assert_eq!(
+            lyric_clock_ms(
+                50_000,
+                50_000 - LYRIC_CLOCK_SEEK_BACK_MS,
+                Some(at),
+                true,
+                at
+            ),
+            50_000
+        );
+        // A seek forward is just a bigger target.
+        assert_eq!(lyric_clock_ms(1_080, 90_000, Some(at), true, at), 90_000);
     }
 }

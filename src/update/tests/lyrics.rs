@@ -1204,3 +1204,124 @@ fn foreign_doc_never_scanned_after_clear() {
     let _ = app.handle_playback_state_updated(update_for("song_2", 50_000));
     assert_eq!(app.lyrics.active_index, None);
 }
+
+// ---------------------------------------------------------------------------
+// The lyric clock: the per-frame playhead the word-level highlight reads. The
+// position tick anchors it ten times a second; the frame tick runs it on
+// between anchors while the transport runs, holds it while paused, and never
+// lets a lagging tick drag it backwards.
+// ---------------------------------------------------------------------------
+
+fn ms(n: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(n)
+}
+
+fn frame(app: &mut crate::Nokkvi, at: std::time::Instant) {
+    let _ = crate::update::frame::handle_frame_tick(app, at);
+}
+
+#[test]
+fn lyric_clock_runs_on_between_position_ticks_while_playing() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 1_000));
+    let anchored = app
+        .lyrics
+        .clock_anchor
+        .expect("the position tick anchors the clock");
+    assert!(app.lyrics.clock_running);
+
+    frame(&mut app, anchored + ms(60));
+    assert_eq!(app.lyrics.clock_ms, 1_060);
+    frame(&mut app, anchored + ms(90));
+    assert_eq!(app.lyrics.clock_ms, 1_090);
+}
+
+#[test]
+fn lyric_clock_holds_while_paused() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let mut paused = update_for("song_1", 1_000);
+    paused.paused = true;
+    let _ = app.handle_playback_state_updated(paused);
+    let anchored = app.lyrics.clock_anchor.expect("anchored even while paused");
+    assert!(!app.lyrics.clock_running);
+
+    frame(&mut app, anchored + ms(500));
+    assert_eq!(app.lyrics.clock_ms, 1_000, "a paused clock does not run on");
+}
+
+#[test]
+fn lyric_clock_never_steps_back_for_a_lagging_tick() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 1_000));
+    let first = app.lyrics.clock_anchor.expect("anchored");
+    frame(&mut app, first + ms(80));
+    assert_eq!(app.lyrics.clock_ms, 1_080);
+
+    // The next tick's position round-trip lagged the real playhead: it says
+    // 1050 while the clock already shows 1080. The clock holds rather than
+    // flickering backwards, then runs on once the new anchor catches up.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 1_050));
+    let second = app.lyrics.clock_anchor.expect("re-anchored");
+    frame(&mut app, second);
+    assert_eq!(app.lyrics.clock_ms, 1_080, "held, not dragged back to 1050");
+    frame(&mut app, second + ms(10));
+    assert_eq!(app.lyrics.clock_ms, 1_080, "still held: 1050 + 10 < 1080");
+    frame(&mut app, second + ms(60));
+    assert_eq!(app.lyrics.clock_ms, 1_110, "caught up: 1050 + 60");
+}
+
+#[test]
+fn lyric_clock_snaps_back_on_a_seek() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 60_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 50_000));
+    let first = app.lyrics.clock_anchor.expect("anchored");
+    frame(&mut app, first + ms(40));
+    assert_eq!(app.lyrics.clock_ms, 50_040);
+
+    // A real seek backwards falls far behind the clock: the clock follows it.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 10_000));
+    let second = app.lyrics.clock_anchor.expect("re-anchored");
+    frame(&mut app, second + ms(20));
+    assert_eq!(app.lyrics.clock_ms, 10_020);
+}
+
+#[test]
+fn song_change_resets_the_lyric_clock() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 50_000));
+    let anchored = app.lyrics.clock_anchor.expect("anchored");
+    frame(&mut app, anchored + ms(30));
+    assert_eq!(app.lyrics.clock_ms, 50_030);
+
+    // The cold path clears the sheet: the clock goes with it, so the next
+    // track's sheet can't read the previous track's playhead for a frame.
+    let _ = app.handle_playback_state_updated(update_for("song_2", 500));
+    assert_eq!(app.lyrics.clock_ms, 0);
+    assert_eq!(app.lyrics.clock_anchor, None);
+    assert!(!app.lyrics.clock_running);
+}
+
+#[test]
+fn a_sheet_landing_mid_track_starts_its_clock_at_the_transport() {
+    // A resolve that lands mid-track seeds `position_ms` from the whole-second
+    // transport (see `Loaded`); the first frame reads the clock from there
+    // rather than from zero, so the first word lit is the right one.
+    let mut app = test_app();
+    app.settings.lyrics_enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.playback.position = 61;
+    let epoch = app.lyrics.load_epoch.current();
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(timed_doc(&[1_000, 2_000])),
+        epoch,
+    });
+    assert_eq!(app.lyrics.position_ms, 61_000);
+    frame(&mut app, std::time::Instant::now());
+    assert_eq!(app.lyrics.clock_ms, 61_000);
+}

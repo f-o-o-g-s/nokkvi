@@ -18,9 +18,29 @@ pub(crate) fn handle_frame_tick(app: &mut Nokkvi, now: Instant) -> Task<Message>
     // `lines.boat` toggle, AND the audio-pause freeze: the scene keeps
     // breathing while the player is paused or stopped.
     super::boat::step_harbour_scene(app, now);
+    step_lyrics_clock(app, now);
     publish_lyrics_center(app, now);
     super::boat::step_boat(app, now);
     Task::none()
+}
+
+/// Run the lyric clock on from the last position tick — the per-frame
+/// playhead the word-level highlight reads (`LyricsState::clock_ms`). The
+/// 10 Hz position tick anchors it; this step interpolates between anchors
+/// while the transport runs, holds while paused, and never steps backwards
+/// for a lagging tick (see `lyric_clock_ms`). Gated like the center: only a
+/// matched sheet has a clock worth running.
+fn step_lyrics_clock(app: &mut Nokkvi, now: Instant) {
+    if !app.settings.lyrics_enabled || app.lyrics.matched_song_id.is_none() {
+        return;
+    }
+    app.lyrics.clock_ms = crate::state::lyric_clock_ms(
+        app.lyrics.clock_ms,
+        app.lyrics.position_ms,
+        app.lyrics.clock_anchor,
+        app.lyrics.clock_running,
+        now,
+    );
 }
 
 /// Drive the now-playing breathing glow off the frame tick so it stays smooth
