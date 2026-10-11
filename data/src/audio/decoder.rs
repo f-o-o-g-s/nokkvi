@@ -8,9 +8,13 @@ use symphonia::core::{
     audio::Channels,
     codecs::audio::AudioDecoder as SymphoniaDecoder,
     errors::Error as SymphoniaError,
-    formats::{FormatReader, SeekMode, SeekTo, Track, probe::Hint},
+    formats::{
+        FormatId, FormatReader, SeekMode, SeekTo, SeekedTo, Track,
+        probe::Hint,
+        well_known::{FORMAT_ID_MP1, FORMAT_ID_MP2, FORMAT_ID_MP3},
+    },
     io::{MediaSource, MediaSourceStream, ReadOnlySource},
-    units::Time,
+    units::{Time, TimeBase},
 };
 use tokio::sync::mpsc;
 use tokio_util::{
@@ -364,6 +368,12 @@ pub struct AudioDecoder {
     /// prepared TRANSITION decoders — user-initiated loads keep the honest
     /// recorded start. See [`LeadingTrim`].
     leading_trim: LeadingTrim,
+    /// Decoded frames still to drop before the last seek's target. A seek
+    /// lands on the packet that holds the target (an MP3 one up to three
+    /// bit-reservoir frames earlier), so its first frames come before the
+    /// position the clock names; `read_buffer` drops them. See
+    /// [`seek_preroll_frames`].
+    seek_preroll_frames: u64,
 }
 
 /// Leading-silence trim state (M8). The scan lives inside the registry-backed
@@ -436,6 +446,63 @@ fn leading_trim_prefix_bytes(
         frames_left: frames_left - dropped_frames,
     };
     (dropped_frames as usize) * bytes_per_frame
+}
+
+/// The seek mode for a container. MPEG audio (MP1/MP2/MP3) carries no
+/// timestamps: its coarse seek places the target by spreading the byte length
+/// evenly over the duration and reports that estimate as where it landed, so
+/// a VBR file plays seconds away from the position the clock shows. Its
+/// accurate seek counts frame headers up to the target instead (from the read
+/// position, or from the first frame for a seek back): it reads those bytes
+/// but decodes none. Every other container lands coarsely on a real
+/// timestamp (a FLAC frame number, an Ogg granule position, an MP4 sample
+/// table, a WAV byte offset) and stays coarse, because an accurate seek there
+/// can decode from the start (FLAC without a SEEKTABLE).
+fn seek_mode_for(format: FormatId) -> SeekMode {
+    if [FORMAT_ID_MP1, FORMAT_ID_MP2, FORMAT_ID_MP3].contains(&format) {
+        SeekMode::Accurate
+    } else {
+        SeekMode::Coarse
+    }
+}
+
+/// Decoded frames that come before a seek's target: the reader lands on the
+/// packet holding the target (`actual_ts <= required_ts`), so playback would
+/// start that far early while the clock names the target. Timestamps below
+/// zero are encoder delay, which the gapless decoder drops on its own, so
+/// they never count twice. 0 when the reader landed on or past the target,
+/// or the track has no time base.
+fn seek_preroll_frames(seeked: &SeekedTo, time_base: Option<TimeBase>, sample_rate: u32) -> u64 {
+    let start = seeked.actual_ts.get().max(0);
+    let target = seeked.required_ts.get().max(0);
+    let (Some(time_base), Ok(ticks)) = (time_base, u64::try_from(target - start)) else {
+        return 0;
+    };
+    let frames = u128::from(ticks) * u128::from(time_base.numer.get()) * u128::from(sample_rate)
+        / u128::from(time_base.denom.get());
+    u64::try_from(frames).unwrap_or(u64::MAX)
+}
+
+/// Take up to `frames` off the seek preroll `frames_left`; returns how many
+/// it took.
+fn take_seek_preroll(frames_left: &mut u64, frames: u64) -> u64 {
+    let taken = (*frames_left).min(frames);
+    *frames_left -= taken;
+    taken
+}
+
+/// How many bytes to drop from the front of a decoded packet for the seek
+/// preroll (whole frames only, so the channel interleave never rotates).
+fn seek_preroll_prefix_bytes(
+    frames_left: &mut u64,
+    decoded_len: usize,
+    bytes_per_frame: usize,
+) -> usize {
+    if bytes_per_frame == 0 {
+        return 0;
+    }
+    take_seek_preroll(frames_left, (decoded_len / bytes_per_frame) as u64) as usize
+        * bytes_per_frame
 }
 
 /// Append `packet_dur` frames of silence (`channel_count` channels,
@@ -596,6 +663,7 @@ impl AudioDecoder {
             live_icy_metadata,
             live_codec: None,
             leading_trim: LeadingTrim::Off,
+            seek_preroll_frames: 0,
         }
     }
 
@@ -1058,6 +1126,7 @@ impl AudioDecoder {
         self.initialized = false;
         self.eof = false;
         self.frame_buffer.clear();
+        self.seek_preroll_frames = 0;
         self.smoothed_bitrate_kbps = 0.0;
         self.live_codec = None;
     }
@@ -1295,6 +1364,14 @@ impl AudioDecoder {
                             decoded_bytes = &decoded_bytes[drop..];
                         }
                     }
+                    if self.seek_preroll_frames > 0 {
+                        let drop = seek_preroll_prefix_bytes(
+                            &mut self.seek_preroll_frames,
+                            decoded_bytes.len(),
+                            bytes_per_frame,
+                        );
+                        decoded_bytes = &decoded_bytes[drop..];
+                    }
 
                     let needed = bytes.saturating_sub(output_data.len());
                     let to_take = needed.min(decoded_bytes.len());
@@ -1314,10 +1391,12 @@ impl AudioDecoder {
                         e
                     );
 
-                    // Zero-fill to maintain time sync and prevent buffer starvation
+                    // Zero-fill to maintain time sync and prevent buffer
+                    // starvation; frames before a seek's target are dropped.
+                    let dur = packet.dur.get();
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
-                        packet.dur.get(),
+                        dur - take_seek_preroll(&mut self.seek_preroll_frames, dur),
                         self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
@@ -1329,10 +1408,12 @@ impl AudioDecoder {
                     // Log and skip packet on decode error
                     warn!(" [DECODER] Decode error (skipping): {:?}", e);
 
-                    // Zero-fill to maintain time sync and prevent buffer starvation
+                    // Zero-fill to maintain time sync and prevent buffer
+                    // starvation; frames before a seek's target are dropped.
+                    let dur = packet.dur.get();
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
-                        packet.dur.get(),
+                        dur - take_seek_preroll(&mut self.seek_preroll_frames, dur),
                         self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
@@ -1381,11 +1462,19 @@ impl AudioDecoder {
             return false;
         };
 
-        // Map the real-timeline target into Symphonia's internal timeline.
-        // Identity unless the probe duration was overridden in open_input —
-        // then the format reader still believes its inflated total and would
-        // interpolate the byte offset against it (Symphonia#516).
-        let target_ms = if self.seek_scale == 1.0 {
+        let mode = seek_mode_for(format_reader.format_info().format);
+        let to = |ms: u64| SeekTo::Time {
+            time: Time::from_millis_u64(ms),
+            track_id: Some(track_id),
+        };
+
+        // Map the real-timeline target into Symphonia's internal timeline for
+        // a coarse seek. Identity unless the probe duration was overridden in
+        // open_input — then the format reader still believes its inflated
+        // total and would interpolate the byte offset against it
+        // (Symphonia#516). An accurate seek counts frames, which is the real
+        // timeline already.
+        let coarse_ms = if self.seek_scale == 1.0 {
             position_ms
         } else {
             let scaled = (position_ms as f64 * self.seek_scale) as u64;
@@ -1396,28 +1485,41 @@ impl AudioDecoder {
             scaled
         };
 
-        let time = Time::from_millis_u64(target_ms);
-
-        // Seek in format reader
-        // Use Coarse mode for HTTP streams - Accurate mode requires decoding from start
-        // for formats without seek tables (like FLAC without SEEKTABLE), causing 20s+ delays.
-        // Coarse mode uses byte-level seeking which is instant with Range requests.
-        let seek_to = SeekTo::Time {
-            time,
-            track_id: Some(track_id),
-        };
-
         trace!(
-            "🔍 [DECODER SEEK] Calling format_reader.seek(Coarse, {}ms)",
-            target_ms
+            "🔍 [DECODER SEEK] Calling format_reader.seek({:?}, {}ms)",
+            mode, position_ms
         );
         let seek_start = std::time::Instant::now();
-        match format_reader.seek(SeekMode::Coarse, seek_to) {
+        let result = match mode {
+            SeekMode::Accurate => format_reader
+                .seek(SeekMode::Accurate, to(position_ms))
+                .or_else(|e| {
+                    // Past the end of a probe that undercounted the frames:
+                    // fall back to where the coarse estimate puts it.
+                    debug!(
+                        "🔍 [DECODER SEEK] Accurate seek failed ({:?}); seeking coarsely",
+                        e
+                    );
+                    format_reader.seek(SeekMode::Coarse, to(coarse_ms))
+                }),
+            SeekMode::Coarse => format_reader.seek(SeekMode::Coarse, to(coarse_ms)),
+        };
+        match result {
             Ok(seeked_to) => {
+                let time_base = format_reader
+                    .tracks()
+                    .iter()
+                    .find(|t| t.id == track_id)
+                    .and_then(|t| t.time_base);
+                self.seek_preroll_frames =
+                    seek_preroll_frames(&seeked_to, time_base, self.format.sample_rate());
                 debug!(
-                    "🔍 [DECODER SEEK] format_reader.seek() completed in {:?}, seeked to ts={}",
+                    "🔍 [DECODER SEEK] format_reader.seek() completed in {:?}, seeked to ts={} \
+                     (target ts={}, dropping {} preroll frames)",
                     seek_start.elapsed(),
-                    seeked_to.actual_ts
+                    seeked_to.actual_ts,
+                    seeked_to.required_ts,
+                    self.seek_preroll_frames
                 );
                 // Flush decoder buffers
                 decoder.reset();
@@ -2526,5 +2628,118 @@ pub(crate) mod tests {
         decoder.init(&url).await.expect("the station must open");
 
         assert_eq!(decoder.delivery(), StreamDelivery::Live);
+    }
+
+    // =========================================================================
+    // Seek accuracy: the audio after a seek starts where the clock says
+    // =========================================================================
+
+    /// Three seconds of digital silence, then three of white noise (onset at
+    /// exactly 3.0 s), mono 44.1 kHz LAME VBR with a Xing header. The halves
+    /// code at very different bitrates, which is what a constant-bitrate
+    /// byte estimate gets wrong.
+    const VBR_SILENCE_THEN_NOISE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/testdata/vbr_silence_then_noise.mp3"
+    );
+
+    /// Seek `path` to `target_ms`, decode up to four seconds and return the
+    /// milliseconds from the first decoded frame to the first loud sample
+    /// (the noise onset), or `None` when none was reached.
+    async fn ms_to_onset_after_seek(path: &str, target_ms: u64) -> Option<u64> {
+        let mut decoder = AudioDecoder::default();
+        decoder.init(path).await.expect("the fixture opens");
+        assert!(decoder.seek(target_ms), "the seek is accepted");
+        let rate = u64::from(decoder.format().sample_rate());
+        let channels = u64::from(decoder.format().channel_count());
+
+        let mut samples: Vec<f32> = Vec::new();
+        while (samples.len() as u64) < 4 * rate * channels && !decoder.is_eof() {
+            let buffer = tokio::task::block_in_place(|| decoder.read_buffer(64 * 1024));
+            if !buffer.is_valid() {
+                break;
+            }
+            samples.extend(
+                buffer
+                    .data()
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| f32::from_le_bytes(*b)),
+            );
+        }
+        let onset = samples.iter().position(|s| s.abs() > 0.05)? as u64;
+        Some(onset / channels * 1000 / rate)
+    }
+
+    /// An MP3 carries no timestamps, and Symphonia's coarse seek places the
+    /// target by spreading the byte length evenly over the duration, then
+    /// reports that estimate as where it landed. On a VBR file it lands
+    /// seconds off (a 70 s seek in a VBR album track played 73.7 s while
+    /// the clock and the word-timed lyrics said 70 s). After `seek(2000)`
+    /// the noise onset at 3.0 s must be heard one second in.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_vbr_mp3_seek_lands_on_its_target() {
+        let onset_ms = ms_to_onset_after_seek(VBR_SILENCE_THEN_NOISE, 2_000)
+            .await
+            .expect("the noise half is reached");
+        assert!(
+            onset_ms.abs_diff(1_000) <= 10,
+            "the 3.0 s onset played {onset_ms} ms after a seek to 2.0 s (expected 1000 ms)"
+        );
+    }
+
+    /// The preroll converts the track's time base into decoded frames: an MP4
+    /// track can tick in other units than its sample rate.
+    #[test]
+    fn seek_preroll_converts_the_track_time_base_to_frames() {
+        use symphonia::core::units::Timestamp;
+        let seeked = |actual: i64, required: i64| SeekedTo {
+            track_id: 0,
+            required_ts: Timestamp::new(required),
+            actual_ts: Timestamp::new(actual),
+        };
+        let millis = TimeBase::try_new(1, 1_000);
+        let per_frame = TimeBase::try_from_recip(44_100);
+
+        // Landed 10 ms early on a 1/1000 s timeline, decoding at 44.1 kHz.
+        assert_eq!(
+            seek_preroll_frames(&seeked(2_000, 2_010), millis, 44_100),
+            441
+        );
+        // A 1/sample-rate timeline counts frames directly.
+        assert_eq!(
+            seek_preroll_frames(&seeked(1_000, 2_152), per_frame, 44_100),
+            1_152
+        );
+        // On or past the target, or with no time base: nothing to drop.
+        assert_eq!(
+            seek_preroll_frames(&seeked(2_010, 2_000), millis, 44_100),
+            0
+        );
+        assert_eq!(seek_preroll_frames(&seeked(2_000, 2_010), None, 44_100), 0);
+        // Encoder delay (negative timestamps) is the gapless decoder's to drop.
+        assert_eq!(
+            seek_preroll_frames(&seeked(-1_105, 0), per_frame, 44_100),
+            0
+        );
+        assert_eq!(
+            seek_preroll_frames(&seeked(-1_105, 47), per_frame, 44_100),
+            47
+        );
+    }
+
+    /// A seek back to the start replays the whole opening: the decoder's
+    /// gapless trim already drops the encoder delay (negative timestamps),
+    /// so the seek must not drop it a second time.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_vbr_mp3_seek_to_zero_keeps_the_whole_opening() {
+        let onset_ms = ms_to_onset_after_seek(VBR_SILENCE_THEN_NOISE, 0)
+            .await
+            .expect("the noise half is reached");
+        assert!(
+            onset_ms.abs_diff(3_000) <= 10,
+            "the 3.0 s onset played {onset_ms} ms after a seek to 0 (expected 3000 ms)"
+        );
     }
 }
