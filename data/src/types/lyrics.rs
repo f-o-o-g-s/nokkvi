@@ -17,13 +17,13 @@ use crate::utils::search::build_searchable_lower;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WordSpan {
     pub start_ms: u32,
-    /// When the word stops being sung: a TTML cue's `end`, the trailing
-    /// `<mm:ss.xx>` stamp an enhanced LRC line may end with, or an end the
-    /// server filled in (Navidrome gives every cue one: the next word's
-    /// start, and for a line's last word the NEXT LINE's start, which is why
-    /// [`LrcLine::word_window`] treats a last word ending at the line's end
-    /// as untimed). `None` means the next word's start, or for a last word
-    /// the pace fallback.
+    /// When the word stops being sung: a TTML cue's `end`, the closing
+    /// `<mm:ss.xx>` stamp an enhanced LRC line may end with, or the stamp of a
+    /// blank marker that followed the word. `None` means the next word's
+    /// start, or for a line's last word the pace fallback in
+    /// [`LrcLine::word_window`]. Navidrome fills ends the source never gave
+    /// (see [`LrcDocument::from_structured`], which undoes the one fill that
+    /// would mislead).
     pub end_ms: Option<u32>,
     pub text: String,
 }
@@ -61,6 +61,16 @@ impl WordSpan {
             text: self.text.clone(),
         }
     }
+
+    /// The same word under an `[offset:]` (positive = earlier, clamped at 0),
+    /// applied exactly as to a line stamp.
+    fn with_offset(self, offset_ms: i64) -> WordSpan {
+        WordSpan {
+            start_ms: apply_offset(self.start_ms, offset_ms),
+            end_ms: self.end_ms.map(|end| apply_offset(end, offset_ms)),
+            text: self.text,
+        }
+    }
 }
 
 /// Shortest a line's last word may be guessed to last, in milliseconds, when
@@ -76,15 +86,12 @@ impl LrcLine {
     /// The window `(start_ms, end_ms)` in which word `index` is sung, with
     /// `end_ms >= start_ms`. A word ends at its explicit end when the source
     /// gave one, cut at the next word's start so windows never overlap, else
-    /// at the next word's start. The LAST word ends at its explicit end only
-    /// when that end falls SHORT of `line_end_ms` (the next line's start):
-    /// Navidrome fills a last cue's missing end with exactly the next line's
-    /// start, which would hold the word lit through the whole gap, so an end
-    /// at or past the line's end counts as untimed. An untimed last word
-    /// ends at the line's own word pace (the mean start-to-start gap, clamped
-    /// to [`LAST_WORD_MIN_MS`]..=[`LAST_WORD_MAX_MS`]; [`LAST_WORD_SOLO_MS`]
-    /// for a one-word line), never past the line's end when that is known.
-    /// `None` when `index` names no word.
+    /// at the next word's start. The LAST word ends at its explicit end, cut
+    /// at `line_end_ms` (the next line's start) when that is known; without
+    /// one it ends at the line's own word pace (the mean start-to-start gap,
+    /// clamped to [`LAST_WORD_MIN_MS`]..=[`LAST_WORD_MAX_MS`];
+    /// [`LAST_WORD_SOLO_MS`] for a one-word line), again never past the line's
+    /// end. `None` when `index` names no word.
     pub fn word_window(&self, index: usize, line_end_ms: Option<u32>) -> Option<(u32, u32)> {
         let word = self.words.get(index)?;
         let start = word.start_ms;
@@ -93,8 +100,8 @@ impl LrcLine {
             None => {
                 let ceiling = line_end_ms.unwrap_or(u32::MAX);
                 match word.end_ms {
-                    Some(explicit) if explicit < ceiling => explicit,
-                    Some(_) | None => {
+                    Some(explicit) => explicit.min(ceiling),
+                    None => {
                         let n = self.words.len() as u32;
                         let pace = if n >= 2 {
                             let first = self.words.first().map_or(start, |w| w.start_ms);
@@ -424,24 +431,35 @@ pub fn parse(content: &str) -> LrcDocument {
         } else {
             remaining
         };
-        let (text, words) = extract_words(raw_text.trim(), offset);
+        // Word markers are read raw; the `[offset:]` is applied below, once
+        // each copy has been shifted.
+        let (text, raw_words) = extract_words(raw_text.trim(), 0);
 
         // A line under several stamps (`[00:10.00][01:10.00]<00:10.10>la…`) is
-        // sung once per stamp; its word markers belong to the FIRST stamp, so
-        // each later copy carries them shifted by its own distance from it.
-        let first_ms = timestamps
-            .first()
-            .and_then(|ts| parse_timestamp(ts, offset))
+        // sung once per stamp; its word markers belong to the first stamp that
+        // parses (Navidrome anchors on it too), so each copy carries them
+        // shifted by its RAW distance from it. The offset comes last, exactly
+        // as for the stamps, so a stamp the offset clamps at 0 can't skew the
+        // shift.
+        let first_raw = timestamps
+            .iter()
+            .find_map(|ts| parse_timestamp(ts, 0))
             .map(i64::from);
         for ts in &timestamps {
-            if let Some(time_ms) = parse_timestamp(ts, offset) {
-                let shift = first_ms.map_or(0, |first| i64::from(time_ms) - first);
-                lines.push(LrcLine {
-                    time_ms,
-                    text: text.clone(),
-                    words: words.iter().map(|w| w.shifted(shift)).collect(),
-                });
-            }
+            let (Some(raw_ms), Some(time_ms)) =
+                (parse_timestamp(ts, 0), parse_timestamp(ts, offset))
+            else {
+                continue;
+            };
+            let shift = first_raw.map_or(0, |first| i64::from(raw_ms) - first);
+            lines.push(LrcLine {
+                time_ms,
+                text: text.clone(),
+                words: raw_words
+                    .iter()
+                    .map(|w| w.shifted(shift).with_offset(offset))
+                    .collect(),
+            });
         }
     }
 
@@ -504,18 +522,24 @@ fn extract_words(text: &str, offset_ms: i64) -> (String, Vec<WordSpan>) {
     for word in &mut words {
         word.text = word.text.trim().to_string();
     }
-    // A bare stamp closing the line (`... <00:01.60>world <00:02.00>`) is the
-    // moment the last word stops, not an empty word: it becomes that word's
-    // end. Any other empty marker (two stamps back to back) is dropped below.
-    if words.len() >= 2
-        && words.last().is_some_and(|w| w.text.is_empty())
-        && let Some(closing) = words.pop()
-        && let Some(last) = words.last_mut()
-    {
-        last.end_ms = Some(closing.start_ms);
+    // A marker with no text after it is a moment, not a word: the end of the
+    // word before it, when that word has none yet. That covers the bare stamp
+    // closing a line (`… <00:01.60>world <00:02.00>`) and one between two
+    // words (`Hello<00:01.40> <00:01.60>world`), matching how the server
+    // reads the same line. A blank marker with no word before it is dropped.
+    let mut kept: Vec<WordSpan> = Vec::with_capacity(words.len());
+    for word in words {
+        if word.text.is_empty() {
+            if let Some(previous) = kept.last_mut()
+                && previous.end_ms.is_none()
+            {
+                previous.end_ms = Some(word.start_ms);
+            }
+        } else {
+            kept.push(word);
+        }
     }
-    words.retain(|w| !w.text.is_empty());
-    (display.trim().to_string(), words)
+    (display.trim().to_string(), kept)
 }
 
 // ---------------------------------------------------------------------------
@@ -551,9 +575,10 @@ pub struct StructuredCueLine {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StructuredCue {
     pub start_ms: u32,
-    /// The cue's `end`. Navidrome fills it for every cue (the next cue's
-    /// start; the next line's start for a line's last cue) once any cue of
-    /// the line carries one, so it is rarely the source's own.
+    /// The cue's `end`. Navidrome's normaliser fills a missing one whenever
+    /// the line has a fallback: the next cue's start, and for a line's last
+    /// cue the line's own `end` (TTML) or else the next line's start. When the
+    /// sheet's last line has no fallback, it clears every end of that line.
     pub end_ms: Option<u32>,
     pub value: String,
 }
@@ -594,7 +619,14 @@ impl LrcDocument {
     /// End are inclusive, line-relative, and off-by-one against a Rust range).
     /// A cue with no text (Navidrome keeps the space between two stamps as a
     /// cue of its own) is no word: its start becomes the previous word's end
-    /// when that word had none, exactly as the parser's trailing stamp.
+    /// when that word had none, exactly as the parser's blank markers.
+    ///
+    /// A line's last word whose end equals the NEXT line's start is read as
+    /// untimed: that is the value Navidrome invents for a last cue with no end
+    /// of its own, and keeping it would hold the word lit through the whole
+    /// gap to the next line. (A source end that happens to equal the next
+    /// line's start is indistinguishable and takes the same pace fallback; an
+    /// end before or after it is the source's own and is kept.)
     pub fn from_structured(s: &StructuredLyrics) -> LrcDocument {
         let offset = s.offset_ms;
         let mut lines: Vec<LrcLine> = s
@@ -652,6 +684,16 @@ impl LrcDocument {
         // IS the reading order, and every stamp is 0 anyway.
         if s.synced {
             lines.sort_by_key(|l| l.time_ms);
+            // Undo the server's last-cue fill (see the doc above); runs after
+            // the sort so "the next line" is the next one in time.
+            let next_starts: Vec<u32> = lines.iter().skip(1).map(|l| l.time_ms).collect();
+            for (line, next_start) in lines.iter_mut().zip(next_starts) {
+                if let Some(last) = line.words.last_mut()
+                    && last.end_ms == Some(next_start)
+                {
+                    last.end_ms = None;
+                }
+            }
         }
         LrcDocument {
             lines,
@@ -1365,8 +1407,8 @@ mod tests {
         assert_eq!(shifted.lines[0].words[0].start_ms, 1_000);
         assert_eq!(shifted.lines[0].words[0].end_ms, Some(1_500));
 
-        // An empty marker that is NOT last (two stamps back to back) is still
-        // dropped: only the closing stamp means an end.
+        // A blank marker with no word before it (two stamps back to back at
+        // the start) is dropped; the word takes the later stamp.
         let doubled = parse("[00:01.00]<00:01.10><00:01.20>Hello <00:01.60>world");
         assert_eq!(doubled.lines[0].words.len(), 2);
         assert_eq!(doubled.lines[0].words[0].start_ms, 1_200);
@@ -1435,19 +1477,14 @@ mod tests {
         assert_eq!(solo.word_window(0, None), Some((3_000, 3_800)));
         assert_eq!(solo.word_window(0, Some(3_200)), Some((3_000, 3_200)));
 
-        // An explicit end on the last word beats the guess while it falls
-        // short of the line's end.
+        // An explicit end on the last word beats the guess, cut at the line's
+        // end: a held note that runs into the next line sweeps until it starts.
         let mut ended = worded(&[1_000, 1_500, 2_000]);
         ended.words[2].end_ms = Some(3_000);
         assert_eq!(ended.word_window(2, None), Some((2_000, 3_000)));
         assert_eq!(ended.word_window(2, Some(4_000)), Some((2_000, 3_000)));
-        // Navidrome fills a last cue's missing end with the NEXT LINE's start:
-        // an end at (or past) the line's end is that fill, not a timing, so
-        // the pace guess applies instead of holding the word through the gap.
-        assert_eq!(ended.word_window(2, Some(3_000)), Some((2_000, 2_500)));
-        assert_eq!(ended.word_window(2, Some(2_600)), Some((2_000, 2_500)));
-        // The guess itself still never passes the line's end.
-        assert_eq!(ended.word_window(2, Some(2_200)), Some((2_000, 2_200)));
+        assert_eq!(ended.word_window(2, Some(3_000)), Some((2_000, 3_000)));
+        assert_eq!(ended.word_window(2, Some(2_600)), Some((2_000, 2_600)));
     }
 
     #[test]
@@ -1463,6 +1500,98 @@ mod tests {
         assert_eq!(doc.lines[1].words[1].start_ms, 70_600);
         assert_eq!(doc.lines[1].words[1].end_ms, Some(71_000));
         assert_eq!(doc.lines[1].text, "la la");
+    }
+
+    #[test]
+    fn repeated_stamps_shift_by_the_raw_distance_then_take_the_offset() {
+        // The offset clamps the first stamp at 0 (200 - 500); the shift must
+        // still be the raw minute, not 59.7 s.
+        let doc = parse("[offset:+500]\n[00:00.20][01:00.20]<00:00.30>la <00:00.80>la");
+        assert_eq!(doc.lines[0].time_ms, 0);
+        assert_eq!(doc.lines[1].time_ms, 59_700);
+        assert_eq!(doc.lines[1].words[0].start_ms, 59_800);
+        assert_eq!(doc.lines[1].words[1].start_ms, 60_300);
+        // The first copy takes the offset exactly as its stamp did (clamped).
+        assert_eq!(doc.lines[0].words[0].start_ms, 0);
+        assert_eq!(doc.lines[0].words[1].start_ms, 300);
+    }
+
+    #[test]
+    fn repeated_stamps_anchor_on_the_first_stamp_that_parses() {
+        // `[00:1x.00]` looks like a stamp but doesn't parse: the words belong
+        // to the first REAL stamp, so the later copy still shifts.
+        let doc = parse("[00:1x.00][00:10.00][01:10.00]<00:10.10>la <00:10.60>la");
+        assert_eq!(doc.lines.len(), 2);
+        assert_eq!(doc.lines[0].words[0].start_ms, 10_100);
+        assert_eq!(doc.lines[1].words[0].start_ms, 70_100);
+    }
+
+    #[test]
+    fn a_blank_marker_between_words_ends_the_word_before_it() {
+        // The same line the server reads into `Hello` 1.00..1.40, a gap,
+        // then `world`: the local parser now agrees.
+        let doc = parse("[00:01.00]<00:01.00>Hello<00:01.40> <00:01.60>world");
+        let words = &doc.lines[0].words;
+        assert_eq!(doc.lines[0].text, "Hello world");
+        assert_eq!(words.len(), 2);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1_000, Some(1_400)));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (1_600, None));
+    }
+
+    #[test]
+    fn from_structured_reads_a_last_end_at_the_next_line_as_untimed() {
+        let cue = |start_ms, end_ms: Option<u32>, value: &str| StructuredCue {
+            start_ms,
+            end_ms,
+            value: value.into(),
+        };
+        let line = |start_ms| StructuredLine {
+            start_ms: Some(start_ms),
+            value: "a b".into(),
+        };
+        let s = StructuredLyrics {
+            synced: true,
+            offset_ms: 0,
+            kind: None,
+            lines: vec![line(1_000), line(3_000), line(5_000), line(7_000)],
+            cue_lines: vec![
+                // Ends exactly at the next line's start: the server's fill.
+                StructuredCueLine {
+                    index: 0,
+                    agent_id: None,
+                    cues: vec![cue(1_000, Some(1_500), "a"), cue(1_500, Some(3_000), "b")],
+                },
+                // Short of it, and past it: the source's own, kept.
+                StructuredCueLine {
+                    index: 1,
+                    agent_id: None,
+                    cues: vec![cue(3_000, None, "a"), cue(3_500, Some(4_200), "b")],
+                },
+                StructuredCueLine {
+                    index: 2,
+                    agent_id: None,
+                    cues: vec![cue(5_000, None, "a"), cue(5_500, Some(7_400), "b")],
+                },
+                // The sheet's last line has no next line: untouched.
+                StructuredCueLine {
+                    index: 3,
+                    agent_id: None,
+                    cues: vec![cue(7_000, None, "a"), cue(7_500, Some(9_000), "b")],
+                },
+            ],
+        };
+        let doc = LrcDocument::from_structured(&s);
+        let last_end = |i: usize| doc.lines[i].words.last().and_then(|w| w.end_ms);
+        assert_eq!(last_end(0), None, "the fill is undone");
+        assert_eq!(doc.lines[0].words[0].end_ms, Some(1_500), "inner ends kept");
+        assert_eq!(last_end(1), Some(4_200));
+        assert_eq!(last_end(2), Some(7_400));
+        assert_eq!(last_end(3), Some(9_000));
+        // The held note on line 2 sweeps until line 3 starts.
+        assert_eq!(
+            doc.lines[2].word_window(1, doc.line_end_ms(2)),
+            Some((5_500, 7_000))
+        );
     }
 
     #[test]

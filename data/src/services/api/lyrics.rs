@@ -63,8 +63,8 @@ struct WireCueLine {
 struct WireCue {
     #[serde(default)]
     start: u32,
-    /// Omitted unless the source timed the word's end (a TTML cue, an
-    /// enhanced LRC line's trailing stamp).
+    /// The word's end: the source's own, or one Navidrome filled in (see
+    /// `StructuredCue::end_ms`). Omitted when neither exists.
     #[serde(default)]
     end: Option<u32>,
     // `value` is the exact word text; `byteStart`/`byteEnd` are line-relative
