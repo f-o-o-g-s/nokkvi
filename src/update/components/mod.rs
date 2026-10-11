@@ -61,7 +61,7 @@ pub(super) fn duplicates_removed_text(count: usize) -> String {
 #[cfg(test)]
 pub(super) use artwork_prefetch::plan_album_artwork_fetches;
 pub(super) use artwork_prefetch::{
-    album_prefetch_entry, artist_mini_task, expansion_album_artwork_tasks,
+    ArtworkGate, album_prefetch_entry, artist_mini_task, expansion_album_artwork_tasks,
     expansion_child_album_ids, passive_artwork_version, prefetch_album_artwork_tasks,
     prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
     quad_album_artwork_tasks_for_ids,
@@ -585,7 +585,7 @@ impl Nokkvi {
     /// returns `cmd_task` untouched when no children were newly loaded (or
     /// pre-login), otherwise batches the version-gated 80px fetches behind it.
     pub(crate) fn append_expansion_album_prefetch(
-        &self,
+        &mut self,
         cmd_task: Task<Message>,
         album_ids: Vec<(String, Option<String>, String)>,
     ) -> Task<Message> {
@@ -595,16 +595,11 @@ impl Nokkvi {
         let Some(shell) = &self.app_service else {
             return cmd_task;
         };
-        let cached: std::collections::HashSet<&String> =
-            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        let prefetch = expansion_album_artwork_tasks(
-            &cached,
-            &self.artwork.album_art_versions,
-            &self.artwork.failed_art,
-            &self.artwork.album_art_pending,
-            shell.albums().clone(),
-            album_ids,
-        );
+        let gate = ArtworkGate::new(&self.artwork);
+        let (queued, prefetch) =
+            expansion_album_artwork_tasks(&gate, shell.albums().clone(), album_ids);
+        drop(gate);
+        self.artwork.album_art_pending.extend(queued);
         if prefetch.is_empty() {
             cmd_task
         } else {

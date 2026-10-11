@@ -13,15 +13,15 @@
 //! otherwise) lives in one place. Per-view fetch closures supply only the
 //! per-entity backend call and the UI-projection mapping.
 
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 
 use iced::Task;
 use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBuffer};
 use tracing::{debug, error};
 
 use super::components::{
-    PaginatedFetch, album_prefetch_entry, passive_artwork_version, prefetch_album_artwork_tasks,
-    prefetch_song_artwork_tasks,
+    ArtworkGate, PaginatedFetch, album_prefetch_entry, passive_artwork_version,
+    prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
 };
 use crate::{
     Nokkvi,
@@ -176,16 +176,17 @@ impl LoaderTarget for AlbumsTarget {
         let Some(shell) = &app.app_service else {
             return vec![];
         };
-        let cached: HashSet<&String> = app.artwork.album_art.iter().map(|(k, _)| k).collect();
-        prefetch_album_artwork_tasks(
+        let gate = ArtworkGate::new(&app.artwork);
+        let (queued, tasks) = prefetch_album_artwork_tasks(
             &app.albums_page.common.slot_list,
             &app.library.albums,
-            &cached,
-            &app.artwork.album_art_versions,
-            &app.artwork.failed_art,
+            &gate,
             shell.albums().clone(),
             album_prefetch_entry,
-        )
+        );
+        drop(gate);
+        app.artwork.album_art_pending.extend(queued);
+        tasks
     }
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
@@ -306,20 +307,21 @@ impl LoaderTarget for SongsTarget {
         let Some(shell) = &app.app_service else {
             return vec![];
         };
-        let cached: HashSet<&String> = app.artwork.album_art.iter().map(|(k, _)| k).collect();
-        prefetch_song_artwork_tasks(
+        let gate = ArtworkGate::new(&app.artwork);
+        let (queued, tasks) = prefetch_song_artwork_tasks(
             &app.songs_page.common.slot_list,
             &app.library.songs,
-            &cached,
-            &app.artwork.album_art_versions,
-            &app.artwork.failed_art,
+            &gate,
             shell.albums().clone(),
             |song| {
                 song.album_id
                     .as_ref()
                     .map(|id| (id, passive_artwork_version(&song.updated_at)))
             },
-        )
+        );
+        drop(gate);
+        app.artwork.album_art_pending.extend(queued);
+        tasks
     }
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {

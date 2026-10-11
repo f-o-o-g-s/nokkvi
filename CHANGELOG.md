@@ -83,6 +83,8 @@ All notable changes to this project will be documented in this file.
 - After a gapless transition, the new song's position and lyrics no longer run up to a second ahead of its audio.
 - Pausing with lyrics on now keeps the Queue cover and its lyrics on the playing song.
 - Holding an arrow key in a list no longer requests the same full-size cover again while it is still loading.
+- Scrolling a list on a slow server no longer requests a thumbnail again while it is still loading.
+- The "Playing From" cover's 2×2 collage now loads even when its albums are scrolled out of view.
 
 ### Removed
 

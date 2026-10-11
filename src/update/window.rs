@@ -1,12 +1,10 @@
 //! Window event handlers
 
-use std::collections::HashSet;
-
 use iced::Task;
 use nokkvi_data::audio;
 
 use super::components::{
-    passive_artwork_version, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    ArtworkGate, passive_artwork_version, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
 };
 use crate::{
     Nokkvi, View,
@@ -124,17 +122,16 @@ impl Nokkvi {
         match self.current_view {
             View::Albums => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> =
-                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                let mut tasks = prefetch_album_artwork_tasks(
+                let gate = ArtworkGate::new(&self.artwork);
+                let (queued, mut tasks) = prefetch_album_artwork_tasks(
                     &self.albums_page.common.slot_list,
                     &self.library.albums,
-                    &cached,
-                    &self.artwork.album_art_versions,
-                    &self.artwork.failed_art,
+                    &gate,
                     albums_vm,
                     crate::update::components::album_prefetch_entry,
                 );
+                drop(gate);
+                self.artwork.album_art_pending.extend(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Albums) {
                     tasks.push(task);
                 }
@@ -142,15 +139,12 @@ impl Nokkvi {
             }
             View::Queue => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> =
-                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
+                let gate = ArtworkGate::new(&self.artwork);
                 let items = self.filter_queue_songs();
-                let mut tasks = prefetch_album_artwork_tasks(
+                let (queued, mut tasks) = prefetch_album_artwork_tasks(
                     &self.queue_page.common.slot_list,
                     &items,
-                    &cached,
-                    &self.artwork.album_art_versions,
-                    &self.artwork.failed_art,
+                    &gate,
                     albums_vm,
                     |song| {
                         (
@@ -160,6 +154,9 @@ impl Nokkvi {
                         )
                     },
                 );
+                drop(items);
+                drop(gate);
+                self.artwork.album_art_pending.extend(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Queue) {
                     tasks.push(task);
                 }
@@ -167,14 +164,11 @@ impl Nokkvi {
             }
             View::Songs => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> =
-                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                let mut tasks = prefetch_song_artwork_tasks(
+                let gate = ArtworkGate::new(&self.artwork);
+                let (queued, mut tasks) = prefetch_song_artwork_tasks(
                     &self.songs_page.common.slot_list,
                     &self.library.songs,
-                    &cached,
-                    &self.artwork.album_art_versions,
-                    &self.artwork.failed_art,
+                    &gate,
                     albums_vm,
                     |s| {
                         s.album_id
@@ -182,6 +176,8 @@ impl Nokkvi {
                             .map(|id| (id, passive_artwork_version(&s.updated_at)))
                     },
                 );
+                drop(gate);
+                self.artwork.album_art_pending.extend(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Songs) {
                     tasks.push(task);
                 }
@@ -357,16 +353,12 @@ impl Nokkvi {
         )))
     }
 
-    /// The `(artist_id, version)` minis the Artists viewport prefetch would
-    /// fetch. The version is the artist's image hash (Navidrome 0.64+; artists
-    /// have no `updated_at`), so a changed artist image refetches through the
-    /// shared [`should_refetch`](crate::update::components::should_refetch)
-    /// gate; on an older server it is `None`, which gates exactly like the
-    /// old id-only `contains` + failed-at-`None` check. Art the server marked
+    /// The `(artist_id, version)` entries of the Artists viewport: the
+    /// version is the artist's image hash (Navidrome 0.64+; artists have no
+    /// `updated_at`), `None` on an older server. Art the server marked
     /// absent is never planned.
-    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<(String, Option<String>)> {
+    fn artist_viewport_entries(&self) -> Vec<(String, Option<String>)> {
         let total = self.library.artists.len();
-        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
         self.artists_page
             .common
             .slot_list
@@ -375,36 +367,34 @@ impl Nokkvi {
             .filter_map(|artist| {
                 nokkvi_data::types::image_info::artist_art_entry(&artist.id, &artist.image)
             })
-            .filter(|(id, version)| {
-                crate::update::components::should_refetch(
-                    &cached,
-                    &self.artwork.album_art_versions,
-                    &self.artwork.failed_art,
-                    id,
-                    version,
-                )
-            })
             .collect()
     }
 
+    /// The `(artist_id, version)` minis the Artists viewport prefetch would
+    /// fetch: the viewport's entries through Harbour's
+    /// [`artist_minis_to_warm`](Self::artist_minis_to_warm), the one gate
+    /// every `ar-` mini surface shares (the version-aware
+    /// [`should_refetch`](crate::update::components::should_refetch) plus
+    /// the in-flight set). A changed artist image refetches; on an older
+    /// server the `None` version gates exactly like the old id-only
+    /// `contains` + failed-at-`None` check.
+    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<(String, Option<String>)> {
+        self.artist_minis_to_warm(self.artist_viewport_entries())
+    }
+
     /// Dispatch async fetches for any uncached artist mini artwork in the
-    /// current viewport ([`Self::artist_minis_to_fetch`]). Returns a batch of
-    /// tasks producing `ArtworkMessage::Loaded`.
+    /// current viewport ([`Self::artist_minis_to_fetch`]), claiming each id
+    /// in `album_art_pending`. Returns a batch of tasks producing
+    /// `ArtworkMessage::Loaded`.
     ///
     /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
     /// and `prefetch_viewport_artwork` (window resize / view switch).
-    pub(crate) fn prefetch_artist_mini_artwork_tasks(&self) -> Task<Message> {
+    pub(crate) fn prefetch_artist_mini_artwork_tasks(&mut self) -> Task<Message> {
         let albums_vm = match self.app_service.as_ref() {
             Some(svc) => svc.albums().clone(),
             None => return Task::none(),
         };
-
-        let tasks = self
-            .artist_minis_to_fetch()
-            .into_iter()
-            .map(|(id, version)| {
-                crate::update::components::artist_mini_task(albums_vm.clone(), id, version)
-            });
-        Task::batch(tasks)
+        let planned = self.artist_minis_to_fetch();
+        Task::batch(self.dispatch_artist_minis(planned, &albums_vm))
     }
 }

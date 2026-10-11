@@ -11,7 +11,7 @@ use nokkvi_data::{
 use tracing::{debug, error, trace};
 
 use super::components::{
-    duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
+    ArtworkGate, duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
     session_expired_message,
 };
 use crate::{
@@ -88,14 +88,11 @@ impl Nokkvi {
                     let total = self.library.queue_songs.len();
                     if total > 0 {
                         // Mini artwork prefetch using canonical helper
-                        let cached: HashSet<&String> =
-                            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                        tasks.extend(prefetch_album_artwork_tasks(
+                        let gate = ArtworkGate::new(&self.artwork);
+                        let (queued, prefetch) = prefetch_album_artwork_tasks(
                             &self.queue_page.common.slot_list,
                             &self.library.queue_songs,
-                            &cached,
-                            &self.artwork.album_art_versions,
-                            &self.artwork.failed_art,
+                            &gate,
                             shell.albums().clone(),
                             |song| {
                                 (
@@ -104,7 +101,10 @@ impl Nokkvi {
                                     song.artwork_url.clone(),
                                 )
                             },
-                        ));
+                        );
+                        drop(gate);
+                        self.artwork.album_art_pending.extend(queued);
+                        tasks.extend(prefetch);
 
                         // Load large artwork for center song
                         if let Some(center_idx) = self
@@ -841,7 +841,8 @@ impl Nokkvi {
         let rows = filtered_owned
             .as_deref()
             .unwrap_or(&self.library.queue_songs);
-        let tasks = self.queue_viewport_artwork_tasks(rows);
+        let (queued, tasks) = self.queue_viewport_artwork_tasks(rows);
+        self.artwork.album_art_pending.extend(queued);
 
         // Execute artwork loading tasks in parallel with the command
         if !tasks.is_empty() {
@@ -883,7 +884,9 @@ impl Nokkvi {
         let rows = filtered_owned
             .as_deref()
             .unwrap_or(&self.library.queue_songs);
-        Task::batch(self.queue_viewport_artwork_tasks(rows))
+        let (queued, tasks) = self.queue_viewport_artwork_tasks(rows);
+        self.artwork.album_art_pending.extend(queued);
+        Task::batch(tasks)
     }
 
     /// The owned row list an active search produced, or `None` when no search
@@ -900,20 +903,24 @@ impl Nokkvi {
     /// for the centered row, over `rows` (the list the view shows: filtered
     /// under a search). Empty without a backend or rows. The one builder
     /// behind the `handle_queue` tail and `load_queue_viewport_artwork`.
-    fn queue_viewport_artwork_tasks(&self, rows: &[QueueSongUIViewData]) -> Vec<Task<Message>> {
+    /// Returns `(queued_ids, tasks)`: `rows` borrows the queue, so the caller
+    /// claims the ids in `album_art_pending` once that borrow ends.
+    fn queue_viewport_artwork_tasks(
+        &self,
+        rows: &[QueueSongUIViewData],
+    ) -> (Vec<String>, Vec<Task<Message>>) {
         let total = rows.len();
+        let mut queued_ids: Vec<String> = Vec::new();
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
         if total > 0
             && let Some(shell) = &self.app_service
         {
-            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-            tasks.extend(prefetch_album_artwork_tasks(
+            let gate = ArtworkGate::new(&self.artwork);
+            let (queued, prefetch) = prefetch_album_artwork_tasks(
                 &self.queue_page.common.slot_list,
                 rows,
-                &cached,
-                &self.artwork.album_art_versions,
-                &self.artwork.failed_art,
+                &gate,
                 shell.albums().clone(),
                 |song| {
                     (
@@ -922,7 +929,9 @@ impl Nokkvi {
                         song.artwork_url.clone(),
                     )
                 },
-            ));
+            );
+            queued_ids = queued;
+            tasks.extend(prefetch);
 
             // Load large artwork for center song
             if let Some(center_idx) = self
@@ -939,16 +948,18 @@ impl Nokkvi {
             }
         }
 
-        tasks
+        (queued_ids, tasks)
     }
 
     /// Load artwork for the current queue viewport. Called by `SeekSettled`
     /// after a scrollbar drag settles and by the drag edge auto-scroll tick,
     /// so the per-cursor-move paths stay free of it. Borrows the queue when
     /// no search is active and filters once when one is.
-    pub(crate) fn load_queue_viewport_artwork(&self) -> Task<Message> {
+    pub(crate) fn load_queue_viewport_artwork(&mut self) -> Task<Message> {
         let rows = self.filter_queue_songs();
-        let tasks = self.queue_viewport_artwork_tasks(&rows);
+        let (queued, tasks) = self.queue_viewport_artwork_tasks(&rows);
+        drop(rows);
+        self.artwork.album_art_pending.extend(queued);
         if tasks.is_empty() {
             Task::none()
         } else {

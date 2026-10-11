@@ -29,18 +29,14 @@ impl Nokkvi {
     /// Prefetch mini station LOGOS for the Radios viewport. Only stations whose
     /// OpenSubsonic `coverArt` token is present (a real admin-uploaded logo) are
     /// fetched; logo-less stations keep the tower glyph and are never requested.
-    pub(crate) fn prefetch_radio_logo_tasks(&self) -> Task<Message> {
-        let stations = self.filter_radio_stations();
-        let total = stations.len();
-        if total == 0 {
-            return Task::none();
-        }
+    pub(crate) fn prefetch_radio_logo_tasks(&mut self) -> Task<Message> {
         let albums_vm = match self.app_service.as_ref() {
             Some(svc) => svc.albums().clone(),
             None => return Task::none(),
         };
-
-        let mut tasks = Vec::new();
+        let stations = self.filter_radio_stations();
+        let total = stations.len();
+        let mut planned: Vec<(String, String)> = Vec::new();
         for idx in self.radios_page.common.slot_list.prefetch_indices(total) {
             let Some(station) = stations.get(idx) else {
                 continue;
@@ -49,11 +45,19 @@ impl Nokkvi {
             let Some(token) = station.logo_cover_art() else {
                 continue;
             };
-            if self.artwork.radio_art.contains(&station.id) {
+            // Warm, or still on its way from an earlier pass.
+            if self.artwork.radio_art.contains(&station.id)
+                || self.artwork.radio_art_pending.contains(&station.id)
+            {
                 continue;
             }
-            let station_id = station.id.clone();
-            let art_id = token.to_string();
+            planned.push((station.id.clone(), token.to_string()));
+        }
+        drop(stations);
+
+        let mut tasks = Vec::new();
+        for (station_id, art_id) in planned {
+            self.artwork.radio_art_pending.insert(station_id.clone());
             let vm = albums_vm.clone();
             tasks.push(Task::perform(
                 async move {
@@ -77,6 +81,8 @@ impl Nokkvi {
         station_id: String,
         art: MiniArt,
     ) -> Task<Message> {
+        // Release the in-flight claim on every outcome.
+        self.artwork.radio_art_pending.remove(&station_id);
         // Logo fetches are gated on a present `coverArt` token, so a miss is
         // rare; drop `Missing`/`Transient` and let the tower glyph stand (a
         // later prefetch re-attempts). No negative cache for radio art.

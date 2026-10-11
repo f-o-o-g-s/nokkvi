@@ -119,6 +119,9 @@ impl Nokkvi {
         updated_at: Option<String>,
         art: MiniArt,
     ) -> Task<Message> {
+        // Release the in-flight claim on every outcome, so a transient
+        // failure is re-attempted by the next viewport pass.
+        self.artwork.album_art_pending.remove(&album_id);
         match art {
             MiniArt::Loaded(h) => {
                 // Record the version in lockstep with the handle (N17) — see

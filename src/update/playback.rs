@@ -797,13 +797,16 @@ impl Nokkvi {
                 // (resolved after `reset_for_new_song` updated current_song_id
                 // above, so it names the LANDED track) returns the cold album;
                 // fetch its 80px mini into `album_art`, the LRU the mini-player
-                // fallback reads. Deduped (Some only when neither LRU is warm)
-                // and marker-free: routes through SongMiniLoaded, never touching
-                // the centered-view `loading_large_artwork` marker.
+                // fallback reads. Deduped (Some only when neither LRU is warm
+                // and no viewport pass has it on its way) and marker-free:
+                // routes through SongMiniLoaded, which releases the in-flight
+                // claim, never touching the centered-view
+                // `loading_large_artwork` marker.
                 if let Some(album_id) = self.now_playing_artwork_to_warm()
                     && let Some(shell) = &self.app_service
                 {
                     let vm = shell.albums().clone();
+                    self.artwork.album_art_pending.insert(album_id.clone());
                     tasks.push(Task::perform(
                         async move {
                             let art = crate::app_message::MiniArt::from_fetch(

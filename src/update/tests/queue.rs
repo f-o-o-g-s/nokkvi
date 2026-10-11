@@ -28,6 +28,38 @@ fn app_with_active_playlist_queue(song_ids: &[&str]) -> crate::Nokkvi {
     app
 }
 
+/// The strip's frozen quad tiles are fetched when cold, once, and the claim
+/// holds them while they load. The prefetch once claimed its ids BEFORE
+/// handing the in-flight set to the planner, which skips claimed ids, so it
+/// never planned a fetch and the tiles came only from the viewport.
+#[tokio::test]
+async fn strip_quad_prefetch_fetches_cold_frozen_tiles_once() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl-1".to_string(),
+        "Mix".to_string(),
+        String::new(),
+    ));
+    app.library.queue_songs = ["s1", "s2"]
+        .iter()
+        .map(|id| {
+            let mut song = make_queue_song(id, "Title", "Artist", "Album");
+            song.artwork_url = format!("http://srv/art/album_{id}");
+            song
+        })
+        .collect();
+    app.snapshot_strip_quad_ids();
+
+    assert_eq!(app.strip_quad_prefetch_tasks().len(), 2, "cold tiles fetch");
+    assert!(
+        app.strip_quad_prefetch_tasks().is_empty(),
+        "a second pass while they load requests nothing"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
 #[test]
 fn strip_quad_none_without_active_playlist() {
     let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4"]);

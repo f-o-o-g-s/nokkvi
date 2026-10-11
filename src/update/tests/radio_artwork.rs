@@ -619,3 +619,27 @@ async fn clearing_station_art_releases_the_large_logo_claim() {
     drop(app);
     let _ = std::fs::remove_file(&db_path);
 }
+
+/// Station logos in the Radios viewport share the thumbnail in-flight gate
+/// and release through their own loaded handler.
+#[tokio::test]
+async fn radio_logos_in_flight_are_not_requested_again() {
+    let (mut app, db_path) = super::library::test_app_with_shell().await;
+    app.library.radio_stations = vec![
+        station("s1", "One", Some("ra-s1")),
+        station("s2", "Two", Some("ra-s2")),
+    ];
+
+    assert_eq!(app.prefetch_radio_logo_tasks().units(), 2);
+    assert_eq!(
+        app.prefetch_radio_logo_tasks().units(),
+        0,
+        "a second pass while they load requests nothing"
+    );
+
+    let _ = app.handle_radio_art_loaded("s1".into(), MiniArt::Transient);
+    assert_eq!(app.prefetch_radio_logo_tasks().units(), 1);
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}

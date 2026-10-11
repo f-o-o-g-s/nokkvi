@@ -1440,15 +1440,12 @@ impl Nokkvi {
         // Recently Added shelf covers (album-id-keyed, retry-wrapped).
         let triples = self.harbour.shelf_album_art_triples();
         if !triples.is_empty() {
-            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-            tasks.extend(super::components::expansion_album_artwork_tasks(
-                &cached,
-                &self.artwork.album_art_versions,
-                &self.artwork.failed_art,
-                &self.artwork.album_art_pending,
-                albums_vm.clone(),
-                triples,
-            ));
+            let gate = crate::update::components::ArtworkGate::new(&self.artwork);
+            let (queued, fetches) =
+                super::components::expansion_album_artwork_tasks(&gate, albums_vm.clone(), triples);
+            drop(gate);
+            self.artwork.album_art_pending.extend(queued);
+            tasks.extend(fetches);
         }
 
         // The song shelves (Recently Played, Most Played Tracks) plus the
@@ -1621,6 +1618,17 @@ impl Nokkvi {
         albums_vm: &AlbumsService,
     ) -> Vec<Task<Message>> {
         let planned = self.artist_minis_to_warm(artists);
+        self.dispatch_artist_minis(planned, albums_vm)
+    }
+
+    /// Fetch each planned `(artist_id, version)` mini, claiming the id in
+    /// `album_art_pending`. `planned` has been through
+    /// [`Self::artist_minis_to_warm`].
+    pub(crate) fn dispatch_artist_minis(
+        &mut self,
+        planned: Vec<(String, Option<String>)>,
+        albums_vm: &AlbumsService,
+    ) -> Vec<Task<Message>> {
         planned
             .into_iter()
             .map(|(id, version)| {

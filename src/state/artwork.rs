@@ -116,13 +116,18 @@ pub struct ArtworkState {
     /// can outlive its handle — `should_refetch` guards against that by checking
     /// `album_art` membership, not just this map.
     pub album_art_versions: HashMap<String, Option<String>>,
-    /// Album ids with an in-flight 80px quad-tile fetch. The quad prefetch is
-    /// re-dispatched from every scroll step and collage event; without an
-    /// in-flight gate a cold viewport would duplicate every still-loading
-    /// request on each step. Inserted when a quad fetch task is built, removed
-    /// by `handle_artwork_loaded` on success AND failure (the `Loaded` message
-    /// always arrives). The single-id prefetch surfaces keep their existing
-    /// gate-free behavior — only the ×4 quad paths consult this set.
+    /// Album/artist ids with an in-flight 80px fetch, from every surface that
+    /// fills [`Self::album_art`]: the viewport prefetches (albums, songs,
+    /// queue, editor, Similar, the Artists `ar-` minis), the expansion and
+    /// Harbour fan-outs, the quad tiles and the now-playing warm. Every one
+    /// re-runs on a scroll step or a re-entry; gated on arrived thumbnails
+    /// alone, a cold viewport on a slow server re-requested every thumbnail
+    /// still on its way per step (one was fetched 29 times in a demo-server
+    /// session), and the repeats queued ahead of the large covers and the
+    /// audio. Inserted when a fetch task is built, removed by
+    /// `handle_artwork_loaded` / `handle_song_artwork_loaded` on success AND
+    /// failure (the loaded message always arrives), so a transient failure
+    /// is re-attempted by the next pass as before.
     pub album_art_pending: HashSet<String>,
     /// Negative cache: album/artist ids whose 80px cover fetch returned NO image
     /// — a stale/deleted id that resolves to Navidrome's code-70 "Artwork not
@@ -170,6 +175,9 @@ pub struct ArtworkState {
     /// [`RadioStation::logo_cover_art`]: nokkvi_data::types::radio_station::RadioStation::logo_cover_art
     /// [`RadioArtStore`]: nokkvi_data::services::radio_art_store::RadioArtStore
     pub radio_art: SnapshottedLru<String, image::Handle>,
+    /// Station ids with an in-flight 80px logo fetch. Same contract as
+    /// [`Self::album_art_pending`], released by `handle_radio_art_loaded`.
+    pub radio_art_pending: HashSet<String>,
     /// Large radio-station artwork (`station_id -> Handle`) for the artwork
     /// panel: a resolution-sized station logo (logo stations) or the
     /// remembered/now-playing stream (ICY) image (logo-less stations). A logo
@@ -270,6 +278,7 @@ impl Default for ArtworkState {
             large_artwork_hashes: HashMap::new(),
             large_artwork_pending: HashMap::new(),
             radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
+            radio_art_pending: HashSet::new(),
             radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
             radio_large_art_pending: HashMap::new(),
             radio_icy_captured: HashMap::new(),

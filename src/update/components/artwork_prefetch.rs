@@ -5,7 +5,13 @@
 //! path). These are the single authoritative implementation of slot-list
 //! artwork prefetch — views call them via the `components::` re-export instead
 //! of inline loops. The version-aware [`should_refetch`] gate (N17) is the
-//! shared dedup core every surface routes through.
+//! shared dedup core every surface routes through, and every planner also
+//! skips the ids in `album_art_pending` (the in-flight set): the viewport
+//! prefetch re-runs on every scroll step, and a gate on arrived thumbnails
+//! alone re-requested every thumbnail still on its way per step. The
+//! planners return `(queued_ids, tasks)`; the caller inserts the ids into
+//! `album_art_pending`, and the loaded handlers release them on every
+//! outcome.
 use std::collections::{HashMap, HashSet};
 
 use iced::Task;
@@ -17,8 +23,39 @@ use nokkvi_data::{
 
 use crate::{
     app_message::{ArtworkMessage, Message, MiniArt},
+    state::ArtworkState,
     widgets::SlotListView,
 };
+
+/// The read side of the thumbnail dedup, borrowed from [`ArtworkState`] for
+/// one planning pass: what is warm (and at which version), what failed, and
+/// what is on its way. The planners return the ids they queue; the caller
+/// drops the gate (it borrows `album_art`) and claims them in
+/// `album_art_pending`.
+pub(crate) struct ArtworkGate<'a> {
+    cached: HashSet<&'a String>,
+    versions: &'a HashMap<String, Option<String>>,
+    failed: &'a HashMap<String, Option<String>>,
+    pending: &'a HashSet<String>,
+}
+
+impl<'a> ArtworkGate<'a> {
+    pub(crate) fn new(artwork: &'a ArtworkState) -> Self {
+        Self {
+            cached: artwork.album_art.iter().map(|(k, _)| k).collect(),
+            versions: &artwork.album_art_versions,
+            failed: &artwork.failed_art,
+            pending: &artwork.album_art_pending,
+        }
+    }
+
+    /// Whether `id` at `version` needs a fetch: a version-aware miss
+    /// ([`should_refetch`]) that no earlier pass already has on its way.
+    pub(crate) fn needs_fetch(&self, id: &String, version: &Option<String>) -> bool {
+        should_refetch(&self.cached, self.versions, self.failed, id, version)
+            && !self.pending.contains(id)
+    }
+}
 
 /// Version-aware prefetch dedup gate (N17) with a negative-cache short-circuit.
 ///
@@ -89,6 +126,8 @@ pub(crate) fn passive_artwork_version(_per_song_updated_at: &Option<String>) -> 
 /// The `extract_id_url` closure returns `(album_id, version, url)`: the
 /// `version` feeds the version-aware [`should_refetch`] gate so a changed
 /// server cover re-fetches even when the bare id is already cached (N17).
+/// Returns `(queued_ids, tasks)`; the caller inserts the ids into
+/// `album_art_pending` (`handle_artwork_loaded` releases them).
 ///
 /// The album-coherent surfaces (Albums view, Artists/Genres expansion) pass the
 /// album's artwork version here ([`album_prefetch_entry`]: the image hash on
@@ -100,35 +139,31 @@ pub(crate) fn passive_artwork_version(_per_song_updated_at: &Option<String>) -> 
 pub(crate) fn prefetch_album_artwork_tasks<F, T>(
     slot_list: &SlotListView,
     items: &[T],
-    cached_ids: &HashSet<&String>,
-    versions: &HashMap<String, Option<String>>,
-    failed: &HashMap<String, Option<String>>,
+    gate: &ArtworkGate<'_>,
     albums_vm: AlbumsService,
     extract_id_url: F,
-) -> Vec<Task<Message>>
+) -> (Vec<String>, Vec<Task<Message>>)
 where
     F: Fn(&T) -> (String, Option<String>, String),
 {
-    plan_album_artwork_fetches(
-        slot_list,
-        items,
-        cached_ids,
-        versions,
-        failed,
-        extract_id_url,
-    )
-    .into_iter()
-    .map(|(id, updated_at, url)| {
-        let vm = albums_vm.clone();
-        Task::perform(
-            async move {
-                let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
-                (id, updated_at, art)
-            },
-            |(id, updated_at, art)| Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art)),
-        )
-    })
-    .collect()
+    let planned = plan_album_artwork_fetches(slot_list, items, gate, extract_id_url);
+    let queued_ids = planned.iter().map(|(id, _, _)| id.clone()).collect();
+    let tasks = planned
+        .into_iter()
+        .map(|(id, updated_at, url)| {
+            let vm = albums_vm.clone();
+            Task::perform(
+                async move {
+                    let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
+                    (id, updated_at, art)
+                },
+                |(id, updated_at, art)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art))
+                },
+            )
+        })
+        .collect();
+    (queued_ids, tasks)
 }
 
 /// The `(id, version, url)` fetches [`prefetch_album_artwork_tasks`] would
@@ -137,9 +172,7 @@ where
 pub(crate) fn plan_album_artwork_fetches<F, T>(
     slot_list: &SlotListView,
     items: &[T],
-    cached_ids: &HashSet<&String>,
-    versions: &HashMap<String, Option<String>>,
-    failed: &HashMap<String, Option<String>>,
+    gate: &ArtworkGate<'_>,
     extract_id_url: F,
 ) -> Vec<(String, Option<String>, String)>
 where
@@ -166,11 +199,10 @@ where
             if id.is_empty() || url.is_empty() {
                 return None;
             }
-            // Skip if version-warm (id cached AND recorded version matches) or
-            // already queued in this batch; a changed updated_at is a miss.
-            if !should_refetch(cached_ids, versions, failed, &id, &updated_at)
-                || already_queued.contains(&id)
-            {
+            // Skip if version-warm (id cached AND recorded version matches),
+            // still on its way from an earlier pass, or already queued in
+            // this batch; a changed updated_at is a miss.
+            if !gate.needs_fetch(&id, &updated_at) || already_queued.contains(&id) {
                 None
             } else {
                 already_queued.insert(id.clone());
@@ -230,34 +262,31 @@ pub(crate) fn artist_mini_task(
 /// next cold load. A `None` version also yields the documented empty-`_u=` URL
 /// shape, which still returns the current cover (there is no client-side
 /// artwork response cache). Dispatches
-/// `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
+/// `Message::Artwork(ArtworkMessage::SongMiniLoaded)`, which releases the
+/// `album_art_pending` claim the caller makes with the returned ids.
 pub(crate) fn prefetch_song_artwork_tasks<T, F>(
     slot_list: &SlotListView,
     songs: &[T],
-    cached_ids: &HashSet<&String>,
-    versions: &HashMap<String, Option<String>>,
-    failed: &HashMap<String, Option<String>>,
+    gate: &ArtworkGate<'_>,
     albums_vm: AlbumsService,
     extract_album_id: F,
-) -> Vec<Task<Message>>
+) -> (Vec<String>, Vec<Task<Message>>)
 where
     F: Fn(&T) -> Option<(&String, Option<String>)>,
 {
     let total = songs.len();
     if total == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
     let mut already_queued = HashSet::new();
 
-    slot_list
+    let planned: Vec<(String, Option<String>)> = slot_list
         .prefetch_indices(total)
         .filter_map(|idx| songs.get(idx))
         .filter_map(|song| {
             extract_album_id(song).and_then(|(id, updated_at)| {
-                if !should_refetch(cached_ids, versions, failed, id, &updated_at)
-                    || already_queued.contains(id)
-                {
+                if !gate.needs_fetch(id, &updated_at) || already_queued.contains(id) {
                     None
                 } else {
                     already_queued.insert(id.clone());
@@ -265,6 +294,10 @@ where
                 }
             })
         })
+        .collect();
+    let queued_ids = planned.iter().map(|(id, _)| id.clone()).collect();
+    let tasks = planned
+        .into_iter()
         .map(|(album_id, updated_at)| {
             let vm = albums_vm.clone();
             let id = album_id;
@@ -283,7 +316,8 @@ where
                 },
             )
         })
-        .collect()
+        .collect();
+    (queued_ids, tasks)
 }
 
 /// Generate 80px quad-tile prefetch tasks for a slot list viewport.
@@ -449,31 +483,30 @@ where
 /// scroll-triggered re-fetch path, so a single dropped fetch leaves a
 /// permanently-blank slot until the next expansion.
 ///
-/// `pending_ids` is the `album_art_pending` in-flight set: a genre's
-/// expansion children lead with the SAME albums its row quad is warming
-/// (both derive from the name-ASC `/api/album` listing), and FocusAndExpand
-/// fires the quad dispatch and the expansion fan-out in the same event
-/// cluster — without this filter the fan-out duplicates every quad fetch
-/// still in flight.
+/// The gate's in-flight set matters here: a genre's expansion children lead
+/// with the SAME albums its row quad is warming (both derive from the
+/// name-ASC `/api/album` listing), and FocusAndExpand fires the quad dispatch
+/// and the expansion fan-out in the same event cluster — without it the
+/// fan-out duplicates every quad fetch still in flight. Returns
+/// `(queued_ids, tasks)`; the caller inserts the ids into that set so the
+/// next pass (a Harbour re-entry, a second expansion) holds them too.
 pub(crate) fn expansion_album_artwork_tasks(
-    cached_ids: &HashSet<&String>,
-    versions: &HashMap<String, Option<String>>,
-    failed: &HashMap<String, Option<String>>,
-    pending_ids: &HashSet<String>,
+    gate: &ArtworkGate<'_>,
     albums_vm: AlbumsService,
     album_ids_urls: Vec<(String, Option<String>, String)>,
-) -> Vec<Task<Message>> {
-    album_ids_urls
+) -> (Vec<String>, Vec<Task<Message>>) {
+    let planned: Vec<(String, Option<String>, String)> = album_ids_urls
         .into_iter()
         .filter(|(id, updated_at, url)| {
             // An empty URL (no id, or art the server marked absent) has
             // nothing to fetch; fetching it would error Transient and
             // re-queue on every pass.
-            !id.is_empty()
-                && !url.is_empty()
-                && should_refetch(cached_ids, versions, failed, id, updated_at)
-                && !pending_ids.contains(id)
+            !id.is_empty() && !url.is_empty() && gate.needs_fetch(id, updated_at)
         })
+        .collect();
+    let queued_ids = planned.iter().map(|(id, _, _)| id.clone()).collect();
+    let tasks = planned
+        .into_iter()
         .map(|(id, updated_at, url)| {
             let vm = albums_vm.clone();
             Task::perform(
@@ -486,7 +519,8 @@ pub(crate) fn expansion_album_artwork_tasks(
                 },
             )
         })
-        .collect()
+        .collect();
+    (queued_ids, tasks)
 }
 
 /// Project newly-loaded expansion children into the

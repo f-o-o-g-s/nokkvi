@@ -448,6 +448,7 @@ impl Nokkvi {
         let album_id = self.current_queue_song_album_id()?;
         if self.artwork.large_artwork.snapshot.contains_key(album_id)
             || self.artwork.album_art.snapshot.contains_key(album_id)
+            || self.artwork.album_art_pending.contains(album_id)
         {
             None
         } else {

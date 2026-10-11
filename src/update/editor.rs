@@ -16,7 +16,7 @@ use nokkvi_data::{
 };
 
 use super::components::{
-    duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
+    ArtworkGate, duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
 };
 use crate::{
     Nokkvi,
@@ -507,7 +507,7 @@ impl Nokkvi {
     /// fetched by another view. Mirrors `handle_queue_loaded`: the canonical
     /// 80 px album-id prefetch plus a large-artwork load for the centered row.
     /// A no-op when there is no backend or the buffer is empty.
-    pub(crate) fn editor_artwork_prefetch_tasks(&self) -> Task<Message> {
+    pub(crate) fn editor_artwork_prefetch_tasks(&mut self) -> Task<Message> {
         let (Some(editor), Some(shell)) =
             (self.playlist_editor.as_ref(), self.app_service.as_ref())
         else {
@@ -517,13 +517,11 @@ impl Nokkvi {
             return Task::none();
         }
 
-        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        let mut tasks = prefetch_album_artwork_tasks(
+        let gate = ArtworkGate::new(&self.artwork);
+        let (queued, mut tasks) = prefetch_album_artwork_tasks(
             &editor.common.slot_list,
             &editor.songs,
-            &cached,
-            &self.artwork.album_art_versions,
-            &self.artwork.failed_art,
+            &gate,
             shell.albums().clone(),
             |song| {
                 (
@@ -533,6 +531,8 @@ impl Nokkvi {
                 )
             },
         );
+        drop(gate);
+        self.artwork.album_art_pending.extend(queued);
 
         // Large artwork for the centered row, so the artwork panel fills too.
         if let Some(center_idx) = editor

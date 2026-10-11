@@ -3,7 +3,7 @@
 //! Absent art (`imageAbsent: true`) is never requested by a surface that
 //! holds the entity; everything else plans exactly as before.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use nokkvi_data::{
     backend::albums::AlbumUIViewData,
@@ -13,7 +13,7 @@ use nokkvi_data::{
 use crate::{
     test_helpers::{make_artist, test_app},
     update::components::{
-        album_prefetch_entry, expansion_child_album_ids, plan_album_artwork_fetches,
+        ArtworkGate, album_prefetch_entry, expansion_child_album_ids, plan_album_artwork_fetches,
     },
     widgets::SlotListView,
 };
@@ -40,12 +40,14 @@ fn planned_ids(
     failed: &HashMap<String, Option<String>>,
 ) -> Vec<String> {
     let slot_list = SlotListView::new();
+    let artwork = crate::state::ArtworkState {
+        failed_art: failed.clone(),
+        ..Default::default()
+    };
     plan_album_artwork_fetches(
         &slot_list,
         albums,
-        &HashSet::new(),
-        &HashMap::new(),
-        failed,
+        &ArtworkGate::new(&artwork),
         album_prefetch_entry,
     )
     .into_iter()
@@ -351,7 +353,6 @@ fn artist_minis_version_by_hash() {
 // --- Exact refresh after a background reload ----------------------------------
 
 mod background_reload {
-    use std::collections::HashSet;
 
     use nokkvi_data::backend::albums::AlbumUIViewData;
 
@@ -359,7 +360,7 @@ mod background_reload {
     use crate::{
         app_message::MiniArt,
         test_helpers::{make_artist, test_app},
-        update::components::{album_prefetch_entry, plan_album_artwork_fetches},
+        update::components::{ArtworkGate, album_prefetch_entry, plan_album_artwork_fetches},
     };
 
     const A: &str = "aaaaaaaaaaaaaaaa";
@@ -394,13 +395,10 @@ mod background_reload {
     /// cache state (the planning half `prefetch_artwork_tasks` runs after
     /// every load, background ones included).
     fn planned(app: &crate::Nokkvi) -> Vec<String> {
-        let cached: HashSet<&String> = app.artwork.album_art.iter().map(|(k, _)| k).collect();
         plan_album_artwork_fetches(
             &app.albums_page.common.slot_list,
             &app.library.albums,
-            &cached,
-            &app.artwork.album_art_versions,
-            &app.artwork.failed_art,
+            &ArtworkGate::new(&app.artwork),
             album_prefetch_entry,
         )
         .into_iter()

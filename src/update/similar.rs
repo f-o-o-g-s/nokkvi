@@ -51,27 +51,27 @@ impl Nokkvi {
                 ))];
 
                 if let Some(shell) = &self.app_service {
-                    let cached: std::collections::HashSet<&String> =
-                        self.artwork.album_art.iter().map(|(k, _)| k).collect();
+                    let gate = crate::update::components::ArtworkGate::new(&self.artwork);
                     if let Some(state) = &self.similar_songs {
-                        let prefetch_tasks = crate::update::components::prefetch_song_artwork_tasks(
-                            &self.similar_page.common.slot_list,
-                            &state.songs,
-                            &cached,
-                            &self.artwork.album_art_versions,
-                            &self.artwork.failed_art,
-                            shell.albums().clone(),
-                            |s| {
-                                s.album_id.as_ref().map(|id| {
-                                    (
-                                        id,
-                                        crate::update::components::passive_artwork_version(
-                                            &s.updated_at,
-                                        ),
-                                    )
-                                })
-                            },
-                        );
+                        let (queued, prefetch_tasks) =
+                            crate::update::components::prefetch_song_artwork_tasks(
+                                &self.similar_page.common.slot_list,
+                                &state.songs,
+                                &gate,
+                                shell.albums().clone(),
+                                |s| {
+                                    s.album_id.as_ref().map(|id| {
+                                        (
+                                            id,
+                                            crate::update::components::passive_artwork_version(
+                                                &s.updated_at,
+                                            ),
+                                        )
+                                    })
+                                },
+                            );
+                        drop(gate);
+                        self.artwork.album_art_pending.extend(queued);
                         tasks.extend(prefetch_tasks);
                     }
                 }
@@ -253,26 +253,26 @@ impl Nokkvi {
                     }
 
                     if let Some(shell) = &self.app_service {
-                        let cached: std::collections::HashSet<&String> =
-                            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                        let prefetch_tasks = crate::update::components::prefetch_song_artwork_tasks(
-                            &self.similar_page.common.slot_list,
-                            &state.songs,
-                            &cached,
-                            &self.artwork.album_art_versions,
-                            &self.artwork.failed_art,
-                            shell.albums().clone(),
-                            |s| {
-                                s.album_id.as_ref().map(|id| {
-                                    (
-                                        id,
-                                        crate::update::components::passive_artwork_version(
-                                            &s.updated_at,
-                                        ),
-                                    )
-                                })
-                            },
-                        );
+                        let gate = crate::update::components::ArtworkGate::new(&self.artwork);
+                        let (queued, prefetch_tasks) =
+                            crate::update::components::prefetch_song_artwork_tasks(
+                                &self.similar_page.common.slot_list,
+                                &state.songs,
+                                &gate,
+                                shell.albums().clone(),
+                                |s| {
+                                    s.album_id.as_ref().map(|id| {
+                                        (
+                                            id,
+                                            crate::update::components::passive_artwork_version(
+                                                &s.updated_at,
+                                            ),
+                                        )
+                                    })
+                                },
+                            );
+                        drop(gate);
+                        self.artwork.album_art_pending.extend(queued);
                         tasks.extend(prefetch_tasks);
                     }
                 }

@@ -12,9 +12,15 @@ use std::collections::{HashMap, HashSet};
 
 use super::library::test_app_with_shell;
 use crate::{
-    app_message::ArtworkMessage,
-    test_helpers::{make_album, seed_albums, test_app},
-    update::components::{passive_artwork_version, should_refetch},
+    app_message::{ArtworkMessage, MiniArt},
+    test_helpers::{
+        make_album, make_artist, make_queue_song, make_song, seed_albums, seed_artists, seed_songs,
+        test_app,
+    },
+    update::{
+        components::{passive_artwork_version, should_refetch},
+        loader_target::{AlbumsTarget, LoaderTarget, SongsTarget},
+    },
 };
 
 /// Empty negative cache — the default for the version-behaviour tests below
@@ -334,4 +340,142 @@ fn large_art_without_a_session_claims_nothing() {
     let _ = app.handle_load_artist_large_artwork("ar1".into());
 
     assert!(app.artwork.large_artwork_pending.is_empty());
+}
+
+// ============================================================================
+// Thumbnail in-flight dedup
+// ============================================================================
+//
+// The viewport prefetch re-runs on every scroll step and gated only on the
+// thumbnails that had ARRIVED, so on a slow server every step re-requested
+// every thumbnail still on its way (one was fetched 29 times in a demo-server
+// session). Each surface now claims its ids in `album_art_pending` and the
+// loaded handler releases them on every outcome.
+
+fn album_with_art(id: &str) -> nokkvi_data::backend::albums::AlbumUIViewData {
+    let mut album = make_album(id, "Album", "Artist");
+    album.artwork_url = format!("http://srv/art/{id}");
+    album
+}
+
+/// A second Albums viewport pass while the first pass's thumbnails are still
+/// loading requests nothing; a settled fetch (any outcome) frees its id.
+#[tokio::test]
+async fn album_thumbnails_in_flight_are_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+    seed_albums(
+        &mut app,
+        vec![
+            album_with_art("a1"),
+            album_with_art("a2"),
+            album_with_art("a3"),
+        ],
+    );
+
+    assert_eq!(
+        AlbumsTarget::prefetch_artwork_tasks(&mut app).len(),
+        3,
+        "a cold viewport fetches every row"
+    );
+    assert!(
+        AlbumsTarget::prefetch_artwork_tasks(&mut app).is_empty(),
+        "a second pass while they load requests nothing"
+    );
+
+    let _ = app.handle_artwork_loaded("a2".into(), None, MiniArt::Transient);
+    assert_eq!(
+        AlbumsTarget::prefetch_artwork_tasks(&mut app).len(),
+        1,
+        "a settled fetch is planned again, the others stay held"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// The song-mini surfaces (Songs view, Similar) share the gate and release
+/// through their own loaded handler.
+#[tokio::test]
+async fn song_thumbnails_in_flight_are_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+    seed_songs(
+        &mut app,
+        vec![make_song("s1", "T", "A"), make_song("s2", "T", "A")],
+    );
+
+    assert_eq!(SongsTarget::prefetch_artwork_tasks(&mut app).len(), 2);
+    assert!(
+        SongsTarget::prefetch_artwork_tasks(&mut app).is_empty(),
+        "a second pass while they load requests nothing"
+    );
+
+    let _ = app.handle_song_artwork_loaded("album_s1".into(), None, MiniArt::Transient);
+    assert_eq!(
+        SongsTarget::prefetch_artwork_tasks(&mut app).len(),
+        1,
+        "a settled fetch is planned again"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// The Artists viewport's `ar-` minis share the gate.
+#[tokio::test]
+async fn artist_thumbnails_in_flight_are_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+    seed_artists(
+        &mut app,
+        vec![make_artist("ar1", "One"), make_artist("ar2", "Two")],
+    );
+
+    assert_eq!(app.prefetch_artist_mini_artwork_tasks().units(), 2);
+    assert_eq!(
+        app.prefetch_artist_mini_artwork_tasks().units(),
+        0,
+        "a second pass while they load requests nothing"
+    );
+
+    let _ = app.handle_artwork_loaded("ar1".into(), None, MiniArt::Transient);
+    assert_eq!(
+        app.prefetch_artist_mini_artwork_tasks().units(),
+        1,
+        "a settled fetch is planned again"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// Harbour's shelf covers go through the expansion fan-out, which also
+/// claims what it sends.
+#[tokio::test]
+async fn harbour_shelf_covers_in_flight_are_not_requested_again() {
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.harbour.recently_added = vec![album_with_art("a1"), album_with_art("a2")];
+
+    assert_eq!(app.warm_harbour_artwork(0).units(), 2);
+    assert_eq!(
+        app.warm_harbour_artwork(0).units(),
+        0,
+        "a re-entry while they load requests nothing"
+    );
+
+    let _ = app.handle_artwork_loaded("a1".into(), None, MiniArt::Transient);
+    assert_eq!(app.warm_harbour_artwork(0).units(), 1);
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// The song-change warm of the playing album stands down while a viewport
+/// pass already has that cover on its way.
+#[test]
+fn now_playing_warm_skipped_while_the_album_is_in_flight() {
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.artwork.album_art_pending.insert("album_s1".to_string());
+
+    assert!(app.now_playing_artwork_to_warm().is_none());
 }

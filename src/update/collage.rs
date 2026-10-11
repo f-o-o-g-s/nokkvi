@@ -175,20 +175,11 @@ impl Nokkvi {
             })
             .collect();
 
-        for (id, _, _) in &triples {
-            self.artwork.album_art_pending.insert(id.clone());
-        }
-
-        let cached: std::collections::HashSet<&String> =
-            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        expansion_album_artwork_tasks(
-            &cached,
-            &self.artwork.album_art_versions,
-            &self.artwork.failed_art,
-            &self.artwork.album_art_pending,
-            albums_vm,
-            triples,
-        )
+        let gate = crate::update::components::ArtworkGate::new(&self.artwork);
+        let (queued, tasks) = expansion_album_artwork_tasks(&gate, albums_vm, triples);
+        drop(gate);
+        self.artwork.album_art_pending.extend(queued);
+        tasks
     }
 
     /// Unified collage artwork loader for both genres and playlists.
