@@ -210,6 +210,18 @@ impl SongsApiService {
             .ok_or_else(|| anyhow::anyhow!("Song not found: {song_id}"))
     }
 
+    /// Whether a song with this id exists on the server: an empty answer is
+    /// `false`, a failed request an error.
+    pub async fn song_exists(&self, song_id: &str) -> Result<bool> {
+        let params = vec![("id", song_id), ("_start", "0"), ("_end", "1")];
+        let response_text = self
+            .client
+            .get("/api/song", &params)
+            .await
+            .context("Failed to look up song by ID")?;
+        Ok(!Self::parse_song_response(&response_text)?.is_empty())
+    }
+
     /// Load songs for an album
     pub async fn load_album_songs(&self, album_id: &str) -> Result<Vec<Song>> {
         // Use "_sort=album" to leverage Navidrome's sort mapping which expands to:

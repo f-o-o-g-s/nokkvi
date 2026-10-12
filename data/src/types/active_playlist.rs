@@ -13,7 +13,7 @@ use super::settings::LivePlayerSettings;
 ///
 /// `Default` is the cleared context the store writes when no playlist is
 /// active: empty strings, 0 duration and count, private.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActivePlaylistRecord {
     pub id: String,
     pub name: String,

@@ -22,6 +22,15 @@ pub(crate) const JWT_TOKEN: &str = "jwt_token";
 pub(crate) const SUBSONIC_CREDENTIAL: &str = "subsonic_credential";
 pub(crate) const QUEUE_ORDER: &str = "queue_order";
 pub(crate) const QUEUE_SONGS: &str = "queue_songs";
+/// Who the live queue (`QUEUE_ORDER` + `QUEUE_SONGS`) and the stored
+/// "Playing From" playlist belong to: a `QueueOwner` key (server URL + user).
+/// Absent on a queue saved before per-session queues existed. See
+/// `services::queue::slots`.
+pub(crate) const QUEUE_OWNER: &str = "queue_owner";
+/// Prefix of the parked queues of other sessions: `queue_slot` + separator +
+/// owner key + separator + part (`order`, `songs`, `playlist`). See
+/// `services::queue::slots`.
+pub(crate) const QUEUE_SLOT_PREFIX: &str = "queue_slot";
 /// Bincode blob of remembered radio now-playing (ICY) artwork, keyed by
 /// station id and namespaced by server URL. Written/read by
 /// [`crate::services::radio_art_store::RadioArtStore`].
@@ -64,6 +73,8 @@ mod tests {
         assert_eq!(SUBSONIC_CREDENTIAL, "subsonic_credential");
         assert_eq!(QUEUE_ORDER, "queue_order");
         assert_eq!(QUEUE_SONGS, "queue_songs");
+        assert_eq!(QUEUE_OWNER, "queue_owner");
+        assert_eq!(QUEUE_SLOT_PREFIX, "queue_slot");
         assert_eq!(RADIO_ART_INDEX, "radio_art_index_v2");
         assert_eq!(LISTENBRAINZ_TOKEN, "radio_listenbrainz_token");
         assert_eq!(LASTFM_API_KEY, "radio_lastfm_api_key");

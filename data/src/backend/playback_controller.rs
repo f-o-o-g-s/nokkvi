@@ -1190,6 +1190,24 @@ impl PlaybackController {
     /// Callers use this to capture "what was playing" before a queue mutation
     /// so [`crate::services::playback::decide_removal_aftermath`] can later
     /// detect whether the removal unhooked the engine.
+    /// Point the navigator at the queue's playing row after the queue was
+    /// reloaded from storage (a login claimed another session's queue). Same
+    /// seed as `QueueNavigator::new`.
+    pub async fn resync_navigator_with_queue(&self) {
+        let playing = {
+            let queue_manager = self.queue_service.queue_manager();
+            let qm = queue_manager.lock().await;
+            qm.current_index()
+                .and_then(|idx| qm.song_id_at(idx))
+                .map(str::to_owned)
+        };
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(playing)
+            .await;
+    }
+
     pub async fn current_song_id(&self) -> Option<String> {
         self.queue_navigator
             .lock()

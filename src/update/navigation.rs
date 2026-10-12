@@ -501,6 +501,13 @@ impl Nokkvi {
                                 ))
                                 .await;
 
+                            // Load this session's own queue before anything
+                            // reads it: a login to another server must not
+                            // show the previous server's queue.
+                            if let Err(e) = shell.claim_queue_for_session().await {
+                                tracing::warn!("Could not load this session's queue: {e:#}");
+                            }
+
                             // The auth service resolved the typed input to the
                             // candidate that actually connected; surface it so
                             // the root persists the resolved URL, not the raw
@@ -590,6 +597,11 @@ impl Nokkvi {
                         }
                     }))
                     .await;
+
+                // Same as a fresh login: this session's own queue first.
+                if let Err(e) = shell.claim_queue_for_session().await {
+                    tracing::warn!("Could not load this session's queue: {e:#}");
+                }
 
                 let user_id = shell.auth().user_id().await;
                 Ok(crate::app_message::LoginSuccess {

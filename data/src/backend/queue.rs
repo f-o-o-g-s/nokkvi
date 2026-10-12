@@ -170,6 +170,15 @@ impl QueueService {
         })
     }
 
+    /// Re-read the queue from storage after a login claimed another session's
+    /// queue (see [`crate::services::queue::slots`]), and refresh the
+    /// reactive properties from it.
+    pub async fn reload_from_storage(&self) -> Result<()> {
+        let mut queue_manager = self.queue_manager.lock().await;
+        queue_manager.reload();
+        self.refresh_from_locked_manager(&queue_manager).await
+    }
+
     /// Initialize the viewmodel by loading persisted queue data into reactive properties
     pub async fn initialize(&self) -> Result<()> {
         let queue_manager = self.queue_manager.lock().await;

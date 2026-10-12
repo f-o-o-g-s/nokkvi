@@ -235,6 +235,80 @@ impl AppService {
     }
 
     /// Get reference to PlaybackController
+    /// Load the queue that belongs to the session just logged in (see
+    /// [`crate::services::queue::slots`]): the same server and user keep the
+    /// live queue; another one parks it and gets its own parked queue back,
+    /// or an empty one, with the "Playing From" playlist following its
+    /// queue. Both login paths call this after authenticating and before the
+    /// UI reads the queue.
+    pub async fn claim_queue_for_session(&self) -> Result<()> {
+        use crate::services::queue::slots::{self, LegacySample, LegacyVerdict, QueueClaim};
+
+        let owner = slots::QueueOwner::new(
+            &self.auth_gateway.get_server_url().await,
+            &self.auth_gateway.username().await,
+        );
+        let legacy = match slots::legacy_sample(&self.storage)? {
+            // A stamped queue is judged by its stamp alone.
+            LegacySample::Owned => LegacyVerdict::Unknown,
+            LegacySample::Empty => LegacyVerdict::Belongs,
+            LegacySample::Ask(ids) => self.legacy_queue_verdict(&ids).await,
+        };
+        let current_playlist = self
+            .settings_service
+            .get_player_settings()
+            .await
+            .active_playlist();
+
+        match slots::claim(&self.storage, &owner, current_playlist, legacy)? {
+            QueueClaim::Kept => {}
+            QueueClaim::Replaced { playlist, restored } => {
+                self.queue_service.reload_from_storage().await?;
+                self.playback.resync_navigator_with_queue().await;
+                self.settings_service.set_active_playlist(playlist).await?;
+                info!(
+                    " [QUEUE] {} for {}",
+                    if restored {
+                        "Restored the parked queue"
+                    } else {
+                        "Started an empty queue"
+                    },
+                    owner.label()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether an unowned queue's songs exist on this server: the first id
+    /// found wins, none found means another server's queue, and a failed
+    /// lookup leaves it undecided.
+    async fn legacy_queue_verdict(
+        &self,
+        ids: &[String],
+    ) -> crate::services::queue::slots::LegacyVerdict {
+        use crate::services::queue::slots::LegacyVerdict;
+
+        let api = match self.songs_api().await {
+            Ok(api) => api,
+            Err(e) => {
+                debug!(" [QUEUE] Could not check the saved queue against the server: {e:#}");
+                return LegacyVerdict::Unknown;
+            }
+        };
+        for id in ids {
+            match api.song_exists(id).await {
+                Ok(true) => return LegacyVerdict::Belongs,
+                Ok(false) => {}
+                Err(e) => {
+                    debug!(" [QUEUE] Could not check the saved queue against the server: {e:#}");
+                    return LegacyVerdict::Unknown;
+                }
+            }
+        }
+        LegacyVerdict::Foreign
+    }
+
     pub fn playback(&self) -> &PlaybackController {
         &self.playback
     }
@@ -2157,6 +2231,72 @@ mod tests {
             .await
             .expect("app service");
         (app, db_path)
+    }
+
+    /// Log `app` in without a network call: a resumed session with a fake
+    /// token. The legacy ownership check would call `server`, so tests point
+    /// it at a closed port and stamp the owner while the queue is empty.
+    async fn resume_as(app: &AppService, server: &str, user: &str) {
+        app.auth()
+            .resume_session(
+                server.to_owned(),
+                user.to_owned(),
+                "not-a-jwt".to_owned(),
+                format!("u={user}&t=x&s=y"),
+            )
+            .await
+            .expect("resume");
+    }
+
+    async fn live_queue_ids(app: &AppService) -> Vec<String> {
+        app.queue().queue_manager().lock().await.song_ids_snapshot()
+    }
+
+    /// The bug: logging into another server showed the previous server's
+    /// queue. A claim after the login swaps the in-memory queue, the queue
+    /// view's rows and the navigator's playing song along with storage, and
+    /// logging back in restores the first server's queue.
+    #[tokio::test]
+    async fn claiming_after_a_server_switch_swaps_the_live_queue() {
+        let (app, db_path) = test_app().await;
+        // Closed ports: no claim here may reach a server (an empty queue is
+        // stamped without asking, a stamped one is judged by its stamp).
+        let local = "http://127.0.0.1:9/local";
+        let other = "http://127.0.0.1:9/other";
+        resume_as(&app, local, "foogs").await;
+        app.claim_queue_for_session().await.expect("stamp local");
+        let songs = ["l1", "l2"]
+            .iter()
+            .map(|id| crate::types::song::Song::test_default(id, id))
+            .collect();
+        let effect = app
+            .queue()
+            .set_queue(songs, Some(1))
+            .await
+            .expect("seed queue");
+        effect.apply_to(&app.audio_engine()).await;
+
+        resume_as(&app, other, "demo").await;
+        app.claim_queue_for_session().await.expect("claim other");
+        assert!(
+            live_queue_ids(&app).await.is_empty(),
+            "the other server starts empty"
+        );
+        assert!(app.queue().get_songs().is_empty(), "the queue view follows");
+        assert_eq!(app.playback().current_song_id().await, None);
+
+        resume_as(&app, local, "Foogs").await;
+        app.claim_queue_for_session().await.expect("claim local");
+        assert_eq!(live_queue_ids(&app).await, ["l1", "l2"]);
+        assert_eq!(app.queue().get_songs().len(), 2);
+        assert_eq!(
+            app.playback().current_song_id().await.as_deref(),
+            Some("l2"),
+            "the navigator points at the restored playing row"
+        );
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
     }
 
     /// Fresh storage means no persisted selection — the active set

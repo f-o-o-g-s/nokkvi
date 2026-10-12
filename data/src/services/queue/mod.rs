@@ -9,6 +9,7 @@
 
 mod navigation;
 mod order;
+pub mod slots;
 mod write_guard;
 
 use std::collections::HashSet;
@@ -199,6 +200,45 @@ fn order_is_identity_permutation(order: &[usize], len: usize) -> bool {
 
 impl QueueManager {
     pub fn new(storage: StateStorage) -> Result<Self> {
+        let (queue, pool, dirty) = Self::load_persisted(&storage);
+        let next_entry_id = queue.rows.len() as u64;
+
+        let mgr = Self {
+            queue,
+            pool,
+            storage,
+            playback_history: Vec::new(),
+            max_history_size: 100,
+            next_entry_id,
+        };
+
+        // Persist the cleaned state so the repair is durable (best-effort: a
+        // failed save must not abort login — the in-memory queue is already
+        // consistent).
+        if dirty && let Err(e) = mgr.save_all() {
+            warn!(" [QUEUE] Failed to persist reconciled queue on load: {e}");
+        }
+
+        Ok(mgr)
+    }
+
+    /// Re-read the queue from storage after its live keys changed underneath
+    /// (a login claimed another session's queue, see [`slots`]). The playback
+    /// history goes with it: it named the previous session's songs.
+    pub fn reload(&mut self) {
+        let (queue, pool, dirty) = Self::load_persisted(&self.storage);
+        self.next_entry_id = queue.rows.len() as u64;
+        self.queue = queue;
+        self.pool = pool;
+        self.playback_history.clear();
+        if dirty && let Err(e) = self.save_all() {
+            warn!(" [QUEUE] Failed to persist reconciled queue on reload: {e}");
+        }
+    }
+
+    /// The persisted queue and pool, reconciled, with `entry_id`s seeded
+    /// `0..len`, plus whether the repair changed anything worth saving.
+    fn load_persisted(storage: &StateStorage) -> (Queue, SongPool, bool) {
         // ORDER load is best-effort: a physically-corrupt or
         // schema-incompatible Queue blob must never abort AppService
         // construction (which would bounce the user to the login screen).
@@ -243,25 +283,8 @@ impl QueueManager {
         for (i, row) in queue.rows.iter_mut().enumerate() {
             row.entry_id = i as u64;
         }
-        let next_entry_id = queue.rows.len() as u64;
 
-        let mgr = Self {
-            queue,
-            pool,
-            storage,
-            playback_history: Vec::new(),
-            max_history_size: 100,
-            next_entry_id,
-        };
-
-        // Persist the cleaned state so the repair is durable (best-effort: a
-        // failed save must not abort login — the in-memory queue is already
-        // consistent).
-        if dirty && let Err(e) = mgr.save_all() {
-            warn!(" [QUEUE] Failed to persist reconciled queue on load: {e}");
-        }
-
-        Ok(mgr)
+        (queue, pool, dirty)
     }
 
     // ── Song Pool Accessors ──

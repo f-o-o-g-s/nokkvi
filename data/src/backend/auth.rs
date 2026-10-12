@@ -56,6 +56,12 @@ impl AuthGateway {
         auth_service.get_server_url().to_string()
     }
 
+    /// The username this session logged in (or resumed) with.
+    pub async fn username(&self) -> String {
+        let auth_service = self.auth_service.lock().await;
+        auth_service.username().to_string()
+    }
+
     /// Get subsonic credential
     pub async fn get_subsonic_credential(&self) -> String {
         let auth_service = self.auth_service.lock().await;

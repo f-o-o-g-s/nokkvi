@@ -211,6 +211,11 @@ impl AuthService {
         &self.server_url
     }
 
+    /// The username this session logged in (or resumed) with.
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
     pub fn get_subsonic_credential(&self) -> &str {
         &self.subsonic_credential
     }

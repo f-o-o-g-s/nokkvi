@@ -156,6 +156,34 @@ impl StateStorage {
         Ok(())
     }
 
+    /// Apply several raw puts and removals in ONE redb write transaction:
+    /// every entry commits together or none does. The bytes are stored as
+    /// given (already-encoded blobs, moved between keys unchanged).
+    pub fn write_batch(&self, puts: &[(&str, &[u8])], removes: &[&str]) -> Result<()> {
+        let write_txn = self.begin_write()?;
+        {
+            let mut table = write_txn.open_table(STATE_TABLE)?;
+            for (key, bytes) in puts {
+                table.insert(*key, *bytes)?;
+            }
+            for key in removes {
+                table.remove(*key)?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    /// The raw bytes stored under `key`, undecoded.
+    pub fn load_raw(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(STATE_TABLE) {
+            Ok(table) => table,
+            Err(_) => return Ok(None),
+        };
+        Ok(table.get(key)?.map(|value| value.value().to_vec()))
+    }
+
     /// Load data from bincode (native Decode trait).
     pub fn load_binary<T: bincode_next::Decode<()>>(&self, key: &str) -> Result<Option<T>> {
         let read_txn = self.db.begin_read()?;

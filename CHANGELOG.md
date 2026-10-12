@@ -86,6 +86,9 @@ All notable changes to this project will be documented in this file.
 - Scrolling a list on a slow server no longer requests a thumbnail again while it is still loading.
 - The "Playing From" cover's 2×2 collage now loads even when its albums are scrolled out of view.
 - The playing song's title no longer waits for its cover to download before it shows in the app and desktop media widgets.
+- Logging into a different server no longer shows the previous server's queue.
+- Logging back into a server now brings back the queue you left there.
+- The Playing From playlist now switches along with the queue when you log into another server.
 
 ### Removed
 
