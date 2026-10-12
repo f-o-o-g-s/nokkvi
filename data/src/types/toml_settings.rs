@@ -352,7 +352,7 @@ impl Default for TomlSettings {
             rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::MiniPlayer,
+            track_info_display: TrackInfoDisplay::PlayerBarAbove,
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: false,
             slot_text_links: false,

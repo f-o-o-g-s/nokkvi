@@ -18,7 +18,7 @@
   "rounded_mode": "on",
   "nav_layout": "top",
   "nav_display_mode": "text_only",
-  "track_info_display": "mini_player",
+  "track_info_display": "player_bar_above",
   "slot_row_height": "compact",
   "opacity_gradient": false,
   "dynamic_accent": false,

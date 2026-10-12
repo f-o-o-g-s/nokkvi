@@ -1511,7 +1511,7 @@ mod sentinel_roundtrip_tests {
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top
             nav_display_mode: NavDisplayMode::IconsOnly, // default TextOnly
-            track_info_display: TrackInfoDisplay::TopBar, // default Mini Player
+            track_info_display: TrackInfoDisplay::TopBar, // default Player Bar Above
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
             dynamic_accent: true,                  // default false

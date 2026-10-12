@@ -81,7 +81,7 @@ define_settings! {
                 label: "Metadata Strip",
                 category: "Layout",
                 subtitle: Some("Where to show the now-playing metadata strip"),
-                default: "Mini Player",
+                default: "Player Bar Above",
                 options: &[
                     "Off",
                     "Player Bar",
@@ -1040,5 +1040,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Player Bar Above is the shipped metadata strip: the Mini Player's
+    /// thumbnail repeats the cover the artwork column and the queue rows
+    /// already show. `TomlSettings::default()` decides what a sparse
+    /// config.toml leaves out and what a missing key loads as, so it has to
+    /// name the same mode as `PersistedPlayerSettings::default()` (the
+    /// ui_meta literal is held to that one by the parity guard above).
+    #[test]
+    fn metadata_strip_defaults_to_player_bar_above() {
+        assert_eq!(
+            PersistedPlayerSettings::default().track_info_display,
+            TrackInfoDisplay::PlayerBarAbove
+        );
+        assert_eq!(
+            TomlSettings::default().track_info_display,
+            TrackInfoDisplay::PlayerBarAbove
+        );
     }
 }

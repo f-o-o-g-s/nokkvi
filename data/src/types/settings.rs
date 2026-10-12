@@ -94,7 +94,7 @@ crate::player_settings_schema! {
     same nav_display_mode: NavDisplayMode = NavDisplayMode::default(),
     /// Track info display mode (off / player bar / top bar)
     #[serde(default)]
-    same track_info_display: TrackInfoDisplay = TrackInfoDisplay::MiniPlayer,
+    same track_info_display: TrackInfoDisplay = TrackInfoDisplay::PlayerBarAbove,
     /// Slot list row density (default: Default = 70px)
     #[serde(default)]
     same slot_row_height: SlotRowHeight = SlotRowHeight::Compact,
