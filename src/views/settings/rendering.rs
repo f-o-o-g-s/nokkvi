@@ -770,13 +770,11 @@ fn render_hotkey_badge<'a>(
     hotkey_idle_badge(combo, font_size, opacity)
 }
 
-/// Idle key-cap badge — full accent fill, dark text. Sizes to its
-/// content (so long combos like `Ctrl+Alt+Shift+F12` aren't clipped)
-/// with a 96 px floor matching `nk-w-key` in the flat CSS for typical
-/// short combos. The floor is enforced via a `Stack` containing a
-/// fixed-width invisible spacer below the styled badge — iced's stack
-/// takes the max intrinsic width of its children, so the badge widens
-/// past 96 px when the content demands it.
+/// Narrowest an idle key-cap badge draws, matching `nk-w-key` in the flat
+/// CSS for typical short combos.
+const HOTKEY_BADGE_MIN_WIDTH: f32 = 96.0;
+
+/// Idle key-cap badge — full accent fill, dark text.
 fn hotkey_idle_badge<'a>(
     combo: &str,
     font_size: f32,
@@ -784,36 +782,42 @@ fn hotkey_idle_badge<'a>(
 ) -> Element<'a, SettingsMessage> {
     let badge_size = font_size * 0.92;
     let bg = scale_alpha_local(theme::accent_fill(), opacity);
-    let border = bg;
     let text_color = scale_alpha_local(theme::on_accent_fill(), opacity);
 
-    const MIN_WIDTH: f32 = 96.0;
-
-    let badge = container(
+    hotkey_key_cap(
         slot_list::slot_list_text(combo.to_string(), badge_size, text_color)
             .font(theme::weighted_ui_font(Weight::Medium)),
+        bg,
     )
-    .width(Length::Shrink)
-    .align_x(Alignment::Center)
-    .align_y(Alignment::Center)
-    .padding(Padding::new(5.0).left(14.0).right(14.0))
-    .style(move |_: &iced::Theme| container::Style {
-        background: Some(bg.into()),
-        border: Border {
-            color: border,
-            width: 1.0,
-            radius: theme::ui_radius_pill(),
-        },
-        ..Default::default()
-    });
+}
 
-    iced::widget::stack![
-        Space::new()
-            .width(Length::Fixed(MIN_WIDTH))
-            .height(Length::Fixed(0.0)),
-        badge,
-    ]
-    .boxed()
+/// The idle badge's pill around its label. Sizes to the label (so long
+/// combos like `Ctrl+Alt+Shift+F12` aren't clipped) and never draws
+/// narrower than `HOTKEY_BADGE_MIN_WIDTH`. Generic over the renderer so
+/// its layout can be pinned against iced's null renderer.
+fn hotkey_key_cap<'a, Message, Renderer>(
+    label: impl iced::Widget<Message, iced::Theme, Renderer> + 'a,
+    bg: Color,
+) -> Element<'a, Message, iced::Theme, Renderer>
+where
+    Message: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    container(label)
+        .width(Length::Shrink.min(HOTKEY_BADGE_MIN_WIDTH))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(Padding::new(5.0).left(14.0).right(14.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(bg.into()),
+            border: Border {
+                color: bg,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        })
+        .boxed()
 }
 
 /// Capture / conflict badge — transparent fill, colored border + text, with
@@ -1483,7 +1487,50 @@ pub(crate) fn render_detail_row<'a>(
 mod tests {
     use std::borrow::Cow;
 
+    use iced::{
+        Size,
+        advanced::{
+            layout::Limits,
+            widget::{Tree, Widget},
+        },
+    };
+
     use super::*;
+
+    /// Lay out a key cap around a fixed-size stand-in label against iced's
+    /// null renderer and return the cap's size.
+    fn key_cap_size(label_width: f32, label_height: f32) -> Size {
+        let mut cap: Element<'static, (), iced::Theme, ()> = hotkey_key_cap(
+            Space::new()
+                .width(Length::Fixed(label_width))
+                .height(Length::Fixed(label_height)),
+            Color::BLACK,
+        );
+        let mut tree = Tree::new::<(), iced::Theme, ()>(&cap);
+        tree.diff::<(), iced::Theme, ()>(&mut cap);
+        Widget::<(), iced::Theme, ()>::layout(
+            &mut cap,
+            &mut tree,
+            &(),
+            &Limits::new(Size::ZERO, Size::new(1000.0, 100.0)),
+        );
+        tree.size
+    }
+
+    #[test]
+    fn key_cap_widens_a_short_label_to_the_floor() {
+        // 40 px label + 28 px horizontal padding is under the floor; the
+        // 16 px label + 10 px vertical padding keeps its height.
+        assert_eq!(
+            key_cap_size(40.0, 16.0),
+            Size::new(HOTKEY_BADGE_MIN_WIDTH, 26.0)
+        );
+    }
+
+    #[test]
+    fn key_cap_grows_past_the_floor_for_a_long_label() {
+        assert_eq!(key_cap_size(200.0, 16.0), Size::new(228.0, 26.0));
+    }
 
     /// Construct a bare `SettingItem` for predicate tests, with all defaults
     /// (`needs_enter_hint = false`, `is_theme_key = false`, `on_activate = None`,

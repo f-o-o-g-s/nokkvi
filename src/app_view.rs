@@ -1246,8 +1246,8 @@ impl Nokkvi {
         // Pad to a fixed layer count: `Stack` diffs children by position, so a
         // layer that comes and goes (pressing `v`) would otherwise reset the
         // state of any layer above it (Theater Mode's player bar sits there).
-        // `Stack::push` drops only a child with a `Fixed(0.0)` side, so the
-        // default (`Shrink`) `Space::new()` is kept as a placeholder.
+        // `Stack::push` drops only `void()` / `None` children, so a
+        // `Space::new()` is kept as a placeholder.
         for _ in pushed..BOTTOM_BAND_LAYERS {
             stack = stack.push(iced::widget::Space::new().boxed());
         }
@@ -1269,8 +1269,8 @@ impl Nokkvi {
         // open one (a server reply opening Info under a dialog) would
         // otherwise shift the open one's layer and rebuild its widget state,
         // dropping the text field's focus mid-typing. `Stack::push` drops
-        // only a child with a `Fixed(0.0)` side, so the default (`Shrink`)
-        // `Space::new()` is kept as the placeholder.
+        // only `void()` / `None` children, so a `Space::new()` is kept as the
+        // placeholder.
         for modal in ActiveModal::STACK.into_iter().rev() {
             stack = stack.push(
                 self.modal_overlay(modal)
