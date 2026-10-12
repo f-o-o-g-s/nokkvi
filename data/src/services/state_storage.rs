@@ -221,6 +221,26 @@ impl StateStorage {
     }
 }
 
+/// A redb path under the temp dir that no other test opens: the process id
+/// keeps concurrent `cargo test` runs apart and a per-process counter keeps
+/// this run's tests apart. A clock reading is not unique enough: two tests
+/// building their database in the same nanosecond on a busy CI runner got
+/// one path, and the second open failed with "Database already open". A
+/// file left by an earlier process with the same id is removed.
+///
+/// The UI crate keeps its own copy in `src/test_helpers.rs` (this one is
+/// compiled only into the data crate's tests).
+#[cfg(test)]
+pub(crate) fn test_db_path(prefix: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("{prefix}_{}_{n}.redb", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
@@ -252,11 +272,7 @@ mod tests {
 
     #[test]
     fn test_save_and_load() {
-        let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join("test_queue.redb");
-
-        // Clean up any existing test db
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_queue");
 
         let storage = StateStorage::new(db_path.clone()).unwrap();
 
@@ -278,9 +294,7 @@ mod tests {
 
     #[test]
     fn test_binary_round_trip() {
-        let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join("test_binary_rt.redb");
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_binary_rt");
 
         let storage = StateStorage::new(db_path.clone()).unwrap();
 
@@ -301,9 +315,7 @@ mod tests {
 
     #[test]
     fn save_binary_batch_is_atomic_round_trip() {
-        let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join("test_binary_batch.redb");
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_binary_batch");
 
         let storage = StateStorage::new(db_path.clone()).unwrap();
 

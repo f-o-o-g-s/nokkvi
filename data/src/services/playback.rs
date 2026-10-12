@@ -993,31 +993,22 @@ impl QueueNavigator {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    };
+    use std::sync::Arc;
 
     use tokio::sync::Mutex;
 
     use super::*;
     use crate::{
         audio::engine::CustomAudioEngine,
-        services::{queue::QueueManager, state_storage::StateStorage},
+        services::{
+            queue::QueueManager,
+            state_storage::{StateStorage, test_db_path},
+        },
         types::song::Song,
     };
 
     fn temp_storage() -> StateStorage {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "nokkvi_playback_test_{}_{}.redb",
-            std::process::id(),
-            id
-        ));
-        let _ = std::fs::remove_file(&path);
-        StateStorage::new(path).expect("temp storage")
+        StateStorage::new(test_db_path("nokkvi_playback_test")).expect("temp storage")
     }
 
     fn make_song(id: &str) -> Song {

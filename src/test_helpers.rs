@@ -25,6 +25,21 @@ pub(crate) fn next_test_queue_entry_id() -> u64 {
     TEST_QUEUE_ENTRY_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+/// A redb path under the temp dir that no other test opens: the process id
+/// keeps concurrent `cargo test` runs apart and a per-process counter keeps
+/// this run's tests apart (a clock reading can repeat across threads, and a
+/// second open of one path fails with "Database already open"). A file left
+/// by an earlier process with the same id is removed. Mirrors the data
+/// crate's `state_storage::test_db_path`, which is compiled only into its
+/// own tests.
+pub(crate) fn test_db_path(prefix: &str) -> std::path::PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("{prefix}_{}_{n}.redb", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
 /// Create a default `Nokkvi` for testing.
 /// No network calls are made; `app_service` is `None`.
 pub(crate) fn test_app() -> Nokkvi {

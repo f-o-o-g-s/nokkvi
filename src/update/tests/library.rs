@@ -31,15 +31,7 @@ use crate::{
 /// isolated tempfile redb. Returns the redb path so the caller can clean
 /// up after the assertions run.
 pub(crate) async fn test_app_with_shell() -> (crate::Nokkvi, std::path::PathBuf) {
-    let suffix = format!(
-        "test_lane_d_library_{}_{}.redb",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    );
-    let db_path = std::env::temp_dir().join(suffix);
-    let _ = std::fs::remove_file(&db_path);
+    let db_path = crate::test_helpers::test_db_path("test_lane_d_library");
     let storage = StateStorage::new(db_path.clone()).expect("redb open");
     let shell = AppService::new_with_storage(storage)
         .await

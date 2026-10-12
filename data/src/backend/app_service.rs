@@ -2270,7 +2270,7 @@ impl AppService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::state_storage::StateStorage;
+    use crate::services::state_storage::{StateStorage, test_db_path};
 
     /// Build a minimal `AppService` for tests. Uses an isolated redb
     /// path under `std::env::temp_dir()` so independent tests don't
@@ -2279,19 +2279,10 @@ mod tests {
     /// `AudioRenderer::new()`, which is why every test below is
     /// annotated `#[tokio::test]`.
     async fn test_app() -> (AppService, std::path::PathBuf) {
-        // Use a process-and-nanosecond-suffixed db file. `std::env::temp_dir`
-        // is shared across the test runner's threads, and two
-        // concurrent tests opening the same redb would race the
-        // exclusive lock.
-        let suffix = format!(
-            "test_app_libraries_{}_{}.redb",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let db_path = std::env::temp_dir().join(suffix);
-        let _ = std::fs::remove_file(&db_path);
+        // Every test calls this, so the path must be unique per call:
+        // two concurrent tests opening the same redb race its exclusive
+        // lock (`test_db_path`).
+        let db_path = test_db_path("test_app_libraries");
         let storage = StateStorage::new(db_path.clone()).expect("redb open");
         let app = AppService::new_with_storage(storage)
             .await
@@ -2498,15 +2489,7 @@ mod tests {
     /// same libraries selected" UX requirement.
     #[tokio::test]
     async fn toggled_selection_persists_across_rebuild() {
-        let suffix = format!(
-            "test_app_libraries_persist_{}_{}.redb",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let db_path = std::env::temp_dir().join(suffix);
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_app_libraries_persist");
 
         // First boot: toggle two libraries on, then drop everything.
         {
@@ -2544,15 +2527,7 @@ mod tests {
     /// be persisted so the next launch doesn't see the ghost IDs.
     #[tokio::test]
     async fn apply_library_refresh_prunes_missing_ids_and_persists() {
-        let suffix = format!(
-            "test_app_libraries_prune_{}_{}.redb",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let db_path = std::env::temp_dir().join(suffix);
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_app_libraries_prune");
 
         // Boot 1: pre-seed the active set with IDs 1, 2, 3.
         {
@@ -2797,15 +2772,7 @@ mod tests {
     /// would otherwise play it at the next gapless join.
     #[tokio::test]
     async fn removing_the_prepared_next_row_resets_it_even_when_the_save_fails() {
-        let suffix = format!(
-            "test_app_unsaved_removal_{}_{}.redb",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let db_path = std::env::temp_dir().join(suffix);
-        let _ = std::fs::remove_file(&db_path);
+        let db_path = test_db_path("test_app_unsaved_removal");
         let storage = StateStorage::new(db_path.clone()).expect("redb open");
         let app = AppService::new_with_storage(storage.clone())
             .await

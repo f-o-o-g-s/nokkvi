@@ -1934,13 +1934,7 @@ fn a_keyed_session_on_a_server_without_keys_ends() {
 fn a_login_attempt_keeps_the_cached_storage() {
     use crate::views::LoginMessage;
 
-    let db_path = std::env::temp_dir().join(format!(
-        "test_login_keeps_storage_{}_{}.redb",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
+    let db_path = crate::test_helpers::test_db_path("test_login_keeps_storage");
     let storage =
         nokkvi_data::services::state_storage::StateStorage::new(db_path.clone()).expect("storage");
     let mut app = test_app();
