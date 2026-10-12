@@ -20,6 +20,10 @@
 pub(crate) const USER_SETTINGS: &str = "user_settings";
 pub(crate) const JWT_TOKEN: &str = "jwt_token";
 pub(crate) const SUBSONIC_CREDENTIAL: &str = "subsonic_credential";
+/// Who the stored session (`JWT_TOKEN` + `SUBSONIC_CREDENTIAL`) belongs to:
+/// a JSON `credentials::SessionOwner` (resolved server URL + username).
+/// Absent on a session saved before owners were stored.
+pub(crate) const SESSION_OWNER: &str = "session_owner";
 pub(crate) const QUEUE_ORDER: &str = "queue_order";
 pub(crate) const QUEUE_SONGS: &str = "queue_songs";
 /// Who the live queue (`QUEUE_ORDER` + `QUEUE_SONGS`) and the stored
@@ -71,6 +75,7 @@ mod tests {
         assert_eq!(USER_SETTINGS, "user_settings");
         assert_eq!(JWT_TOKEN, "jwt_token");
         assert_eq!(SUBSONIC_CREDENTIAL, "subsonic_credential");
+        assert_eq!(SESSION_OWNER, "session_owner");
         assert_eq!(QUEUE_ORDER, "queue_order");
         assert_eq!(QUEUE_SONGS, "queue_songs");
         assert_eq!(QUEUE_OWNER, "queue_owner");

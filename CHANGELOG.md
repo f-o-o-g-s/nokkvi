@@ -89,6 +89,7 @@ All notable changes to this project will be documented in this file.
 - Logging into a different server no longer shows the previous server's queue.
 - Logging back into a server now brings back the queue you left there.
 - The Playing From playlist now switches along with the queue when you log into another server.
+- After config.toml is edited to name another server or user, nokkvi now shows the login screen instead of resuming the old session there.
 
 ### Removed
 

@@ -1,7 +1,8 @@
 //! Credential and session persistence
 //!
 //! Stores server URL and username in config.toml (user-editable).
-//! JWT token and Subsonic credential are stored in app.redb (session tokens).
+//! JWT token, Subsonic credential and the session's owner are stored in
+//! app.redb (session tokens).
 //! No password is stored on disk — expired JWT requires manual re-login.
 
 use std::path::PathBuf;
@@ -10,16 +11,22 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
+use crate::services::{queue::slots::QueueOwner, state_storage::StateStorage};
+
 // ================================================================================
 // Credential & Session Persistence
 // ================================================================================
 //
 // config.toml  → server_url, username (user-editable)
-// app.redb     → jwt_token, subsonic_credential (session tokens, auto-refreshed)
+// app.redb     → jwt_token, subsonic_credential (session tokens, auto-refreshed),
+//                session_owner (the server + user the tokens belong to)
 //
-// On startup, the stored JWT is used to resume the session without a password.
-// The JWT auto-refreshes via the X-ND-Authorization response header on every
-// API call. If the JWT expires (default 48h inactivity), the login screen is shown.
+// On startup, the stored JWT is used to resume the session without a password,
+// as long as config.toml still names the session's owner. The Subsonic
+// credential is the token pair from /auth/login, or an OpenSubsonic API key
+// (`services::api_key`). The JWT auto-refreshes via the X-ND-Authorization
+// response header on every API call. If the JWT expires (default 48h
+// inactivity), the login screen is shown.
 // ================================================================================
 
 /// Redb key for the Navidrome JWT token.
@@ -28,11 +35,15 @@ use tracing::{debug, info};
 /// for the on-disk-compat invariant.
 const JWT_TOKEN_KEY: &str = crate::services::storage_keys::JWT_TOKEN;
 
-/// Redb key for the Subsonic credential string (u=X&s=Y&t=Z).
+/// Redb key for the Subsonic credential string (`u=X&s=Y&t=Z`, or
+/// `apiKey=K`).
 ///
 /// Re-exported from `services::storage_keys::SUBSONIC_CREDENTIAL`; see that
 /// module for the on-disk-compat invariant.
 const SUBSONIC_CREDENTIAL_KEY: &str = crate::services::storage_keys::SUBSONIC_CREDENTIAL;
+
+/// Redb key for the stored session's [`SessionOwner`].
+const SESSION_OWNER_KEY: &str = crate::services::storage_keys::SESSION_OWNER;
 
 /// Config.toml fields (user-editable: server_url, username)
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,21 +133,118 @@ pub fn parse_username_from_credential(credential: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-// ── Session (JWT + Subsonic credential) ─────────────────────────────────────
+// ── Session (JWT + Subsonic credential + owner) ──────────────────────────────
 
-/// Save JWT token and Subsonic credential to redb.
+/// Who a stored session belongs to: the server URL it connected to (the
+/// resolved one, as config.toml stores it) and the username it logged in with.
+///
+/// Saved beside the JWT and the Subsonic credential. A resume checks it
+/// against config.toml ([`resume_identity`]), so the session's JWT and its
+/// Subsonic credential (the token pair, or an API key that works until it is
+/// revoked) never go to a server or user config.toml was since edited to
+/// name, and the username never has to be read back out of the credential:
+/// an API key credential carries none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionOwner {
+    pub server_url: String,
+    pub username: String,
+}
+
+impl SessionOwner {
+    /// Whether `server_url` and `username` name this owner, compared like the
+    /// queue's owner stamp: URL normalized, username case-insensitive.
+    pub fn is(&self, server_url: &str, username: &str) -> bool {
+        QueueOwner::new(&self.server_url, &self.username) == QueueOwner::new(server_url, username)
+    }
+}
+
+/// A session loaded from redb for auto-login. `Debug` leaves out the JWT and
+/// the credential.
+#[derive(Clone)]
+pub struct LoadedSession {
+    pub jwt_token: String,
+    pub subsonic_credential: String,
+    /// `None` for a session saved before owners were stored.
+    pub owner: Option<SessionOwner>,
+}
+
+impl std::fmt::Debug for LoadedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedSession")
+            .field("owner", &self.owner)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The server and user a stored session resumes as, given config.toml's pair
+/// (`None` when config.toml has none) and the session's owner.
+///
+/// - config.toml names the owner: config.toml's pair.
+/// - config.toml names another server or user: `None`, so the login screen
+///   shows config.toml's pair and the session's tokens stay home.
+/// - config.toml has no pair: the owner's.
+/// - A session saved before owners were stored follows config.toml, as
+///   before, and has nowhere to resume without it.
+pub fn resume_identity(
+    config: Option<&(String, String)>,
+    owner: Option<&SessionOwner>,
+) -> Option<(String, String)> {
+    match (config, owner) {
+        (Some((server_url, username)), Some(owner)) => owner
+            .is(server_url, username)
+            .then(|| (server_url.clone(), username.clone())),
+        (Some(pair), None) => Some(pair.clone()),
+        (None, Some(owner)) => Some((owner.server_url.clone(), owner.username.clone())),
+        (None, None) => None,
+    }
+}
+
+/// JSON-encode `value` the way [`StateStorage::save`] does, for a
+/// [`StateStorage::write_batch`] put.
+fn json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(value)?)
+}
+
+/// Save the JWT, the Subsonic credential and their owner to redb, in one
+/// transaction.
 ///
 /// Accepts an existing `StateStorage` handle to avoid opening a second
 /// exclusive lock on the redb file (AppService already holds the DB open).
 pub fn save_session(
-    storage: &crate::services::state_storage::StateStorage,
+    storage: &StateStorage,
+    owner: &SessionOwner,
     jwt_token: &str,
     subsonic_credential: &str,
 ) -> Result<()> {
-    storage.save(JWT_TOKEN_KEY, &jwt_token.to_string())?;
-    storage.save(SUBSONIC_CREDENTIAL_KEY, &subsonic_credential.to_string())?;
+    storage.write_batch(
+        &[
+            (JWT_TOKEN_KEY, &json(&jwt_token)?),
+            (SUBSONIC_CREDENTIAL_KEY, &json(&subsonic_credential)?),
+            (SESSION_OWNER_KEY, &json(owner)?),
+        ],
+        &[],
+    )?;
 
     debug!("Saved session tokens to app.redb");
+    Ok(())
+}
+
+/// Save the Subsonic credential and its owner, leaving the JWT alone: a
+/// session that moved to an API key mid-run (the JWT on disk is whatever the
+/// refresh policy last persisted, which must not be rolled back).
+pub fn save_subsonic_credential(
+    storage: &StateStorage,
+    owner: &SessionOwner,
+    subsonic_credential: &str,
+) -> Result<()> {
+    storage.write_batch(
+        &[
+            (SUBSONIC_CREDENTIAL_KEY, &json(&subsonic_credential)?),
+            (SESSION_OWNER_KEY, &json(owner)?),
+        ],
+        &[],
+    )?;
+    debug!("Saved the session's Subsonic credential to app.redb");
     Ok(())
 }
 
@@ -153,12 +261,17 @@ pub fn save_jwt_token(
     Ok(())
 }
 
-/// Load JWT token and Subsonic credential from redb.
+/// Load the stored session from redb.
 /// Opens its own storage handle (safe before AppService is initialised).
 /// Returns None if either token is missing.
-pub fn load_session() -> Option<(String, String)> {
+pub fn load_session() -> Option<LoadedSession> {
     let storage = open_session_storage().ok()?;
+    let session = load_session_from(&storage)?;
+    info!("Loaded session tokens from app.redb");
+    Some(session)
+}
 
+fn load_session_from(storage: &StateStorage) -> Option<LoadedSession> {
     let jwt_token: String = storage.load(JWT_TOKEN_KEY).ok()??;
     let subsonic_credential: String = storage.load(SUBSONIC_CREDENTIAL_KEY).ok()??;
 
@@ -166,15 +279,24 @@ pub fn load_session() -> Option<(String, String)> {
         return None;
     }
 
-    info!("Loaded session tokens from app.redb");
-    Some((jwt_token, subsonic_credential))
+    // An unreadable owner reads as a session saved before owners were
+    // stored; the resume then follows config.toml, as it always did.
+    let owner = storage.load(SESSION_OWNER_KEY).ok().flatten();
+    Some(LoadedSession {
+        jwt_token,
+        subsonic_credential,
+        owner,
+    })
 }
 
-/// Clear stored session tokens from redb.
+/// Clear stored session tokens (and their owner) from redb.
 /// Used when JWT expires (401) to force re-login.
-pub fn clear_session(storage: &crate::services::state_storage::StateStorage) -> Result<()> {
-    storage.save(JWT_TOKEN_KEY, &String::new())?;
-    storage.save(SUBSONIC_CREDENTIAL_KEY, &String::new())?;
+pub fn clear_session(storage: &StateStorage) -> Result<()> {
+    let empty = json(&"")?;
+    storage.write_batch(
+        &[(JWT_TOKEN_KEY, &empty), (SUBSONIC_CREDENTIAL_KEY, &empty)],
+        &[SESSION_OWNER_KEY],
+    )?;
     info!("Cleared session tokens from app.redb");
     Ok(())
 }
@@ -193,17 +315,108 @@ mod tests {
         let jwt = "eyJhbGciOiJIUzI1NiJ9.test.signature";
         let subsonic = "u=testuser&s=abc123&t=md5hash";
 
-        save_session(&storage, jwt, subsonic).unwrap();
+        save_session(
+            &storage,
+            &owner("https://music.example.com", "testuser"),
+            jwt,
+            subsonic,
+        )
+        .unwrap();
 
         // Load from a fresh handle (simulates app restart)
         drop(storage);
         let storage2 = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
-        let jwt_loaded: Option<String> = storage2.load(JWT_TOKEN_KEY).unwrap();
-        let sub_loaded: Option<String> = storage2.load(SUBSONIC_CREDENTIAL_KEY).unwrap();
+        let loaded = load_session_from(&storage2).expect("a stored session");
+        assert_eq!(loaded.jwt_token, jwt);
+        assert_eq!(loaded.subsonic_credential, subsonic);
+        assert_eq!(
+            loaded.owner,
+            Some(owner("https://music.example.com", "testuser"))
+        );
+    }
 
-        assert_eq!(jwt_loaded.unwrap(), jwt);
-        assert_eq!(sub_loaded.unwrap(), subsonic);
+    fn owner(server_url: &str, username: &str) -> SessionOwner {
+        SessionOwner {
+            server_url: server_url.into(),
+            username: username.into(),
+        }
+    }
+
+    fn pair(server_url: &str, username: &str) -> (String, String) {
+        (server_url.into(), username.into())
+    }
+
+    /// A session saved before owners were stored loads with no owner and
+    /// resumes as config.toml says, like before.
+    #[test]
+    fn a_session_without_an_owner_still_loads() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let storage = StateStorage::new(temp.path().join("session.redb")).unwrap();
+        storage.save(JWT_TOKEN_KEY, &"jwt".to_string()).unwrap();
+        storage
+            .save(SUBSONIC_CREDENTIAL_KEY, &"u=a&s=b&t=c".to_string())
+            .unwrap();
+
+        let loaded = load_session_from(&storage).expect("a stored session");
+        assert_eq!(loaded.owner, None);
+        let config = pair("https://music.example.com", "alice");
+        assert_eq!(resume_identity(Some(&config), None), Some(config.clone()));
+        assert_eq!(resume_identity(None, None), None);
+    }
+
+    /// The session's tokens go only to the server and user they came from.
+    #[test]
+    fn resume_follows_config_only_while_it_names_the_owner() {
+        let stored = owner("https://music.example.com", "alice");
+
+        // Same server and user, written differently: resume as config says.
+        let config = pair("https://Music.Example.com/", "Alice");
+        assert_eq!(resume_identity(Some(&config), Some(&stored)), Some(config));
+
+        // config.toml now names another server, or another user: no resume.
+        let elsewhere = pair("https://other.example.com", "alice");
+        assert_eq!(resume_identity(Some(&elsewhere), Some(&stored)), None);
+        let someone_else = pair("https://music.example.com", "bob");
+        assert_eq!(resume_identity(Some(&someone_else), Some(&stored)), None);
+
+        // No pair in config.toml: the owner's.
+        assert_eq!(
+            resume_identity(None, Some(&stored)),
+            Some(pair("https://music.example.com", "alice"))
+        );
+    }
+
+    #[test]
+    fn loaded_session_debug_hides_the_tokens() {
+        let hidden = "apiKey=nds_HIDE";
+        let session = LoadedSession {
+            jwt_token: "JWT_SECRET".into(),
+            subsonic_credential: hidden.into(),
+            owner: Some(owner("https://music.example.com", "alice")),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains("JWT_SECRET"));
+        assert!(!debug.contains("HIDE"));
+        assert!(debug.contains("alice"));
+    }
+
+    /// A credential change mid-session keeps the JWT the refresh policy
+    /// persisted.
+    #[test]
+    fn saving_the_credential_alone_keeps_the_jwt() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let storage = StateStorage::new(temp.path().join("session.redb")).unwrap();
+        let alice = owner("https://music.example.com", "alice");
+        save_session(&storage, &alice, "jwt-refreshed", "u=alice&s=b&t=c").unwrap();
+
+        let fresh = "apiKey=nds_new";
+        save_subsonic_credential(&storage, &alice, fresh).unwrap();
+
+        let loaded = load_session_from(&storage).expect("a stored session");
+        assert_eq!(loaded.jwt_token, "jwt-refreshed");
+        assert_eq!(loaded.subsonic_credential, fresh);
+        assert_eq!(loaded.owner, Some(alice));
     }
 
     #[test]
@@ -213,13 +426,16 @@ mod tests {
 
         let storage = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
-        save_session(&storage, "jwt", "subsonic").unwrap();
+        save_session(&storage, &owner("https://m", "a"), "jwt", "subsonic").unwrap();
         clear_session(&storage).unwrap();
 
         // Verify tokens are emptied via the same storage handle
         // (load_session() opens a new handle which may conflict)
         let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();
         assert!(jwt.unwrap().is_empty());
+        let stored_owner: Option<SessionOwner> = storage.load(SESSION_OWNER_KEY).unwrap();
+        assert_eq!(stored_owner, None, "the owner goes with the tokens");
+        assert!(load_session_from(&storage).is_none());
     }
 
     /// Pins the N3/N14 ordering invariant: when an in-flight credential writer
@@ -236,7 +452,8 @@ mod tests {
         let storage = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
         // Initial logged-in session.
-        save_session(&storage, "jwt", "subsonic").unwrap();
+        let stale_owner = owner("https://m", "a");
+        save_session(&storage, &stale_owner, "jwt", "subsonic").unwrap();
 
         // Straggler credential writer: mid-flight, re-materializes a non-empty
         // session blob after a delay (simulates a save_session / save_jwt_token
@@ -245,7 +462,7 @@ mod tests {
         let storage_clone = storage.clone();
         tm.spawn_result("straggler_save", move || async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
-            save_session(&storage_clone, "STALE_JWT", "STALE_SUB")?;
+            save_session(&storage_clone, &stale_owner, "STALE_JWT", "STALE_SUB")?;
             Ok::<(), anyhow::Error>(())
         });
 

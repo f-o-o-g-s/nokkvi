@@ -417,25 +417,45 @@ pub struct Nokkvi {
 impl Default for Nokkvi {
     fn default() -> Self {
         // Load server_url + username from config.toml
-        let (server_url, username) = nokkvi_data::credentials::load_credentials()
-            .unwrap_or_else(|| ("http://localhost:4533".to_string(), String::new()));
+        let config = nokkvi_data::credentials::load_credentials();
 
-        // Try to load stored session (JWT + subsonic credential) from redb
-        let stored_session = nokkvi_data::credentials::load_session();
-        let should_auto_login = stored_session.is_some();
-        let stored_session = stored_session.map(|(jwt, sub)| crate::state::StoredSession {
-            server_url: server_url.clone(),
-            username: username.clone(),
-            jwt_token: jwt,
-            subsonic_credential: sub,
+        // Try to load stored session (JWT + subsonic credential) from redb. It
+        // resumes only as the server and user it belongs to: a config.toml
+        // edited to name another one gets the login screen instead, so the
+        // session's tokens never go there (`resume_identity`).
+        let loaded = nokkvi_data::credentials::load_session();
+        let resume_as = loaded.as_ref().and_then(|session| {
+            nokkvi_data::credentials::resume_identity(config.as_ref(), session.owner.as_ref())
         });
+        if loaded.is_some() && resume_as.is_none() {
+            tracing::info!(
+                target: "nokkvi::auth",
+                "Stored session not resumed: config.toml names another server or user"
+            );
+        }
+        let stored_session =
+            loaded
+                .zip(resume_as.clone())
+                .map(
+                    |(session, (server_url, username))| crate::state::StoredSession {
+                        server_url,
+                        username,
+                        jwt_token: session.jwt_token,
+                        subsonic_credential: session.subsonic_credential,
+                    },
+                );
+        let should_auto_login = stored_session.is_some();
 
         debug!(
             " Auto-login (session resume) enabled: {}",
             should_auto_login
         );
 
-        // Create login page with pre-filled server_url and username (no password)
+        // Create login page with pre-filled server_url and username (no
+        // password): config.toml's, else the stored session's, else the default.
+        let (server_url, username) = config
+            .or(resume_as)
+            .unwrap_or_else(|| ("http://localhost:4533".to_string(), String::new()));
         let login_page = views::LoginPage::with_credentials(server_url, username, String::new());
 
         Self {

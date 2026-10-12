@@ -645,15 +645,22 @@ impl Nokkvi {
                     self.toast_warn(format!("Couldn't save login to config.toml: {e}"));
                 }
 
-                // Save session tokens (JWT + subsonic credential) to redb
+                // Save session tokens (JWT + subsonic credential) to redb,
+                // stamped with the server and user they belong to
                 let shell_for_session = shell.clone();
                 shell
                     .task_manager()
                     .spawn("save_session", move || async move {
-                        let token = shell_for_session.auth().get_token().await;
-                        let subsonic = shell_for_session.auth().get_subsonic_credential().await;
+                        let auth = shell_for_session.auth();
+                        let owner = nokkvi_data::credentials::SessionOwner {
+                            server_url: auth.get_server_url().await,
+                            username: auth.username().await,
+                        };
+                        let token = auth.get_token().await;
+                        let subsonic = auth.get_subsonic_credential().await;
                         if let Err(e) = nokkvi_data::credentials::save_session(
                             shell_for_session.storage(),
+                            &owner,
                             &token,
                             &subsonic,
                         ) {

@@ -5,13 +5,23 @@ use nokkvi_data::types::active_playlist::ActivePlaylistRecord;
 /// Stored session for JWT-based auto-login.
 ///
 /// Replaces the anonymous `Option<(String, String, String, String)>` tuple
-/// that made field order ambiguous at every destructure site.
-#[derive(Debug, Clone)]
+/// that made field order ambiguous at every destructure site. `Debug` leaves
+/// out the JWT and the Subsonic credential (a token pair or an API key).
+#[derive(Clone)]
 pub struct StoredSession {
     pub server_url: String,
     pub username: String,
     pub jwt_token: String,
     pub subsonic_credential: String,
+}
+
+impl std::fmt::Debug for StoredSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredSession")
+            .field("server_url", &self.server_url)
+            .field("username", &self.username)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Identity and metadata of the playlist currently loaded in the queue.

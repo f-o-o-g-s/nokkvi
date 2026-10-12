@@ -33,7 +33,9 @@ use crate::{
 const SEP: char = '\u{1f}';
 
 /// The session a queue belongs to: the server it was built from and the user
-/// logged into it.
+/// logged into it. The same identity keys the stored session's owner check
+/// (`credentials::SessionOwner`) and nokkvi's API-key player on each server
+/// (`services::api_key`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueOwner {
     key: String,
