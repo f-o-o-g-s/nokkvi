@@ -3,12 +3,12 @@
 //! Used by both the player bar (above or below its controls) and the top bar
 //! (when `TrackInfoDisplay::TopBar` is active in side nav mode).
 //!
-//! Layout: `FLAC 44.1kHz │ │ title: xxx │ artist: xxx │ album: xxx │ │ 1411kbps`
+//! Layout: `FLAC 44.1kHz │ title: xxx │ artist: xxx │ album: xxx │ 1411kbps`
 
 use iced::{
     Alignment, Element, Length, Widget as _,
     font::Weight,
-    widget::{container, mouse_area, row, space, text, tooltip},
+    widget::{container, mouse_area, row, text, tooltip},
 };
 
 use crate::theme;
@@ -386,8 +386,9 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         }
     }
 
-    // Build the 3-column layout:
-    // [codec+kHz │] [fill] [│ title │ artist │ album │] [fill] [│ kbps]
+    // Build the columnar layout, the fields spanning the whole lane between
+    // the bookends: [codec+kHz] [│ title │ artist │ album │ (Fill)] [kbps].
+    // The center row owns the separators that frame it.
     let mut info_row = iced::widget::Row::<Element<'_, _>>::new()
         .spacing(6)
         .align_y(Alignment::Center);
@@ -408,17 +409,17 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
             info_row = info_row.push(info_sep());
             info_row = info_row.push(badge);
         }
-        info_row = info_row.push(info_sep());
     }
-
-    // Fill spacer → center
-    info_row = info_row.push(space().width(Length::Fill).boxed());
 
     // CENTER: │ title: │ artist: │ album: │
     // Each field is independently toggleable. Separators only between visible fields.
+    // The width is set here rather than left to iced's Fit promotion, which
+    // turns the fields' FillPortion(3) into a plain Fill share (and leaves a
+    // row with no fill children at its content width).
     let mut center_row = iced::widget::Row::new()
         .spacing(6)
-        .align_y(Alignment::Center);
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
     if merged_mode {
         // Merged mode: one bookend pair around a single marquee that scrolls
@@ -490,7 +491,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         center_row = columnar_radio_strip(
             iced::widget::Row::new()
                 .spacing(6)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
             radio_name,
             data.icy_title.unwrap_or(""),
             data.icy_artist.unwrap_or(""),
@@ -506,12 +508,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     };
     info_row = info_row.push(center_element);
 
-    // Fill spacer → right
-    info_row = info_row.push(space().width(Length::Fill).boxed());
-
     // RIGHT: bitrate (gated by strip_show_format_info)
     if let Some((_, Some(ref right))) = format_split {
-        info_row = info_row.push(info_sep());
         info_row = info_row.push(
             text(right.clone())
                 .size(10.0)
