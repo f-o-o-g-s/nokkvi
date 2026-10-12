@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - On Navidrome servers that offer API keys, nokkvi now connects with its own revocable key instead of a token derived from your password.
 - nokkvi's key lives on its own player in Navidrome's Players list, named after your computer and starting from your current nokkvi player's settings.
 - Logging out now revokes nokkvi's API key on the server; the next login sets a fresh one.
+- A new Metadata Strip option, Player Bar Above, shows the strip on top of the player bar's controls.
 
 ### Changed
 

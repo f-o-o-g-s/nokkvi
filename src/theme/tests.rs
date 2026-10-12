@@ -520,11 +520,45 @@ fn atomic_u8_enum_unknown_byte_falls_back_to_default() {
     // TrackInfoDisplay default = Off.
     assert_eq!(TrackInfoDisplay::from_u8(255), TrackInfoDisplay::Off);
     assert_eq!(TrackInfoDisplay::from_u8(99), TrackInfoDisplay::Off);
-    // Also verify a byte just past the highest known variant (4) falls back.
-    assert_eq!(TrackInfoDisplay::from_u8(5), TrackInfoDisplay::Off);
+    // Also verify a byte just past the highest known variant (5) falls back.
+    assert_eq!(TrackInfoDisplay::from_u8(6), TrackInfoDisplay::Off);
     // StripSeparator default is Slash (byte 4); unknown bytes fall back to it.
     assert_eq!(StripSeparator::from_u8(255), StripSeparator::Slash);
     assert_eq!(StripSeparator::from_u8(6), StripSeparator::Slash);
+}
+
+/// Every strip mode says which edge of the player bar's control row carries
+/// the strip, if any: `PlayerBar` hangs it below the controls,
+/// `PlayerBarAbove` stacks it over them, and every other mode leaves the
+/// player bar without one. `show_player_bar_strip` (which sizes the bar)
+/// agrees with the edge.
+#[test]
+fn player_bar_strip_edge_follows_the_strip_mode() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let saved = track_info_display();
+
+    let table = [
+        (TrackInfoDisplay::Off, None),
+        (TrackInfoDisplay::PlayerBar, Some(PlayerBarStripEdge::Below)),
+        (
+            TrackInfoDisplay::PlayerBarAbove,
+            Some(PlayerBarStripEdge::Above),
+        ),
+        (TrackInfoDisplay::TopBar, None),
+        (TrackInfoDisplay::TopBarUnder, None),
+        (TrackInfoDisplay::MiniPlayer, None),
+    ];
+    let mut got = Vec::new();
+    for (mode, _) in table {
+        set_track_info_display(mode);
+        got.push((mode, player_bar_strip_edge(), show_player_bar_strip()));
+    }
+    set_track_info_display(saved);
+
+    for ((mode, edge), (_, got_edge, shown)) in table.into_iter().zip(got) {
+        assert_eq!(got_edge, edge, "{mode:?}: player-bar strip edge");
+        assert_eq!(shown, edge.is_some(), "{mode:?}: show_player_bar_strip");
+    }
 }
 
 /// `ArtworkColumnMode` is the largest enum behind a `UI_MODE` atomic —

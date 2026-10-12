@@ -312,6 +312,7 @@ mod tests {
         for mode in [
             TrackInfoDisplay::Off,
             TrackInfoDisplay::PlayerBar,
+            TrackInfoDisplay::PlayerBarAbove,
             TrackInfoDisplay::TopBar,
         ] {
             let items = build_interface_items(&data_for(mode.as_label()));

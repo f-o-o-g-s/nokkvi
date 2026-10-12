@@ -66,7 +66,7 @@ pub(crate) mod volume_slider;
 pub(crate) use eq_modal::{EqModalMessage, PresetChoice, eq_modal_overlay};
 use iced::Widget as _;
 pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
-pub(crate) use player_bar::{PlayerBarMessage, PlayerBarViewData, player_bar};
+pub(crate) use player_bar::{PlayerBarMessage, PlayerBarStrip, PlayerBarViewData, player_bar};
 pub(crate) use side_nav_bar::{SideNavBarData, side_nav_bar};
 pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageMessage, SlotListPageState};
 pub(crate) use slot_list_view::{HoveredSlot, SlotListView};

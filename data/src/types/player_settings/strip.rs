@@ -15,8 +15,12 @@ define_labeled_enum! {
         /// No track info strip (default)
         #[default]
         Off { label: "Off", wire: "off" },
-        /// Track info strip in the player bar (bottom)
+        /// Track info strip in the player bar (bottom), below the controls
         PlayerBar { label: "Player Bar", wire: "player_bar" },
+        /// Track info strip in the player bar, above the controls: the
+        /// same strip row `TopBarUnder` hangs under the nav bar, docked on
+        /// top of the player bar instead.
+        PlayerBarAbove { label: "Player Bar Above", wire: "player_bar_above" },
         /// Track info strip at the top of the window (side nav only)
         TopBar { label: "Top Bar", wire: "top_bar" },
         /// Track info strip rendered in its own row directly beneath the
@@ -139,6 +143,24 @@ mod tests {
     fn track_info_display_deserializes_mini_player_as_mini_player() {
         let mode: TrackInfoDisplay = serde_json::from_str("\"mini_player\"").unwrap();
         assert_eq!(mode, TrackInfoDisplay::MiniPlayer);
+    }
+
+    /// `PlayerBarAbove` round-trips through its wire string (config.toml /
+    /// redb) and its Settings label.
+    #[test]
+    fn track_info_display_player_bar_above_round_trips() {
+        let wire = serde_json::to_string(&TrackInfoDisplay::PlayerBarAbove).unwrap();
+        assert_eq!(wire, "\"player_bar_above\"");
+        let mode: TrackInfoDisplay = serde_json::from_str(&wire).unwrap();
+        assert_eq!(mode, TrackInfoDisplay::PlayerBarAbove);
+        assert_eq!(
+            TrackInfoDisplay::PlayerBarAbove.to_string(),
+            "player_bar_above"
+        );
+        assert_eq!(
+            TrackInfoDisplay::from_label(TrackInfoDisplay::PlayerBarAbove.as_label()),
+            TrackInfoDisplay::PlayerBarAbove,
+        );
     }
 
     /// `MiniPlayer` serializes back as `"mini_player"` (not the alias) so

@@ -89,8 +89,12 @@ fn expected_top_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
 }
 
 fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
-    let player = if tid == TrackInfoDisplay::PlayerBar {
-        // Base + 1 px top separator + strip-with-its-own-separator.
+    let player = if matches!(
+        tid,
+        TrackInfoDisplay::PlayerBar | TrackInfoDisplay::PlayerBarAbove
+    ) {
+        // Base + 1 px top separator + strip-with-its-own-separator, whichever
+        // edge of the control row the strip docks on.
         72.0 + 1.0 + STRIP_HEIGHT_WITH_SEPARATOR
     } else if tid == TrackInfoDisplay::MiniPlayer {
         // MiniPlayer is the capsule layout: 1px separator + capsule scrub (20) +
@@ -104,9 +108,10 @@ fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
 
 const LAYOUTS: [NavLayout; 3] = [NavLayout::Top, NavLayout::Side, NavLayout::None];
 
-const MODES: [TrackInfoDisplay; 5] = [
+const MODES: [TrackInfoDisplay; 6] = [
     TrackInfoDisplay::Off,
     TrackInfoDisplay::PlayerBar,
+    TrackInfoDisplay::PlayerBarAbove,
     TrackInfoDisplay::TopBar,
     TrackInfoDisplay::TopBarUnder,
     TrackInfoDisplay::MiniPlayer,
@@ -271,6 +276,31 @@ fn player_bar_strip_adds_top_separator_plus_strip_with_separator() {
     );
 }
 
+#[test]
+fn player_bar_above_strip_reserves_the_same_height_as_player_bar() {
+    // The strip above the controls is the same three rows in another order:
+    // `column![top_separator(1), strip(STRIP_HEIGHT), separator(1), main_row]`
+    // against PlayerBar's `column![top_separator(1), main_row, separator(1),
+    // strip(STRIP_HEIGHT)]`. The top chrome stays as it is in Off.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    set_track_info_display(TrackInfoDisplay::Off);
+    let off = player_bar_height();
+    let off_top = top_chrome_height();
+    set_track_info_display(TrackInfoDisplay::PlayerBarAbove);
+    let above = player_bar_height();
+    let expected = 1.0 + STRIP_HEIGHT_WITH_SEPARATOR;
+    assert!(
+        (above - off - expected).abs() < f32::EPSILON,
+        "PlayerBarAbove strip delta drifted: got {} expected {expected}",
+        above - off,
+    );
+    assert!(
+        (top_chrome_height() - off_top).abs() < f32::EPSILON,
+        "PlayerBarAbove must leave the top chrome alone",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // MiniPlayer artwork resolver — pins that `Nokkvi::mini_player_artwork`
 // is gated on `TrackInfoDisplay::MiniPlayer` and short-circuits to None
@@ -301,6 +331,7 @@ fn mini_player_artwork_only_when_mini_player_mode_active() {
     for mode in [
         TrackInfoDisplay::Off,
         TrackInfoDisplay::PlayerBar,
+        TrackInfoDisplay::PlayerBarAbove,
         TrackInfoDisplay::TopBar,
         TrackInfoDisplay::TopBarUnder,
     ] {

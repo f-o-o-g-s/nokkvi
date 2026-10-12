@@ -152,6 +152,7 @@ atomic_u8_enum! {
     TrackInfoDisplay {
         Off,
         PlayerBar,
+        PlayerBarAbove,
         TopBar,
         TopBarUnder,
         MiniPlayer,
@@ -173,14 +174,40 @@ pub(crate) fn set_track_info_display(mode: TrackInfoDisplay) {
     debug!(" Track info display changed: {}", mode);
 }
 
-/// Whether the player bar should show the track info strip below controls.
+/// Which edge of the player bar's control row carries the metadata strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlayerBarStripEdge {
+    /// `TrackInfoDisplay::PlayerBarAbove`: between the page and the controls.
+    Above,
+    /// `TrackInfoDisplay::PlayerBar`: under the controls, on the window's
+    /// bottom edge.
+    Below,
+}
+
+/// The edge of the player bar's control row the metadata strip docks on, or
+/// `None` when the active strip mode puts no strip in the player bar.
 ///
-/// True when `TrackInfoDisplay::PlayerBar` is active.
+/// **Single source of truth** — the match is exhaustive, so a new
+/// `TrackInfoDisplay` variant has to say whether the player bar carries it.
+#[inline]
+pub(crate) fn player_bar_strip_edge() -> Option<PlayerBarStripEdge> {
+    match track_info_display() {
+        TrackInfoDisplay::PlayerBar => Some(PlayerBarStripEdge::Below),
+        TrackInfoDisplay::PlayerBarAbove => Some(PlayerBarStripEdge::Above),
+        TrackInfoDisplay::Off
+        | TrackInfoDisplay::TopBar
+        | TrackInfoDisplay::TopBarUnder
+        | TrackInfoDisplay::MiniPlayer => None,
+    }
+}
+
+/// Whether the player bar carries the metadata strip, on either edge of its
+/// control row (see [`player_bar_strip_edge`]).
 ///
 /// **Single source of truth** — use this instead of ad-hoc compound checks.
 #[inline]
 pub(crate) fn show_player_bar_strip() -> bool {
-    track_info_display() == TrackInfoDisplay::PlayerBar
+    player_bar_strip_edge().is_some()
 }
 
 /// Whether the top bar track info strip should be rendered above content.

@@ -1,6 +1,6 @@
 //! Track info strip — shared widget rendering now-playing metadata.
 //!
-//! Used by both the player bar (bottom info strip) and the top bar
+//! Used by both the player bar (above or below its controls) and the top bar
 //! (when `TrackInfoDisplay::TopBar` is active in side nav mode).
 //!
 //! Layout: `FLAC 44.1kHz │ │ title: xxx │ artist: xxx │ album: xxx │ │ 1411kbps`

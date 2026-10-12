@@ -41,6 +41,7 @@
 //!     TrackInfoDisplay {
 //!         Off,
 //!         PlayerBar,
+//!         PlayerBarAbove,
 //!         TopBar,
 //!         TopBarUnder,
 //!         MiniPlayer,

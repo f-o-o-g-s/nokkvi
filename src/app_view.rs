@@ -768,29 +768,25 @@ impl Nokkvi {
             icy_title,
         };
 
-        // Build the player bar info strip if PlayerBar mode is active
-        let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
-            if crate::theme::show_player_bar_strip() {
-                Some(widgets::track_info_strip::track_info_strip_with_separator(
-                    &strip_data,
-                    Some(widgets::PlayerBarMessage::StripClicked),
-                ))
-            } else {
-                None
-            };
-
-        // Wrap player bar strip in context menu for right-click actions (if not radio)
-        let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
-            player_strip.map(|strip| {
-                widgets::context_menu::wrap_strip_context_menu(
-                    strip,
+        // The player bar's info strip in the PlayerBar / PlayerBarAbove modes,
+        // wrapped in the context menu for right-click actions (if not radio).
+        // The bar docks it on its edge and draws the separator between it
+        // and the controls.
+        let player_strip: Option<widgets::PlayerBarStrip<'_>> =
+            crate::theme::player_bar_strip_edge().map(|edge| widgets::PlayerBarStrip {
+                edge,
+                strip: widgets::context_menu::wrap_strip_context_menu(
+                    widgets::track_info_strip::track_info_strip(
+                        &strip_data,
+                        Some(widgets::PlayerBarMessage::StripClicked),
+                    ),
                     radio_name.is_some(),
                     !self.settings.local_music_path.is_empty(),
                     self.is_current_track_starred(),
                     strip_context_state(&self.open_menu),
                     widgets::PlayerBarMessage::StripContextAction,
                     widgets::PlayerBarMessage::SetOpenMenu,
-                )
+                ),
             });
 
         // Base layout (each docks its chrome around `main_content` with

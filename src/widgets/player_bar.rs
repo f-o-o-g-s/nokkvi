@@ -201,19 +201,20 @@ fn base_player_bar_height() -> f32 {
     BASE_PLAYER_BAR_HEIGHT
 }
 
-/// Dynamic player bar height. `PlayerBar` strip mode adds the strip chrome
-/// above/below the base row. `MiniPlayer` mode is TALLER than the base bar
-/// ([`MINI_PLAYER_BAR_HEIGHT`] = 78) — the capsule seek scrub is its own row
-/// (framed by 1 px separators) above the artwork-sized content row. This is
-/// regime-independent: both the wide three-section and the compact layouts are
-/// horizontal-only variations of the same 78 px bar. Every other mode uses the
-/// base 72 px.
+/// Dynamic player bar height. The `PlayerBar` / `PlayerBarAbove` strip modes
+/// add the strip chrome below / above the base row. `MiniPlayer` mode is
+/// TALLER than the base bar ([`MINI_PLAYER_BAR_HEIGHT`] = 78) — the capsule
+/// seek scrub is its own row (framed by 1 px separators) above the
+/// artwork-sized content row. This is regime-independent: both the wide
+/// three-section and the compact layouts are horizontal-only variations of
+/// the same 78 px bar. Every other mode uses the base 72 px.
 ///
-/// When the strip is on, the rendered widget tree is:
-/// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
-/// `STRIP_HEIGHT_WITH_SEPARATOR` already accounts for the strip's own
-/// 1 px separator-above, so the chrome math here must add 1 more px for
-/// the player-bar's own top separator.
+/// When the strip is on, the rendered widget tree is
+/// `column![top_separator(1), main_row(base), separator(1), strip]` below the
+/// controls, or `column![top_separator(1), strip, separator(1), main_row(base)]`
+/// above them. `STRIP_HEIGHT_WITH_SEPARATOR` already accounts for the
+/// separator between the strip and the controls, so the chrome math here must
+/// add 1 more px for the player-bar's own top separator.
 pub(crate) fn player_bar_height() -> f32 {
     use nokkvi_data::types::player_settings::TrackInfoDisplay;
     let base = base_player_bar_height();
@@ -1271,17 +1272,27 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
         .boxed()
 }
 
+/// The metadata strip a player-bar strip mode docks in the bar, and the edge
+/// of the control row it docks on (`theme::player_bar_strip_edge`).
+pub(crate) struct PlayerBarStrip<'a> {
+    pub(crate) edge: theme::PlayerBarStripEdge,
+    /// The bare strip: the bar draws the separator between it and the
+    /// controls.
+    pub(crate) strip: Element<'a, PlayerBarMessage>,
+}
+
 /// Build the player bar view.
 ///
 /// If `info_strip` is `Some`, the player bar renders in "track display" mode:
-/// controls + progress on top, info strip below (with separator).
+/// controls + progress in one row, the info strip on the edge it names, with
+/// a separator between them.
 /// If `None`, the player bar renders in normal single-row mode.
 ///
 /// The caller (`app_view.rs`) is responsible for building the strip element
 /// from `TrackInfoStripData` — the player bar doesn't know about track metadata.
 pub(crate) fn player_bar<'a>(
     data: &PlayerBarViewData,
-    info_strip: Option<Element<'a, PlayerBarMessage>>,
+    info_strip: Option<PlayerBarStrip<'a>>,
 ) -> Element<'a, PlayerBarMessage> {
     // Player controls with SVG icons
     let has_queue = data.has_queue && !data.is_radio;
@@ -1718,14 +1729,13 @@ pub(crate) fn player_bar<'a>(
             .width(Length::Fill)
             .height(Length::Fill)
             .boxed()
-    } else if let Some(strip) = info_strip {
-        // --- TRACK DISPLAY (PlayerBar strip) MODE ---
-        // Main row on top, info strip below (separator built into the
-        // strip). `player_bar_height()` reserves
+    } else if let Some(PlayerBarStrip { edge, strip }) = info_strip {
+        // --- TRACK DISPLAY (PlayerBar / PlayerBarAbove strip) MODE ---
+        // Main row and info strip with a 1 px separator between them, the
+        // strip on the edge it names. `player_bar_height()` reserves
         // `base + 1 + STRIP_HEIGHT_WITH_SEPARATOR`, the outer column
-        // consumes the leading 1 px for `top_separator`, and the strip
-        // accounts for its own separator-above — so this row gets the
-        // bare `base_height`.
+        // consumes the leading 1 px for `top_separator`, and the separator
+        // here is the strip's own — so this row gets the bare `base_height`.
         let transports_section =
             fixed_section(player_controls, transport_section_w, Alignment::Start);
         let mode_toggles = fixed_section(mode_toggles, mode_section_w, Alignment::End);
@@ -1735,13 +1745,16 @@ pub(crate) fn player_bar<'a>(
             .push(progress_row.boxed())
             .push(mode_toggles)
             .push(volume_control);
-        column![
-            container(main_row)
-                .width(Length::Fill)
-                .height(Length::Fixed(base_height))
-                .center_y(Length::Fill),
-            strip,
-        ]
+        let controls = container(main_row)
+            .width(Length::Fill)
+            .height(Length::Fixed(base_height))
+            .center_y(Length::Fill)
+            .boxed();
+        let separator = hairline(Length::Fill, Length::Fixed(1.0));
+        match edge {
+            theme::PlayerBarStripEdge::Above => column![strip, separator, controls],
+            theme::PlayerBarStripEdge::Below => column![controls, separator, strip],
+        }
         .boxed()
     } else {
         // --- NORMAL MODE ---
@@ -1820,8 +1833,8 @@ mod player_bar_height_tests {
     }
 
     /// When the PlayerBar strip is active, the rendered widget is
-    /// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
-    /// `player_bar_height()` must account for all three rows so the
+    /// `column![top_separator(1), main_row(base), separator(1), strip]`.
+    /// `player_bar_height()` must account for every row so the
     /// `chrome_height_with_header()` math (and the iced layout) lines up.
     #[test]
     fn player_bar_height_with_strip_includes_top_separator_and_strip_separator() {
