@@ -24,6 +24,9 @@ pub(crate) const SUBSONIC_CREDENTIAL: &str = "subsonic_credential";
 /// a JSON `credentials::SessionOwner` (resolved server URL + username).
 /// Absent on a session saved before owners were stored.
 pub(crate) const SESSION_OWNER: &str = "session_owner";
+/// nokkvi's API-key player on each server, per user: a JSON map of session
+/// owner key (`QueueOwner`) to player id. See `services::api_key`.
+pub(crate) const API_KEY_PLAYERS: &str = "api_key_players";
 pub(crate) const QUEUE_ORDER: &str = "queue_order";
 pub(crate) const QUEUE_SONGS: &str = "queue_songs";
 /// Who the live queue (`QUEUE_ORDER` + `QUEUE_SONGS`) and the stored
@@ -76,6 +79,7 @@ mod tests {
         assert_eq!(JWT_TOKEN, "jwt_token");
         assert_eq!(SUBSONIC_CREDENTIAL, "subsonic_credential");
         assert_eq!(SESSION_OWNER, "session_owner");
+        assert_eq!(API_KEY_PLAYERS, "api_key_players");
         assert_eq!(QUEUE_ORDER, "queue_order");
         assert_eq!(QUEUE_SONGS, "queue_songs");
         assert_eq!(QUEUE_OWNER, "queue_owner");

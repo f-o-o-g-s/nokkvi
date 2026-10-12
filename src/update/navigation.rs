@@ -501,6 +501,16 @@ impl Nokkvi {
                                 ))
                                 .await;
 
+                            // Subsonic requests send an OpenSubsonic API key
+                            // (a fresh one each login) when the server offers
+                            // keys, else the token pair. Fails the login only
+                            // when the server sent no pair and no key could
+                            // be set up.
+                            shell
+                                .establish_api_key()
+                                .await
+                                .map_err(|e| format!("{e:#}"))?;
+
                             // Load this session's own queue before anything
                             // reads it: a login to another server must not
                             // show the previous server's queue.
@@ -602,6 +612,17 @@ impl Nokkvi {
                 if let Err(e) = shell.claim_queue_for_session().await {
                     tracing::warn!("Could not load this session's queue: {e:#}");
                 }
+
+                // A session resumed on the token pair moves to an API key in
+                // the background when the server offers keys, so startup
+                // never waits on it. Tracked, so a logout drains it before
+                // the stored session is cleared.
+                let upgrading = shell.clone();
+                shell
+                    .task_manager()
+                    .spawn("api_key_upgrade", move || async move {
+                        upgrading.upgrade_resumed_session_to_api_key().await;
+                    });
 
                 let user_id = shell.auth().user_id().await;
                 Ok(crate::app_message::LoginSuccess {

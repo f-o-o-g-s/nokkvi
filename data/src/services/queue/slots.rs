@@ -63,6 +63,11 @@ impl QueueOwner {
     pub fn label(&self) -> &str {
         &self.label
     }
+
+    /// The normalized `server + user` key, for maps stored per session owner.
+    pub(crate) fn key(&self) -> &str {
+        &self.key
+    }
 }
 
 /// One stored part of a parked queue.

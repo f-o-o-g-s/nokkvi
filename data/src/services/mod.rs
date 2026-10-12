@@ -5,6 +5,7 @@
 //! task management, and state storage.
 
 pub mod api;
+pub mod api_key;
 pub mod auth;
 pub mod font_discovery;
 pub mod lyrics_source;

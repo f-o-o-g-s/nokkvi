@@ -234,6 +234,61 @@ impl AppService {
         &self.settings_service
     }
 
+    /// Make this session's `/rest` requests send an OpenSubsonic API key when
+    /// the server offers keys. See [`AuthGateway::establish_api_key`]; errs
+    /// only when the session is left with no `/rest` credential, which must
+    /// fail a login.
+    pub async fn establish_api_key(&self) -> Result<crate::backend::auth::ApiKeyOutcome> {
+        self.auth_gateway.establish_api_key(&self.storage).await
+    }
+
+    /// Move a resumed session that still sends the token pair to an API key
+    /// when the server offers keys, and save the new credential so the next
+    /// launch resumes with it. A resume runs this in the background, so
+    /// startup never waits on it; any failure leaves the session as it was.
+    pub async fn upgrade_resumed_session_to_api_key(&self) {
+        use crate::backend::auth::ApiKeyOutcome;
+        match self.establish_api_key().await {
+            Ok(ApiKeyOutcome::Adopted { .. }) => {
+                let owner = crate::credentials::SessionOwner {
+                    server_url: self.auth_gateway.get_server_url().await,
+                    username: self.auth_gateway.username().await,
+                };
+                let credential = self.auth_gateway.get_subsonic_credential().await;
+                if let Err(e) =
+                    crate::credentials::save_subsonic_credential(&self.storage, &owner, &credential)
+                {
+                    warn!(" [API KEY] Couldn't save the session's API key: {e:#}");
+                }
+            }
+            Ok(
+                ApiKeyOutcome::AlreadyKeyed
+                | ApiKeyOutcome::NotOffered
+                | ApiKeyOutcome::FellBack(_),
+            ) => {}
+            Err(e) => warn!(" [API KEY] {e:#}"),
+        }
+    }
+
+    /// Revoke this session's API key (an explicit logout). The key-write lock
+    /// is taken now, before the future runs, so a login that starts first
+    /// waits for the revoke instead of having its new key revoked. A revoke
+    /// that fails is logged; the next login replaces the key anyway.
+    pub fn revoke_api_key(&self) -> impl Future<Output = ()> + Send + 'static {
+        let held = crate::services::api_key::try_claim_key_writes();
+        let auth = self.auth_gateway.clone();
+        let storage = self.storage.clone();
+        async move {
+            let _writes = match held {
+                Some(guard) => guard,
+                None => crate::services::api_key::claim_key_writes().await,
+            };
+            if let Err(e) = auth.revoke_api_key(&storage).await {
+                info!(" [API KEY] The API key was not revoked (the next login replaces it): {e:#}");
+            }
+        }
+    }
+
     /// Get reference to PlaybackController
     /// Load the queue that belongs to the session just logged in (see
     /// [`crate::services::queue::slots`]): the same server and user keep the

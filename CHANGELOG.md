@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - Bars and Lines have a new Reflection Below Cover setting, on by default.
 - Lyrics with word timing (TTML, enhanced LRC, server cues) now light the current line word by word as it is sung.
 - A new Playback setting, Lyrics: Word Highlight, picks Sweep (a karaoke fill), Word (each word lights whole) or Off.
+- On Navidrome servers that offer API keys, nokkvi now connects with its own revocable key instead of a token derived from your password.
+- nokkvi's key lives on its own player in Navidrome's Players list, named after your computer and starting from your current nokkvi player's settings.
+- Logging out now revokes nokkvi's API key on the server; the next login sets a fresh one.
 
 ### Changed
 

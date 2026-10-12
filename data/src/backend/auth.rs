@@ -1,13 +1,177 @@
 //! AuthGateway — authentication state and API client management
 //!
 //! Wraps `AuthService` behind `Arc<Mutex>` for shared access across services.
+//! Also sets up the session's OpenSubsonic API key (`establish_api_key`,
+//! `revoke_api_key`; the scheme is in `services::api_key`).
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use tokio::sync::Mutex;
+use tracing::{debug, info, warn};
 
-use crate::services::{api::client::ApiClient, auth::AuthService};
+use crate::{
+    services::{
+        api::{
+            client::ApiClient,
+            players::{PlayerSettings, PlayersApiService},
+        },
+        api_key::{self, ApiKey},
+        auth::{self as auth_api, AuthService},
+        queue::slots::QueueOwner,
+        state_storage::StateStorage,
+    },
+    types::error::NokkviError,
+};
+
+/// How long setting up an API key may take in all: the extension list, the
+/// wait for a logout's revoke, the registration and the check. Past it the
+/// session keeps the token pair.
+const KEY_SETUP_BUDGET: Duration = Duration::from_secs(30);
+
+/// How long one key request may take. A logout's revoke holds the key-write
+/// lock for at most this long, so a login queued behind it waits that long
+/// too.
+const KEY_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// What [`AuthGateway::establish_api_key`] did to the session's `/rest`
+/// credential.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiKeyOutcome {
+    /// The session already sends a key (a resumed keyed session). Nothing
+    /// was asked of the server.
+    AlreadyKeyed,
+    /// The server takes no keys; the session keeps the token pair.
+    NotOffered,
+    /// A fresh key is on nokkvi's player and the session sends it now.
+    /// `created` when the player was made for it.
+    Adopted { created: bool },
+    /// Setting up a key failed; the session keeps the token pair. The reason,
+    /// for the log (it never holds the key).
+    FellBack(String),
+}
+
+/// What a key setup reads from the session, taken under one lock so that no
+/// network call holds it.
+struct KeySession {
+    server_url: String,
+    username: String,
+    user_id: String,
+    credential: String,
+    client: Option<ApiClient>,
+}
+
+impl KeySession {
+    fn owner(&self) -> QueueOwner {
+        QueueOwner::new(&self.server_url, &self.username)
+    }
+}
+
+/// Run one key request under [`KEY_REQUEST_TIMEOUT`].
+async fn timed<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(KEY_REQUEST_TIMEOUT, request)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "the server did not answer within {} s",
+                KEY_REQUEST_TIMEOUT.as_secs()
+            )
+        })?
+}
+
+/// A player that is gone (deleted in the web UI, a reset server) or that
+/// belongs to another user: the record pointing at it is stale.
+fn player_is_stale(e: &anyhow::Error) -> bool {
+    NokkviError::is_not_found(e) || NokkviError::is_forbidden(e)
+}
+
+/// Register a fresh key for `session`: `Ok(None)` when the server takes no
+/// keys, else the key the server confirmed and whether its player was
+/// created for it. See [`AuthGateway::establish_api_key`].
+async fn issue_api_key(
+    session: &KeySession,
+    storage: &StateStorage,
+) -> Result<Option<(ApiKey, bool)>> {
+    let client = session.client.clone().context("Not authenticated")?;
+    let http = client.http_client();
+    let extensions = timed(auth_api::open_subsonic_extensions(
+        &http,
+        &session.server_url,
+        &session.credential,
+    ))
+    .await?;
+    if !extensions
+        .iter()
+        .any(|name| name == api_key::API_KEY_EXTENSION)
+    {
+        return Ok(None);
+    }
+
+    // A logout's revoke on this player lands first, or it would kill the
+    // key put there next (`api_key::try_claim_key_writes`).
+    let _writes = tokio::time::timeout(2 * KEY_REQUEST_TIMEOUT, api_key::claim_key_writes())
+        .await
+        .map_err(|_| anyhow!("another API key change is still running"))?;
+
+    let owner = session.owner();
+    let key = ApiKey::mint()?;
+    let players = PlayersApiService::new(client);
+    let mut on_player = false;
+    if let Some(player_id) = api_key::recorded_player_id(storage, &owner) {
+        match timed(players.set_api_key(&player_id, key.as_str())).await {
+            Ok(()) => on_player = true,
+            Err(e) if player_is_stale(&e) => {
+                debug!(
+                    target: "nokkvi::auth",
+                    "API key player {player_id} is gone or not this user's; registering a new one"
+                );
+                if let Err(e) = api_key::forget_player_id(storage, &owner) {
+                    warn!(target: "nokkvi::auth", "Couldn't forget the API key player: {e:#}");
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    let created = !on_player;
+    if created {
+        let settings = match timed(players.list()).await {
+            Ok(rows) => api_key::settings_template(&rows, &session.user_id, &session.username),
+            Err(e) => {
+                debug!(
+                    target: "nokkvi::auth",
+                    "Couldn't read the player list; the new player starts from the defaults: {e:#}"
+                );
+                PlayerSettings::default()
+            }
+        };
+        let player_id = timed(players.create(
+            &api_key::player_name(),
+            api_key::PLAYER_CLIENT,
+            key.as_str(),
+            &settings,
+        ))
+        .await?;
+        if let Err(e) = api_key::record_player_id(storage, &owner, &player_id) {
+            // The key works all the same; only a logout can't find it to
+            // revoke it (the next login replaces it).
+            warn!(target: "nokkvi::auth", "Couldn't remember the API key player: {e:#}");
+        }
+    }
+
+    // The server must take the key, and name this user for it, before the
+    // session switches to it.
+    let confirmed = timed(auth_api::token_info_username(
+        &http,
+        &session.server_url,
+        &key.credential(),
+    ))
+    .await
+    .context("checking the new API key")?;
+    if confirmed.to_lowercase() != session.username.to_lowercase() {
+        anyhow::bail!("the server says the new API key belongs to another user");
+    }
+    Ok(Some((key, created)))
+}
 
 /// AuthGateway - Manages authentication state and operations
 ///
@@ -141,6 +305,121 @@ impl AuthGateway {
         let auth_service = self.auth_service.lock().await;
         auth_service.fetch_open_subsonic_extensions().await
     }
+
+    async fn key_session(&self) -> KeySession {
+        let auth = self.auth_service.lock().await;
+        KeySession {
+            server_url: auth.get_server_url().to_owned(),
+            username: auth.username().to_owned(),
+            user_id: auth.user_id().to_owned(),
+            credential: auth.get_subsonic_credential().to_owned(),
+            client: auth.get_client().cloned(),
+        }
+    }
+
+    /// Switch the session's `/rest` credential from `expected` to `next`,
+    /// unless something replaced it meanwhile.
+    async fn swap_credential(&self, expected: &str, next: String) -> bool {
+        let mut auth = self.auth_service.lock().await;
+        if auth.get_subsonic_credential() != expected {
+            return false;
+        }
+        auth.set_subsonic_credential(next);
+        true
+    }
+
+    /// Make this session's `/rest` requests send an OpenSubsonic API key when
+    /// the server offers keys (the scheme is in `services::api_key`): put a
+    /// fresh key on nokkvi's player (creating the player the first time, with
+    /// the settings of the player Navidrome registered for nokkvi's token
+    /// requests), check that the server takes it for this user, then switch
+    /// the session to it.
+    ///
+    /// A session that already sends a key is left alone. A server without
+    /// the extension, or a key that can't be set up in time, leaves the token
+    /// pair in place. Errs only when the session is left with no `/rest`
+    /// credential at all (a login whose server sent no token pair), which
+    /// must fail the login.
+    pub async fn establish_api_key(&self, storage: &StateStorage) -> Result<ApiKeyOutcome> {
+        let session = self.key_session().await;
+        if api_key::is_api_key_credential(&session.credential) {
+            debug!(target: "nokkvi::auth", "Subsonic requests already send an API key");
+            return Ok(ApiKeyOutcome::AlreadyKeyed);
+        }
+        let outcome =
+            match tokio::time::timeout(KEY_SETUP_BUDGET, issue_api_key(&session, storage)).await {
+                Ok(Ok(None)) => ApiKeyOutcome::NotOffered,
+                Ok(Ok(Some((key, created)))) => {
+                    if self
+                        .swap_credential(&session.credential, key.credential())
+                        .await
+                    {
+                        ApiKeyOutcome::Adopted { created }
+                    } else {
+                        ApiKeyOutcome::FellBack(
+                            "the session changed while the key was set up".to_owned(),
+                        )
+                    }
+                }
+                Ok(Err(e)) => ApiKeyOutcome::FellBack(format!("{e:#}")),
+                Err(_) => ApiKeyOutcome::FellBack(format!(
+                    "it took longer than {} s",
+                    KEY_SETUP_BUDGET.as_secs()
+                )),
+            };
+        match &outcome {
+            ApiKeyOutcome::Adopted { created } => info!(
+                target: "nokkvi::auth",
+                "Subsonic requests now send an API key ({} player)",
+                if *created { "new" } else { "existing" }
+            ),
+            ApiKeyOutcome::NotOffered => debug!(
+                target: "nokkvi::auth",
+                "The server takes no API keys; Subsonic requests keep the token"
+            ),
+            ApiKeyOutcome::FellBack(reason) => warn!(
+                target: "nokkvi::auth",
+                "Couldn't set up an API key; Subsonic requests keep the token: {reason}"
+            ),
+            ApiKeyOutcome::AlreadyKeyed => {}
+        }
+        if session.credential.is_empty() {
+            match &outcome {
+                ApiKeyOutcome::Adopted { .. } | ApiKeyOutcome::AlreadyKeyed => {}
+                ApiKeyOutcome::NotOffered => anyhow::bail!(
+                    "This Navidrome sent no Subsonic login and takes no API keys, so nokkvi \
+                     can't play from it."
+                ),
+                ApiKeyOutcome::FellBack(reason) => anyhow::bail!(
+                    "This Navidrome sent no Subsonic login, and nokkvi couldn't set up an API \
+                     key: {reason}"
+                ),
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Revoke the API key on nokkvi's player for this session's server and
+    /// user (an explicit logout). The player stays, with its settings, and
+    /// the next login puts a new key on it. Nothing to do when nokkvi has no
+    /// player there. Call it holding the key-write lock
+    /// (`api_key::try_claim_key_writes`).
+    pub async fn revoke_api_key(&self, storage: &StateStorage) -> Result<()> {
+        let session = self.key_session().await;
+        let owner = session.owner();
+        let Some(player_id) = api_key::recorded_player_id(storage, &owner) else {
+            return Ok(());
+        };
+        let client = session.client.context("Not authenticated")?;
+        match timed(PlayersApiService::new(client).set_api_key(&player_id, "")).await {
+            Ok(()) => {
+                info!(target: "nokkvi::auth", "Revoked the API key at logout");
+                Ok(())
+            }
+            Err(e) if player_is_stale(&e) => api_key::forget_player_id(storage, &owner),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -183,5 +462,394 @@ mod tests {
         let (url, cred) = gateway.server_config().await;
         assert!(url.is_empty());
         assert!(cred.is_empty());
+    }
+
+    // ── API key setup against a scripted server ────────────────────────────
+
+    use crate::services::api::test_server::{
+        Recorded, ScriptedServer, extensions, subsonic_failed, subsonic_ok,
+    };
+
+    const TOKEN_PAIR: &str = "u=alice&s=salt&t=tok";
+
+    /// A scripted Navidrome: it advertises keys when `offers_keys`, answers
+    /// `PUT /api/player/{id}` for the ids in `players` (404 otherwise),
+    /// creates `p-new` on a POST, and confirms through `tokenInfo` only the
+    /// last key it was given, as `confirms_as`.
+    struct FakeNavidrome {
+        offers_keys: bool,
+        players: Vec<&'static str>,
+        player_list: &'static str,
+        create_status: u16,
+        confirms_as: &'static str,
+    }
+
+    impl Default for FakeNavidrome {
+        fn default() -> Self {
+            Self {
+                offers_keys: true,
+                players: Vec::new(),
+                player_list: "[]",
+                create_status: 200,
+                confirms_as: "alice",
+            }
+        }
+    }
+
+    impl FakeNavidrome {
+        async fn start(self) -> ScriptedServer {
+            let registered = Arc::new(parking_lot::Mutex::new(None::<String>));
+            ScriptedServer::start(move |r: &Recorded| {
+                if r.is("POST", "/rest/getOpenSubsonicExtensions") {
+                    let names: &[&str] = if self.offers_keys {
+                        &["formPost", "apiKeyAuthentication"]
+                    } else {
+                        &["formPost"]
+                    };
+                    return (200, extensions(names));
+                }
+                if r.is("GET", "/api/player") {
+                    return (200, self.player_list.to_owned());
+                }
+                if r.is("POST", "/api/player") {
+                    if self.create_status != 200 {
+                        return (self.create_status, "boom".to_owned());
+                    }
+                    *registered.lock() = r.json()["apiKey"].as_str().map(str::to_owned);
+                    return (200, r#"{"id":"p-new"}"#.to_owned());
+                }
+                if r.method == "PUT"
+                    && let Some(id) = r.path.strip_prefix("/api/player/")
+                {
+                    if !self.players.contains(&id) {
+                        return (404, r#""player not found""#.to_owned());
+                    }
+                    let key = r.json()["apiKey"].as_str().map(str::to_owned);
+                    *registered.lock() = key.filter(|k| !k.is_empty());
+                    return (200, format!(r#"{{"id":"{id}","name":"nokkvi (host)"}}"#));
+                }
+                if r.is("POST", "/rest/tokenInfo") {
+                    let sent = r.param("apiKey");
+                    if r.param("u").is_none() && sent.is_some() && sent == *registered.lock() {
+                        return (
+                            200,
+                            subsonic_ok(&format!(
+                                r#""tokenInfo":{{"username":"{}"}}"#,
+                                self.confirms_as
+                            )),
+                        );
+                    }
+                    return (200, subsonic_failed(44, "Invalid API key"));
+                }
+                (404, String::new())
+            })
+            .await
+        }
+    }
+
+    async fn gateway_on(server: &ScriptedServer, credential: &str) -> AuthGateway {
+        let gateway = AuthGateway::new().expect("auth gateway");
+        gateway
+            .resume_session(
+                server.base_url.clone(),
+                "alice".to_string(),
+                "jwt".to_string(),
+                credential.to_string(),
+            )
+            .await
+            .expect("resume session");
+        gateway
+    }
+
+    fn storage() -> (StateStorage, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let storage = StateStorage::new(dir.path().join("app.redb")).expect("storage");
+        (storage, dir)
+    }
+
+    fn owner_of(server: &ScriptedServer) -> QueueOwner {
+        QueueOwner::new(&server.base_url, "alice")
+    }
+
+    /// The key the session sends, out of its credential.
+    async fn sent_key(gateway: &AuthGateway) -> Option<String> {
+        gateway
+            .get_subsonic_credential()
+            .await
+            .strip_prefix("apiKey=")
+            .map(str::to_owned)
+    }
+
+    fn player_writes(server: &ScriptedServer) -> Vec<Recorded> {
+        server
+            .requests()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/api/player"))
+            .collect()
+    }
+
+    /// The extension gate: a server that doesn't advertise
+    /// `apiKeyAuthentication` keeps the token pair, and nokkvi never touches
+    /// its players.
+    #[tokio::test]
+    async fn a_server_without_keys_keeps_the_token_pair() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            offers_keys: false,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::NotOffered);
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+        assert!(player_writes(&server).is_empty());
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)),
+            None
+        );
+    }
+
+    /// The first login on a server with keys makes nokkvi's player, copying
+    /// the settings of the player Navidrome registered for its token
+    /// requests, and switches the session to the key once the server
+    /// confirms it.
+    #[tokio::test]
+    async fn the_first_login_creates_a_keyed_player() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            player_list: r#"[{"id":"auto","name":"nokkvi [nokkvi]","client":"nokkvi",
+                "userName":"alice","lastSeen":"2026-10-01T00:00:00Z","maxBitRate":192,
+                "transcodingId":"opus","scrobbleEnabled":false,"hasApiKey":false}]"#,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
+        let creates: Vec<_> = server
+            .requests()
+            .into_iter()
+            .filter(|r| r.is("POST", "/api/player"))
+            .collect();
+        assert_eq!(creates.len(), 1);
+        let body = creates[0].json();
+        assert!(
+            body["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with("nokkvi"))
+        );
+        assert_eq!(body["client"], "nokkvi");
+        assert_eq!(body["maxBitRate"], 192);
+        assert_eq!(body["transcodingId"], "opus");
+        assert_eq!(body["scrobbleEnabled"], false);
+        let posted = body["apiKey"].as_str().expect("a key").to_owned();
+        assert_eq!(sent_key(&gateway).await.as_deref(), Some(posted.as_str()));
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
+            Some("p-new")
+        );
+    }
+
+    /// A later login puts a fresh key on the same player and creates nothing.
+    #[tokio::test]
+    async fn the_next_login_rotates_the_key_on_the_same_player() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        api_key::record_player_id(&storage, &owner_of(&server), "p1").expect("record");
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: false });
+        let writes = player_writes(&server);
+        assert_eq!(writes.len(), 1, "one PUT, no list, no create: {writes:?}");
+        assert!(writes[0].is("PUT", "/api/player/p1"));
+        let body = writes[0].json();
+        assert_eq!(
+            body.as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>()),
+            Some(vec!["apiKey".to_owned()]),
+            "only the key changes on the player"
+        );
+        assert_eq!(sent_key(&gateway).await.as_deref(), body["apiKey"].as_str());
+    }
+
+    /// A player deleted in the web UI is made again, from the defaults, and
+    /// the record moves to it.
+    #[tokio::test]
+    async fn a_deleted_player_is_made_again() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        api_key::record_player_id(&storage, &owner_of(&server), "p-gone").expect("record");
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
+        let create = server
+            .requests()
+            .into_iter()
+            .find(|r| r.is("POST", "/api/player"))
+            .expect("a create");
+        assert_eq!(
+            create.json()["scrobbleEnabled"],
+            true,
+            "Navidrome's default"
+        );
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
+            Some("p-new")
+        );
+    }
+
+    /// The session only switches to a key the server confirms for this user.
+    #[tokio::test]
+    async fn a_key_the_server_names_for_someone_else_is_not_used() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            confirms_as: "bob",
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+    }
+
+    #[tokio::test]
+    async fn a_failed_registration_keeps_the_token_pair() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            create_status: 500,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        let ApiKeyOutcome::FellBack(reason) = outcome else {
+            panic!("expected a fallback, got {outcome:?}");
+        };
+        assert!(!reason.contains("nds_"), "the reason never holds the key");
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)),
+            None
+        );
+    }
+
+    /// A resumed keyed session asks nothing of the server.
+    #[tokio::test]
+    async fn a_keyed_session_is_left_alone() {
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::AlreadyKeyed);
+        assert!(server.requests().is_empty());
+    }
+
+    /// A login whose server sent no token pair needs a key: without one the
+    /// login fails with a reason; with one it goes through.
+    #[tokio::test]
+    async fn no_token_pair_and_no_key_fails_the_login() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            offers_keys: false,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, "").await;
+        let (storage, _dir) = storage();
+        let err = gateway
+            .establish_api_key(&storage)
+            .await
+            .expect_err("no credential at all");
+        assert!(format!("{err:#}").contains("takes no API keys"), "{err:#}");
+
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, "").await;
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
+        assert!(sent_key(&gateway).await.is_some());
+    }
+
+    /// An explicit logout revokes the key with a key-only PUT and keeps the
+    /// player for the next login.
+    #[tokio::test]
+    async fn logout_revokes_the_key_and_keeps_the_player() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let (storage, _dir) = storage();
+        api_key::record_player_id(&storage, &owner_of(&server), "p1").expect("record");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        let writes = player_writes(&server);
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].is("PUT", "/api/player/p1"));
+        assert_eq!(writes[0].json(), serde_json::json!({ "apiKey": "" }));
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
+            Some("p1")
+        );
+    }
+
+    #[tokio::test]
+    async fn revoking_a_deleted_player_forgets_it() {
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let (storage, _dir) = storage();
+        api_key::record_player_id(&storage, &owner_of(&server), "p-gone").expect("record");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert_eq!(
+            api_key::recorded_player_id(&storage, &owner_of(&server)),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn revoking_with_no_player_asks_nothing() {
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert!(server.requests().is_empty());
     }
 }

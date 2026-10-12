@@ -3,11 +3,13 @@ use thiserror::Error;
 /// Errors emitted by the data layer at the boundary between
 /// `crate::services::api` and consumers.
 ///
-/// Two variants — every other API failure path uses `anyhow::Result`. The
+/// Three variants — every other API failure path uses `anyhow::Result`. The
 /// 401 case is broken out so the UI can downcast and drop to the login
 /// screen instead of merely surfacing a toast; the 403 case is broken out so
 /// permission failures (artwork upload disabled server-side, playlist not
-/// owned) can map to a friendly toast instead of a raw status string.
+/// owned) can map to a friendly toast instead of a raw status string; the 404
+/// case is broken out so a caller can tell a row that is gone from any other
+/// failure (the API key player, `services::api_key`).
 #[derive(Debug, Error)]
 pub enum NokkviError {
     #[error("Unauthorized: Session has expired or credentials are invalid")]
@@ -17,6 +19,12 @@ pub enum NokkviError {
     /// would have produced, so logs stay as informative as before the split.
     #[error("Forbidden: {0}")]
     Forbidden(String),
+    /// HTTP 404 from the Navidrome native API. Displays exactly the
+    /// `"{ctx} failed with status 404 Not Found: {body}"` text the generic arm
+    /// produced before it was split out, so a check on `"status 404"` in the
+    /// flattened text still matches.
+    #[error("{0}")]
+    NotFound(String),
 }
 
 impl NokkviError {
@@ -26,6 +34,18 @@ impl NokkviError {
     /// `session_expired_message` and the batch / Trawl resolvers share.
     pub fn is_unauthorized(e: &anyhow::Error) -> bool {
         matches!(e.downcast_ref::<Self>(), Some(Self::Unauthorized))
+    }
+
+    /// Whether an `anyhow` chain's typed cause is [`NokkviError::NotFound`]
+    /// (a native-API 404, possibly wrapped in context).
+    pub fn is_not_found(e: &anyhow::Error) -> bool {
+        matches!(e.downcast_ref::<Self>(), Some(Self::NotFound(_)))
+    }
+
+    /// Whether an `anyhow` chain's typed cause is [`NokkviError::Forbidden`]
+    /// (a native-API 403, possibly wrapped in context).
+    pub fn is_forbidden(e: &anyhow::Error) -> bool {
+        matches!(e.downcast_ref::<Self>(), Some(Self::Forbidden(_)))
     }
 
     /// Returns true when a stringified error chain carries the

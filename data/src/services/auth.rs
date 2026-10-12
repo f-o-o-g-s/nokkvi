@@ -8,9 +8,12 @@ use crate::services::api::client::ApiClient;
 struct LoginResponse {
     token: String,
     id: Option<String>,
-    #[serde(rename = "subsonicSalt")]
+    /// The Subsonic token pair. Navidrome derives it from the stored
+    /// password, so a server that stops keeping passwords can leave it out;
+    /// the session's `/rest` credential then has to come from an API key.
+    #[serde(rename = "subsonicSalt", default)]
     subsonic_salt: String,
-    #[serde(rename = "subsonicToken")]
+    #[serde(rename = "subsonicToken", default)]
     subsonic_token: String,
 }
 
@@ -135,15 +138,6 @@ impl AuthService {
                 .context("Invalid server response. Please check your server URL.")
                 .map_err(AttemptError::Reached)?;
 
-            // Validate required fields
-            if login_response.subsonic_salt.is_empty() || login_response.subsonic_token.is_empty() {
-                self.error_message =
-                    "Server response missing required authentication fields".to_string();
-                return Err(AttemptError::Reached(anyhow::anyhow!(
-                    self.error_message.clone()
-                )));
-            }
-
             let base = Url::parse(base_url)
                 .context("Invalid server response. Please check your server URL.")
                 .map_err(AttemptError::Reached)?;
@@ -153,11 +147,21 @@ impl AuthService {
             self.username = username.to_string();
             self.token = login_response.token;
             self.user_id = login_response.id.unwrap_or_default();
-            self.subsonic_credential = subsonic_token_credential(
-                username,
-                &login_response.subsonic_salt,
-                &login_response.subsonic_token,
-            );
+            // The token pair when the server sent one. Without it the
+            // credential stays empty until an API key is set up
+            // (`AuthGateway::establish_api_key`, which fails the login when
+            // it can't set one up).
+            self.subsonic_credential = if login_response.subsonic_salt.is_empty()
+                || login_response.subsonic_token.is_empty()
+            {
+                String::new()
+            } else {
+                subsonic_token_credential(
+                    username,
+                    &login_response.subsonic_salt,
+                    &login_response.subsonic_token,
+                )
+            };
             self.client = Some(ApiClient::new(base, self.token.clone()));
 
             Ok(())
@@ -220,6 +224,12 @@ impl AuthService {
         &self.subsonic_credential
     }
 
+    /// Replace the session's `/rest` credential: an API key adopted after the
+    /// login (`AuthGateway::establish_api_key`).
+    pub(crate) fn set_subsonic_credential(&mut self, subsonic_credential: String) {
+        self.subsonic_credential = subsonic_credential;
+    }
+
     /// The authenticated user's Navidrome id — from the login response on a
     /// fresh login, or the JWT `uid` claim on session resume. Empty when
     /// unauthenticated (or when a resumed token carried no `uid`). The
@@ -261,9 +271,9 @@ impl AuthService {
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
-            // `ping_url` is the one Subsonic request that carries `s=`/`t=` in the
-            // query string (every other call POSTs them in the body), so strip the
-            // URL from any transport error before it can reach a log sink.
+            // `ping_url` carries the Subsonic credential (`s=`/`t=` or `apiKey=`)
+            // in its query string, so strip the URL from any transport error
+            // before it can reach a log sink.
             .map_err(reqwest::Error::without_url)
             .context("Failed to connect to server for ping")?;
 
@@ -291,18 +301,49 @@ impl AuthService {
             .as_ref()
             .context("Not authenticated")?
             .http_client();
-        let inner: OpenSubsonicExtensionsInner =
-            crate::services::api::subsonic::subsonic_get_envelope(
-                &client,
-                &self.server_url,
-                "getOpenSubsonicExtensions",
-                &self.subsonic_credential,
-                &[],
-                "open subsonic extensions",
-            )
-            .await?;
-        Ok(inner.extensions.into_iter().map(|e| e.name).collect())
+        open_subsonic_extensions(&client, &self.server_url, &self.subsonic_credential).await
     }
+}
+
+/// The server's advertised OpenSubsonic extension names, read the lenient
+/// way described on [`AuthService::fetch_open_subsonic_extensions`]. A free
+/// function so a caller can ask without holding the auth lock.
+pub(crate) async fn open_subsonic_extensions(
+    http_client: &std::sync::Arc<reqwest::Client>,
+    server_url: &str,
+    subsonic_credential: &str,
+) -> Result<Vec<String>> {
+    let inner: OpenSubsonicExtensionsInner = crate::services::api::subsonic::subsonic_get_envelope(
+        http_client,
+        server_url,
+        "getOpenSubsonicExtensions",
+        subsonic_credential,
+        &[],
+        "open subsonic extensions",
+    )
+    .await?;
+    Ok(inner.extensions.into_iter().map(|e| e.name).collect())
+}
+
+/// The username a `/rest` credential authenticates as: the OpenSubsonic
+/// `tokenInfo` endpoint, which comes with the `apiKeyAuthentication`
+/// extension. Read checked, so a rejected credential is an error, and an
+/// unknown key (code 44) is [`crate::types::error::NokkviError::Unauthorized`].
+pub(crate) async fn token_info_username(
+    http_client: &std::sync::Arc<reqwest::Client>,
+    server_url: &str,
+    subsonic_credential: &str,
+) -> Result<String> {
+    let inner: TokenInfoInner = crate::services::api::subsonic::subsonic_get_envelope_checked(
+        http_client,
+        server_url,
+        "tokenInfo",
+        subsonic_credential,
+        &[],
+        "token info",
+    )
+    .await?;
+    Ok(inner.token_info.username)
 }
 
 /// The Subsonic token credential (`u=…&s=…&t=…`) every `/rest` request
@@ -360,6 +401,18 @@ struct OpenSubsonicExtension {
     name: String,
 }
 
+/// Inner payload of the `tokenInfo` envelope.
+#[derive(Debug, Deserialize)]
+struct TokenInfoInner {
+    #[serde(rename = "tokenInfo")]
+    token_info: TokenInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenInfo {
+    username: String,
+}
+
 /// Total-tolerant version probe: any parse failure or missing key returns
 /// `None`, never an error. A `status == "failed"` ping that still carries
 /// `serverVersion` extracts it (unknown fields are ignored, the leaf is
@@ -413,6 +466,81 @@ mod tests {
         )
         .expect("resume");
         assert_eq!(auth.get_subsonic_credential(), "u=foogs&p=enc:abcd");
+    }
+
+    use crate::services::api::test_server::{ScriptedServer, subsonic_failed, subsonic_ok};
+
+    fn login_answer(pair: bool) -> String {
+        let pair = if pair {
+            r#","subsonicSalt":"salt","subsonicToken":"tok""#
+        } else {
+            ""
+        };
+        format!(r#"{{"token":"jwt","id":"u1","name":"Alice","username":"alice"{pair}}}"#)
+    }
+
+    #[tokio::test]
+    async fn login_with_a_token_pair_builds_the_token_credential() {
+        let server = ScriptedServer::start(|r| {
+            if r.is("POST", "/auth/login") {
+                (200, login_answer(true))
+            } else {
+                (404, String::new())
+            }
+        })
+        .await;
+        let mut auth = AuthService::new().expect("auth service");
+        auth.login(server.base_url.clone(), "alice".into(), "pw".into())
+            .await
+            .expect("login");
+        assert_eq!(auth.get_subsonic_credential(), "u=alice&s=salt&t=tok");
+        assert_eq!(auth.user_id(), "u1");
+    }
+
+    /// Navidrome derives the token pair from the stored password; a server
+    /// that stops keeping passwords can leave it out. The login still
+    /// succeeds, with no `/rest` credential, which then has to come from an
+    /// API key (`AuthGateway::establish_api_key` fails the login otherwise).
+    #[tokio::test]
+    async fn login_without_a_token_pair_leaves_the_credential_empty() {
+        let server = ScriptedServer::start(|r| {
+            if r.is("POST", "/auth/login") {
+                (200, login_answer(false))
+            } else {
+                (404, String::new())
+            }
+        })
+        .await;
+        let mut auth = AuthService::new().expect("auth service");
+        auth.login(server.base_url.clone(), "alice".into(), "pw".into())
+            .await
+            .expect("login");
+        assert_eq!(auth.get_subsonic_credential(), "");
+        assert_eq!(auth.username(), "alice");
+    }
+
+    #[tokio::test]
+    async fn token_info_names_the_credential_owner() {
+        let server = ScriptedServer::start(|r| {
+            assert!(r.is("POST", "/rest/tokenInfo"));
+            assert_eq!(r.param("u"), None, "a key goes alone");
+            match r.param("apiKey").as_deref() {
+                Some("nds_good") => (200, subsonic_ok(r#""tokenInfo":{"username":"alice"}"#)),
+                _ => (200, subsonic_failed(44, "Invalid API key")),
+            }
+        })
+        .await;
+        let http = std::sync::Arc::new(reqwest::Client::new());
+
+        let owner = token_info_username(&http, &server.base_url, "apiKey=nds_good")
+            .await
+            .expect("token info");
+        assert_eq!(owner, "alice");
+
+        let err = token_info_username(&http, &server.base_url, "apiKey=nds_bad")
+            .await
+            .expect_err("an unknown key is refused");
+        assert!(crate::types::error::NokkviError::is_unauthorized(&err));
     }
 
     #[test]

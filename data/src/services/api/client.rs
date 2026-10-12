@@ -389,7 +389,8 @@ impl ApiClient {
     /// routes to [`NokkviError::Unauthorized`] (the UI's session-expiry
     /// downcast depends on it), 403 routes to [`NokkviError::Forbidden`]
     /// (permission failures like artwork-upload-disabled map to friendly
-    /// toasts), anything else becomes a descriptive error.
+    /// toasts), 404 routes to [`NokkviError::NotFound`] (same text as the
+    /// generic arm), anything else becomes a descriptive error.
     ///
     /// Pure (no I/O) so it can be unit-tested without an HTTP server —
     /// mirrors `check_subsonic_response_status` in
@@ -403,6 +404,9 @@ impl ApiClient {
             // Keep the generic arm's detail text inside the typed variant so
             // log lines lose nothing to the split.
             Err(NokkviError::Forbidden(format!("{ctx} failed with status {status}: {body}")).into())
+        } else if status == StatusCode::NOT_FOUND {
+            // Same text as the generic arm, typed for a downcast.
+            Err(NokkviError::NotFound(format!("{ctx} failed with status {status}: {body}")).into())
         } else {
             Err(anyhow!("{ctx} failed with status {status}: {body}"))
         }
@@ -985,6 +989,36 @@ mod tests {
         assert!(detail.contains("not authorized"));
         // The Display marker the flattened string matcher keys on.
         assert!(NokkviError::is_forbidden_str(&format!("{err:#}")));
+        assert!(!NokkviError::is_unauthorized_str(&format!("{err:#}")));
+    }
+
+    /// HTTP 404 is typed (`NokkviError::NotFound`) so a caller can tell a
+    /// row that is gone from any other failure, and still reads exactly like
+    /// the generic arm: the `"status 404"` string checks keep matching.
+    #[test]
+    fn finish_status_404_is_typed_and_reads_like_before() {
+        let err = ApiClient::finish_status(
+            StatusCode::NOT_FOUND,
+            "player not found".to_string(),
+            "API PUT /api/player/p1",
+        )
+        .expect_err("404 must produce an error");
+
+        assert!(NokkviError::is_not_found(&err));
+        assert!(NokkviError::is_not_found(
+            &err.context("setting the player's API key")
+        ));
+        let err = ApiClient::finish_status(
+            StatusCode::NOT_FOUND,
+            "player not found".to_string(),
+            "API PUT /api/player/p1",
+        )
+        .expect_err("404 must produce an error");
+        assert_eq!(
+            format!("{err:#}"),
+            "API PUT /api/player/p1 failed with status 404 Not Found: player not found"
+        );
+        assert!(format!("{err:#}").contains("status 404"));
         assert!(!NokkviError::is_unauthorized_str(&format!("{err:#}")));
     }
 

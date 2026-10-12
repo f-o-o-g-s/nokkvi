@@ -954,11 +954,20 @@ impl Nokkvi {
 
     pub(crate) fn handle_settings_logout(&mut self) -> Task<Message> {
         tracing::info!(" [SETTINGS] Logout requested");
+        // An explicit logout revokes the session's API key on the server (a
+        // session that merely expires keeps it until the next login replaces
+        // it). The revoke takes the key-write lock right here, before the
+        // teardown, so a login started right after waits for it rather than
+        // having its fresh key revoked. Its result acts on nothing.
+        let revoke = self.app_service.as_ref().map_or_else(Task::none, |shell| {
+            Task::perform(shell.revoke_api_key(), |()| Message::NoOp)
+        });
         // Shared session teardown — see `Nokkvi::reset_session_state` in
         // `update/components.rs`. Logout is silent (user took the action,
         // no toast); the helper handles the engine-stop Task + redb
         // session clear + storage caching for re-login.
-        self.reset_session_state()
+        let teardown = self.reset_session_state();
+        Task::batch([revoke, teardown])
     }
 }
 

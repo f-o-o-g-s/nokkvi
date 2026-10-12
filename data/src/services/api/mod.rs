@@ -13,6 +13,7 @@ pub mod lyrics;
 pub(crate) mod pagination;
 pub(crate) mod parse;
 pub mod play_queue;
+pub mod players;
 pub mod playlists;
 pub mod radios;
 pub mod random;
@@ -24,3 +25,5 @@ pub mod sort;
 pub mod star;
 pub mod subsonic;
 pub mod tags;
+#[cfg(test)]
+pub(crate) mod test_server;
