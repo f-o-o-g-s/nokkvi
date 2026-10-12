@@ -189,24 +189,28 @@ pub enum LyricsLoaderMessage {
 }
 
 /// Waveform seek bar results, carried by `Message::Waveform` (see
-/// `update/waveform.rs`).
+/// `update/waveform.rs`). Each carries the number of the job that produced it
+/// (`WaveformState::started`), so a late result from a dropped job leaves a
+/// newer job alone.
 #[derive(Debug, Clone)]
 pub enum WaveformMessage {
-    /// A cache lookup finished: the song's envelope, or `None` when the cache
-    /// has none for its audio.
+    /// A cache lookup finished.
     Looked {
+        job: u64,
         song_id: String,
-        waveform: Option<std::sync::Arc<nokkvi_data::types::waveform::Waveform>>,
+        lookup: nokkvi_data::services::waveform::WaveformLookup,
     },
     /// A scan finished. `scanning` is whether the session still scans after
     /// it (a too-slow scan turns scanning off).
     Scanned {
+        job: u64,
         song_id: String,
         end: Result<nokkvi_data::services::waveform::ScanEnd, String>,
         scanning: bool,
     },
     /// The song after `for_current` in play order (`None` at the end).
     NextFound {
+        job: u64,
         for_current: String,
         next: Option<String>,
     },

@@ -1185,32 +1185,38 @@ impl AppService {
 // === Lyrics resolution ===
 impl AppService {
     /// The queue song `song_id`'s waveform envelope from the cache, when one
-    /// was worked out from the same audio. `None` for a song no longer in the
-    /// queue.
+    /// was worked out from the same audio.
     pub async fn cached_waveform(
         &self,
         song_id: &str,
-    ) -> Option<Arc<crate::types::waveform::Waveform>> {
-        let song = self.queue_song(song_id).await?;
+    ) -> crate::services::waveform::WaveformLookup {
+        use crate::services::waveform::{WaveformIdentity, WaveformLookup};
+        let Some(song) = self.queue_song(song_id).await else {
+            return WaveformLookup::NotInQueue;
+        };
         let (server_url, _) = self.auth_gateway.server_config().await;
-        self.waveforms
-            .cached(
-                &server_url,
-                &crate::services::waveform::WaveformIdentity::of(&song),
-            )
+        match self
+            .waveforms
+            .cached(&server_url, &WaveformIdentity::of(&song))
             .await
+        {
+            Some(waveform) => WaveformLookup::Cached(waveform),
+            None => WaveformLookup::NotCached,
+        }
     }
 
     /// Work the queue song `song_id`'s waveform envelope out from its stream
     /// (the URL playback uses) and cache it. `cancel` stops the scan; a song
-    /// that left the queue ends as cancelled.
+    /// that left the queue ends as [`ScanEnd::NotInQueue`].
+    ///
+    /// [`ScanEnd::NotInQueue`]: crate::services::waveform::ScanEnd::NotInQueue
     pub async fn scan_waveform(
         &self,
         song_id: &str,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<crate::services::waveform::ScanEnd> {
         let Some(song) = self.queue_song(song_id).await else {
-            return Ok(crate::services::waveform::ScanEnd::Cancelled);
+            return Ok(crate::services::waveform::ScanEnd::NotInQueue);
         };
         let session = self
             .queue_service

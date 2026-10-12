@@ -5,8 +5,9 @@
 //! `~/.cache/nokkvi/waveforms/` ([`cache`]). The scan ([`scan`]) requests the
 //! exact stream URL playback uses: with no transcoding on nokkvi's player the
 //! server sends the original file, and with one it serves the same transcode
-//! (and transcode cache entry) playback gets, so the scan adds no ffmpeg run
-//! and the envelope matches what is heard. A scan that runs too slowly stops
+//! playback gets, so the envelope matches what is heard. With Navidrome's
+//! transcode cache on (its default), the scan also reads the same cache
+//! entry, in progress or finished, so it starts no second ffmpeg run. A scan that runs too slowly stops
 //! scanning for the rest of the session, so a slow link never trades
 //! playback's buffering for a waveform.
 
@@ -21,7 +22,7 @@ use std::{
     },
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 pub use cache::WaveformIdentity;
 pub use scan::ScanEnd;
 use tokio_util::sync::CancellationToken;
@@ -34,6 +35,17 @@ use crate::types::waveform::Waveform;
 /// first) once it grows past this. ~2 KB a song: tens of thousands of songs.
 const CACHE_MAX_BYTES: u64 = 64 << 20;
 const CACHE_TARGET_BYTES: u64 = 48 << 20;
+
+/// What a cache lookup for a queue song found.
+#[derive(Debug, Clone)]
+pub enum WaveformLookup {
+    /// An envelope worked out from the same audio.
+    Cached(Arc<Waveform>),
+    /// No envelope for this audio yet: scan it.
+    NotCached,
+    /// The song left the queue, so its audio can't be identified.
+    NotInQueue,
+}
 
 /// Envelope lookups and scans for one session.
 #[derive(Debug)]
@@ -129,13 +141,20 @@ impl WaveformService {
         match &end {
             ScanEnd::Ready(waveform) => {
                 debug!(song = %id.song_id, took = ?started.elapsed(), "waveform scanned");
+                // A failed write costs a rescan on the next play, never the
+                // envelope this scan just worked out.
                 if let Some(root) = &self.root {
                     let cache = WaveformCache::for_server(root, server_url);
-                    let (id, waveform) = (id.clone(), Arc::clone(waveform));
-                    tokio::task::spawn_blocking(move || cache.store(&id, &waveform))
-                        .await
-                        .context("waveform cache write thread")?
-                        .context("cache the waveform")?;
+                    let (song, waveform) = (id.clone(), Arc::clone(waveform));
+                    match tokio::task::spawn_blocking(move || cache.store(&song, &waveform)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            warn!(song = %id.song_id, error = %format!("{e:#}"), "waveform cache write failed");
+                        }
+                        Err(e) => {
+                            warn!(song = %id.song_id, error = %e, "waveform cache write thread failed");
+                        }
+                    }
                 }
             }
             ScanEnd::TooSlow { speed } => {
@@ -155,7 +174,7 @@ impl WaveformService {
                     "waveform scan ended short of the song; not cached"
                 );
             }
-            ScanEnd::Cancelled => {}
+            ScanEnd::Cancelled | ScanEnd::NotInQueue => {}
         }
         Ok(end)
     }
@@ -190,6 +209,100 @@ mod tests {
                 .as_deref(),
             Some(&waveform)
         );
+    }
+
+    /// A mono 16-bit 8 kHz WAV: one quiet second, then one loud second.
+    fn wav(path: &std::path::Path) {
+        let rate: u32 = 8000;
+        let samples: Vec<i16> = (0..2 * rate)
+            .map(|i| {
+                let amp = if i < rate { 2000.0 } else { 24000.0 };
+                (amp * (i as f32 * 0.3).sin()) as i16
+            })
+            .collect();
+        let data_len = (samples.len() * 2) as u32;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        out.extend_from_slice(&1u16.to_le_bytes()); // mono
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        for s in samples {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        std::fs::write(path, out).unwrap();
+    }
+
+    fn wav_identity() -> WaveformIdentity {
+        WaveformIdentity {
+            song_id: "wav".into(),
+            size: 0,
+            duration_secs: 2,
+            suffix: "wav".into(),
+        }
+    }
+
+    /// The whole path the app takes — playback's decoder opening the source,
+    /// the fold, the cache write — on a real (local) file.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_song_scans_end_to_end_and_is_cached() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("song.wav");
+        wav(&file);
+        let service = WaveformService::with_root(tmp.path().join("cache"));
+        let end = service
+            .scan(
+                "http://server",
+                &wav_identity(),
+                file.to_str().unwrap(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let ScanEnd::Ready(waveform) = end else {
+            panic!("expected an envelope, got {end:?}");
+        };
+        let half = waveform.rms().len() / 2;
+        assert!(
+            waveform.rms()[half + 10] > waveform.rms()[10] * 4,
+            "loud half is louder"
+        );
+        assert_eq!(
+            service
+                .cached("http://server", &wav_identity())
+                .await
+                .as_deref(),
+            Some(&*waveform)
+        );
+    }
+
+    /// A cache that can't be written still hands the envelope to the bar.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_cache_write_keeps_the_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("song.wav");
+        wav(&file);
+        // A file where the cache directory should be: every write fails.
+        let blocked = tmp.path().join("blocked");
+        std::fs::write(&blocked, b"not a directory").unwrap();
+        let service = WaveformService::with_root(blocked);
+        let end = service
+            .scan(
+                "http://server",
+                &wav_identity(),
+                file.to_str().unwrap(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(end, ScanEnd::Ready(_)), "{end:?}");
     }
 
     #[tokio::test]

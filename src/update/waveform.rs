@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use iced::Task;
 use nokkvi_data::{
-    services::waveform::ScanEnd,
+    services::waveform::{ScanEnd, WaveformLookup},
     types::{player_settings::SeekbarStyle, waveform::Waveform},
 };
 use tracing::warn;
@@ -39,7 +39,10 @@ impl Nokkvi {
             None
         };
         self.waveform.follow(playing);
-        match self.waveform.plan(self.playback.position) {
+        match self
+            .waveform
+            .plan(self.playback.position, std::time::Instant::now())
+        {
             Some(job) => self.start_waveform_job(job),
             None => Task::none(),
         }
@@ -51,18 +54,22 @@ impl Nokkvi {
         };
         match &job {
             WaveformJob::Lookup(song_id) => {
-                self.waveform.started(&job, None);
+                let job = self.waveform.started(&job, None);
                 let (sid, song_id) = (song_id.clone(), song_id.clone());
                 self.shell_task(
                     move |shell| async move { shell.cached_waveform(&sid).await },
-                    move |waveform| {
-                        Message::Waveform(WaveformMessage::Looked { song_id, waveform })
+                    move |lookup| {
+                        Message::Waveform(WaveformMessage::Looked {
+                            job,
+                            song_id,
+                            lookup,
+                        })
                     },
                 )
             }
             WaveformJob::Scan(song_id) => {
                 let cancel = shell.task_manager().child_token();
-                self.waveform.started(&job, Some(cancel.clone()));
+                let job = self.waveform.started(&job, Some(cancel.clone()));
                 let (sid, song_id) = (song_id.clone(), song_id.clone());
                 self.shell_task(
                     move |shell| async move {
@@ -74,6 +81,7 @@ impl Nokkvi {
                     },
                     move |(end, scanning)| {
                         Message::Waveform(WaveformMessage::Scanned {
+                            job,
                             song_id,
                             end,
                             scanning,
@@ -85,10 +93,16 @@ impl Nokkvi {
                 let Some(for_current) = self.waveform.current.clone() else {
                     return Task::none();
                 };
-                self.waveform.started(&job, None);
+                let job = self.waveform.started(&job, None);
                 self.shell_task(
                     move |shell| async move { shell.next_song_id_in_play_order().await },
-                    move |next| Message::Waveform(WaveformMessage::NextFound { for_current, next }),
+                    move |next| {
+                        Message::Waveform(WaveformMessage::NextFound {
+                            job,
+                            for_current,
+                            next,
+                        })
+                    },
                 )
             }
         }
@@ -97,21 +111,27 @@ impl Nokkvi {
     pub(crate) fn handle_waveform(&mut self, message: WaveformMessage) -> Task<Message> {
         let state = &mut self.waveform;
         match message {
-            WaveformMessage::Looked { song_id, waveform } => {
-                state.finished(Some(&song_id));
-                match waveform {
-                    Some(waveform) => state.place(&song_id, waveform),
-                    None => {
+            WaveformMessage::Looked {
+                job,
+                song_id,
+                lookup,
+            } => {
+                state.finished(job);
+                match lookup {
+                    WaveformLookup::Cached(waveform) => state.place(&song_id, waveform),
+                    WaveformLookup::NotCached => {
                         state.not_cached.insert(song_id);
                     }
+                    WaveformLookup::NotInQueue => state.song_gone(song_id),
                 }
             }
             WaveformMessage::Scanned {
+                job,
                 song_id,
                 end,
                 scanning,
             } => {
-                state.finished(Some(&song_id));
+                state.finished(job);
                 state.scans_off = !scanning;
                 match end {
                     Ok(ScanEnd::Ready(waveform)) => {
@@ -119,6 +139,7 @@ impl Nokkvi {
                         state.place(&song_id, waveform);
                     }
                     Ok(ScanEnd::Cancelled) => {}
+                    Ok(ScanEnd::NotInQueue) => state.song_gone(song_id),
                     Ok(ScanEnd::Truncated { .. } | ScanEnd::TooSlow { .. }) => {
                         state.gave_up.insert(song_id);
                     }
@@ -130,12 +151,13 @@ impl Nokkvi {
                     }
                 }
             }
-            WaveformMessage::NextFound { for_current, next } => {
-                state.finished(None);
-                if state.current.as_deref() == Some(for_current.as_str()) {
-                    state.next_for = Some(for_current);
-                    state.next = next;
-                }
+            WaveformMessage::NextFound {
+                job,
+                for_current,
+                next,
+            } => {
+                state.finished(job);
+                state.next_found(for_current, next, std::time::Instant::now());
             }
         }
         Task::none()

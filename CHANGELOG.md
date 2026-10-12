@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Releasing a seek bar drag after the song changed to one that can't seek no longer seeks a later song.
 - Saving a different Last.fm API key now disconnects the old Last.fm login instead of still showing it as connected.
 - When Last.fm rejects the saved login during radio scrobbling, nokkvi now disconnects it and warns you to reconnect.
 - The Scrobble Radio setting's description now mentions Last.fm, which it also scrobbles to.

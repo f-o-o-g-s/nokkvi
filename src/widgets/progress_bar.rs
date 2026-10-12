@@ -24,7 +24,10 @@
 //! its own layer and the seek tooltip through `overlay()`, so both sit above
 //! neighboring widgets.
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, Weak},
+    time::Instant,
+};
 
 use iced::{
     Color, Event, Length, Pixels, Point, Rectangle, Shadow, Size, Theme, Vector,
@@ -51,16 +54,19 @@ pub(crate) struct State {
     hover: Option<f32>,
     /// Measured widths of the times drawn beside the track.
     caps: CapWidths,
-    /// When the shown waveform first drew (its `Arc` address + the moment),
-    /// for the fade-in.
-    waveform_since: Option<(usize, Instant)>,
+    /// The waveform that last started fading in, and when. Held as a `Weak`
+    /// so the allocation (and its address) can't be reused by the next song's
+    /// envelope while the comparison still refers to it.
+    waveform_since: Option<(Weak<Waveform>, Instant)>,
 }
 
-/// Widths of the left / right times beside the track, keyed by the strings
-/// they were measured from so layout only re-shapes text when those change.
+/// Widths of the left / right times beside the track, keyed by the templates
+/// and the font they were measured with, so layout only re-shapes text when
+/// one of those changes (the font picker changes the font live).
 #[derive(Debug, Clone, Default)]
 struct CapWidths {
     key: (String, String),
+    font: Option<iced::Font>,
     left: f32,
     right: f32,
 }
@@ -308,12 +314,14 @@ impl<'a, Message> ProgressBar<'a, Message> {
             None => padded_digit_template(&right.full),
         };
         let key = (left_key, right_key);
-        if caps.key == key {
+        let font = crate::theme::ui_font();
+        if caps.key == key && caps.font == Some(font) {
             return;
         }
         caps.left = cap_text_width(&key.0);
         caps.right = cap_text_width(&key.1);
         caps.key = key;
+        caps.font = Some(font);
     }
 }
 
@@ -507,15 +515,14 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         if self.drawn_style() == SeekbarStyle::Waveform
             && let Some(waveform) = &self.waveform
         {
-            let key = Arc::as_ptr(waveform) as usize;
-            match state.waveform_since {
-                Some((seen, since)) if seen == key => {
+            match &state.waveform_since {
+                Some((seen, since)) if Weak::ptr_eq(seen, &Arc::downgrade(waveform)) => {
                     if since.elapsed().as_secs_f32() < WAVE_FADE_SECS {
                         shell.request_redraw();
                     }
                 }
                 _ => {
-                    state.waveform_since = Some((key, Instant::now()));
+                    state.waveform_since = Some((Arc::downgrade(waveform), Instant::now()));
                     shell.request_redraw();
                 }
             }
@@ -524,7 +531,13 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         // Non-seekable streams (radio) disable all interaction. Note this is
         // decoupled from `hide_handle`: a handle-less bar stays seekable.
         if !self.interactive {
-            if state.hover.take().is_some() {
+            // A drag in progress when the bar turned non-seekable (the queue
+            // moved on to a live transcode mid-drag) ends here, unpublished:
+            // otherwise the release goes unseen and the next release anywhere
+            // seeks the next song to a stale point.
+            let had_hover = state.hover.take().is_some();
+            let was_dragging = std::mem::take(&mut state.is_dragging);
+            if had_hover || was_dragging {
                 shell.request_redraw();
             }
             return;
@@ -655,7 +668,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             SeekbarStyle::Capsule => self.draw_capsule(renderer, track, progress, hover),
             SeekbarStyle::Cells => draw_cells(renderer, track, progress, hover),
             SeekbarStyle::Waveform => {
-                let fade = state.waveform_since.map_or(1.0, |(_, since)| {
+                let fade = state.waveform_since.as_ref().map_or(1.0, |(_, since)| {
                     (since.elapsed().as_secs_f32() / WAVE_FADE_SECS).min(1.0)
                 });
                 if fade < 1.0 {
@@ -911,7 +924,10 @@ impl<Message> ProgressBar<'_, Message> {
         }
 
         // Hover marker: ink that contrasts with whichever side it lands on.
-        if let Some(h) = hover {
+        // Skipped on a block too narrow to hold it (the clamp below needs it).
+        if let Some(h) = hover
+            && track.width >= HOVER_MARKER_WIDTH
+        {
             let x = track.x + h * track.width;
             let ink = if x < track.x + fill_width {
                 crate::theme::on_accent_fill()
@@ -1358,6 +1374,7 @@ mod tests {
             .time_labels(CapLabel::time_only("0:00"), CapLabel::time_only("1:40"));
         let caps = CapWidths {
             key: Default::default(),
+            font: None,
             left: 30.0,
             right: 30.0,
         };

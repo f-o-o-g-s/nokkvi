@@ -9,6 +9,7 @@
 use std::{
     io::Write as _,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
 
@@ -91,7 +92,14 @@ impl WaveformCache {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("create {}", self.dir.display()))?;
         let path = self.path(&id.song_id);
-        let tmp = path.with_extension("wf.tmp");
+        // A name no other writer shares: two scans of one song (a cancelled
+        // one still finishing, say) must not rename each other's file away.
+        static WRITES: AtomicU64 = AtomicU64::new(0);
+        let tmp = path.with_extension(format!(
+            "wf.{}.{}.tmp",
+            std::process::id(),
+            WRITES.fetch_add(1, Ordering::Relaxed)
+        ));
         let mut file =
             std::fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
         file.write_all(&encode(id, waveform))

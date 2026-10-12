@@ -27,10 +27,12 @@ const READ_BYTES: usize = 256 * 1024;
 /// probe don't count against it.
 const SPEED_GRACE_SECS: f64 = 3.0;
 
-/// Slowest acceptable scan, in seconds of audio per second of wall time.
-/// Slower means a link (or CPU) where a full-speed second download would
-/// crowd playback's own buffering, so the session stops scanning.
-const MIN_SPEED: f64 = 16.0;
+/// Slowest acceptable scan, in seconds of audio per second of wall time —
+/// that is, how many times the stream's own bitrate the link delivers. Under
+/// 4x, a full-speed second download would leave playback too little of the
+/// link (TCP splits it roughly evenly), so the session stops scanning. Hi-res
+/// (24/192 FLAC, ~9 Mbps) still clears it on a 100 Mbps link.
+const MIN_SPEED: f64 = 4.0;
 
 /// How far short of the expected length a finished scan may end and still
 /// count as whole: 2 % of the length, at least 2 s (metadata lengths are
@@ -48,6 +50,8 @@ pub enum ScanEnd {
     Truncated { decoded_ms: u64, expected_ms: u64 },
     /// The scan ran slower than [`MIN_SPEED`].
     TooSlow { speed: f64 },
+    /// The song left the queue before its scan could start.
+    NotInQueue,
 }
 
 /// One read from a PCM source.

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use nokkvi_data::{
-    services::waveform::ScanEnd,
+    services::waveform::{ScanEnd, WaveformLookup},
     types::{
         player_settings::{SeekbarStyle, TrackInfoDisplay},
         waveform::Waveform,
@@ -85,8 +85,9 @@ fn a_cached_envelope_reaches_the_bar_for_the_playing_song() {
     send(
         &mut app,
         WaveformMessage::Looked {
+            job: 0,
             song_id: "a".into(),
-            waveform: Some(wf()),
+            lookup: WaveformLookup::Cached(wf()),
         },
     );
     assert!(app.waveform_for_bar().is_some());
@@ -103,11 +104,33 @@ fn a_cache_miss_is_remembered_so_the_scan_comes_next() {
     send(
         &mut app,
         WaveformMessage::Looked {
+            job: 0,
             song_id: "a".into(),
-            waveform: None,
+            lookup: WaveformLookup::NotCached,
         },
     );
     assert!(app.waveform.not_cached.contains("a"));
+}
+
+/// A song that left the queue (cleared, removed while playing) is settled
+/// for this play instead of being looked up again every tick.
+#[test]
+fn a_song_that_left_the_queue_is_settled_for_this_play() {
+    let mut app = playing("a");
+    app.waveform.follow(Some("a"));
+    send(
+        &mut app,
+        WaveformMessage::Looked {
+            job: 0,
+            song_id: "a".into(),
+            lookup: WaveformLookup::NotInQueue,
+        },
+    );
+    assert!(app.waveform.gave_up.contains("a"));
+    assert_ne!(
+        app.waveform.plan(60, std::time::Instant::now()),
+        Some(crate::state::WaveformJob::Lookup("a".into()))
+    );
 }
 
 #[test]
@@ -118,6 +141,7 @@ fn a_scanned_envelope_is_shown_and_no_longer_counts_as_uncached() {
     send(
         &mut app,
         WaveformMessage::Scanned {
+            job: 0,
             song_id: "a".into(),
             end: Ok(ScanEnd::Ready(wf())),
             scanning: true,
@@ -134,6 +158,7 @@ fn a_too_slow_scan_turns_scanning_off_for_the_session() {
     send(
         &mut app,
         WaveformMessage::Scanned {
+            job: 0,
             song_id: "a".into(),
             end: Ok(ScanEnd::TooSlow { speed: 3.0 }),
             scanning: false,
@@ -150,6 +175,7 @@ fn a_failed_or_short_scan_gives_up_for_this_play_only() {
     send(
         &mut app,
         WaveformMessage::Scanned {
+            job: 0,
             song_id: "a".into(),
             end: Err("connection reset".into()),
             scanning: true,
@@ -168,6 +194,7 @@ fn a_next_song_answer_for_a_song_no_longer_playing_is_ignored() {
     send(
         &mut app,
         WaveformMessage::NextFound {
+            job: 0,
             for_current: "a".into(),
             next: Some("c".into()),
         },
@@ -176,6 +203,7 @@ fn a_next_song_answer_for_a_song_no_longer_playing_is_ignored() {
     send(
         &mut app,
         WaveformMessage::NextFound {
+            job: 0,
             for_current: "b".into(),
             next: Some("c".into()),
         },
