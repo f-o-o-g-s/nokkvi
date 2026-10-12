@@ -26,13 +26,13 @@ const BASE_PLAYER_BAR_HEIGHT: f32 = 72.0;
 /// 1 px separator line (theme `border()`) framing the MiniPlayer capsule scrub
 /// on its top and bottom edges, matching the app's divider language.
 const SCRUB_SEPARATOR_HEIGHT: f32 = 1.0;
-/// MiniPlayer bar height — a connected "capsule" progress scrub (with elapsed /
-/// duration end-caps) rides the top as its own row, framed by a 1 px separator
-/// above and below, directly over the content row (sized to the artwork). The
-/// capsule is a real layout row, so the bar is taller than the base.
-/// `sep + capsule + sep + artwork`.
+/// MiniPlayer bar height — a full-width seek scrub (with elapsed / duration
+/// end-caps) rides the top as its own row, framed by a 1 px separator above and
+/// below, directly over the content row (sized to the artwork). The scrub is a
+/// real layout row, so the bar is taller than the base.
+/// `sep + scrub + sep + artwork`.
 const MINI_PLAYER_BAR_HEIGHT: f32 =
-    2.0 * SCRUB_SEPARATOR_HEIGHT + CAPSULE_SCRUB_HEIGHT + MINI_PLAYER_ARTWORK_SIZE;
+    2.0 * SCRUB_SEPARATOR_HEIGHT + MINI_SCRUB_HEIGHT + MINI_PLAYER_ARTWORK_SIZE;
 const CONTROL_ROW_HEIGHT: f32 = 44.0;
 /// Transport button (prev/play/pause/stop/next) — 40×40, borderless flat icon.
 const TRANSPORT_SIZE: f32 = 40.0;
@@ -43,10 +43,13 @@ const MODE_BUTTON_HEIGHT: f32 = 44.0;
 /// Re-uses the canonical constant from `track_info_strip.rs` to avoid drift.
 use super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR as INFO_STRIP_WITH_SEPARATOR;
 
-/// Height of the MiniPlayer "capsule" seek scrub — a full-width connected
-/// progress bar across the top of the bar, with elapsed/duration time end-caps
-/// butted against the track so they read as one continuous progress element.
-const CAPSULE_SCRUB_HEIGHT: f32 = 20.0;
+/// Height of the MiniPlayer seek scrub row — a full-width progress bar across
+/// the top of the bar, its elapsed / duration end-caps inside a Capsule and
+/// beside the track for the other styles.
+const MINI_SCRUB_HEIGHT: f32 = 20.0;
+/// Height of a Capsule seek bar in the other strip modes' control row, where
+/// it takes the place of the track and its two outside time labels.
+const CAPSULE_SEEK_HEIGHT: f32 = 22.0;
 /// Height of the vertical divider between the volume utility and the transports
 /// in the MiniPlayer right cluster.
 const MINI_DIVIDER_HEIGHT: f32 = 24.0;
@@ -132,6 +135,12 @@ const MINI_PLAYER_INNER_GAP: f32 = 8.0;
 /// column is `Length::Fill` and each line ellipsizes (no marquee), so above this
 /// width it simply fills the available room — see [`show_mini_player_section`].
 const MINI_PLAYER_MIN_METADATA_WIDTH: f32 = MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + 50.0;
+/// The same floor with the cover hidden (Visible Controls → Artwork off): the
+/// text inset plus the legible slice.
+const MINI_PLAYER_MIN_TEXT_ONLY_WIDTH: f32 = MINI_PLAYER_TEXT_INSET + 50.0;
+/// Left inset of the metadata text when the cover is hidden, matching the
+/// scrub's left time label above it so the two columns line up.
+const MINI_PLAYER_TEXT_INSET: f32 = super::progress_bar::CAP_PAD;
 
 /// Minimum width the metadata section + right cluster need to coexist in the
 /// COMPACT MiniPlayer regime, for the given layout. The capsule seek scrub is a
@@ -175,7 +184,12 @@ fn mini_player_min_width(width: f32, layout: PlayerBarLayout) -> f32 {
     } else {
         2.0 * 6.0
     };
-    MINI_PLAYER_MIN_METADATA_WIDTH + cluster + gaps + horizontal_padding
+    let metadata_w = if theme::mini_player_show_artwork() {
+        MINI_PLAYER_MIN_METADATA_WIDTH
+    } else {
+        MINI_PLAYER_MIN_TEXT_ONLY_WIDTH
+    };
+    metadata_w + cluster + gaps + horizontal_padding
 }
 
 /// Whether the mini-player left-of-cluster section should render for the active
@@ -779,6 +793,10 @@ pub(crate) struct PlayerBarViewData {
     /// to mini). Rendered as the leading thumbnail in `MiniPlayer`
     /// mode; ignored in other modes.
     pub artwork_handle: Option<iced::widget::image::Handle>,
+    /// The playing song's envelope for the Waveform seek bar style. `None`
+    /// until it has been worked out, and always for radio; the bar draws the
+    /// Line look meanwhile.
+    pub waveform: Option<std::sync::Arc<nokkvi_data::types::waveform::Waveform>>,
     /// Whether the player-bar hamburger menu is currently open (controlled state).
     pub hamburger_open: bool,
     /// Whether the player-bar kebab "modes" menu is currently open
@@ -1262,10 +1280,18 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
     .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
     .align_y(Alignment::Center);
 
-    let inner = row![artwork, text_column]
-        .spacing(MINI_PLAYER_INNER_GAP)
-        .width(Length::Fill)
-        .align_y(Alignment::Center);
+    // Visible Controls → Artwork off drops the cover; the text then starts at
+    // the scrub's left time label instead of the bar's hard left edge.
+    let inner = if theme::mini_player_show_artwork() {
+        row![artwork, text_column].spacing(MINI_PLAYER_INNER_GAP)
+    } else {
+        row![text_column].padding(iced::Padding {
+            left: MINI_PLAYER_TEXT_INSET,
+            ..iced::Padding::ZERO
+        })
+    }
+    .width(Length::Fill)
+    .align_y(Alignment::Center);
 
     mouse_area(inner)
         .on_press(PlayerBarMessage::StripClicked)
@@ -1369,42 +1395,60 @@ pub(crate) fn player_bar<'a>(
         )
     };
 
-    // The inline progress row (with time end-caps + drag handle) used by every
-    // mode EXCEPT MiniPlayer. MiniPlayer instead floats a bare seek scrub as a
-    // top-edge overlay (built in the assembly below). Radio and a live
+    // The inline progress row used by every mode EXCEPT MiniPlayer, in the
+    // normal bar's Seekbar Style. MiniPlayer instead runs a full-width scrub
+    // row across the top (built in the assembly below). Radio and a live
     // transcode are non-seekable, so they hide the handle and disable
     // interaction.
     use nokkvi_data::types::player_settings::TrackInfoDisplay;
     let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
 
-    let custom_progress_bar =
-        widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
-            .is_playing(data.playback_playing && !data.playback_paused)
-            .hide_handle(!data.seekable)
-            .interactive(data.seekable)
-            .width(Length::Fill)
-            .height(24.0);
+    let bar_style = theme::seekbar_style();
+    let seek_bar = widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
+        .style(bar_style)
+        .waveform(data.waveform.clone())
+        .is_playing(data.playback_playing && !data.playback_paused)
+        .hide_handle(!data.seekable)
+        .interactive(data.seekable)
+        .width(Length::Fill);
 
-    let progress_row = row![
-        text(pos_str.clone())
-            .size(11.0)
-            .font(theme::ui_font())
-            .color(theme::fg4())
-            .width(Length::Fixed(40.0))
-            .align_x(Alignment::End)
-            .align_y(Alignment::Center),
-        custom_progress_bar,
-        text(dur_str.clone())
-            .size(11.0)
-            .font(theme::ui_font())
-            .color(theme::fg4())
-            .width(Length::Fixed(40.0))
-            .align_y(Alignment::Center),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center)
-    .height(Length::Fixed(CONTROL_ROW_HEIGHT))
-    .width(Length::Fill);
+    let progress_row: Element<'_, PlayerBarMessage> = if bar_style.times_inside() {
+        // Capsule: the times ride inside the block, so it takes the whole row.
+        container(
+            seek_bar
+                .time_labels(
+                    CapLabel::time_only(pos_str.clone()),
+                    CapLabel::time_only(dur_str.clone()),
+                )
+                .height(CAPSULE_SEEK_HEIGHT),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(CONTROL_ROW_HEIGHT))
+        .center_y(Length::Fill)
+        .boxed()
+    } else {
+        row![
+            text(pos_str.clone())
+                .size(11.0)
+                .font(theme::ui_font())
+                .color(theme::fg4())
+                .width(Length::Fixed(40.0))
+                .align_x(Alignment::End)
+                .align_y(Alignment::Center),
+            seek_bar.height(24.0),
+            text(dur_str.clone())
+                .size(11.0)
+                .font(theme::ui_font())
+                .color(theme::fg4())
+                .width(Length::Fixed(40.0))
+                .align_y(Alignment::Center),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .height(Length::Fixed(CONTROL_ROW_HEIGHT))
+        .width(Length::Fill)
+        .boxed()
+    };
 
     let sound_effects_enabled = data.sound_effects_enabled;
     let sfx_volume = data.sfx_volume;
@@ -1580,20 +1624,21 @@ pub(crate) fn player_bar<'a>(
 
     let main_content: Element<'_, PlayerBarMessage> = if is_mini_player_mode {
         // --- MINIPLAYER MODE ---
-        // A capsule seek scrub rides the top (full-width filled progress bar with
-        // color-aware elapsed/duration + dimmed codec/bitrate end-caps, no handle
-        // — click/drag still seeks), framed by 1 px separators, directly above a
-        // content row whose SHAPE depends on the width-driven regime flag
-        // `data.layout.wide_for_three_section`:
+        // A full-width seek scrub rides the top in the mini player's Seekbar
+        // Style (the Capsule by default: a filled block with color-aware
+        // elapsed/duration + dimmed codec/bitrate end-caps inside; the other
+        // styles put those end-caps beside the track), framed by 1 px
+        // separators, directly above a content row whose SHAPE depends on the
+        // width-driven regime flag `data.layout.wide_for_three_section`:
         //   WIDE    — three-section [ metadata (Fill, Start) | transports
         //             (CENTER) | modes + volume (Fill, End) ] with the modes
         //             EXPANDED and width-culling individually like the normal bar.
         //   COMPACT — the single trailing cluster [ metadata (or Space) |
         //             transports | divider | volume | kebab ] with every mode
         //             folded into one kebab (the Gelly compact bar).
-        // Both subtrees feed the SAME outer column so the capsule's drag state +
-        // seek tooltip survive a mid-drag regime flip. The capsule's end-caps
-        // tuck the codec + bitrate inside (e.g. `3:40 · FLAC 44.1kHz` /
+        // Both subtrees feed the SAME outer column so the scrub's drag state +
+        // seek tooltip survive a mid-drag regime flip. The end-caps tuck the
+        // codec + bitrate in beside the times (e.g. `3:40 · FLAC 44.1kHz` /
         // `1411kbps · 8:00`) for parity with the other strip modes — see
         // `capsule_scrub_labels`.
         let (cap_left, cap_right) = capsule_scrub_labels(
@@ -1606,17 +1651,16 @@ pub(crate) fn player_bar<'a>(
             data.bit_perfect_status,
             data.bit_perfect_holder.as_deref(),
         );
-        let capscrub =
-            widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
-                .is_playing(data.playback_playing && !data.playback_paused)
-                // filled (capsule) mode is inherently handle-less; no need to
-                // also pass hide_handle. Radio and a live transcode are
-                // non-seekable.
-                .filled(true)
-                .time_labels(cap_left, cap_right)
-                .interactive(data.seekable)
-                .width(Length::Fill)
-                .height(CAPSULE_SCRUB_HEIGHT);
+        let scrub = widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
+            .style(theme::mini_player_seekbar_style())
+            .waveform(data.waveform.clone())
+            .is_playing(data.playback_playing && !data.playback_paused)
+            .time_labels(cap_left, cap_right)
+            // Radio and a live transcode are non-seekable.
+            .hide_handle(!data.seekable)
+            .interactive(data.seekable)
+            .width(Length::Fill)
+            .height(MINI_SCRUB_HEIGHT);
 
         // Transports are shared by both regimes: a raw container with NO width
         // wrapper so it sizes to its content. In the WIDE regime the two equal
@@ -1721,11 +1765,11 @@ pub(crate) fn player_bar<'a>(
         }
         main_row = main_row.height(Length::Fill);
 
-        // 1 px separator lines framing the capsule scrub top and bottom, in the
-        // app's divider color — matching the separator language elsewhere.
+        // 1 px separator lines framing the scrub top and bottom, in the app's
+        // divider color — matching the separator language elsewhere.
         let scrub_separator = || hairline(Length::Fill, Length::Fixed(SCRUB_SEPARATOR_HEIGHT));
 
-        column![scrub_separator(), capscrub, scrub_separator(), main_row]
+        column![scrub_separator(), scrub, scrub_separator(), main_row]
             .width(Length::Fill)
             .height(Length::Fill)
             .boxed()
@@ -1742,7 +1786,7 @@ pub(crate) fn player_bar<'a>(
         let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
         main_row = main_row
             .push(transports_section)
-            .push(progress_row.boxed())
+            .push(progress_row)
             .push(mode_toggles)
             .push(volume_control);
         let controls = container(main_row)
@@ -1764,7 +1808,7 @@ pub(crate) fn player_bar<'a>(
         let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
         main_row
             .push(transports_section)
-            .push(progress_row.boxed())
+            .push(progress_row)
             .push(mode_toggles)
             .push(volume_control)
             .boxed()
@@ -1772,8 +1816,8 @@ pub(crate) fn player_bar<'a>(
 
     // Bar body. Non-mini modes draw a 1 px top separator (the chrome divider
     // between the page content and the bar) over the centered content row.
-    // MiniPlayer drops the separator — its capsule scrub already caps the top
-    // edge — and lets its `column![capscrub, content_row]` fill the bar.
+    // MiniPlayer drops the separator — its seek scrub already caps the top
+    // edge — and lets its `column![scrub, content_row]` fill the bar.
     let bar_body: Element<'_, PlayerBarMessage> = if is_mini_player_mode {
         container(main_content)
             .width(Length::Fill)
@@ -2534,6 +2578,7 @@ mod mode_descriptor_tests {
             bit_perfect_holder: None,
             radio_name: None,
             artwork_handle: None,
+            waveform: None,
             hamburger_open: false,
             player_modes_open: false,
         }

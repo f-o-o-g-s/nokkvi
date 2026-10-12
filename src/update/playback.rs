@@ -2642,6 +2642,11 @@ impl Nokkvi {
         // Apply mini-player per-control visibility from persisted settings
         crate::theme::set_mini_player_show_volume(settings.mini_player_show_volume);
         crate::theme::set_mini_player_show_modes(settings.mini_player_show_modes);
+        crate::theme::set_mini_player_show_artwork(settings.mini_player_show_artwork);
+
+        // Apply the two seek bar looks (normal bar, mini player)
+        crate::theme::set_seekbar_style(settings.seekbar_style);
+        crate::theme::set_mini_player_seekbar_style(settings.mini_player_seekbar_style);
 
         // Apply font family from persisted settings
         crate::theme::set_font_family(settings.font_family.clone());

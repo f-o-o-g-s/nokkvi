@@ -624,6 +624,7 @@ mod tests {
                 "general.scrollbar_visibility",
                 "general.autohide_toolbar",
                 "general.horizontal_volume",
+                "general.seekbar_style",
                 "font_family",
                 "general.icon_set",
                 "general.track_info_display",

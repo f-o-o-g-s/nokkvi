@@ -208,6 +208,15 @@ keyword_table! {
         "general.nav_display_mode" => &["labels", "glyphs", "tab style"],
         "general.slot_row_height" => &["compact", "spacing", "list density"],
         "general.horizontal_volume" => &["volume layout", "slider orientation"],
+        "general.seekbar_style" | "general.mini_player_seekbar_style" => &[
+            "progress bar",
+            "scrub",
+            "seek",
+            "timeline",
+            "waveform",
+            "handle",
+            "thumb",
+        ],
         "general.autohide_toolbar" => &["collapse toolbar", "hide search bar", "hide sort bar"],
         "general.autohide_collapsed_appearance" => {
             &["hairline", "strip", "collapsed toolbar", "sliver"]
@@ -218,7 +227,7 @@ keyword_table! {
         "general.icon_set" => &["phosphor", "lucide", "glyphs", "symbols", "iconography"],
         "general.track_info_display" => &["now playing", "song info", "metadata"],
         "__toggle_mini_player_controls" => {
-            &["mini player", "transport", "buttons", "volume", "shuffle repeat"]
+            &["mini player", "transport", "buttons", "volume", "shuffle repeat", "artwork", "cover"]
         },
         // Salvaged from `general.strip_show_format_info`, which is a field
         // INSIDE this ToggleSet — search only ever sees the parent row's key.

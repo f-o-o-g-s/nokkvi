@@ -201,6 +201,15 @@ pub(super) fn blend_toward(base: Color, target: Color, factor: f32) -> Color {
     }
 }
 
+/// Blend `color` toward the theme's brightest foreground (`fg0()`) by
+/// `factor`: lighter on a dark palette, darker on a light one, so a highlight
+/// built from it stands apart from `color` in both modes (the seek bar's
+/// playhead cell and hovered played range).
+#[inline]
+pub(crate) fn toward_foreground(color: Color, factor: f32) -> Color {
+    blend_toward(color, fg0(), factor)
+}
+
 /// Darken a color by blending it toward black.
 #[inline]
 pub(crate) fn darken(color: Color, amount: f32) -> Color {

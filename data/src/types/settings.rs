@@ -9,8 +9,8 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
             NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay,
-            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator, TheaterControls,
+            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
             deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
             deserialize_verbose_config_with_bool_compat,
         },
@@ -261,6 +261,17 @@ crate::player_settings_schema! {
     /// Only affects `TrackInfoDisplay::MiniPlayer`.
     #[serde(default = "default_true")]
     same mini_player_show_modes: bool = true,
+    /// Whether the mini-player bar shows the cover beside the title (default:
+    /// true). Only affects `TrackInfoDisplay::MiniPlayer`.
+    #[serde(default = "default_true")]
+    same mini_player_show_artwork: bool = true,
+    /// How the seek bar is drawn in every strip mode except MiniPlayer
+    /// (default: Classic, the handle bar).
+    #[serde(default)]
+    same seekbar_style: SeekbarStyle = SeekbarStyle::default(),
+    /// How the mini player's seek bar is drawn (default: Capsule).
+    #[serde(default = "default_mini_player_seekbar_style")]
+    same mini_player_seekbar_style: SeekbarStyle = SeekbarStyle::MINI_PLAYER_DEFAULT,
     /// Font family override (default: empty = system default sans-serif)
     #[serde(default)]
     same font_family: String = String::new(),
@@ -549,6 +560,9 @@ fn default_eq_gains() -> [f32; EQ_BAND_COUNT] {
     [0.0; EQ_BAND_COUNT]
 }
 
+fn default_mini_player_seekbar_style() -> SeekbarStyle {
+    SeekbarStyle::MINI_PLAYER_DEFAULT
+}
 fn default_volume() -> f64 {
     1.0
 }

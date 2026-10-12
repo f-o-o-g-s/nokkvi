@@ -52,6 +52,7 @@ pub mod trawl;
 pub mod view_columns;
 pub mod view_preferences;
 pub mod visualizer_config;
+pub mod waveform;
 pub mod wire_enum;
 
 pub use accessors::{HasId, Named};

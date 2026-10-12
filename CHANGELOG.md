@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A new Player Bar setting, Seekbar Style, draws the seek bar as Classic, Line, Capsule, Cells or Waveform.
+- The mini player keeps its own Seekbar Style, so it stays on the Capsule while the other modes keep the handle bar.
+- Hovering the Line, Capsule, Cells or Waveform seek bar shows the time under the cursor.
+- The mini player's Visible Controls can now hide the cover art.
+
 ### Changed
 
 ### Fixed

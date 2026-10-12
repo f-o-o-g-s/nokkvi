@@ -14,9 +14,10 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
             NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay, VerboseConfig,
-            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
+            SeekbarStyle, SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay,
+            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            deserialize_verbose_config_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -134,6 +135,11 @@ pub struct TomlSettings {
     pub autohide_collapsed_appearance: CollapsedAppearance,
     pub mini_player_show_volume: bool,
     pub mini_player_show_modes: bool,
+    pub mini_player_show_artwork: bool,
+    /// Seek bar look for every strip mode except MiniPlayer (default Classic).
+    pub seekbar_style: SeekbarStyle,
+    /// Seek bar look in MiniPlayer mode (default Capsule).
+    pub mini_player_seekbar_style: SeekbarStyle,
     /// Font family override. Empty = system default sans-serif.
     #[serde(default)]
     pub font_family: String,
@@ -367,6 +373,9 @@ impl Default for TomlSettings {
             autohide_collapsed_appearance: CollapsedAppearance::CountStrip,
             mini_player_show_volume: true,
             mini_player_show_modes: true,
+            mini_player_show_artwork: true,
+            seekbar_style: SeekbarStyle::default(),
+            mini_player_seekbar_style: SeekbarStyle::MINI_PLAYER_DEFAULT,
             font_family: String::new(),
             strip_show_title: true,
             strip_show_artist: true,

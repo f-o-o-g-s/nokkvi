@@ -18,12 +18,20 @@ use crate::{
             ARTWORK_VERTICAL_HEIGHT_PCT_MIN, AUTOHIDE_TOOLBAR_HEIGHT_MAX,
             AUTOHIDE_TOOLBAR_HEIGHT_MIN, ArtworkColumnMode, ArtworkCover, ArtworkStretchFit,
             CollapsedAppearance, IconSet, NavDisplayMode, NavLayout, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay,
+            SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator, TheaterControls,
+            TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
     },
 };
+
+/// The two Seekbar Style rows (normal bar, mini player) share their choices
+/// and copy, so the row reads the same whichever bar it is editing.
+const SEEKBAR_STYLE_OPTIONS: &[&str] = &["Classic", "Line", "Capsule", "Cells", "Waveform"];
+const SEEKBAR_STYLE_SUBTITLE: &str = "Classic: a track with a drag handle · Line: a thin track \
+     that shows its handle under the cursor · Capsule: a solid block with the times inside · \
+     Cells: a row of blocks · Waveform: the song's shape, worked out once per song";
 
 define_settings! {
     tab: Tab::Interface,
@@ -253,6 +261,50 @@ define_settings! {
             toml_apply: |ts, p| p.mini_player_show_modes = ts.mini_player_show_modes,
             read: |src, out| out.mini_player_show_modes = src.mini_player_show_modes,
             write: |ps, ts| ts.mini_player_show_modes = ps.mini_player_show_modes,
+        },
+        MiniPlayerShowArtwork {
+            key: "general.mini_player_show_artwork",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_mini_player_show_artwork(v),
+            toml_apply: |ts, p| p.mini_player_show_artwork = ts.mini_player_show_artwork,
+            read: |src, out| out.mini_player_show_artwork = src.mini_player_show_artwork,
+            write: |ps, ts| ts.mini_player_show_artwork = ps.mini_player_show_artwork,
+        },
+        // The Player Bar section shows ONE "Seekbar Style" row: this one in
+        // every strip mode except MiniPlayer, the mini player's below it there.
+        SeekbarStyleSetting {
+            key: "general.seekbar_style",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_seekbar_style(SeekbarStyle::from_label(&v)),
+            toml_apply: |ts, p| p.seekbar_style = ts.seekbar_style,
+            read: |src, out| out.seekbar_style = src.seekbar_style,
+            write: |ps, ts| ts.seekbar_style = ps.seekbar_style,
+            ui_meta: {
+                label: "Seekbar Style",
+                category: "Player Bar",
+                subtitle: Some(SEEKBAR_STYLE_SUBTITLE),
+                default: "Classic",
+                options: SEEKBAR_STYLE_OPTIONS,
+                read_field: |d| d.seekbar_style.as_ref(),
+            },
+        },
+        MiniPlayerSeekbarStyleSetting {
+            key: "general.mini_player_seekbar_style",
+            value_type: Enum,
+            setter: |mgr, v: String| {
+                mgr.set_mini_player_seekbar_style(SeekbarStyle::from_label(&v))
+            },
+            toml_apply: |ts, p| p.mini_player_seekbar_style = ts.mini_player_seekbar_style,
+            read: |src, out| out.mini_player_seekbar_style = src.mini_player_seekbar_style,
+            write: |ps, ts| ts.mini_player_seekbar_style = ps.mini_player_seekbar_style,
+            ui_meta: {
+                label: "Seekbar Style",
+                category: "Player Bar",
+                subtitle: Some(SEEKBAR_STYLE_SUBTITLE),
+                default: "Capsule",
+                options: SEEKBAR_STYLE_OPTIONS,
+                read_field: |d| d.mini_player_seekbar_style.as_ref(),
+            },
         },
         // --- Views ---
         SlotTextLinks {
@@ -621,6 +673,9 @@ mod tests {
             autohide_collapsed_appearance: "Hairline".into(),
             mini_player_show_volume: true,
             mini_player_show_modes: true,
+            mini_player_show_artwork: true,
+            seekbar_style: "Classic".into(),
+            mini_player_seekbar_style: "Capsule".into(),
             slot_text_links: true,
             scrollbar_visibility: "Always".into(),
             icon_set: "Phosphor".into(),
@@ -656,10 +711,10 @@ mod tests {
     /// (`strip_show_*`, `*_artwork_overlay`) plus the conditional
     /// `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_twenty_two_rows() {
+    fn build_interface_tab_settings_items_emits_twenty_four_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 22);
+        assert_eq!(entries.len(), 24);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -891,7 +946,10 @@ mod tests {
         assert!(keys.contains(&"general.autohide_collapsed_appearance"));
         assert!(keys.contains(&"general.scrollbar_visibility"));
         assert!(keys.contains(&"general.icon_set"));
-        assert_eq!(keys.len(), 33);
+        assert!(keys.contains(&"general.seekbar_style"));
+        assert!(keys.contains(&"general.mini_player_seekbar_style"));
+        assert!(keys.contains(&"general.mini_player_show_artwork"));
+        assert_eq!(keys.len(), 36);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
@@ -995,6 +1053,9 @@ mod tests {
             autohide_collapsed_appearance: live.autohide_collapsed_appearance.as_label().into(),
             mini_player_show_volume: live.mini_player_show_volume,
             mini_player_show_modes: live.mini_player_show_modes,
+            mini_player_show_artwork: live.mini_player_show_artwork,
+            seekbar_style: live.seekbar_style.as_label().into(),
+            mini_player_seekbar_style: live.mini_player_seekbar_style.as_label().into(),
             slot_text_links: live.slot_text_links,
             scrollbar_visibility: live.scrollbar_visibility.as_label().into(),
             icon_set: live.icon_set.as_label().into(),
@@ -1040,6 +1101,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Each bar starts at the seek bar it shipped with (the handle bar, the
+    /// mini player's capsule) on every default path: the redb struct, a sparse
+    /// config.toml, and the ui_meta "Restore Default" literal (held to the
+    /// struct by the parity guard above).
+    #[test]
+    fn seekbar_styles_default_to_each_bars_shipped_look() {
+        use crate::types::player_settings::SeekbarStyle;
+        let p = PersistedPlayerSettings::default();
+        let t = TomlSettings::default();
+        assert_eq!(p.seekbar_style, SeekbarStyle::Classic);
+        assert_eq!(t.seekbar_style, SeekbarStyle::Classic);
+        assert_eq!(p.mini_player_seekbar_style, SeekbarStyle::Capsule);
+        assert_eq!(t.mini_player_seekbar_style, SeekbarStyle::Capsule);
+        assert!(p.mini_player_show_artwork && t.mini_player_show_artwork);
+        // An old redb row without the keys fills the same values.
+        let old: PersistedPlayerSettings = serde_json::from_str("{}").expect("empty row");
+        assert_eq!(old.seekbar_style, SeekbarStyle::Classic);
+        assert_eq!(old.mini_player_seekbar_style, SeekbarStyle::Capsule);
+        assert!(old.mini_player_show_artwork);
+    }
+
+    #[test]
+    fn dispatch_mini_player_seekbar_style_leaves_the_bar_style_alone() {
+        use crate::types::player_settings::SeekbarStyle;
+        let (mut mgr, _tmp) = make_test_manager();
+        let result = dispatch_interface_tab_setting(
+            "general.mini_player_seekbar_style",
+            SettingValue::Enum {
+                val: "Waveform".into(),
+                options: vec![],
+            },
+            &mut mgr,
+        );
+        assert!(matches!(result, Some(Ok(_))), "dispatch claimed the key");
+        let live = mgr.get_player_settings();
+        assert_eq!(live.mini_player_seekbar_style, SeekbarStyle::Waveform);
+        assert_eq!(live.seekbar_style, SeekbarStyle::Classic);
     }
 
     /// Player Bar Above is the shipped metadata strip: the Mini Player's

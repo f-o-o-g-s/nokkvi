@@ -53,6 +53,14 @@ pub(super) struct UiModeFlags {
     /// Whether the mini-player bar shows the mode toggles / kebab menu
     /// (mini-player mode only)
     pub(super) mini_player_show_modes: AtomicBool,
+    /// Whether the mini-player bar shows the cover beside the title
+    /// (mini-player mode only)
+    pub(super) mini_player_show_artwork: AtomicBool,
+    /// Seek bar look in every strip mode except MiniPlayer (`SeekbarStyle`
+    /// discriminant)
+    pub(super) seekbar_style: AtomicU8,
+    /// Seek bar look in MiniPlayer mode (`SeekbarStyle` discriminant)
+    pub(super) mini_player_seekbar_style: AtomicU8,
     /// Whether the title field is shown in the track info strip
     pub(super) strip_show_title: AtomicBool,
     /// Whether the artist field is shown in the track info strip
@@ -119,6 +127,9 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     autohide_collapsed_appearance: AtomicU8::new(CollapsedAppearance::Hairline as u8),
     mini_player_show_volume: AtomicBool::new(true),
     mini_player_show_modes: AtomicBool::new(true),
+    mini_player_show_artwork: AtomicBool::new(true),
+    seekbar_style: AtomicU8::new(SeekbarStyle::Classic as u8),
+    mini_player_seekbar_style: AtomicU8::new(SeekbarStyle::MINI_PLAYER_DEFAULT as u8),
     strip_show_title: AtomicBool::new(true),
     strip_show_artist: AtomicBool::new(true),
     strip_show_album: AtomicBool::new(true),
@@ -566,6 +577,67 @@ pub(crate) fn set_mini_player_show_modes(shown: bool) {
         .mini_player_show_modes
         .store(shown, Ordering::Relaxed);
     debug!("Mini-player show modes changed: mini_player_show_modes={shown}");
+}
+
+/// Returns true if the mini-player bar shows the cover beside the title
+/// (mini-player mode only)
+#[inline]
+pub(crate) fn mini_player_show_artwork() -> bool {
+    UI_MODE.mini_player_show_artwork.load(Ordering::Relaxed)
+}
+
+/// Set whether the mini-player bar shows the cover (call when the user toggles
+/// the setting)
+#[inline]
+pub(crate) fn set_mini_player_show_artwork(shown: bool) {
+    UI_MODE
+        .mini_player_show_artwork
+        .store(shown, Ordering::Relaxed);
+    debug!("Mini-player show artwork changed: mini_player_show_artwork={shown}");
+}
+
+// ============================================================================
+// Seek Bar Style
+// ============================================================================
+
+use nokkvi_data::types::player_settings::SeekbarStyle;
+
+atomic_u8_enum! {
+    SeekbarStyle {
+        Classic,
+        Line,
+        Capsule,
+        Cells,
+        Waveform,
+    } default Classic
+}
+
+/// Seek bar look for every strip mode except MiniPlayer.
+#[inline]
+pub(crate) fn seekbar_style() -> SeekbarStyle {
+    SeekbarStyle::from_u8(UI_MODE.seekbar_style.load(Ordering::Relaxed))
+}
+
+/// Set the seek bar look for every strip mode except MiniPlayer.
+#[inline]
+pub(crate) fn set_seekbar_style(style: SeekbarStyle) {
+    UI_MODE
+        .seekbar_style
+        .store(style.to_u8(), Ordering::Relaxed);
+}
+
+/// Seek bar look in MiniPlayer mode.
+#[inline]
+pub(crate) fn mini_player_seekbar_style() -> SeekbarStyle {
+    SeekbarStyle::from_u8(UI_MODE.mini_player_seekbar_style.load(Ordering::Relaxed))
+}
+
+/// Set the seek bar look for MiniPlayer mode.
+#[inline]
+pub(crate) fn set_mini_player_seekbar_style(style: SeekbarStyle) {
+    UI_MODE
+        .mini_player_seekbar_style
+        .store(style.to_u8(), Ordering::Relaxed);
 }
 
 // ============================================================================

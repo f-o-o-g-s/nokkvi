@@ -695,6 +695,27 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_mini_player_show_artwork(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.mini_player_show_artwork = enabled;
+        self.save()
+    }
+
+    pub fn set_seekbar_style(
+        &mut self,
+        style: crate::types::player_settings::SeekbarStyle,
+    ) -> Result<()> {
+        self.settings.player.seekbar_style = style;
+        self.save()
+    }
+
+    pub fn set_mini_player_seekbar_style(
+        &mut self,
+        style: crate::types::player_settings::SeekbarStyle,
+    ) -> Result<()> {
+        self.settings.player.mini_player_seekbar_style = style;
+        self.save()
+    }
+
     pub fn set_font_family(&mut self, family: String) -> Result<()> {
         self.settings.player.font_family = family;
         self.save()
@@ -1556,6 +1577,9 @@ mod sentinel_roundtrip_tests {
                 crate::types::player_settings::CollapsedAppearance::Hidden, // default Count strip
             mini_player_show_volume: false,    // default true
             mini_player_show_modes: false,     // default true
+            mini_player_show_artwork: false,   // default true
+            seekbar_style: crate::types::player_settings::SeekbarStyle::Cells, // default Classic
+            mini_player_seekbar_style: crate::types::player_settings::SeekbarStyle::Line, // default Capsule
             font_family: "Sentinel Mono".to_string(),
 
             // Volume normalization
@@ -1841,6 +1865,15 @@ mod sentinel_roundtrip_tests {
             ui_ps2.mini_player_show_volume
         );
         assert_eq!(ui_ps1.mini_player_show_modes, ui_ps2.mini_player_show_modes);
+        assert_eq!(
+            ui_ps1.mini_player_show_artwork,
+            ui_ps2.mini_player_show_artwork
+        );
+        assert_eq!(ui_ps1.seekbar_style, ui_ps2.seekbar_style);
+        assert_eq!(
+            ui_ps1.mini_player_seekbar_style,
+            ui_ps2.mini_player_seekbar_style
+        );
         assert_eq!(ui_ps1.font_family, ui_ps2.font_family);
 
         // Volume normalization

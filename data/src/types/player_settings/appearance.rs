@@ -53,6 +53,46 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// How the player bar draws its seek bar. One value is kept for the
+    /// MiniPlayer strip mode and one for every other mode, so each bar starts
+    /// at the look it shipped with ([`Self::default`] for the normal bar,
+    /// [`Self::MINI_PLAYER_DEFAULT`] for the mini player).
+    ///
+    /// Serializes to snake_case strings in `config.toml` and the redb-backed
+    /// `PersistedPlayerSettings`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum SeekbarStyle {
+        /// Default for the normal bar. A 6 px track with a draggable 14 px
+        /// handle; the times sit outside the bar.
+        #[default]
+        Classic { label: "Classic", wire: "classic" },
+        /// A thin handle-less track that thickens and shows its handle under
+        /// the cursor; the times sit outside the bar.
+        Line { label: "Line", wire: "line" },
+        /// A solid full-height block with the times drawn inside it, switching
+        /// ink where the fill passes under them. The mini player's default.
+        Capsule { label: "Capsule", wire: "capsule" },
+        /// A row of discrete cells, like a level meter.
+        Cells { label: "Cells", wire: "cells" },
+        /// The track's peak envelope. Draws as [`Self::Line`] until the
+        /// envelope has been worked out, and always for radio.
+        Waveform { label: "Waveform", wire: "waveform" },
+    }
+}
+
+impl SeekbarStyle {
+    /// The mini player's starting style: the capsule it has always drawn.
+    pub const MINI_PLAYER_DEFAULT: Self = Self::Capsule;
+
+    /// Whether the elapsed / duration times are drawn inside the bar rather
+    /// than beside it.
+    pub fn times_inside(self) -> bool {
+        matches!(self, Self::Capsule)
+    }
+}
+
 /// Field-level shim used by `#[serde(deserialize_with = ...)]` on the
 /// `rounded_mode` fields of [`PersistedPlayerSettings`] and [`TomlSettings`].
 ///
@@ -147,6 +187,27 @@ mod tests {
         // settings projection both depend on this.
         assert_eq!(IconSet::default(), IconSet::Phosphor);
         assert_eq!(IconSet::Phosphor.as_label(), "Phosphor");
+    }
+
+    #[test]
+    fn seekbar_style_round_trips_and_keeps_both_shipped_looks() {
+        for style in [
+            SeekbarStyle::Classic,
+            SeekbarStyle::Line,
+            SeekbarStyle::Capsule,
+            SeekbarStyle::Cells,
+            SeekbarStyle::Waveform,
+        ] {
+            assert_eq!(SeekbarStyle::from_label(style.as_label()), style);
+            let json = serde_json::to_string(&style).unwrap();
+            assert_eq!(json.trim_matches('"'), style.to_string());
+        }
+        // The normal bar keeps its handle and the mini player its capsule, so
+        // neither bar changes for an existing setup.
+        assert_eq!(SeekbarStyle::default(), SeekbarStyle::Classic);
+        assert_eq!(SeekbarStyle::MINI_PLAYER_DEFAULT, SeekbarStyle::Capsule);
+        assert!(SeekbarStyle::Capsule.times_inside());
+        assert!(!SeekbarStyle::Waveform.times_inside());
     }
 
     #[test]

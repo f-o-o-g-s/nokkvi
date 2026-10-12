@@ -80,6 +80,11 @@ pub struct InterfaceSettingsData {
     pub autohide_collapsed_appearance: Cow<'static, str>,
     pub mini_player_show_volume: bool,
     pub mini_player_show_modes: bool,
+    pub mini_player_show_artwork: bool,
+    /// Seek bar style label for the normal bar (Classic / Line / Capsule / Cells / Waveform).
+    pub seekbar_style: Cow<'static, str>,
+    /// Seek bar style label for the mini player.
+    pub mini_player_seekbar_style: Cow<'static, str>,
     pub slot_text_links: bool,
     /// Scrollbar visibility label (On hover / Always / Hidden).
     pub scrollbar_visibility: Cow<'static, str>,
@@ -128,6 +133,9 @@ impl Default for InterfaceSettingsData {
             autohide_collapsed_appearance: Cow::Borrowed("test-default"),
             mini_player_show_volume: true,
             mini_player_show_modes: true,
+            mini_player_show_artwork: true,
+            seekbar_style: Cow::Borrowed("test-default"),
+            mini_player_seekbar_style: Cow::Borrowed("test-default"),
             slot_text_links: false,
             scrollbar_visibility: Cow::Borrowed("test-default"),
             icon_set: Cow::Borrowed("test-default"),

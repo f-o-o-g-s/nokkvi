@@ -1,8 +1,8 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 22 rows come from `define_settings!` via `build_interface_tab_settings_items`
-//! (2 Navigation + 7 Slot List + 1 Player Bar + 1 Font & Icons (`icon_set`) +
+//! 24 rows come from `define_settings!` via `build_interface_tab_settings_items`
+//! (2 Navigation + 7 Slot List + 3 Player Bar + 1 Font & Icons (`icon_set`) +
 //! 5 Metadata Strip + 4 Artwork Column: mode dropdown, `artwork_cover`
 //! dropdown, `artwork_auto_max_pct` slider, `artwork_vertical_height_pct`
 //! slider + 2 Theater: `theater_controls` dropdown,
@@ -12,9 +12,12 @@
 //! `autohide_toolbar_grip`), which are inserted beneath the Auto-hide Toolbar
 //! toggle only while it's enabled (height + grip only for the Hairline
 //! appearance).
-//! A MiniPlayer-only "Visible Controls" ToggleSet (`__toggle_mini_player_controls`
-//! → the data-only `general.mini_player_show_volume` / `general.mini_player_show_modes`
-//! settings) is hand-inserted beneath the Player Bar row only when
+//! The Player Bar section shows ONE of its two Seekbar Style rows
+//! (`general.mini_player_seekbar_style` in MiniPlayer mode,
+//! `general.seekbar_style` otherwise). A MiniPlayer-only "Visible Controls"
+//! ToggleSet (`__toggle_mini_player_controls` → the data-only
+//! `general.mini_player_show_artwork` / `_show_volume` / `_show_modes`
+//! settings) is hand-inserted beneath the mini Seekbar Style row only when
 //! `TrackInfoDisplay::MiniPlayer` is the active strip mode. Section headers, the
 //! three ToggleSet rows (`__toggle_artwork_overlays`, `__toggle_strip_fields`,
 //! `__toggle_mini_player_controls`), the theme-routed `font_family` text row, and
@@ -49,6 +52,10 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     };
 
     let mut macro_rows = MacroRows::new(build_interface_tab_settings_items(data));
+    // Reads `data.track_info_display` rather than the live theme atomic, so the
+    // MiniPlayer-only rows are deterministic in tests.
+    let is_mini_player = TrackInfoDisplay::from_label(data.track_info_display.as_ref())
+        == TrackInfoDisplay::MiniPlayer;
 
     let mut items: Vec<SettingsEntry> = vec![
         // --- Navigation ---
@@ -73,6 +80,14 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             icon: PLAYER_BAR,
         },
         macro_rows.take("general.horizontal_volume"),
+        // One "Seekbar Style" row, editing whichever bar is on screen: the mini
+        // player's value in MiniPlayer mode, the normal bar's otherwise. Both
+        // rows are taken unconditionally so consumption stays data-independent.
+        {
+            let bar = macro_rows.take("general.seekbar_style");
+            let mini = macro_rows.take("general.mini_player_seekbar_style");
+            if is_mini_player { mini } else { bar }
+        },
         // The MiniPlayer-only "Visible Controls" ToggleSet is conditionally
         // appended below (only in MiniPlayer mode) — see the trailing block.
         // --- Font & Icons (font row theme-routed + hand-written; icon set is a
@@ -189,9 +204,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     // `data.track_info_display` (mirroring the `artwork_column_mode` conditional
     // below) rather than the live theme atomic, so the gate is deterministic in
     // tests.
-    if TrackInfoDisplay::from_label(data.track_info_display.as_ref())
-        == TrackInfoDisplay::MiniPlayer
-    {
+    if is_mini_player {
         let controls_row = SettingItem::toggle_set(
             SettingMeta::new(
                 "__toggle_mini_player_controls",
@@ -200,6 +213,11 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             )
             .with_subtitle("Choose which controls appear in the mini-player bar"),
             vec![
+                (
+                    "Artwork".to_string(),
+                    "general.mini_player_show_artwork".to_string(),
+                    data.mini_player_show_artwork,
+                ),
                 (
                     "Volume".to_string(),
                     "general.mini_player_show_volume".to_string(),
@@ -215,7 +233,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         let insert_at = items
             .iter()
             .position(|e| {
-                matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == "general.horizontal_volume")
+                matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == "general.mini_player_seekbar_style")
             })
             .map_or(items.len(), |pos| pos + 1);
         items.insert(insert_at, controls_row);
@@ -290,19 +308,74 @@ mod tests {
     }
 
     /// The MiniPlayer-only "Visible Controls" ToggleSet renders directly after
-    /// the horizontal-volume row. Guards the position(...).map_or(append) insert
-    /// against a silent append-to-end if either key is ever renamed.
+    /// the mini player's Seekbar Style row, which follows horizontal volume.
+    /// Guards the position(...).map_or(append) insert against a silent
+    /// append-to-end if either key is ever renamed.
     #[test]
-    fn visible_controls_toggleset_sits_after_horizontal_volume_in_mini_player() {
+    fn visible_controls_toggleset_sits_after_the_mini_seekbar_style() {
         let items = build_interface_items(&data_for(TrackInfoDisplay::MiniPlayer.as_label()));
         let hv =
             key_pos(&items, "general.horizontal_volume").expect("horizontal_volume row present");
+        let style = key_pos(&items, "general.mini_player_seekbar_style")
+            .expect("mini Seekbar Style row present in MiniPlayer mode");
         let ts = key_pos(&items, "__toggle_mini_player_controls")
             .expect("Visible Controls ToggleSet present in MiniPlayer mode");
+        assert_eq!(style, hv + 1, "Seekbar Style sits after horizontal_volume");
+        assert_eq!(ts, style + 1, "ToggleSet sits after Seekbar Style");
+    }
+
+    /// One Seekbar Style row, editing the bar that is on screen: the mini
+    /// player's value in MiniPlayer mode, the normal bar's in every other mode.
+    #[test]
+    fn seekbar_style_row_edits_the_bar_on_screen() {
+        let mini = build_interface_items(&data_for(TrackInfoDisplay::MiniPlayer.as_label()));
+        assert!(key_pos(&mini, "general.mini_player_seekbar_style").is_some());
+        assert!(key_pos(&mini, "general.seekbar_style").is_none());
+        for mode in [
+            TrackInfoDisplay::Off,
+            TrackInfoDisplay::PlayerBar,
+            TrackInfoDisplay::PlayerBarAbove,
+            TrackInfoDisplay::TopBar,
+            TrackInfoDisplay::TopBarUnder,
+        ] {
+            let items = build_interface_items(&data_for(mode.as_label()));
+            assert!(
+                key_pos(&items, "general.seekbar_style").is_some(),
+                "{mode:?}: normal Seekbar Style row shown"
+            );
+            assert!(
+                key_pos(&items, "general.mini_player_seekbar_style").is_none(),
+                "{mode:?}: mini Seekbar Style row hidden"
+            );
+        }
+    }
+
+    /// Visible Controls leads with Artwork, so the cover can be hidden like
+    /// the volume slider and mode menu.
+    #[test]
+    fn visible_controls_offers_artwork_first() {
+        use nokkvi_data::types::setting_value::SettingValue;
+        let items = build_interface_items(&data_for(TrackInfoDisplay::MiniPlayer.as_label()));
+        let row = items
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(it) if it.key.as_ref() == "__toggle_mini_player_controls" => {
+                    Some(it)
+                }
+                _ => None,
+            })
+            .expect("Visible Controls present");
+        let SettingValue::ToggleSet(chips) = &row.value else {
+            panic!("Visible Controls is a ToggleSet");
+        };
+        let keys: Vec<&str> = chips.iter().map(|(_, key, _)| key.as_str()).collect();
         assert_eq!(
-            ts,
-            hv + 1,
-            "ToggleSet must sit directly after horizontal_volume"
+            keys,
+            [
+                "general.mini_player_show_artwork",
+                "general.mini_player_show_volume",
+                "general.mini_player_show_modes",
+            ]
         );
     }
 
