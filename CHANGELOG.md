@@ -6,14 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.24.0 — 2026-10-11
+
+### Added
+
 - Text fields now undo and redo with Ctrl+Z and Ctrl+Y.
 - The raw rules JSON editor now deletes a whole word with Ctrl+Backspace or Ctrl+Delete.
 - Bars and Lines have a new Reflection Below Cover setting, on by default.
 - Lyrics with word timing (TTML, enhanced LRC, server cues) now light the current line word by word as it is sung.
 - A new Playback setting, Lyrics: Word Highlight, picks Sweep (a karaoke fill), Word (each word lights whole) or Off.
 - On Navidrome servers that offer API keys, nokkvi now connects with its own revocable key instead of a token derived from your password.
-- nokkvi's key lives on its own player in Navidrome's Players list, named after your computer and starting from your current nokkvi player's settings.
-- Logging out now revokes nokkvi's API key on the server; the next login sets a fresh one.
+- nokkvi's API key lives on its own player in Navidrome's Players list, named after your computer.
+- The API key's player starts with your current nokkvi player's transcoding, bit-rate and scrobbling settings.
+- Logging out revokes nokkvi's API key on the server.
 - A new Metadata Strip option, Player Bar Above, shows the strip on top of the player bar's controls.
 
 ### Changed
@@ -24,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Toasts now sit over the list instead of across the artwork column.
 - The artwork's resize handle is now invisible, marked only by the resize cursor at the artwork's edge beside the list.
 - Mouse-wheel scrolling in Settings, the Get Info dialog and the rules editor now glides instead of jumping.
+- Clicking a scrollbar's track in Settings, Get Info or the rules editor now pages toward the pointer instead of jumping there.
 - Hotkey badges in Settings are now at least 96 pixels wide.
 - With the Metadata Strip on Top Bar or Top Bar Under, the top nav bar now spans only the list beside the artwork column.
 - With the Metadata Strip on Top Bar or Top Bar Under, the artwork column beside the list now reaches the window's top edge.
@@ -39,11 +51,11 @@ All notable changes to this project will be documented in this file.
 - The Horizon's receding waves and bars now crest above the visualizer instead of being cut off along a straight line at its top.
 - Typing in the Queue's search while a playlist plays no longer knocks focus out of the field after the first letter.
 - Playing or queueing a genre, or mixing one in Trawl, now includes songs tagged with a different capitalization of its name.
-- Importing a .nsp file whose refresh delay Navidrome can't read now stops with an explanation before anything is uploaded.
+- On Navidrome 0.64 and newer, importing a .nsp file with an unreadable refresh delay now stops with an explanation before uploading anything.
 - Importing a .nsp file with a refresh delay now warns when the server is older than 0.64 and will ignore it.
 - Adding, removing or moving songs late in a track no longer turns the next crossfade or gapless join into a hard cut.
 - Changing a crossfade or bit-perfect setting late in a track no longer turns the next transition into a hard cut.
-- With Fade on Skip set to Crossfade, a song reached with Previous now crossfades into the next one instead of cutting.
+- With Fade on Skip set to Crossfade, a song reached by pressing Previous late in a track no longer ends in a hard cut.
 - With Fade on Skip set to Crossfade, pressing Next twice quickly on the second-to-last song now plays the last song.
 - Seeking at the instant a crossfade finishes no longer jumps back into the previous song.
 - Clearing the queue while a radio station plays now leaves the station playing, as removing every song already did.
@@ -52,20 +64,21 @@ All notable changes to this project will be documented in this file.
 - A Top Songs request the server fails now shows an error instead of "No similar songs found".
 - Starring, rating and scrobbling no longer make every other user's open Navidrome sessions refresh.
 - A rejected or expired server token now returns you to the login screen instead of showing an error toast.
-- Accounts whose username contains characters like + or & now play songs, load covers and stay signed in.
+- Accounts whose username contains characters like + or & now play songs and load covers.
 - A playlist the server fails to send now shows an error when played, expanded or edited, instead of opening as empty.
 - A radio station list the server fails to send now shows an error instead of an empty Radios view.
-- A failed library list fetch no longer clears your library selection; it shows an error instead.
+- A failed library list fetch now shows an error instead of clearing your library selection.
 - A Find Similar request the server fails now shows an error instead of "No similar songs found".
 - Adding the same song to a playlist twice in quick succession now adds it once, then asks about the duplicate.
 - In Theater Mode, the `nav-up`, `nav-down`, `enter`, `add-to-queue` and `remove-from-queue` commands now leave Theater Mode instead of acting on the hidden list.
 - Switching between a radio station and the queue no longer briefly shows the previous item's cover in desktop media widgets.
 - Desktop media widgets no longer show a seek bar while a radio station plays.
 - Desktop media widgets now receive a track ID for the playing song or station.
-- A media-widget seek aimed at a previous song, or past the song's end, is now ignored instead of moving the playhead.
+- A media widget's jump to a position in a previous song, or past the song's end, is now ignored instead of moving the playhead.
 - Launching nokkvi twice in quick succession now opens one window instead of two.
 - A song the server transcodes on the fly now ends and moves to the next song instead of restarting.
-- Seeking a song the server transcodes on the fly is now refused up front, with no seek handle and no media-widget seek bar.
+- The progress bar now shows no seek handle for a song the server transcodes on the fly.
+- Desktop media widgets can no longer seek a song the server transcodes on the fly.
 - A song the server transcodes on the fly is no longer labelled bit-perfect.
 - A song the server transcodes on the fly now shows the codec the server actually sends.
 - A radio station whose server reports a stream length now reconnects when it drops instead of ending like a song.
@@ -78,18 +91,17 @@ All notable changes to this project will be documented in this file.
 - A genre or playlist list the server fails to send now shows an error and keeps the rows, instead of an empty view.
 - A rejected session while loading genres or playlists now returns you to the login screen.
 - Playing several items at once, or a Trawl mix, on a rejected session now returns to the login screen instead of saying "No songs found".
-- A failed unstar now only puts the star back; it no longer rates the song five stars locally and on the server.
-- The "already in playlist" confirm now re-checks the playlist when it adds, so a song added meanwhile is not added twice.
-- A star, rating or scrobble confirmed after logging out no longer shows "Library refreshed automatically" on the login screen.
+- A failed unstar no longer rates the song five stars locally and on the server.
+- With "Skip the N already there" checked, a song that reaches the playlist while the add-to-playlist confirm is open is no longer added twice.
 - A library list that fails to reload now keeps its header count instead of showing 0 above the rows it kept.
 - With Navigation Layout set to Side, bottom-band Bars now fit beside the sidebar instead of losing their rightmost bars off the window's edge.
 - Seeking in a variable-bitrate MP3 now resumes exactly where you aimed instead of seconds off.
-- After a gapless transition, the new song's position and lyrics no longer run up to a second ahead of its audio.
+- After a gapless transition, the new song's position and lyrics no longer run about a second ahead of its audio.
 - Pausing with lyrics on now keeps the Queue cover and its lyrics on the playing song.
 - Holding an arrow key in a list no longer requests the same full-size cover again while it is still loading.
 - Scrolling a list on a slow server no longer requests a thumbnail again while it is still loading.
 - The "Playing From" cover's 2×2 collage now loads even when its albums are scrolled out of view.
-- The playing song's title no longer waits for its cover to download before it shows in the app and desktop media widgets.
+- The playing song's title now waits at most half a second for its cover before showing in the app and desktop media widgets.
 - Logging into a different server no longer shows the previous server's queue.
 - Logging back into a server now brings back the queue you left there.
 - The Playing From playlist now switches along with the queue when you log into another server.
@@ -98,47 +110,9 @@ All notable changes to this project will be documented in this file.
 - A server URL typed with a capitalized scheme, like HTTPS://, no longer makes every song fail to play.
 - nokkvi no longer follows a redirect from your server to another host, which could have handed that host your login.
 
-### Removed
-
-## v0.23.0 — 2026-10-09
-
-### Added
-
-- The new Tunnel setting for Scope spirals about the last second of the spectrum down into the cover behind the ring.
-- In Scope's Tunnel, kicks light up rings that then fall away down it.
-- With Echo on, Scope's Tunnel stays sharp while the ring's echo swirls over it.
-
-### Changed
-
-- The queue's "Playing From" playlist now sits inside the toolbar instead of on its own bar above it.
-- The "Playing From" cover now lines up with the start of the queue's rows.
-- The "Playing From" cover now measures 16 pixels in the slim toolbar strip and 32 in the full toolbar.
-- The "Playing From" playlist's save and edit buttons are now regular toolbar buttons.
-- The "Playing From" playlist's save and edit buttons now sit right after its name.
-- The "Playing From" playlist's save and edit buttons now hide with the toolbar.
-- The "Playing From" playlist name no longer jumps sideways when the cover finishes loading.
-- With the toolbar hidden, the Count strip now leads with the playing playlist's cover and name.
-- With Collapsed Appearance set to Hairline or Hidden, the "Playing From" playlist now hides with the toolbar.
-- The "Playing from playlist" label now appears only as the cover's tooltip.
-- A smart playlist's sparkles mark now follows its name in the full toolbar.
-- The "Playing From" playlist's details now open after a brief hover on its cover or name.
-- The "Playing From" playlist's details now open below the toolbar.
-- In narrow windows, the full toolbar shrinks the "Playing From" name first, then hides the song count, then shows only the cover.
-- Scope now shows the Tunnel by default.
-- Scope's Echo now defaults to off.
-- Scope's Fill setting has no effect while the Tunnel is on.
-
-### Fixed
-
-- The Lines Horizon now keeps its receding waves as dim contour lines where the music is quiet, instead of leaving gaps.
-- The Bars Horizon now keeps a short stub of every receding bar where the music is quiet, instead of leaving gaps.
-- The "Playing From" cover now shows a playlist's uploaded image instead of its album collage.
-- After a restart, the "Playing From" playlist's details now refresh from the server without opening the Playlists view.
-- With Navigation Layout set to Side, toasts no longer cover the bottom of the sidebar's tabs.
-- The "Playing From" playlist's details no longer stay open after switching views or entering Theater Mode.
-
 ## Older releases
 
+- **v0.23.x** (2026-10-09, v0.23.0): [CHANGELOG-0.23.md](./changelog-archive/CHANGELOG-0.23.md)
 - **v0.22.x** (2026-10-04 → 2026-10-07, v0.22.0–v0.22.2): [CHANGELOG-0.22.md](./changelog-archive/CHANGELOG-0.22.md)
 - **v0.21.x** (2026-09-25 → 2026-10-02, v0.21.0–v0.21.2): [CHANGELOG-0.21.md](./changelog-archive/CHANGELOG-0.21.md)
 - **v0.20.x** (2026-09-23, v0.20.0): [CHANGELOG-0.20.md](./changelog-archive/CHANGELOG-0.20.md)
