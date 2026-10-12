@@ -223,6 +223,8 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
         let client = reqwest::Client::builder()
             .user_agent(nokkvi_data::USER_AGENT)
             .timeout(Duration::from_secs(60 * 60 * 24)) // 24 hour total connection timeout
+            // The JWT rides in a header reqwest keeps across hosts.
+            .redirect(nokkvi_data::utils::redirects::server_only())
             .build()
             .unwrap_or_default();
 

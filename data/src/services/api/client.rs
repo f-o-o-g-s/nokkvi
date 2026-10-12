@@ -75,6 +75,8 @@ impl ApiClient {
         let client = Client::builder()
             .user_agent(crate::USER_AGENT)
             .pool_idle_timeout(std::time::Duration::from_secs(5))
+            // Every request carries the JWT header or a /rest credential.
+            .redirect(crate::utils::redirects::server_only())
             .build()
             .expect("Failed to build HTTP client");
 
@@ -1021,6 +1023,61 @@ mod tests {
         // The Display marker the flattened string matcher keys on.
         assert!(NokkviError::is_forbidden_str(&format!("{err:#}")));
         assert!(!NokkviError::is_unauthorized_str(&format!("{err:#}")));
+    }
+
+    /// A redirect off the server is not followed: on a 307 reqwest would send
+    /// the body again, and `X-ND-Authorization` with it, to whatever host the
+    /// redirect names. It comes back as a failed request instead.
+    #[tokio::test]
+    async fn a_redirect_to_another_host_is_not_followed() {
+        let (redirecting, elsewhere) =
+            crate::services::api::test_server::redirect_to_another_host().await;
+        let client = ApiClient::new(
+            Url::parse(&redirecting.base_url).expect("base url"),
+            "SECRET_JWT".to_owned(),
+        );
+
+        let err = client
+            .post_json(
+                "/api/player",
+                &serde_json::json!({ "apiKey": "nds_SECRET" }),
+            )
+            .await
+            .expect_err("the redirect is refused");
+
+        assert!(
+            elsewhere.requests().is_empty(),
+            "{:?}",
+            elsewhere.requests()
+        );
+        assert!(format!("{err:#}").contains("307"), "{err:#}");
+    }
+
+    /// A redirect that stays on the server (a reverse proxy moving a path)
+    /// is still followed.
+    #[tokio::test]
+    async fn a_redirect_on_the_same_server_is_followed() {
+        let server = crate::services::api::test_server::ScriptedServer::start_with_headers(
+            vec![("Location".to_owned(), "/moved".to_owned())],
+            |r| {
+                if r.path == "/api/song" {
+                    (307, String::new())
+                } else {
+                    (200, "[]".to_owned())
+                }
+            },
+        )
+        .await;
+        let client = ApiClient::new(
+            Url::parse(&server.base_url).expect("base url"),
+            "jwt".to_owned(),
+        );
+
+        let body = client.get("/api/song", &[]).await.expect("followed");
+
+        assert_eq!(body, "[]");
+        let paths: Vec<String> = server.requests().into_iter().map(|r| r.path).collect();
+        assert_eq!(paths, ["/api/song", "/moved"]);
     }
 
     /// HTTP 404 is typed (`NokkviError::NotFound`) so a caller can tell a

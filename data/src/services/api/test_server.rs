@@ -186,6 +186,7 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Recorded> {
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        307 => "Temporary Redirect",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
@@ -216,4 +217,24 @@ pub(crate) fn extensions(names: &[&str]) -> String {
         .map(|name| format!(r#"{{"name":"{name}","versions":[1]}}"#))
         .collect();
     subsonic_ok(&format!(r#""openSubsonicExtensions":[{}]"#, list.join(",")))
+}
+
+/// A server that answers every request with a 307 to `target` (another
+/// server's base URL with `localhost` for its host, so the hop changes host),
+/// and the server it points at. The second records whatever reaches it.
+pub(crate) async fn redirect_to_another_host() -> (ScriptedServer, ScriptedServer) {
+    let elsewhere = ScriptedServer::start(|_| (200, "{}".to_owned())).await;
+    let port = url::Url::parse(&elsewhere.base_url)
+        .ok()
+        .and_then(|u| u.port())
+        .expect("a port");
+    let redirecting = ScriptedServer::start_with_headers(
+        vec![(
+            "Location".to_owned(),
+            format!("http://localhost:{port}/elsewhere"),
+        )],
+        |_| (307, String::new()),
+    )
+    .await;
+    (redirecting, elsewhere)
 }

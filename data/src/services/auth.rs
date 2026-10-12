@@ -114,6 +114,8 @@ impl AuthService {
 
         let client = reqwest::Client::builder()
             .user_agent(crate::USER_AGENT)
+            // The body is the password.
+            .redirect(crate::utils::redirects::server_only())
             .build()
             .expect("Failed to build HTTP client");
         let response = client
@@ -509,6 +511,29 @@ mod tests {
             .expect("login");
         assert_eq!(auth.get_subsonic_credential(), "");
         assert_eq!(auth.username(), "alice");
+    }
+
+    /// The login's password never follows a redirect to another host.
+    #[tokio::test]
+    async fn a_login_never_follows_a_redirect_off_the_server() {
+        let (redirecting, elsewhere) =
+            crate::services::api::test_server::redirect_to_another_host().await;
+        let mut auth = AuthService::new().expect("auth service");
+
+        let result = auth
+            .login(
+                redirecting.base_url.clone(),
+                "alice".into(),
+                "SECRET_PW".into(),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            elsewhere.requests().is_empty(),
+            "{:?}",
+            elsewhere.requests()
+        );
     }
 
     #[tokio::test]

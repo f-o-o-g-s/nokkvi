@@ -747,6 +747,9 @@ impl AudioDecoder {
             let client = reqwest::Client::builder()
                 .user_agent(crate::USER_AGENT)
                 .timeout(std::time::Duration::from_secs(30))
+                // A queue song's URL carries the /rest credential; a station's
+                // doesn't, and stations redirect freely.
+                .redirect(crate::utils::redirects::guard_credential_urls())
                 .build()
                 .context("Failed to create HTTP client")?;
 
@@ -922,6 +925,8 @@ impl AudioDecoder {
                 //      CURLOPT_TCP_KEEPALIVE.
                 let client = reqwest::Client::builder()
                     .user_agent(crate::USER_AGENT)
+                    // A length-less queue song's URL carries the credential.
+                    .redirect(crate::utils::redirects::guard_credential_urls())
                     // G2 fix: abort DNS/SYN hangs quickly (matches MPD CONNECTTIMEOUT=10s).
                     .connect_timeout(std::time::Duration::from_secs(10))
                     // G1 fix (reqwest layer): abort stalled transfers where bytes stop
@@ -2493,6 +2498,34 @@ pub(crate) mod tests {
         while !decoder.is_eof() && started.elapsed() < std::time::Duration::from_secs(10) {
             tokio::task::block_in_place(|| decoder.read_buffer(64 * 1024));
         }
+    }
+
+    /// A stream URL with the Subsonic credential in it never follows a
+    /// redirect to another host; a station's URL (no credential) still does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_credentialed_stream_never_follows_a_redirect_off_the_server() {
+        let (redirecting, elsewhere) =
+            crate::services::api::test_server::redirect_to_another_host().await;
+
+        let mut decoder = AudioDecoder::default();
+        let song = format!(
+            "{}/rest/stream?id=s1&apiKey=nds_SECRET&f=json",
+            redirecting.base_url
+        );
+        assert!(decoder.init(&song).await.is_err());
+        assert!(
+            elsewhere.requests().is_empty(),
+            "{:?}",
+            elsewhere.requests()
+        );
+
+        let mut station = AudioDecoder::default();
+        let live = format!("{}/live.mp3", redirecting.base_url);
+        let _ = station.init(&live).await;
+        assert!(
+            !elsewhere.requests().is_empty(),
+            "a station's redirect is followed"
+        );
     }
 
     /// A queue song the server transcodes on the fly arrives with no length

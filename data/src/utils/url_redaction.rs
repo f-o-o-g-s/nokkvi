@@ -18,6 +18,12 @@ use std::borrow::Cow;
 /// `s` and `t`, as a pair). `u` is the username, not a secret, and stays.
 const SECRET_PARAMS: [&str; 5] = ["s", "t", "apiKey", "p", "jwt"];
 
+/// Whether a query key is one of the [`SECRET_PARAMS`]: a URL carrying it
+/// carries a credential.
+pub(crate) fn is_secret_param(key: &str) -> bool {
+    SECRET_PARAMS.contains(&key)
+}
+
 /// Strip every [`SECRET_PARAMS`] query parameter (`s`, `t`, `apiKey`, `p`,
 /// `jwt`) from a Subsonic URL.
 ///
@@ -46,7 +52,7 @@ pub fn redact_subsonic_url(url: &str) -> Cow<'_, str> {
     let mut redacted_any = false;
     for pair in query.split('&') {
         let key = pair.split_once('=').map_or(pair, |(k, _)| k);
-        if SECRET_PARAMS.contains(&key) {
+        if is_secret_param(key) {
             redacted_any = true;
         } else {
             kept.push(pair);

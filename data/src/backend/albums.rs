@@ -411,6 +411,8 @@ impl AlbumsService {
             total_count: ReactiveInt::new(0),
             artwork_client: Arc::new(
                 artwork_client_base()
+                    // Every getCoverArt URL carries the /rest credential.
+                    .redirect(crate::utils::redirects::server_only())
                     .build()
                     .expect("Failed to build artwork HTTP client"),
             ),
@@ -947,6 +949,27 @@ mod tests {
                 "transient errors must not be treated as a deterministic miss: {transient}"
             );
         }
+    }
+
+    /// A cover URL carries the /rest credential, so the cover client never
+    /// follows a redirect to another host.
+    #[tokio::test]
+    async fn the_cover_client_never_follows_a_redirect_off_the_server() {
+        let (redirecting, elsewhere) =
+            crate::services::api::test_server::redirect_to_another_host().await;
+        let url = format!(
+            "{}/rest/getCoverArt?id=al-1&apiKey=nds_SECRET&f=json",
+            redirecting.base_url
+        );
+
+        let result = AlbumsService::new().fetch_artwork_by_url(&url).await;
+
+        assert!(result.is_err());
+        assert!(
+            elsewhere.requests().is_empty(),
+            "{:?}",
+            elsewhere.requests()
+        );
     }
 
     /// Regression guard for the leak that surfaced in a user's MPRIS "art fetch

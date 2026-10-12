@@ -229,6 +229,8 @@ impl RangeHttpReader {
         reqwest::blocking::Client::builder()
             // Identify as nokkvi (shared crate UA) so the server sees one player.
             .user_agent(crate::USER_AGENT)
+            // A queue song's URL carries the /rest credential.
+            .redirect(crate::utils::redirects::guard_credential_urls())
             // Fast fail on connect - 5s is plenty for local server
             .connect_timeout(std::time::Duration::from_secs(5))
             // Reduced from 30s - 10s is enough for chunk reads, prevents long stalls
@@ -497,6 +499,7 @@ async fn prefetch_loop(
 ) {
     let client = match reqwest::Client::builder()
         .user_agent(crate::USER_AGENT)
+        .redirect(crate::utils::redirects::guard_credential_urls())
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(PREFETCH_REQUEST_TIMEOUT_SECS))
         .build()

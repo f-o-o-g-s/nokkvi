@@ -9,6 +9,7 @@ pub mod dedupe;
 pub mod formatters;
 pub mod fuzzy;
 pub mod paths;
+pub mod redirects;
 pub mod reorder;
 pub mod scale;
 pub mod search;

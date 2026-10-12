@@ -95,6 +95,7 @@ All notable changes to this project will be documented in this file.
 - After config.toml is edited to name another server or user, nokkvi now shows the login screen instead of resuming the old session there.
 - A network error while scrobbling no longer writes your server credentials into nokkvi.log.
 - A server URL typed with a capitalized scheme, like HTTPS://, no longer makes every song fail to play.
+- nokkvi no longer follows a redirect from your server to another host, which could have handed that host your login.
 
 ### Removed
 
