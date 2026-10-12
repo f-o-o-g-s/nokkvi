@@ -673,6 +673,12 @@ const CUSHION_BASE_UNITS: u64 = 120;
 /// this much audio is buffered.
 const RADIO_JITTER_PREBUFFER_MS: u64 = 5000;
 
+/// How long a ring write that found the ring full waits for the renderer to
+/// consume samples before it re-checks the loop generation. A paused stream
+/// consumes nothing, so this sets both the paused wake-up rate and how late a
+/// superseded loop can notice it has been superseded.
+const WRITE_RETRY_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Default crossfade duration (ms) seeded at construction, before settings
 /// apply. Keeps the shared atomic (decode-loop watermarks) and the plain field
 /// (arm_crossfade) in lockstep.
@@ -1375,11 +1381,7 @@ async fn inject_transition_gap(gap: TransitionGap<'_>) {
                 clippy::let_underscore_must_use,
                 reason = "the timeout elapsing is the paused-ring wake-up, not an error"
             )]
-            let _ = tokio::time::timeout(
-                tokio::time::Duration::from_millis(500),
-                consumed_notify.notified(),
-            )
-            .await;
+            let _ = tokio::time::timeout(WRITE_RETRY_WAIT, consumed_notify.notified()).await;
         }
     }
 }
@@ -2218,19 +2220,17 @@ impl CustomAudioEngine {
                             //   ~512 samples (~5 ms at 48 kHz stereo) → we wake up promptly.
                             // When paused:   renderer emits silence without consuming the ring
                             //   buffer → consumed_notify never fires → timeout elapses → we
-                            //   re-check generation and sleep again. 500 ms per cycle ≈ 2
-                            //   wake-ups/s instead of 200 wake-ups/s — no more livelock.
+                            //   re-check generation and sleep again. One `WRITE_RETRY_WAIT`
+                            //   (500 ms) per cycle ≈ 2 wake-ups/s instead of 200 — no livelock.
                             // On supersede:  generation check fires immediately after the timeout
-                            //   (or after a spurious wake), bounding exit latency to ≤500 ms.
+                            //   (or after a spurious wake), bounding exit latency to one wait.
                             #[expect(
                                 clippy::let_underscore_must_use,
                                 reason = "the timeout elapsing is the paused wake-up described above, not an error"
                             )]
-                            let _ = tokio::time::timeout(
-                                tokio::time::Duration::from_millis(500),
-                                consumed_notify.notified(),
-                            )
-                            .await;
+                            let _ =
+                                tokio::time::timeout(WRITE_RETRY_WAIT, consumed_notify.notified())
+                                    .await;
                         } else {
                             break;
                         }
@@ -9103,6 +9103,36 @@ mod tests {
         );
     }
 
+    /// A station that never comes back is given up on after the documented
+    /// schedule: five attempts, 2 + 4 + 8 + 16 + 16 s of backoff, then EOF is
+    /// stored so the renderer learns the station is dead. A path that does
+    /// not exist fails every re-init at once without a socket, so the paused
+    /// clock runs the 46 s in no real time.
+    #[tokio::test(start_paused = true)]
+    async fn radio_reconnect_gives_up_after_its_backoff_schedule() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let url = dir.path().join("gone.mp3").to_string_lossy().into_owned();
+        let decoder = tokio::sync::Mutex::new(AudioDecoder::default());
+        let decode_gen = DecodeLoopHandle::new();
+        let my_gen = decode_gen.current();
+        let decoder_eof = AtomicBool::new(false);
+
+        let started = tokio::time::Instant::now();
+        let guard = decoder.lock().await;
+        let outcome =
+            radio_reconnect_loop(&decoder, guard, &decode_gen, my_gen, &decoder_eof, &url).await;
+
+        assert_eq!(outcome, RadioReconnectOutcome::GaveUp);
+        assert!(
+            decoder_eof.load(Ordering::Acquire),
+            "giving up must store EOF, or the station stays silent"
+        );
+        assert_eq!(
+            started.elapsed(),
+            std::time::Duration::from_secs(2 + 4 + 8 + 16 + 16)
+        );
+    }
+
     // -----------------------------------------------------------------------
     // F3: pause-aware decode-loop — consumed_notify unit tests
     //
@@ -9258,32 +9288,53 @@ mod tests {
         );
     }
 
-    /// The write-retry timeout (500 ms) bounds the decode loop's exit latency
-    /// when its generation is superseded while it is waiting on the notify.
-    ///
-    /// We simulate this by verifying that a `timeout(500ms, notified())` on an
-    /// Arc<Notify> that nobody fires resolves within 600 ms.
-    #[tokio::test]
-    async fn write_retry_timeout_bounds_supersede_exit_latency() {
-        use std::sync::Arc;
-
-        use tokio::sync::Notify;
-
+    /// A gap injection that meets a full ring waits `WRITE_RETRY_WAIT` for
+    /// the renderer to drain it, then re-checks its generation: a loop
+    /// superseded during the wait aborts at the end of that one wait and
+    /// writes nothing. That one wait is what bounds a superseded loop's exit.
+    #[tokio::test(start_paused = true)]
+    async fn a_superseded_gap_injection_exits_after_one_write_retry_wait() {
+        let engine = CustomAudioEngine::new();
+        let (_src, _handle) = engine
+            .renderer
+            .lock()
+            .force_primary_stream_for_test(crate::audio::RING_BUFFER_CAPACITY);
+        let full = engine.renderer.lock().buffer_count();
+        let gap = Arc::new(AtomicU64::new(500));
+        let skip = Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING));
+        let source_generation = SourceGeneration::new();
+        let decode_gen = DecodeLoopHandle::new();
+        let my_gen = decode_gen.current();
         let notify = Arc::new(Notify::new());
-        let start = std::time::Instant::now();
 
-        // Nobody fires the notify — should time out at 500 ms.
-        let _ =
-            tokio::time::timeout(tokio::time::Duration::from_millis(500), notify.notified()).await;
-
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= tokio::time::Duration::from_millis(490),
-            "timeout should have elapsed ~500 ms, got {elapsed:?}"
+        let started = tokio::time::Instant::now();
+        tokio::join!(
+            inject_transition_gap(TransitionGap {
+                renderer: &engine.renderer,
+                gap_offset_ms: &gap,
+                skip_fade_pending: &skip,
+                source_generation: &source_generation,
+                decode_gen: &decode_gen,
+                my_gen,
+                frame_rate: 96_000,
+                consumed_notify: &notify,
+            }),
+            async {
+                // A skip supersedes the loop while the write waits.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                decode_gen.supersede();
+            }
         );
-        assert!(
-            elapsed < tokio::time::Duration::from_millis(600),
-            "timeout should not overshoot by more than 100 ms, got {elapsed:?}"
+
+        assert_eq!(
+            started.elapsed(),
+            WRITE_RETRY_WAIT,
+            "a superseded injection must end with the wait it was in"
+        );
+        assert_eq!(
+            engine.renderer.lock().buffer_count(),
+            full,
+            "a superseded injection writes nothing"
         );
     }
     // =========================================================================

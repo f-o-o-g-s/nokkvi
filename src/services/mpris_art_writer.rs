@@ -129,10 +129,7 @@ pub(crate) struct ArtCacheState {
     /// would refetch that cover on the next tick) nor be deleted by the next
     /// cover write's supersede.
     placeholder: PlaceholderSlot,
-    /// How long a tick waits for a cover it has to fetch; [`COVER_WAIT`]
-    /// outside tests.
-    cover_wait: Duration,
-    /// The cover fetch a tick left running after `cover_wait` ran out. The
+    /// The cover fetch a tick left running after [`COVER_WAIT`] ran out. The
     /// next tick for the same key harvests it without waiting; a tick for
     /// another key drops it, which aborts the task.
     in_flight: Option<InFlightCover>,
@@ -144,7 +141,6 @@ impl ArtCacheState {
             last_written: None,
             last_failed: None,
             placeholder: PlaceholderSlot::Unwritten,
-            cover_wait: COVER_WAIT,
             in_flight: None,
         }
     }
@@ -597,7 +593,7 @@ async fn sweep_dir_where(dir: &Path, op: &'static str, should_remove: impl Fn(&s
 /// `None` sends the caller on to the next candidate: the cover failed
 /// (negative-cached for [`RETRY_FAILED_AFTER`]), or its fetch is still
 /// running. The fetch runs on its own task: the first tick for a cover waits
-/// [`ArtCacheState::cover_wait`] for it, so a server that answers in time
+/// [`COVER_WAIT`] for it, so a server that answers in time
 /// publishes the cover with the title as before; a tick that finds the fetch
 /// still running only checks whether it has landed. Either way the state
 /// update behind the tick (title, position) is never held for the cover: on
@@ -643,10 +639,10 @@ where
     let (mut handle, wait) = match state.in_flight.take() {
         Some(mut flight) if flight.is_for(server_url, cover_id) => match flight.handle.take() {
             Some(handle) => (handle, Duration::ZERO),
-            None => (tokio::spawn(fetcher), state.cover_wait),
+            None => (tokio::spawn(fetcher), COVER_WAIT),
         },
         // Another cover's fetch: dropping it aborts the task.
-        Some(_) | None => (tokio::spawn(fetcher), state.cover_wait),
+        Some(_) | None => (tokio::spawn(fetcher), COVER_WAIT),
     };
 
     let joined = match tokio::time::timeout(wait, &mut handle).await {
@@ -1999,9 +1995,10 @@ mod tests {
     // The tick resolves the art before every state update. A slow server
     // once held the whole update (title included) for as long as the cover
     // took: on the one-core demo server a title lagged the audio by a minute.
-    // The cover fetch now runs on its own task; the tick waits `cover_wait`
+    // The cover fetch now runs on its own task; the tick waits `COVER_WAIT`
     // for it, then publishes the placeholder and harvests the cover on a
-    // later tick.
+    // later tick. These tests run on tokio's paused clock, so they wait out
+    // the production `COVER_WAIT` in no real time.
 
     /// A fetcher that answers only once `tx` fires, so a test can hold a
     /// cover "in flight" for as long as it wants.
@@ -2016,16 +2013,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn slow_cover_publishes_the_placeholder_then_the_cover() {
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
-        state.cover_wait = Duration::from_millis(20);
         let calls = Arc::new(AtomicU32::new(0));
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut fetcher = Some(gated_fetcher(&calls, rx));
 
-        let started = Instant::now();
+        let started = tokio::time::Instant::now();
         let uri = tokio::time::timeout(
             Duration::from_secs(2),
             resolve_art_inner(
@@ -2038,14 +2034,36 @@ mod tests {
         )
         .await
         .expect("the tick must not wait for a slow cover");
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "the tick must not wait for a slow cover"
+        assert_eq!(
+            started.elapsed(),
+            COVER_WAIT,
+            "the tick waits COVER_WAIT for a slow cover, then moves on"
         );
         assert_eq!(
             uri.as_deref(),
             Some(placeholder_uri_in(dir.path()).as_str()),
             "the placeholder stands in while the cover loads"
+        );
+
+        // A tick that finds the fetch still running only checks on it.
+        let checked_at = tokio::time::Instant::now();
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            song("al-slow"),
+            &calls,
+            Ok(vec![]),
+        )
+        .await;
+        assert_eq!(
+            checked_at.elapsed(),
+            Duration::ZERO,
+            "a later tick must not wait for the cover again"
+        );
+        assert_eq!(
+            uri.as_deref(),
+            Some(placeholder_uri_in(dir.path()).as_str()),
+            "the placeholder stays up while the cover loads"
         );
 
         tx.send(Ok(b"cover".to_vec())).expect("fetch task alive");
@@ -2071,7 +2089,42 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    /// A cover that lands inside `COVER_WAIT` is published by the tick that
+    /// asked for it, together with the title, and that tick waits only as
+    /// long as the fetch took.
+    #[tokio::test(start_paused = true)]
+    async fn a_cover_that_lands_in_time_is_published_by_the_first_tick() {
+        const ANSWERS_AFTER: Duration = Duration::from_millis(100);
+        const _: () = assert!(ANSWERS_AFTER.as_millis() < COVER_WAIT.as_millis());
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+
+        let started = tokio::time::Instant::now();
+        let uri = resolve_art_inner(
+            &mut state,
+            Some(dir.path()),
+            SERVER,
+            song("al-quick"),
+            |_| async {
+                tokio::time::sleep(ANSWERS_AFTER).await;
+                Ok::<_, anyhow::Error>(b"cover".to_vec())
+            },
+        )
+        .await;
+
+        assert_eq!(
+            uri.as_deref(),
+            Some(path_to_file_uri(&cache_file_path_for(dir.path(), "al-quick")).as_str()),
+            "a cover that answers in time goes out with the title"
+        );
+        assert_eq!(
+            started.elapsed(),
+            ANSWERS_AFTER,
+            "the tick waits only as long as the fetch takes"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn song_change_abandons_the_in_flight_cover() {
         struct DropFlag(Arc<AtomicU32>);
         impl Drop for DropFlag {
@@ -2082,7 +2135,6 @@ mod tests {
 
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
-        state.cover_wait = Duration::from_millis(20);
         let calls = Arc::new(AtomicU32::new(0));
         let dropped = Arc::new(AtomicU32::new(0));
         let (_tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<Vec<u8>>>();
@@ -2122,11 +2174,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn in_flight_cover_failure_is_negative_cached() {
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
-        state.cover_wait = Duration::from_millis(20);
         let calls = Arc::new(AtomicU32::new(0));
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut fetcher = Some(gated_fetcher(&calls, rx));

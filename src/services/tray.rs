@@ -375,6 +375,32 @@ mod tests {
         assert_eq!(exit, LoopExit::SubscriptionGone);
     }
 
+    /// The subscription usually goes while the loop idles between commands.
+    /// The loop must notice at its next idle wake-up, not run on behind it.
+    #[tokio::test(start_paused = true)]
+    async fn the_command_loop_notices_a_subscription_dropped_while_idle() {
+        let (event_tx, event_rx) = tokio_mpsc::channel::<TrayEvent>(1);
+        let (cmd_tx, cmd_rx) = std_mpsc::channel();
+        let _still_held_by_the_app = TrayConnection { sender: cmd_tx };
+
+        let started = tokio::time::Instant::now();
+        let (exit, ()) = tokio::join!(
+            pump_commands(&cmd_rx, &event_tx, async |_| {}),
+            async move {
+                // Halfway through the loop's third idle sleep.
+                tokio::time::sleep(TRAY_CMD_IDLE_SLEEP * 2 + TRAY_CMD_IDLE_SLEEP / 2).await;
+                drop(event_rx);
+            }
+        );
+
+        assert_eq!(exit, LoopExit::SubscriptionGone);
+        assert_eq!(
+            started.elapsed(),
+            TRAY_CMD_IDLE_SLEEP * 3,
+            "the loop must stop at the first idle wake-up after the drop"
+        );
+    }
+
     #[tokio::test]
     async fn commands_are_applied_in_order_until_the_app_drops_its_handle() {
         let (event_tx, _event_rx) = tokio_mpsc::channel::<TrayEvent>(1);

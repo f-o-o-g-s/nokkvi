@@ -64,7 +64,13 @@ impl ShowOutcome {
 /// Maximum wall-clock time we are willing to spend in `request_shutdown` before
 /// abandoning and proceeding to `iced::exit()` anyway. The OS cleans up after
 /// process exit, so an incomplete shutdown is always better than a stuck UI.
-const SHUTDOWN_BUDGET: Duration = Duration::from_millis(750);
+const QUIT_BUDGET: Duration = Duration::from_millis(750);
+
+// `request_shutdown` stops the engine, then drains tasks for up to
+// `TASK_DRAIN_BUDGET`; both have to fit inside the quit timeout.
+const _: () = assert!(
+    nokkvi_data::services::task_manager::TASK_DRAIN_BUDGET.as_millis() < QUIT_BUDGET.as_millis()
+);
 
 impl Nokkvi {
     /// Handle a tray menu activation or icon click.
@@ -97,7 +103,7 @@ impl Nokkvi {
     /// docs above.
     ///
     /// On the quit path, `Task::perform` runs `AppService::request_shutdown`
-    /// under a `SHUTDOWN_BUDGET` timeout. The callback always dispatches
+    /// under a `QUIT_BUDGET` timeout. The callback always dispatches
     /// `Message::ShutdownComplete` regardless of whether the timeout fired —
     /// the OS reaps anything left after process exit anyway.
     pub fn handle_window_close_requested(&mut self, id: window::Id) -> Task<Message> {
@@ -128,14 +134,14 @@ impl Nokkvi {
         Task::perform(
             async move {
                 if let Some(svc) = service {
-                    match tokio::time::timeout(SHUTDOWN_BUDGET, svc.request_shutdown()).await {
+                    match tokio::time::timeout(QUIT_BUDGET, svc.request_shutdown()).await {
                         Ok(()) => {
                             debug!(" [SHUTDOWN] Completed within budget");
                         }
                         Err(_elapsed) => {
                             warn!(
                                 " [SHUTDOWN] Timed out after {}ms — proceeding to exit",
-                                SHUTDOWN_BUDGET.as_millis()
+                                QUIT_BUDGET.as_millis()
                             );
                         }
                     }

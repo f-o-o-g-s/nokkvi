@@ -87,3 +87,7 @@ pipewire = { version = "0.10.0", features = ["v0_3_77"] }
 [dev-dependencies]
 tempfile = "3"
 proptest = "1.11"
+# `test-util` adds tokio's paused test clock (`#[tokio::test(start_paused = true)]`).
+# Test builds only: `cargo build --release` never enables it. The extra feature
+# means test builds compile tokio and its dependents apart from `cargo build`.
+tokio = { version = "1.52.3", features = ["test-util"] }

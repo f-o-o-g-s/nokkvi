@@ -1822,7 +1822,7 @@ impl Nokkvi {
         // an in-flight save_session / save_jwt_token / queue-save task can no
         // longer re-materialize a stale or non-empty blob after the clear.
         // Mirrors AppService::request_shutdown's engine-first, drain-second
-        // shape and reuses its 500 ms budget.
+        // shape and shares its `TASK_DRAIN_BUDGET`.
         let stop_task = if let Some(ref shell) = self.app_service {
             // Cache the storage Arc before `self.app_service = None` drops the
             // shell. This is the same DB handle the async body clears — caching
@@ -1863,10 +1863,10 @@ impl Nokkvi {
                     }
                     tracing::debug!(" [SESSION-RESET] Audio engine stopped");
 
-                    // (2) Drain tracked tasks within the established 500 ms
+                    // (2) Drain tracked tasks within the shared shutdown
                     // budget; past it, stragglers are no longer waited for.
                     let clean = task_manager
-                        .shutdown_all(std::time::Duration::from_millis(500))
+                        .shutdown_all(nokkvi_data::services::task_manager::TASK_DRAIN_BUDGET)
                         .await;
                     tracing::debug!(" [SESSION-RESET] task manager drained ({clean} clean)");
 

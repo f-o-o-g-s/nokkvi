@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(sip.next().await, Some(3));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn run_then_register_picks_up_after_notify() {
         let slot = leak_slot::<i32>("test_run_then_register");
 
@@ -149,11 +149,13 @@ mod tests {
             sip.next().await
         });
 
-        // Give the driver task a chance to park.
+        // On the paused clock this sleep ends only once every task is idle,
+        // so the driver has parked by then.
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!driver.is_finished(), "sipper should be parked on notify");
 
         let (tx, rx) = mpsc::unbounded_channel();
+        let registered_at = tokio::time::Instant::now();
         slot.register(rx);
         tx.send(42).unwrap();
 
@@ -163,9 +165,14 @@ mod tests {
             .expect("join handle");
 
         assert_eq!(got, Some(42));
+        assert_eq!(
+            registered_at.elapsed(),
+            Duration::ZERO,
+            "register wakes the parked sipper at once, not at a later poll"
+        );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn channel_close_stalls_sipper() {
         let slot = leak_slot::<i32>("test_channel_close_stalls");
         let (tx, rx) = mpsc::unbounded_channel();
@@ -181,8 +188,9 @@ mod tests {
 
         // Subsequent reads should hang forever (the sipper parks on
         // `pending::<Never>()`); bound the test on a timeout and assert
-        // we did NOT yield further output and did NOT terminate.
-        let stalled = tokio::time::timeout(Duration::from_millis(100), sip.next()).await;
+        // we did NOT yield further output and did NOT terminate. The paused
+        // clock makes an hour of stall free to check.
+        let stalled = tokio::time::timeout(Duration::from_secs(3600), sip.next()).await;
         assert!(
             stalled.is_err(),
             "sipper should stall after channel close, not terminate or emit"
@@ -214,6 +222,10 @@ mod tests {
         // Even if another task is briefly holding the parking_lot mutex,
         // `register` uses a blocking `lock()` (not `try_lock`), so it must
         // wait and complete. There is no silent-drop path.
+        //
+        // Real clock on purpose: a `spawn_blocking` task holds the paused
+        // clock still until it finishes, so the 5 ms sleep below would outlast
+        // the holder and `register` would never meet the lock held.
         let slot = leak_slot::<i32>("test_no_silent_drop");
 
         let hold_handle = {

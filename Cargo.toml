@@ -129,3 +129,9 @@ rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] 
 # pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
 particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
 particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
+
+[dev-dependencies]
+# `test-util` adds tokio's paused test clock (`#[tokio::test(start_paused = true)]`).
+# Test builds only: `cargo build --release` never enables it. The extra feature
+# means test builds compile tokio and its dependents apart from `cargo build`.
+tokio = { version = "1.52.3", features = ["test-util"] }

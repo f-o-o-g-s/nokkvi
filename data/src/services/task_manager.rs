@@ -14,8 +14,8 @@
 //!     settings.save().await
 //! });
 //!
-//! // Bounded shutdown: signal + await all tasks with a 500 ms budget
-//! let clean = task_manager.shutdown_all(Duration::from_millis(500)).await;
+//! // Bounded shutdown: signal + await all tasks for the shared budget
+//! let clean = task_manager.shutdown_all(TASK_DRAIN_BUDGET).await;
 //! info!("shutdown: {clean} tasks finished cleanly");
 //! ```
 
@@ -28,6 +28,11 @@ use std::{
 use tokio::{sync::Mutex, time::timeout};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, error, info, trace, warn};
+
+/// The longest logout and quit wait for in-flight tasks once the token
+/// fires. Quit runs the drain inside the UI's outer `QUIT_BUDGET`
+/// (`src/update/tray.rs`), which a const assert keeps larger.
+pub const TASK_DRAIN_BUDGET: Duration = Duration::from_millis(500);
 
 /// Status of a background task
 #[derive(Debug, Clone, PartialEq)]
@@ -254,34 +259,35 @@ mod tests {
             Arc,
             atomic::{AtomicBool, Ordering},
         },
-        time::{Duration, Instant},
+        time::Duration,
     };
+
+    use tokio::time::Instant;
 
     use super::*;
 
-    /// Spawn a few tasks that sleep N ms; shutdown_all with 4N budget → all finish cleanly.
-    #[tokio::test]
-    async fn task_manager_shutdown_awaits_in_flight_tasks() {
+    /// `spawn` and `spawn_result` tasks watch the token, so `shutdown_all`
+    /// ends them at their next await: both count as clean and the drain
+    /// takes no time, though each meant to run far past the budget.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_all_ends_token_watching_tasks_at_once() {
         let tm = TaskManager::new();
-        let n = 3usize;
-        let sleep_ms = 50u64;
+        tm.spawn("plain", || async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tm.spawn_result("result", || async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok::<(), anyhow::Error>(())
+        });
 
-        for i in 0..n {
-            let label: &'static str = match i {
-                0 => "t0",
-                1 => "t1",
-                _ => "t2",
-            };
-            tm.spawn_result(label, move || async move {
-                tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-                Ok::<(), anyhow::Error>(())
-            });
-        }
+        let started = Instant::now();
+        let clean = tm.shutdown_all(TASK_DRAIN_BUDGET).await;
 
-        let clean = tm.shutdown_all(Duration::from_millis(sleep_ms * 4)).await;
+        assert_eq!(clean, 2, "both tasks end cleanly at the token");
         assert_eq!(
-            clean, n,
-            "all {n} tasks should finish cleanly within 4× sleep budget"
+            started.elapsed(),
+            Duration::ZERO,
+            "the token ends them without waiting"
         );
     }
 
@@ -352,48 +358,52 @@ mod tests {
     /// A task is tracked from the moment `spawn_*` returns: a `shutdown_all`
     /// issued right after the spawn, before the runtime has polled anything,
     /// still waits for it. The task here ignores the token for a moment, so
-    /// only a tracked wait can see it finish.
-    #[tokio::test]
+    /// only a tracked wait can see it finish. The paused clock times the wait
+    /// exactly: it ends when the task does, not when the budget runs out.
+    #[tokio::test(start_paused = true)]
     async fn shutdown_all_waits_for_a_task_spawned_just_before() {
+        const TASK_RUNS: Duration = Duration::from_millis(30);
         let tm = TaskManager::new();
         let finished = Arc::new(AtomicBool::new(false));
         let finished2 = finished.clone();
 
         tm.spawn_cancellable("late", move |_token| async move {
-            tokio::time::sleep(Duration::from_millis(30)).await;
+            tokio::time::sleep(TASK_RUNS).await;
             finished2.store(true, Ordering::SeqCst);
         });
 
-        let clean = tm.shutdown_all(Duration::from_millis(500)).await;
+        let started = Instant::now();
+        let clean = tm.shutdown_all(TASK_DRAIN_BUDGET).await;
 
         assert!(
             finished.load(Ordering::SeqCst),
             "shutdown_all returned before the task it was handed had finished"
         );
         assert_eq!(clean, 1);
+        assert_eq!(
+            started.elapsed(),
+            TASK_RUNS,
+            "shutdown_all kept waiting after its last task had finished"
+        );
     }
 
     /// A task that ignores cancellation is waited for only as long as the
-    /// budget: `shutdown_all` returns on time and does not count it.
-    #[tokio::test]
+    /// budget: `shutdown_all` returns on time and does not count it. The
+    /// paused clock pins "on time" to the budget itself, so a busy test
+    /// machine can't fail the check.
+    #[tokio::test(start_paused = true)]
     async fn shutdown_all_stops_waiting_at_the_budget() {
         let tm = TaskManager::new();
 
-        tm.spawn_cancellable("stuck", |_token| async move {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-        });
+        tm.spawn_cancellable("stuck", |_token| std::future::pending::<()>());
 
         let started = Instant::now();
-        let clean = tm.shutdown_all(Duration::from_millis(100)).await;
-        let elapsed = started.elapsed();
+        let clean = tm.shutdown_all(TASK_DRAIN_BUDGET).await;
 
-        assert!(
-            elapsed >= Duration::from_millis(100),
-            "shutdown_all returned before the budget while a task was still running ({elapsed:?})"
-        );
-        assert!(
-            elapsed < Duration::from_millis(300),
-            "shutdown_all overran its budget: {elapsed:?}"
+        assert_eq!(
+            started.elapsed(),
+            TASK_DRAIN_BUDGET,
+            "shutdown_all must wait out its budget for a running task, then stop"
         );
         assert_eq!(clean, 0, "the straggler did not finish cleanly");
     }

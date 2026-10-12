@@ -450,11 +450,17 @@ mod tests {
     /// Pins the N3/N14 ordering invariant: when an in-flight credential writer
     /// is drained to completion BEFORE `clear_session` runs, the clear is the
     /// last write to win, so no non-empty session blob survives logout.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn clear_session_after_drain_wins_over_in_flight_writer() {
-        use std::time::Duration;
+        use std::{
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::Duration,
+        };
 
-        use crate::services::task_manager::TaskManager;
+        use crate::services::task_manager::{TASK_DRAIN_BUDGET, TaskManager};
 
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("session.redb");
@@ -464,19 +470,28 @@ mod tests {
         let stale_owner = owner("https://m", "a");
         save_session(&storage, &stale_owner, "jwt", "subsonic").unwrap();
 
-        // Straggler credential writer: mid-flight, re-materializes a non-empty
-        // session blob after a delay (simulates a save_session / save_jwt_token
-        // task that is past its last await when logout fires).
+        // Straggler credential writer: re-materializes a non-empty session
+        // blob after a delay. It does not stop at the token, so it stands in
+        // for a save_session / save_jwt_token task that is past its last
+        // await when logout fires (a token-watching task would be cancelled
+        // before it wrote anything).
         let tm = TaskManager::new();
         let storage_clone = storage.clone();
-        tm.spawn_result("straggler_save", move || async move {
+        let wrote = Arc::new(AtomicBool::new(false));
+        let wrote2 = wrote.clone();
+        tm.spawn_cancellable("straggler_save", move |_token| async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
-            save_session(&storage_clone, &stale_owner, "STALE_JWT", "STALE_SUB")?;
-            Ok::<(), anyhow::Error>(())
+            save_session(&storage_clone, &stale_owner, "STALE_JWT", "STALE_SUB")
+                .expect("straggler write");
+            wrote2.store(true, Ordering::SeqCst);
         });
 
         // Drain first (writer finishes), THEN clear (clear wins last).
-        let _clean = tm.shutdown_all(Duration::from_millis(500)).await;
+        let _clean = tm.shutdown_all(TASK_DRAIN_BUDGET).await;
+        assert!(
+            wrote.load(Ordering::SeqCst),
+            "the drain must wait for the straggler's write"
+        );
         clear_session(&storage).unwrap();
 
         let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();

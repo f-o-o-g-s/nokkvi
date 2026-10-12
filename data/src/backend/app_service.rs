@@ -2268,12 +2268,13 @@ impl AppService {
     ///    The engine mutex is held only for the duration of this synchronous
     ///    call; no network I/O occurs here.
     /// 2. `TaskManager::shutdown_all` — fires the shared `CancellationToken` and
-    ///    waits for the tracked tasks up to a 500 ms internal budget, then stops
-    ///    waiting. The 500 ms sits inside the caller's 750 ms outer budget.
+    ///    waits for the tracked tasks up to `TASK_DRAIN_BUDGET`, then stops
+    ///    waiting.
     ///
     /// The caller is responsible for wrapping this in a `tokio::time::timeout`
-    /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
-    /// blocking worker cannot defer window close beyond user patience.
+    /// longer than `TASK_DRAIN_BUDGET` (the quit path's `QUIT_BUDGET`) so a slow
+    /// engine mutex acquisition or a stuck blocking worker cannot defer window
+    /// close beyond user patience.
     ///
     /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
     /// is a no-op when already cancelled; `shutdown_all` with nothing in flight
@@ -2288,7 +2289,7 @@ impl AppService {
         debug!(" [APP SERVICE] request_shutdown: awaiting task manager drain");
         let clean = self
             .task_manager
-            .shutdown_all(std::time::Duration::from_millis(500))
+            .shutdown_all(crate::services::task_manager::TASK_DRAIN_BUDGET)
             .await;
         debug!(" [APP SERVICE] request_shutdown: {clean} tasks finished cleanly");
     }
@@ -2433,6 +2434,52 @@ mod tests {
         assert!(try_claim_key_writes().is_none(), "held before it runs");
         assert_eq!(revoke.await, Ok(()), "no player recorded: nothing to do");
         assert!(try_claim_key_writes().is_some(), "released when done");
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A logout's revoke that cannot get the key-write lock (another key
+    /// change is still running) gives up at `KEY_REVOKE_BUDGET`, lock wait
+    /// included, so logout never hangs on it.
+    #[tokio::test(start_paused = true)]
+    async fn a_revoke_stuck_behind_the_key_lock_gives_up_at_its_budget() {
+        use crate::services::api_key::{KEY_WRITES_TEST_LOCK, try_claim_key_writes};
+
+        let _serial = KEY_WRITES_TEST_LOCK.lock().await;
+        let (app, db_path) = test_app().await;
+        let _other_key_change = try_claim_key_writes().expect("the lock starts free");
+
+        let started = tokio::time::Instant::now();
+        let result = app.revoke_api_key().await;
+
+        assert!(
+            result.is_err(),
+            "a revoke that never ran must not report success"
+        );
+        assert_eq!(
+            started.elapsed(),
+            crate::backend::auth::KEY_REVOKE_BUDGET,
+            "the revoke waits out its budget, then gives up"
+        );
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Quit stops waiting for a tracked task that ignores the token once
+    /// `TASK_DRAIN_BUDGET` runs out, so a stuck task can't hold the window open.
+    #[tokio::test(start_paused = true)]
+    async fn request_shutdown_stops_waiting_at_the_task_drain_budget() {
+        let (app, db_path) = test_app().await;
+        app.task_manager()
+            .spawn_cancellable("stuck", |_token| std::future::pending::<()>());
+
+        let started = tokio::time::Instant::now();
+        app.request_shutdown().await;
+
+        assert_eq!(
+            started.elapsed(),
+            crate::services::task_manager::TASK_DRAIN_BUDGET
+        );
         drop(app);
         let _ = std::fs::remove_file(&db_path);
     }
