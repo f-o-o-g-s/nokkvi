@@ -303,21 +303,16 @@ impl Nokkvi {
         Task::batch(vec![submit_task, now_playing_task])
     }
 
-    /// Submit a radio now-playing update directly to the scrobble service
-    /// (ListenBrainz). No-ops in the backend when no token is configured.
+    /// Submit a radio now-playing update directly to the scrobble services
+    /// (ListenBrainz, Last.fm). No-ops in the backend for an unconfigured target.
     pub(crate) fn handle_radio_now_playing(&mut self, track: ScrobbleTrack) -> Task<Message> {
         debug!(
             " [SCROBBLE] Radio now-playing: {} - {}",
             track.artist, track.title
         );
         self.shell_task(
-            move |shell| async move {
-                shell
-                    .radio_scrobble_now_playing(track)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            |result| Message::Scrobble(ScrobbleMessage::RadioResult(result)),
+            move |shell| async move { shell.radio_scrobble_now_playing(track).await },
+            |outcome| Message::Scrobble(ScrobbleMessage::RadioResult(outcome)),
         )
     }
 
@@ -355,11 +350,14 @@ impl Nokkvi {
 
     /// Handle a radio now-playing result. Best-effort: logged only, so a
     /// transient now-playing hiccup never toast-spams during listening.
-    pub(crate) fn handle_radio_result(&mut self, result: Result<(), String>) -> Task<Message> {
+    pub(crate) fn handle_radio_result(&mut self, outcome: RadioSubmitOutcome) -> Task<Message> {
         // Now-playing is best-effort and fired on every track change AND the 30 s
         // keep-alive, so a persistent failure (offline / expired token) would
         // warn!-spam the log all session. Log at debug! like the queue path.
-        match result {
+        if outcome.lastfm_session_dropped {
+            self.warn_lastfm_session_dropped();
+        }
+        match outcome.into_combined() {
             Ok(()) => debug!(" [SCROBBLE] ✅ Radio now-playing accepted"),
             Err(e) => debug!(" [SCROBBLE] Radio now-playing failed (best-effort): {}", e),
         }
@@ -385,10 +383,23 @@ impl Nokkvi {
             debug!(" [SCROBBLE] Last.fm scrobble failed (will re-arm): {e}");
         }
         debug!(" [SCROBBLE] Radio scrobble outcome {artist} - {title}: lb={lb:?} lf={lf:?}");
+        if outcome.lastfm_session_dropped {
+            self.warn_lastfm_session_dropped();
+        }
         let now = unix_now_secs().unwrap_or(0);
         self.radio_scrobble
             .mark_outcome(&artist, &title, now, lb, lf);
         Task::none()
+    }
+
+    /// Last.fm rejected the stored session (revoked on last.fm, or minted for a
+    /// different API key) and the backend cleared it: say how to get Last.fm
+    /// back, and refresh the settings rows so the Connect row reads
+    /// "Not connected".
+    fn warn_lastfm_session_dropped(&mut self) {
+        self.toast_warn("Last.fm rejected the saved login — use Connect Last.fm in Settings");
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
     }
 
     /// True when a `NOKKVI_RADIO_*` env var overrides the ListenBrainz token in
@@ -623,7 +634,7 @@ impl Nokkvi {
             ScrobbleMessage::RadioSubmit(track, started_at, targets) => {
                 self.handle_radio_submit(track, started_at, targets)
             }
-            ScrobbleMessage::RadioResult(result) => self.handle_radio_result(result),
+            ScrobbleMessage::RadioResult(outcome) => self.handle_radio_result(outcome),
             ScrobbleMessage::RadioSubmitResult {
                 artist,
                 title,

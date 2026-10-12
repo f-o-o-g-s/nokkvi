@@ -26,7 +26,7 @@ use crate::{
     services::{
         radio_scrobble::{
             RadioSubmitOutcome, ScrobbleTargets, ScrobbleTrack,
-            lastfm::{LastfmClient, LastfmSession},
+            lastfm::{LastfmClient, LastfmSession, is_invalid_session},
             listenbrainz::{DEFAULT_API_URL, ListenBrainzClient, TokenValidation},
         },
         state_storage::ACTIVE_LIBRARY_IDS_KEY,
@@ -46,6 +46,14 @@ use crate::{
 /// etiquette wants a descriptive agent with a contact URL (distinct from the
 /// bare `crate::USER_AGENT` used for Navidrome).
 const RADIO_SCROBBLE_USER_AGENT: &str = "nokkvi (+https://github.com/f-o-o-g-s/nokkvi)";
+
+/// Whether saving a Last.fm app key must drop the stored session. A session
+/// only works with the API key that minted it, so any change of the effective
+/// key ends it, including setting a key while none resolves (the session's
+/// minting key is then unknown).
+fn key_change_invalidates_session(before: Option<&str>, after: Option<&str>) -> bool {
+    after != before
+}
 
 /// Blank a radio-scrobble credential's legacy redb copy once config.toml
 /// holds it. A failure leaves the old value in redb, where it is only the
@@ -1485,12 +1493,18 @@ impl AppService {
     /// (the GUI write target), clearing any legacy redb copies. The session key +
     /// username stay in redb (browser-auth output).
     pub fn set_lastfm_credentials(&self, api_key: &str, api_secret: &str) -> Result<()> {
+        let key_before = self.lastfm_credentials().map(|(key, _)| key);
         crate::services::radio_scrobble::source::write_config_fields(&[
             ("lastfm_api_key", api_key),
             ("lastfm_api_secret", api_secret),
         ])?;
         clear_legacy_redb_credential(&self.storage, LASTFM_API_KEY);
         clear_legacy_redb_credential(&self.storage, LASTFM_API_SECRET);
+        let key_after = self.lastfm_credentials().map(|(key, _)| key);
+        if key_change_invalidates_session(key_before.as_deref(), key_after.as_deref()) {
+            debug!("Last.fm API key changed; clearing the session it can no longer sign");
+            self.disconnect_lastfm()?;
+        }
         Ok(())
     }
 
@@ -1534,6 +1548,26 @@ impl AppService {
         self.storage.save(LASTFM_USERNAME, &String::new())
     }
 
+    /// Clear the stored Last.fm session after Last.fm rejected `rejected_sk`,
+    /// unless a newer session has replaced it since (a reconnect that landed
+    /// while the request was in flight). Returns whether it cleared, so only
+    /// the one outcome that dropped the session tells the user.
+    fn drop_rejected_lastfm_session(&self, rejected_sk: &str) -> bool {
+        if self.redb_string(LASTFM_SESSION_KEY).as_deref() != Some(rejected_sk) {
+            return false;
+        }
+        match self.disconnect_lastfm() {
+            Ok(()) => {
+                warn!("Last.fm rejected the stored session key; cleared it, reconnect required");
+                true
+            }
+            Err(e) => {
+                warn!("Last.fm rejected the stored session key, and clearing it failed: {e}");
+                false
+            }
+        }
+    }
+
     /// Run a submission against each REQUESTED + configured target concurrently,
     /// returning each target's outcome **independently** so a retry can
     /// re-dispatch only the targets that haven't yet succeeded. Resolves
@@ -1563,6 +1597,8 @@ impl AppService {
                 _ => None,
             })
             .flatten();
+        // The session this send signs with, so a rejection clears only it.
+        let lf_session = lf_client.as_ref().and(creds.lastfm_session.as_deref());
         debug!(
             "radio scrobble dispatch: listenbrainz={}, lastfm={}",
             lb_client.is_some(),
@@ -1581,15 +1617,24 @@ impl AppService {
             (None, Some(b)) => (None, Some(b.await)),
             (None, None) => (None, None),
         };
+        let lastfm_session_dropped = match (&lf_res, lf_session) {
+            (Some(Err(e)), Some(sk)) if is_invalid_session(e) => {
+                self.drop_rejected_lastfm_session(sk)
+            }
+            _ => false,
+        };
         RadioSubmitOutcome {
             listenbrainz: lb_res.map(|r| r.map_err(|e| e.to_string())),
             lastfm: lf_res.map(|r| r.map_err(|e| e.to_string())),
+            lastfm_session_dropped,
         }
     }
 
     /// Submit a now-playing update for a radio track to every configured target.
-    /// Best-effort (no per-target retry) — collapses to one combined result.
-    pub async fn radio_scrobble_now_playing(&self, track: ScrobbleTrack) -> Result<()> {
+    /// Best-effort (no per-target retry): the caller collapses the outcome with
+    /// [`RadioSubmitOutcome::into_combined`] after checking
+    /// `lastfm_session_dropped`.
+    pub async fn radio_scrobble_now_playing(&self, track: ScrobbleTrack) -> RadioSubmitOutcome {
         let track = &track;
         self.dispatch_radio(
             ScrobbleTargets::ALL,
@@ -1597,8 +1642,6 @@ impl AppService {
             |c| async move { c.update_now_playing(track).await },
         )
         .await
-        .into_combined()
-        .map_err(|e| anyhow::anyhow!(e))
     }
 
     /// Submit a completed listen (timestamped at `started_at`) to the requested
@@ -2915,6 +2958,63 @@ mod tests {
             None,
             "a cleared queue names no song"
         );
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A Last.fm session only works with the key that minted it, so a saved
+    /// key that differs from the effective one ends it. Re-saving the same key
+    /// keeps it.
+    #[test]
+    fn key_change_invalidates_session_only_when_the_key_changes() {
+        assert!(!key_change_invalidates_session(Some("a"), Some("a")));
+        assert!(key_change_invalidates_session(Some("a"), Some("b")));
+        assert!(key_change_invalidates_session(None, Some("a")));
+        assert!(key_change_invalidates_session(Some("a"), None));
+        assert!(!key_change_invalidates_session(None, None));
+    }
+
+    /// Last.fm rejecting the stored session clears it, so the settings row
+    /// reads "Not connected" and no further send uses it. The second rejection
+    /// of the same session (now-playing and submit race) has nothing to clear.
+    #[tokio::test]
+    async fn rejected_lastfm_session_is_dropped_once() {
+        let (app, db_path) = test_app().await;
+        app.storage
+            .save(LASTFM_SESSION_KEY, &"sk-old".to_string())
+            .expect("save session");
+        app.storage
+            .save(LASTFM_USERNAME, &"foogs".to_string())
+            .expect("save username");
+
+        assert!(app.drop_rejected_lastfm_session("sk-old"));
+        assert_eq!(app.redb_string(LASTFM_SESSION_KEY), None);
+        assert_eq!(app.lastfm_username(), None);
+        assert!(!app.drop_rejected_lastfm_session("sk-old"));
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A rejection that lands after the user reconnected names the old
+    /// session, so the new one stays.
+    #[tokio::test]
+    async fn rejection_of_a_replaced_lastfm_session_keeps_the_new_one() {
+        let (app, db_path) = test_app().await;
+        app.storage
+            .save(LASTFM_SESSION_KEY, &"sk-new".to_string())
+            .expect("save session");
+        app.storage
+            .save(LASTFM_USERNAME, &"foogs".to_string())
+            .expect("save username");
+
+        assert!(!app.drop_rejected_lastfm_session("sk-old"));
+        assert_eq!(
+            app.redb_string(LASTFM_SESSION_KEY).as_deref(),
+            Some("sk-new")
+        );
+        assert_eq!(app.lastfm_username().as_deref(), Some("foogs"));
 
         drop(app);
         let _ = std::fs::remove_file(&db_path);

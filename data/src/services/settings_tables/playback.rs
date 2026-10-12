@@ -614,7 +614,7 @@ define_settings! {
             ui_meta: {
                 label: "Scrobble Radio",
                 category: "Radio Scrobbling",
-                subtitle: Some("Submit internet-radio tracks (from the stream's ICY title) to ListenBrainz. Needs a token below."),
+                subtitle: Some("Submit internet-radio tracks (from the stream's ICY title) to ListenBrainz and Last.fm. Needs a ListenBrainz token or a connected Last.fm account."),
                 default: false,
                 read_field: |d| d.radio_scrobbling_enabled,
             },

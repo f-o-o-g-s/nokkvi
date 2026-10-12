@@ -26,6 +26,27 @@ use super::ScrobbleTrack;
 /// Last.fm API 2.0 root.
 const API_ROOT: &str = "https://ws.audioscrobbler.com/2.0/";
 
+/// Last.fm's error code for a session key it no longer accepts: the user
+/// revoked nokkvi on last.fm, or the key was minted for a different API key.
+const INVALID_SESSION_KEY: i32 = 9;
+
+/// A Last.fm error envelope (`{"error":N,"message":...}`, sent even on HTTP
+/// 200). Typed so a caller can tell a rejected session from a transient
+/// failure ([`is_invalid_session`]).
+#[derive(Debug, thiserror::Error)]
+#[error("Last.fm error {code}: {message}")]
+pub struct LastfmApiError {
+    pub code: i32,
+    pub message: String,
+}
+
+/// True when `err` is Last.fm rejecting the session key, which no retry can
+/// fix: the stored session is dead and the user has to reconnect.
+pub fn is_invalid_session(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<LastfmApiError>()
+        .is_some_and(|e| e.code == INVALID_SESSION_KEY)
+}
+
 /// A configured Last.fm app (api key + secret) plus an optional per-user
 /// session key. Cheap to clone.
 #[derive(Clone)]
@@ -268,10 +289,11 @@ fn parse_lastfm<T: for<'de> Deserialize<'de>>(body: &str) -> Result<T> {
     if let Ok(e) = serde_json::from_str::<LastfmErrorMaybe>(body)
         && let Some(code) = e.error
     {
-        return Err(anyhow!(
-            "Last.fm error {code}: {}",
-            e.message.unwrap_or_default()
-        ));
+        return Err(LastfmApiError {
+            code,
+            message: e.message.unwrap_or_default(),
+        }
+        .into());
     }
     // Deliberately omit the raw body from the error: an auth.getSession body
     // carries the per-user session key, and this error surfaces in the file log
@@ -384,6 +406,25 @@ mod tests {
         );
     }
 
+    /// Error 9 is a dead session no retry can fix; error 14 (a token the user
+    /// hasn't approved yet) and transport failures are not.
+    #[test]
+    fn invalid_session_is_told_apart_from_other_failures() {
+        let rejected = parse_lastfm::<serde_json::Value>(
+            r#"{"error":9,"message":"Invalid session key - Please re-authenticate"}"#,
+        )
+        .expect_err("error envelope must become Err");
+        assert!(is_invalid_session(&rejected));
+        assert!(is_invalid_session(&rejected.context("radio now-playing")));
+
+        let unapproved = parse_lastfm::<serde_json::Value>(
+            r#"{"error":14,"message":"Unauthorized Token - This token has not been authorized"}"#,
+        )
+        .expect_err("error envelope must become Err");
+        assert!(!is_invalid_session(&unapproved));
+        assert!(!is_invalid_session(&anyhow!("Last.fm request failed")));
+    }
+
     #[test]
     fn scrobble_accepted_and_ignored_are_detected() {
         let ok = serde_json::json!({"scrobbles":{"@attr":{"accepted":1,"ignored":0}}});
@@ -464,5 +505,38 @@ mod tests {
             .await
             .expect("updateNowPlaying (signed + session) must succeed");
         eprintln!("Last.fm now-playing accepted — full scrobble path works");
+    }
+
+    /// Live check that a session Last.fm won't accept comes back as the
+    /// dead-session error nokkvi clears and warns about, rather than a
+    /// transient failure it would keep retrying. Non-destructive: the call
+    /// is rejected before anything is recorded.
+    ///
+    /// Run with LASTFM_API_KEY + LASTFM_API_SECRET set (no session needed).
+    #[tokio::test]
+    #[ignore = "needs LASTFM_API_KEY/SECRET env; hits the network"]
+    async fn lastfm_live_unknown_session_is_invalid_session() {
+        let (Ok(key), Ok(secret)) = (
+            std::env::var("LASTFM_API_KEY"),
+            std::env::var("LASTFM_API_SECRET"),
+        ) else {
+            eprintln!("LASTFM_API_KEY/SECRET unset — skipping live test");
+            return;
+        };
+        let http = Arc::new(reqwest::Client::new());
+        let client =
+            LastfmClient::new(http, key, secret).with_session_key("nokkvi-not-a-session-key");
+        let track = ScrobbleTrack {
+            artist: "nokkvi".into(),
+            title: "dead-session probe".into(),
+            album: None,
+            station_name: None,
+        };
+        let err = client
+            .update_now_playing(&track)
+            .await
+            .expect_err("Last.fm must reject an unknown session key");
+        eprintln!("Last.fm said: {err}");
+        assert!(is_invalid_session(&err));
     }
 }

@@ -327,16 +327,17 @@ pub enum ScrobbleMessage {
     /// playback); otherwise it is a no-op.
     NowPlayingRefresh(u64, String),
     /// Submit a now-playing update for an internet-radio track DIRECTLY to the
-    /// configured scrobble service (ListenBrainz). Radio has no Navidrome song
+    /// configured scrobble services (ListenBrainz, Last.fm). Radio has no Navidrome song
     /// id, so it bypasses the Subsonic relay entirely.
     RadioNowPlaying(ScrobbleTrack),
     /// Submit a completed listen for a radio track, timestamped at the track's
     /// start (unix seconds), to the requested `targets` (a retry narrows to the
     /// not-yet-succeeded targets).
     RadioSubmit(ScrobbleTrack, i64, ScrobbleTargets),
-    /// Result of a radio now-playing. Best-effort: logged only (a failed radio
-    /// now-playing must not toast-spam during normal listening).
-    RadioResult(Result<(), String>),
+    /// Per-target outcome of a radio now-playing. Best-effort: a failure is
+    /// logged only (a failed radio now-playing must not toast-spam during
+    /// normal listening); a dropped Last.fm session is the one toast.
+    RadioResult(RadioSubmitOutcome),
     /// Per-target outcome of a radio scrobble SUBMIT, carrying the `(artist,
     /// title)` it was for so the timer can latch each target on success or
     /// re-arm it on failure (`RadioScrobbleState::mark_outcome`). A stale result

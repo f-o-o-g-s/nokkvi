@@ -109,6 +109,10 @@ impl ScrobbleTargets {
 pub struct RadioSubmitOutcome {
     pub listenbrainz: Option<Result<(), String>>,
     pub lastfm: Option<Result<(), String>>,
+    /// Last.fm rejected the stored session key and the backend cleared it, so
+    /// Last.fm stays off until the user reconnects. Set on the one outcome
+    /// that did the clearing.
+    pub lastfm_session_dropped: bool,
 }
 
 impl RadioSubmitOutcome {

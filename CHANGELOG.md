@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Saving a different Last.fm API key now disconnects the old Last.fm login instead of still showing it as connected.
+- When Last.fm rejects the saved login during radio scrobbling, nokkvi now disconnects it and warns you to reconnect.
+- The Scrobble Radio setting's description now mentions Last.fm, which it also scrobbles to.
+
 ### Removed
 
 ## v0.24.1 — 2026-10-12

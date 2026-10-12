@@ -410,3 +410,64 @@ fn failed_scrobble_refreshes_nothing() {
     assert!(!app.library.albums.is_loading());
     assert!(!app.library.songs.is_loading());
 }
+
+/// The one warning a dropped Last.fm session raises: it names Last.fm and
+/// says how to get it back.
+fn assert_single_lastfm_reconnect_warning(app: &crate::Nokkvi) {
+    let warnings: Vec<_> = app
+        .toast
+        .toasts
+        .iter()
+        .filter(|t| t.level == nokkvi_data::types::toast::ToastLevel::Warning)
+        .collect();
+    assert_eq!(warnings.len(), 1, "expected one warning, got {warnings:?}");
+    assert!(warnings[0].message.contains("Last.fm"));
+    assert!(warnings[0].message.contains("Connect Last.fm"));
+}
+
+fn dropped_lastfm_session_outcome() -> crate::app_message::RadioSubmitOutcome {
+    crate::app_message::RadioSubmitOutcome {
+        listenbrainz: Some(Ok(())),
+        lastfm: Some(Err("Last.fm error 9: Invalid session key".to_string())),
+        lastfm_session_dropped: true,
+    }
+}
+
+#[test]
+fn dropped_lastfm_session_warns_from_a_radio_submit() {
+    let mut app = test_app();
+
+    let _ = app.handle_radio_submit_result(
+        "Fresh Moods".to_string(),
+        "Melian".to_string(),
+        dropped_lastfm_session_outcome(),
+    );
+
+    assert_single_lastfm_reconnect_warning(&app);
+}
+
+#[test]
+fn dropped_lastfm_session_warns_from_a_radio_now_playing() {
+    let mut app = test_app();
+
+    let _ = app.handle_radio_result(dropped_lastfm_session_outcome());
+
+    assert_single_lastfm_reconnect_warning(&app);
+}
+
+/// Ordinary radio-scrobble failures stay log-only: a flaky network must not
+/// toast every 30 s keep-alive.
+#[test]
+fn radio_failures_without_a_dropped_session_stay_quiet() {
+    let mut app = test_app();
+    let failed = crate::app_message::RadioSubmitOutcome {
+        listenbrainz: Some(Err("timeout".to_string())),
+        lastfm: Some(Err("Last.fm request failed".to_string())),
+        lastfm_session_dropped: false,
+    };
+
+    let _ = app.handle_radio_result(failed.clone());
+    let _ = app.handle_radio_submit_result("A".to_string(), "T".to_string(), failed);
+
+    assert!(app.toast.toasts.is_empty(), "got {:?}", app.toast.toasts);
+}
