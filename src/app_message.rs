@@ -89,6 +89,10 @@ pub(crate) use nokkvi_data::types::view_preferences::AllViewPreferences;
 pub struct LoginSuccess {
     pub shell: AppService,
     pub resolved_url: String,
+    /// The username the session authenticated as. config.toml and the
+    /// stored session's owner are both written from it, so a login form
+    /// edited while the login ran can't leave them naming different users.
+    pub username: String,
     /// The authenticated user's Navidrome id (login response `id`, or the
     /// JWT `uid` claim on resume). Stored on `Nokkvi.session_user_id` for
     /// the playlist ownership gate. Empty when unavailable — conservative:

@@ -279,9 +279,16 @@ fn load_session_from(storage: &StateStorage) -> Option<LoadedSession> {
         return None;
     }
 
-    // An unreadable owner reads as a session saved before owners were
-    // stored; the resume then follows config.toml, as it always did.
-    let owner = storage.load(SESSION_OWNER_KEY).ok().flatten();
+    // An absent owner is a session saved before owners were stored (it
+    // follows config.toml, as it always did). One that is stored but can't
+    // be read gives no way to tell where the tokens belong: no resume.
+    let owner = match storage.load::<SessionOwner>(SESSION_OWNER_KEY) {
+        Ok(owner) => owner,
+        Err(e) => {
+            tracing::warn!("Stored session not resumed: its owner can't be read: {e:#}");
+            return None;
+        }
+    };
     Some(LoadedSession {
         jwt_token,
         subsonic_credential,
@@ -363,6 +370,18 @@ mod tests {
         let config = pair("https://music.example.com", "alice");
         assert_eq!(resume_identity(Some(&config), None), Some(config.clone()));
         assert_eq!(resume_identity(None, None), None);
+    }
+
+    /// An owner that is stored but can't be read is not a session from
+    /// before owners existed: the session does not resume at all.
+    #[test]
+    fn an_unreadable_owner_refuses_the_resume() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let storage = StateStorage::new(temp.path().join("session.redb")).unwrap();
+        save_session(&storage, &owner("https://m", "a"), "jwt", "u=a&s=b&t=c").unwrap();
+        storage.save(SESSION_OWNER_KEY, &"not an owner").unwrap();
+
+        assert!(load_session_from(&storage).is_none());
     }
 
     /// The session's tokens go only to the server and user they came from.

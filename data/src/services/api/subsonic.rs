@@ -113,12 +113,14 @@ pub async fn subsonic_post_ok(
 
 /// Subsonic error codes that mean the credential itself was rejected, so the
 /// session is dead: 40 (wrong username or password, which is also what
-/// Navidrome answers a stale token with), 41 (token auth switched off), 42
-/// (the credential's mechanism switched off) and 44 (invalid or revoked API
-/// key). Logging in again fixes each: a fresh login sets up an API key where
-/// the server takes them (`services::api_key`), and a revoked key is replaced.
-/// 43 (a key sent beside another credential) stays a plain error: it is
-/// nokkvi's own bug, which a re-login would only repeat.
+/// Navidrome answers a stale token with), 44 (invalid or revoked API key),
+/// and the OpenSubsonic spec's 41 (token auth switched off) and 42 (the
+/// credential's mechanism switched off). Navidrome sends neither 41 nor 42
+/// today; they are the spec's answers for a server that turns a mechanism
+/// off, and a fresh login then picks the one it still takes (an API key, or
+/// the token pair; `services::api_key`). 43 (a key sent beside another
+/// credential) stays a plain error: it is nokkvi's own bug, which a re-login
+/// would only repeat.
 const SESSION_REJECTED_CODES: [i64; 4] = [40, 41, 42, 44];
 
 /// Apply Subsonic response status/body policy.

@@ -98,6 +98,16 @@ impl ApiClient {
     pub fn set_on_token_refresh(&mut self, callback: TokenRefreshCallback) {
         self.on_token_refresh = Some(callback);
     }
+
+    /// A clone that never persists a refreshed JWT, for a request that runs
+    /// after its session ended (a logout's key revoke): the session's tokens
+    /// were cleared from redb, and a refreshed one must not be written back.
+    pub(crate) fn without_token_refresh(&self) -> Self {
+        Self {
+            on_token_refresh: None,
+            ..self.clone()
+        }
+    }
 }
 
 impl Clone for ApiClient {
@@ -178,6 +188,49 @@ pub(crate) fn decode_jwt_uid(jwt: &str) -> Result<String> {
         .and_then(|x| x.as_str())
         .map(str::to_string)
         .context("JWT payload has no string `uid` claim")
+}
+
+/// Decode a Navidrome JWT's `sub` claim: the username the token was issued
+/// to (`server/subsonic/middlewares.go` `validateCredentials` compares it
+/// with the user's name).
+pub(crate) fn decode_jwt_sub(jwt: &str) -> Result<String> {
+    decode_jwt_payload(jwt)?
+        .get("sub")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .context("JWT payload has no string `sub` claim")
+}
+
+/// Tiny base64url encoder for the test-fixture path only. Mirrors RFC
+/// 4648 §5 (no padding), same alphabet as `decode_base64url`.
+#[cfg(test)]
+pub(crate) fn encode_base64url(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for &b in input {
+        buf = (buf << 8) | b as u32;
+        bits += 8;
+        while bits >= 6 {
+            bits -= 6;
+            out.push(ALPHABET[((buf >> bits) & 0x3F) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        out.push(ALPHABET[((buf << (6 - bits)) & 0x3F) as usize] as char);
+    }
+    out
+}
+
+/// A JWT-shaped test token carrying `claims` (placeholder header and
+/// signature; nokkvi reads claims without verifying).
+#[cfg(test)]
+pub(crate) fn jwt_for_test(claims: &serde_json::Value) -> String {
+    format!(
+        "hdr.{}.sig",
+        encode_base64url(claims.to_string().as_bytes())
+    )
 }
 
 /// Minimal base64url decoder (RFC 4648 §5, no padding). Inlined to avoid
@@ -605,28 +658,6 @@ mod tests {
     };
 
     use super::*;
-
-    /// Tiny base64url encoder for the test-fixture path only. Mirrors RFC
-    /// 4648 §5 (no padding), same alphabet as `decode_base64url`.
-    fn encode_base64url(input: &[u8]) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-        let mut buf: u32 = 0;
-        let mut bits: u32 = 0;
-        for &b in input {
-            buf = (buf << 8) | b as u32;
-            bits += 8;
-            while bits >= 6 {
-                bits -= 6;
-                out.push(ALPHABET[((buf >> bits) & 0x3F) as usize] as char);
-            }
-        }
-        if bits > 0 {
-            out.push(ALPHABET[((buf << (6 - bits)) & 0x3F) as usize] as char);
-        }
-        out
-    }
 
     /// Build a minimal JWT-shaped string with the given `exp`. Only the
     /// payload's `exp` claim is consulted by `decode_jwt_exp`; header and

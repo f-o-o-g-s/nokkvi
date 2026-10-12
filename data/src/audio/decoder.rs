@@ -733,10 +733,10 @@ impl AudioDecoder {
         // whose probe has no byte length to read one from.
         let mut header_duration_ms: Option<u64> = None;
 
-        // Determine if URL is HTTP/HTTPS or file path
-        let (mss, hint_from_data) = if self.url.starts_with("http://")
-            || self.url.starts_with("https://")
-        {
+        // Determine if URL is HTTP/HTTPS or file path (the scheme is
+        // case-insensitive; a stream URL must never reach the file branch,
+        // whose error would carry the URL and its credential)
+        let (mss, hint_from_data) = if crate::utils::server_url::has_http_scheme(&self.url) {
             // HTTP stream - use Range requests for instant playback
             let init_start = std::time::Instant::now();
             trace!(
@@ -1029,8 +1029,12 @@ impl AudioDecoder {
             (mss, detected_format)
         } else {
             // File path
-            let file = std::fs::File::open(&self.url)
-                .with_context(|| format!("Failed to open file: {}", self.url))?;
+            let file = std::fs::File::open(&self.url).with_context(|| {
+                format!(
+                    "Failed to open file: {}",
+                    crate::utils::url_redaction::redact_subsonic_url(&self.url)
+                )
+            })?;
             let media_source: Box<dyn MediaSource> = Box::new(file);
             let mss = MediaSourceStream::new(media_source, Default::default());
             self.delivery = StreamDelivery::Sized;
@@ -1134,7 +1138,7 @@ impl AudioDecoder {
     /// Extract format hint from URL (file extension or query parameter)
     fn extract_format_hint(&self, url: &str) -> Option<String> {
         // Try to parse as URL first for query parameters
-        if (url.starts_with("http://") || url.starts_with("https://"))
+        if crate::utils::server_url::has_http_scheme(url)
             && let Ok(parsed_url) = url::Url::parse(url)
         {
             // Check query parameters for 'f' (format) parameter

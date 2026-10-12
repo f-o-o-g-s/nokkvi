@@ -39,6 +39,20 @@ pub fn has_http_scheme(s: &str) -> bool {
     starts_with("http://") || starts_with("https://")
 }
 
+/// `url` with an `http://` / `https://` scheme in lowercase; anything else
+/// unchanged. Every URL nokkvi builds from the session's server URL is
+/// checked against a lowercase scheme, so the session's URL keeps one.
+pub fn lowercase_http_scheme(url: &str) -> String {
+    if !has_http_scheme(url) {
+        return url.to_string();
+    }
+    // `has_http_scheme` matched an ASCII scheme, so `://` is in range.
+    match url.split_once("://") {
+        Some((scheme, rest)) => format!("{}://{rest}", scheme.to_ascii_lowercase()),
+        None => url.to_string(),
+    }
+}
+
 /// Ordered list of full URLs to attempt for the given user input.
 ///
 /// - already-schemed input → one canonical candidate (trailing slash stripped)
@@ -51,7 +65,7 @@ pub fn normalize_server_url_candidates(raw: &str) -> Vec<String> {
         return Vec::new();
     }
     if has_http_scheme(base) {
-        vec![base.to_string()]
+        vec![lowercase_http_scheme(base)]
     } else {
         // Prefer HTTPS for a bare host. Fall back to plain HTTP ONLY for
         // local/LAN hosts, where cleartext is unremarkable — never silently
@@ -253,12 +267,23 @@ mod tests {
         }
     }
 
+    /// The scheme is matched case-insensitively and stored lowercase: URLs
+    /// built from the session's server URL are checked with a lowercase
+    /// `http(s)://` (the decoder takes anything else for a local file path,
+    /// and its error would show the stream URL, credential included).
     #[test]
     fn scheme_detection_is_case_insensitive() {
         assert_eq!(
             normalize_server_url_candidates("HTTP://Host/"),
-            vec!["HTTP://Host".to_string()]
+            vec!["http://Host".to_string()]
         );
+        assert_eq!(
+            normalize_server_url_candidates("HttpS://music.example.com/nd/"),
+            vec!["https://music.example.com/nd".to_string()]
+        );
+        assert_eq!(lowercase_http_scheme("HTTPS://Host"), "https://Host");
+        assert_eq!(lowercase_http_scheme("http://host"), "http://host");
+        assert_eq!(lowercase_http_scheme("ftp://host"), "ftp://host");
     }
 
     #[test]

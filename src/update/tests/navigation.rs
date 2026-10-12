@@ -1909,3 +1909,73 @@ fn a_current_session_result_is_dispatched_through_the_stamp() {
     ));
     assert_eq!(app.current_view, View::Songs);
 }
+
+// ============================================================================
+// API key: a keyed session on a server that takes no keys
+// ============================================================================
+
+/// A session that sends an API key to a server whose extension list has no
+/// `apiKeyAuthentication` (an older Navidrome after a rollback) is dead:
+/// every `/rest` request fails with "missing parameter u". It ends, and the
+/// next login uses the token pair. A failed or empty probe proves nothing.
+#[test]
+fn a_keyed_session_on_a_server_without_keys_ends() {
+    use crate::{app_message::Message, update::navigation::extensions_fetched_message};
+
+    let without_keys = Some(vec!["formPost".to_string(), "songLyrics".to_string()]);
+    let with_keys = Some(vec![
+        "formPost".to_string(),
+        "apiKeyAuthentication".to_string(),
+    ]);
+
+    assert!(matches!(
+        extensions_fetched_message(without_keys.clone(), true),
+        Message::SessionExpired
+    ));
+    assert!(matches!(
+        extensions_fetched_message(without_keys, false),
+        Message::OpenSubsonicExtensionsFetched(Some(_))
+    ));
+    assert!(matches!(
+        extensions_fetched_message(with_keys, true),
+        Message::OpenSubsonicExtensionsFetched(Some(_))
+    ));
+    assert!(matches!(
+        extensions_fetched_message(None, true),
+        Message::OpenSubsonicExtensionsFetched(None)
+    ));
+    assert!(matches!(
+        extensions_fetched_message(Some(Vec::new()), true),
+        Message::OpenSubsonicExtensionsFetched(Some(_))
+    ));
+}
+
+/// A login attempt shares the cached database handle instead of taking it:
+/// a failed attempt drops its shell, and a second attempt must not reopen a
+/// database that a background task (a logout's key revoke) still holds open.
+#[test]
+fn a_login_attempt_keeps_the_cached_storage() {
+    use crate::views::LoginMessage;
+
+    let db_path = std::env::temp_dir().join(format!(
+        "test_login_keeps_storage_{}_{}.redb",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let storage =
+        nokkvi_data::services::state_storage::StateStorage::new(db_path.clone()).expect("storage");
+    let mut app = test_app();
+    app.cached_storage = Some(storage);
+    let _ = app.handle_login(LoginMessage::ServerUrlChanged("http://127.0.0.1:9".into()));
+    let _ = app.handle_login(LoginMessage::UsernameChanged("alice".into()));
+    let _ = app.handle_login(LoginMessage::PasswordChanged("pw".into()));
+
+    let _ = app.handle_login(LoginMessage::LoginPressed);
+
+    assert!(app.login_page.login_in_progress, "the attempt started");
+    assert!(app.cached_storage.is_some(), "the handle stays for a retry");
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}

@@ -191,6 +191,9 @@ impl AuthService {
         jwt_token: String,
         subsonic_credential: String,
     ) -> Result<()> {
+        // A session saved with a typed `HTTPS://` keeps a lowercase scheme
+        // from here on, like a fresh login's.
+        let server_url = crate::utils::server_url::lowercase_http_scheme(&server_url);
         self.server_url = server_url.clone();
         self.subsonic_credential = reencode_stored_credential(&username, &subsonic_credential);
         self.username = username;
@@ -281,33 +284,22 @@ impl AuthService {
         extract_server_version(&body)
             .context("Could not extract Navidrome server version from API response")
     }
-
-    /// Fetch the server's advertised OpenSubsonic extension names via
-    /// `getOpenSubsonicExtensions`.
-    ///
-    /// The endpoint is registered outside Navidrome's auth group
-    /// (unauthenticated per the OpenSubsonic spec); POSTing the credential in
-    /// the form body like every other Subsonic call is harmless. An absent
-    /// `openSubsonicExtensions` field (pre-OpenSubsonic server) deserializes
-    /// to an empty list, never an error.
-    ///
-    /// Deliberately the LENIENT reader, unlike the other Subsonic reads: the
-    /// endpoint is public, so a rejected token cannot fail it, and an empty
-    /// list is fail-safe (every extension-gated feature stays hidden or
-    /// falls back). A proxy's error page still fails to parse and errs.
-    pub async fn fetch_open_subsonic_extensions(&self) -> Result<Vec<String>> {
-        let client = self
-            .client
-            .as_ref()
-            .context("Not authenticated")?
-            .http_client();
-        open_subsonic_extensions(&client, &self.server_url, &self.subsonic_credential).await
-    }
 }
 
-/// The server's advertised OpenSubsonic extension names, read the lenient
-/// way described on [`AuthService::fetch_open_subsonic_extensions`]. A free
-/// function so a caller can ask without holding the auth lock.
+/// The server's advertised OpenSubsonic extension names, via
+/// `getOpenSubsonicExtensions`. A free function so a caller can ask without
+/// holding the auth lock.
+///
+/// The endpoint is registered outside Navidrome's auth group
+/// (unauthenticated per the OpenSubsonic spec); POSTing the credential in
+/// the form body like every other Subsonic call is harmless. An absent
+/// `openSubsonicExtensions` field (pre-OpenSubsonic server) deserializes
+/// to an empty list, never an error.
+///
+/// Deliberately the LENIENT reader, unlike the other Subsonic reads: the
+/// endpoint is public, so a rejected token cannot fail it, and an empty
+/// list is fail-safe (every extension-gated feature stays hidden or
+/// falls back). A proxy's error page still fails to parse and errs.
 pub(crate) async fn open_subsonic_extensions(
     http_client: &std::sync::Arc<reqwest::Client>,
     server_url: &str,
@@ -541,6 +533,21 @@ mod tests {
             .await
             .expect_err("an unknown key is refused");
         assert!(crate::types::error::NokkviError::is_unauthorized(&err));
+    }
+
+    /// A session saved with a typed `HTTPS://` resumes with the scheme in
+    /// lowercase (see `utils::server_url::lowercase_http_scheme`).
+    #[test]
+    fn resume_lowercases_the_server_scheme() {
+        let mut auth = AuthService::new().expect("auth service");
+        auth.resume_session(
+            "HTTPS://Music.Example.com".into(),
+            "alice".into(),
+            "jwt".into(),
+            "u=alice&s=salt&t=tok".into(),
+        )
+        .expect("resume");
+        assert_eq!(auth.get_server_url(), "https://Music.Example.com");
     }
 
     #[test]

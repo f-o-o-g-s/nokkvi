@@ -102,6 +102,16 @@ impl PlayersApiService {
         parse::parse_json_with_preview(&body, "players")
     }
 
+    /// One player row, which the session user owns or (an admin) may see.
+    /// A missing one is [`crate::types::error::NokkviError::NotFound`].
+    pub async fn get(&self, player_id: &str) -> Result<PlayerRow> {
+        let body = self
+            .client
+            .get(&format!("/api/player/{player_id}"), &[])
+            .await?;
+        parse::parse_json_with_preview(&body, "player")
+    }
+
     /// Create a player for the session user carrying `api_key`; returns its
     /// id. The server requires a key on a create (a hand-made player is
     /// reachable only through one) and rejects one not shaped

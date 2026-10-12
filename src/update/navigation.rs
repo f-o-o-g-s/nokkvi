@@ -468,8 +468,11 @@ impl Nokkvi {
                 username,
                 password,
             } => {
-                // Take cached storage from previous logout (if any)
-                let cached = self.cached_storage.take();
+                // Share the cached storage from a previous logout (if any).
+                // Cloned, not taken: a failed attempt drops its shell, and the
+                // retry must not open a second handle on a database that a
+                // background task (a logout's key revoke) still holds open.
+                let cached = self.cached_storage.clone();
                 // Chain the login task with the mapped task
                 Task::batch([
                     mapped_task,
@@ -523,10 +526,12 @@ impl Nokkvi {
                             // the root persists the resolved URL, not the raw
                             // input.
                             let resolved_url = shell.auth().get_server_url().await;
+                            let username = shell.auth().username().await;
                             let user_id = shell.auth().user_id().await;
                             Ok(crate::app_message::LoginSuccess {
                                 shell,
                                 resolved_url,
+                                username,
                                 user_id,
                             })
                         },
@@ -577,8 +582,9 @@ impl Nokkvi {
             self.login_page.username = parsed;
         }
 
-        // Take cached storage from previous logout (if any)
-        let cached = self.cached_storage.take();
+        // Share the cached storage from a previous logout (if any); see the
+        // login attempt for why it is cloned, not taken.
+        let cached = self.cached_storage.clone();
 
         Task::perform(
             async move {
@@ -587,8 +593,6 @@ impl Nokkvi {
                     None => AppService::new().await,
                 }
                 .map_err(|e| format!("{e:#}"))?;
-                // A resumed session reuses the already-canonical stored URL.
-                let resolved_url = server_url.clone();
                 shell
                     .auth()
                     .resume_session(server_url, username, jwt_token, subsonic_credential)
@@ -624,10 +628,14 @@ impl Nokkvi {
                         upgrading.upgrade_resumed_session_to_api_key().await;
                     });
 
+                // The stored URL as the session holds it (scheme lowercased).
+                let resolved_url = shell.auth().get_server_url().await;
+                let username = shell.auth().username().await;
                 let user_id = shell.auth().user_id().await;
                 Ok(crate::app_message::LoginSuccess {
                     shell,
                     resolved_url,
+                    username,
                     user_id,
                 })
             },
@@ -644,12 +652,14 @@ impl Nokkvi {
                 let crate::app_message::LoginSuccess {
                     shell,
                     resolved_url,
+                    username,
                     user_id,
                 } = success;
                 // Persist the RESOLVED server URL (the candidate that actually
                 // connected) so config save, SSE registration, and the resume
                 // path all use it rather than the raw typed input.
                 self.login_page.server_url = resolved_url;
+                self.login_page.username = username;
                 // The ownership gate's session half (compared against
                 // `owner_id`, never owner names).
                 self.session_user_id = user_id;
@@ -782,75 +792,74 @@ impl Nokkvi {
                 // to avoid an empty-state flash before prefs arrive.
                 // Every post-login load is a `shell_task`, so it is stamped
                 // with this session's generation (see `session_generation`).
-                return Task::batch(
-                    [
-                        Task::done(Message::LoadQueue), // Queue is always needed (sort-independent)
-                        self.shell_task(
-                            |shell| async move { shell.settings().get_player_settings().await },
-                            |settings| {
-                                Message::Playback(PlaybackMessage::PlayerSettingsLoaded(Box::new(
-                                    settings,
-                                )))
-                            },
-                        ),
-                        self.shell_task(
-                            |shell| async move { shell.settings().get_view_preferences().await },
-                            Message::ViewPreferencesLoaded,
-                        ),
-                        self.shell_task(
-                            |shell| async move { shell.settings().get_hotkey_config().await },
-                            Message::HotkeyConfigUpdated,
-                        ),
-                        init_scrobble_task,
-                        self.shell_task(
-                            |shell| async move { shell.auth().fetch_server_version().await.ok() },
-                            Message::ServerVersionFetched,
-                        ),
-                        self.shell_task(
-                            |shell| async move {
-                                shell.auth().fetch_open_subsonic_extensions().await.ok()
-                            },
-                            Message::OpenSubsonicExtensionsFetched,
-                        ),
-                        // Fetch the multi-library list at login so the nav-bar
-                        // trigger knows the count (and hides itself when
-                        // N<=1). Persisted active_library_ids was already
-                        // restored by AppService::new_with_storage; this
-                        // refresh prunes any now-deleted libraries from that
-                        // set against the live server (plan §14.4).
-                        self.shell_task(
-                            |shell| async move { shell.refresh_libraries().await },
-                            |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
-                                match result {
-                                    Ok(libs) => Message::Library(
-                                        crate::app_message::LibraryMessage::Loaded(libs),
-                                    ),
-                                    Err(e) => {
-                                        // This runs on EVERY login, so a rejected
-                                        // token here must route to the session-
-                                        // expired teardown rather than a generic
-                                        // toast that leaves a dead session looking
-                                        // alive.
-                                        if let Some(msg) =
-                                            crate::update::components::session_expired_message(&e)
-                                        {
-                                            return msg;
-                                        }
-                                        Message::Library(
-                                            crate::app_message::LibraryMessage::LoadFailed(
-                                                format!("{e:#}"),
-                                            ),
-                                        )
+                return Task::batch([
+                    Task::done(Message::LoadQueue), // Queue is always needed (sort-independent)
+                    self.shell_task(
+                        |shell| async move { shell.settings().get_player_settings().await },
+                        |settings| {
+                            Message::Playback(PlaybackMessage::PlayerSettingsLoaded(Box::new(
+                                settings,
+                            )))
+                        },
+                    ),
+                    self.shell_task(
+                        |shell| async move { shell.settings().get_view_preferences().await },
+                        Message::ViewPreferencesLoaded,
+                    ),
+                    self.shell_task(
+                        |shell| async move { shell.settings().get_hotkey_config().await },
+                        Message::HotkeyConfigUpdated,
+                    ),
+                    init_scrobble_task,
+                    self.shell_task(
+                        |shell| async move { shell.auth().fetch_server_version().await.ok() },
+                        Message::ServerVersionFetched,
+                    ),
+                    self.shell_task(
+                        |shell| async move {
+                            let names = shell.auth().fetch_open_subsonic_extensions().await.ok();
+                            (names, shell.auth().sends_api_key().await)
+                        },
+                        |(names, sends_api_key)| extensions_fetched_message(names, sends_api_key),
+                    ),
+                    // Fetch the multi-library list at login so the nav-bar
+                    // trigger knows the count (and hides itself when
+                    // N<=1). Persisted active_library_ids was already
+                    // restored by AppService::new_with_storage; this
+                    // refresh prunes any now-deleted libraries from that
+                    // set against the live server (plan §14.4).
+                    self.shell_task(
+                        |shell| async move { shell.refresh_libraries().await },
+                        |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
+                            match result {
+                                Ok(libs) => Message::Library(
+                                    crate::app_message::LibraryMessage::Loaded(libs),
+                                ),
+                                Err(e) => {
+                                    // This runs on EVERY login, so a rejected
+                                    // token here must route to the session-
+                                    // expired teardown rather than a generic
+                                    // toast that leaves a dead session looking
+                                    // alive.
+                                    if let Some(msg) =
+                                        crate::update::components::session_expired_message(&e)
+                                    {
+                                        return msg;
                                     }
+                                    Message::Library(
+                                        crate::app_message::LibraryMessage::LoadFailed(format!(
+                                            "{e:#}"
+                                        )),
+                                    )
                                 }
-                            },
-                        ),
-                        // Sweep stray smart-playlist draft workspaces once per
-                        // auth — including the re-login after a 401, the exact
-                        // moment the own-pid orphan arm exists for.
-                        self.orphan_sweep_task(shell.clone()),
-                    ],
-                );
+                            }
+                        },
+                    ),
+                    // Sweep stray smart-playlist draft workspaces once per
+                    // auth — including the re-login after a 401, the exact
+                    // moment the own-pid orphan arm exists for.
+                    self.orphan_sweep_task(shell.clone()),
+                ]);
             }
             Err(e) => {
                 error!(target: "nokkvi::auth", "Login failed: {e}");
@@ -1242,4 +1251,27 @@ impl Nokkvi {
 
         Task::batch([switch_task, load_task])
     }
+}
+
+/// The message for a login's OpenSubsonic extension probe. A session that
+/// sends an API key to a server whose list has no `apiKeyAuthentication`
+/// (an older Navidrome after a rollback) is dead, since every `/rest` request
+/// fails with "missing parameter u": it ends, and the next login uses the
+/// token pair. Only a non-empty list counts as the server's answer; a failed
+/// probe proves nothing.
+pub(crate) fn extensions_fetched_message(
+    names: Option<Vec<String>>,
+    sends_api_key: bool,
+) -> Message {
+    let takes_no_keys = names.as_ref().is_some_and(|names| {
+        !names.is_empty()
+            && !names
+                .iter()
+                .any(|name| name == nokkvi_data::services::api_key::API_KEY_EXTENSION)
+    });
+    if sends_api_key && takes_no_keys {
+        info!(target: "nokkvi::auth", "The server no longer takes API keys; ending the session");
+        return Message::SessionExpired;
+    }
+    Message::OpenSubsonicExtensionsFetched(names)
 }

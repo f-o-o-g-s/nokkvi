@@ -28,7 +28,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::services::{
     api::players::{PlayerRow, PlayerSettings},
@@ -147,25 +147,34 @@ pub(crate) static KEY_WRITES_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 /// The redb key of the player records.
 const PLAYER_RECORDS_KEY: &str = crate::services::storage_keys::API_KEY_PLAYERS;
 
-/// nokkvi's player on one server, for one user.
+/// nokkvi's player on one server, for one user. `user_id` is the Navidrome
+/// id of the user it was registered for (empty when the session didn't know
+/// it), so a record never serves another user who later took the same name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct PlayerRecord {
     player_id: String,
+    #[serde(default)]
+    user_id: String,
 }
 
 /// Session owner key ([`QueueOwner::key`]) → that owner's player.
 type PlayerRecords = BTreeMap<String, PlayerRecord>;
 
-/// The records, or none when they are missing or unreadable: a lost record
-/// costs one extra player row on the server, never a failed login.
-fn load_records(storage: &StateStorage) -> PlayerRecords {
-    match storage.load::<PlayerRecords>(PLAYER_RECORDS_KEY) {
-        Ok(records) => records.unwrap_or_default(),
-        Err(e) => {
-            debug!(" [API KEY] Player records unreadable, starting over: {e:#}");
-            PlayerRecords::new()
-        }
-    }
+/// The records. A failed read is an error, since writing over it would drop
+/// every other owner's record; a value that doesn't parse reads as none, as
+/// nothing in it can be kept (a lost record costs one extra player row on the
+/// server, never a failed login).
+fn load_records(storage: &StateStorage) -> Result<PlayerRecords> {
+    let Some(raw) = storage
+        .load_raw(PLAYER_RECORDS_KEY)
+        .context("reading the API key player records")?
+    else {
+        return Ok(PlayerRecords::new());
+    };
+    Ok(serde_json::from_slice(&raw).unwrap_or_else(|e| {
+        debug!(" [API KEY] Player records unreadable, starting over: {e}");
+        PlayerRecords::new()
+    }))
 }
 
 /// A player id is only ever a server-made id; anything else (a hand-edited
@@ -178,25 +187,42 @@ fn is_plausible_player_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// The player nokkvi registered for `owner`, if it remembers one.
-pub(crate) fn recorded_player_id(storage: &StateStorage, owner: &QueueOwner) -> Option<String> {
-    load_records(storage)
-        .remove(owner.key())
-        .map(|record| record.player_id)
+/// The player nokkvi registered for `owner`, if it remembers one for the user
+/// with id `user_id` (an empty id on either side matches).
+pub(crate) fn recorded_player_id(
+    storage: &StateStorage,
+    owner: &QueueOwner,
+    user_id: &str,
+) -> Option<String> {
+    let records = match load_records(storage) {
+        Ok(records) => records,
+        Err(e) => {
+            warn!(" [API KEY] {e:#}");
+            return None;
+        }
+    };
+    records
+        .get(owner.key())
+        .filter(|record| {
+            record.user_id.is_empty() || user_id.is_empty() || record.user_id == user_id
+        })
+        .map(|record| record.player_id.clone())
         .filter(|id| is_plausible_player_id(id))
 }
 
-/// Remember `player_id` as `owner`'s player.
+/// Remember `player_id` as `owner`'s player, registered for user `user_id`.
 pub(crate) fn record_player_id(
     storage: &StateStorage,
     owner: &QueueOwner,
     player_id: &str,
+    user_id: &str,
 ) -> Result<()> {
-    let mut records = load_records(storage);
+    let mut records = load_records(storage)?;
     records.insert(
         owner.key().to_owned(),
         PlayerRecord {
             player_id: player_id.to_owned(),
+            user_id: user_id.to_owned(),
         },
     );
     storage
@@ -206,7 +232,7 @@ pub(crate) fn record_player_id(
 
 /// Forget `owner`'s player (it is gone from the server, or not theirs).
 pub(crate) fn forget_player_id(storage: &StateStorage, owner: &QueueOwner) -> Result<()> {
-    let mut records = load_records(storage);
+    let mut records = load_records(storage)?;
     if records.remove(owner.key()).is_some() {
         storage
             .save(PLAYER_RECORDS_KEY, &records)
@@ -240,10 +266,13 @@ fn host_name() -> Option<String> {
 }
 
 /// The settings a new player starts from: those of the player Navidrome
-/// registered for nokkvi's token requests (client `nokkvi`, no key), the most
-/// recently seen one this user owns, so a transcoding profile, bit-rate cap
-/// or scrobble switch set there carries over to the keyed player. Without
-/// one, Navidrome's own defaults ([`PlayerSettings::default`]).
+/// registered for nokkvi's token requests (client `nokkvi`, no key, and the
+/// name `core/players.go` `Register` gives it, `nokkvi [<user agent>]`), the
+/// most recently seen one this user owns, so a transcoding profile, bit-rate
+/// cap or scrobble switch set there carries over to the keyed player. Another
+/// install's keyed player whose key a logout revoked is that install's own and
+/// is skipped. Without one, Navidrome's own defaults
+/// ([`PlayerSettings::default`]).
 pub(crate) fn settings_template(
     rows: &[PlayerRow],
     user_id: &str,
@@ -251,7 +280,11 @@ pub(crate) fn settings_template(
 ) -> PlayerSettings {
     let username = username.to_lowercase();
     rows.iter()
-        .filter(|row| row.client == PLAYER_CLIENT && !row.has_api_key)
+        .filter(|row| {
+            row.client == PLAYER_CLIENT
+                && !row.has_api_key
+                && row.name == format!("{} [{}]", row.client, row.user_agent)
+        })
         .filter(|row| {
             // The id when both sides have one; an admin's list holds every
             // user's players, so an empty id must not match everything.
@@ -362,25 +395,25 @@ mod tests {
         let alice_there = QueueOwner::new("https://other.example.com", "alice");
         let bob_here = QueueOwner::new("https://music.example.com", "bob");
 
-        record_player_id(&storage, &alice_here, "p-alice").expect("save");
-        record_player_id(&storage, &bob_here, "p-bob").expect("save");
+        record_player_id(&storage, &alice_here, "p-alice", "u-alice").expect("save");
+        record_player_id(&storage, &bob_here, "p-bob", "u-bob").expect("save");
 
         // Same server (trailing slash dropped), same user (case-insensitive).
         let alice_again = QueueOwner::new("https://music.example.com", "alice");
         assert_eq!(
-            recorded_player_id(&storage, &alice_again).as_deref(),
+            recorded_player_id(&storage, &alice_again, "u-alice").as_deref(),
             Some("p-alice")
         );
-        assert_eq!(recorded_player_id(&storage, &alice_there), None);
+        assert_eq!(recorded_player_id(&storage, &alice_there, "u-alice"), None);
         assert_eq!(
-            recorded_player_id(&storage, &bob_here).as_deref(),
+            recorded_player_id(&storage, &bob_here, "u-bob").as_deref(),
             Some("p-bob")
         );
 
         forget_player_id(&storage, &alice_again).expect("forget");
-        assert_eq!(recorded_player_id(&storage, &alice_here), None);
+        assert_eq!(recorded_player_id(&storage, &alice_here, "u-alice"), None);
         assert_eq!(
-            recorded_player_id(&storage, &bob_here).as_deref(),
+            recorded_player_id(&storage, &bob_here, "u-bob").as_deref(),
             Some("p-bob")
         );
     }
@@ -389,16 +422,44 @@ mod tests {
     fn a_damaged_record_reads_as_none() {
         let (storage, _dir) = storage();
         let owner = QueueOwner::new("https://music.example.com", "alice");
-        record_player_id(&storage, &owner, "../../api/user").expect("save");
-        assert_eq!(recorded_player_id(&storage, &owner), None);
+        record_player_id(&storage, &owner, "../../api/user", "").expect("save");
+        assert_eq!(recorded_player_id(&storage, &owner, ""), None);
 
         storage
             .save(PLAYER_RECORDS_KEY, &"not a map")
             .expect("save junk");
-        assert_eq!(recorded_player_id(&storage, &owner), None);
+        assert_eq!(recorded_player_id(&storage, &owner, ""), None);
         // A write over junk starts a fresh map instead of failing.
-        record_player_id(&storage, &owner, "p1").expect("save over junk");
-        assert_eq!(recorded_player_id(&storage, &owner).as_deref(), Some("p1"));
+        record_player_id(&storage, &owner, "p1", "").expect("save over junk");
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "").as_deref(),
+            Some("p1")
+        );
+    }
+
+    /// A user who later took a recorded user's name never gets that user's
+    /// player. A record or a session without an id (older records, a
+    /// resumed token without a `uid`) still matches.
+    #[test]
+    fn a_record_never_serves_another_user_of_the_same_name() {
+        let (storage, _dir) = storage();
+        let owner = QueueOwner::new("https://music.example.com", "alice");
+        record_player_id(&storage, &owner, "p1", "u-old").expect("save");
+
+        assert_eq!(recorded_player_id(&storage, &owner, "u-new"), None);
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "u-old").as_deref(),
+            Some("p1")
+        );
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "").as_deref(),
+            Some("p1")
+        );
+        record_player_id(&storage, &owner, "p1", "").expect("save");
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "u-new").as_deref(),
+            Some("p1")
+        );
     }
 
     #[test]
@@ -410,7 +471,9 @@ mod tests {
     fn row(id: &str, user_id: &str, user: &str, seen: &str) -> PlayerRow {
         PlayerRow {
             id: id.into(),
+            name: "nokkvi [nokkvi]".into(),
             client: "nokkvi".into(),
+            user_agent: "nokkvi".into(),
             user_id: user_id.into(),
             user_name: user.into(),
             last_seen: seen.into(),
@@ -446,6 +509,20 @@ mod tests {
                 scrobble_enabled: false,
             }
         );
+    }
+
+    /// Another install's keyed player keeps its `nokkvi (<host>)` name after a
+    /// logout revokes its key; its settings are that install's, not the ones
+    /// Navidrome registered for nokkvi's token requests.
+    #[test]
+    fn template_skips_another_installs_revoked_player() {
+        let mut auto = row("auto", "u1", "alice", "2026-10-01T00:00:00Z");
+        auto.max_bit_rate = 128;
+        let mut other_install = row("laptop", "u1", "alice", "2026-10-11T00:00:00Z");
+        other_install.name = "nokkvi (laptop)".into();
+        other_install.max_bit_rate = 64;
+        let rows = [auto, other_install];
+        assert_eq!(settings_template(&rows, "u1", "alice").max_bit_rate, 128);
     }
 
     /// With no user id (a resume whose JWT carried none) the row is matched

@@ -77,24 +77,17 @@ impl Nokkvi {
                 let auth = shell.auth();
                 let (server_url, cred) = auth.server_config().await;
 
+                // `send_scrobble` drops the credential-bearing URL from a
+                // transport error before it reaches the log.
                 let send_result = if let Some(api_client) = auth.get_client().await {
-                    let request = nokkvi_data::services::api::scrobble::scrobble_request(
+                    nokkvi_data::services::api::scrobble::send_scrobble(
                         &api_client.http_client(),
                         &server_url,
                         &cred,
                         &song_id,
                         false,
-                    );
-                    match request.send().await {
-                        Ok(resp) => {
-                            if resp.status().is_success() {
-                                Ok(())
-                            } else {
-                                Err(format!("HTTP {}", resp.status()))
-                            }
-                        }
-                        Err(e) => Err(e.to_string()),
-                    }
+                    )
+                    .await
                 } else {
                     Err("No API client".to_string())
                 };
@@ -162,23 +155,15 @@ impl Nokkvi {
                 let (server_url, cred) = auth.server_config().await;
 
                 if let Some(api_client) = auth.get_client().await {
-                    let request = nokkvi_data::services::api::scrobble::scrobble_request(
+                    nokkvi_data::services::api::scrobble::send_scrobble(
                         &api_client.http_client(),
                         &server_url,
                         &cred,
                         &song_id,
                         true,
-                    );
-                    match request.send().await {
-                        Ok(resp) => {
-                            if resp.status().is_success() {
-                                Ok(scrobbled)
-                            } else {
-                                Err(format!("HTTP {}", resp.status()))
-                            }
-                        }
-                        Err(e) => Err(e.to_string()),
-                    }
+                    )
+                    .await
+                    .map(|()| scrobbled)
                 } else {
                     Err("No API client".to_string())
                 }

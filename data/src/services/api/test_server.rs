@@ -19,6 +19,8 @@ pub(crate) struct Recorded {
     /// The path without the query string.
     pub path: String,
     pub query: String,
+    /// Header names lowercased, in order.
+    pub headers: Vec<(String, String)>,
     pub body: String,
 }
 
@@ -29,6 +31,21 @@ impl Recorded {
         url::form_urlencoded::parse(self.body.as_bytes())
             .chain(url::form_urlencoded::parse(self.query.as_bytes()))
             .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+    }
+
+    /// A form parameter from the body only: a credential nokkvi POSTs must
+    /// stay out of the URL, where server access logs keep it.
+    pub fn form(&self, name: &str) -> Option<String> {
+        url::form_urlencoded::parse(self.body.as_bytes())
+            .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+    }
+
+    /// A header's value, by case-insensitive name.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find_map(|(key, value)| (*key == name).then_some(value.as_str()))
     }
 
     /// The body as JSON (a native-API request).
@@ -129,6 +146,12 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Recorded> {
         raw.extend_from_slice(&chunk[..read]);
     }
     let text = String::from_utf8_lossy(&raw).into_owned();
+    let headers = text[..head_end.min(text.len())]
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.trim().to_ascii_lowercase(), value.trim().to_owned()))
+        .collect();
     let mut first = text.lines().next()?.split_whitespace();
     let method = first.next()?.to_owned();
     let target = first.next()?.to_owned();
@@ -142,6 +165,7 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Recorded> {
         method,
         path,
         query,
+        headers,
         body: text[body_start..body_end].to_owned(),
     })
 }

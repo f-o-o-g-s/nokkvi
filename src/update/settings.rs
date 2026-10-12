@@ -958,9 +958,20 @@ impl Nokkvi {
         // session that merely expires keeps it until the next login replaces
         // it). The revoke takes the key-write lock right here, before the
         // teardown, so a login started right after waits for it rather than
-        // having its fresh key revoked. Its result acts on nothing.
+        // having its fresh key revoked. It must be built before the teardown,
+        // which drops `app_service`. A failure only warns.
         let revoke = self.app_service.as_ref().map_or_else(Task::none, |shell| {
-            Task::perform(shell.revoke_api_key(), |()| Message::NoOp)
+            Task::perform(shell.revoke_api_key(), |result| match result {
+                Ok(()) => Message::NoOp,
+                Err(_) => Message::Toast(crate::app_message::ToastMessage::Push(
+                    nokkvi_data::types::toast::Toast::new(
+                        "Couldn't revoke nokkvi's API key on the server. Revoke it on \
+                         Navidrome's Players page, or log in again to replace it."
+                            .to_string(),
+                        nokkvi_data::types::toast::ToastLevel::Warning,
+                    ),
+                )),
+            })
         });
         // Shared session teardown — see `Nokkvi::reset_session_state` in
         // `update/components.rs`. Logout is silent (user took the action,

@@ -272,20 +272,31 @@ impl AppService {
 
     /// Revoke this session's API key (an explicit logout). The key-write lock
     /// is taken now, before the future runs, so a login that starts first
-    /// waits for the revoke instead of having its new key revoked. A revoke
-    /// that fails is logged; the next login replaces the key anyway.
-    pub fn revoke_api_key(&self) -> impl Future<Output = ()> + Send + 'static {
+    /// waits for the revoke instead of having its new key revoked. The whole
+    /// revoke, lock wait included, is bounded by `KEY_REVOKE_BUDGET`. A
+    /// revoke that fails resolves to the reason (the next login on this
+    /// install replaces the key anyway).
+    pub fn revoke_api_key(&self) -> impl Future<Output = Result<(), String>> + Send + 'static {
         let held = crate::services::api_key::try_claim_key_writes();
         let auth = self.auth_gateway.clone();
         let storage = self.storage.clone();
         async move {
-            let _writes = match held {
-                Some(guard) => guard,
-                None => crate::services::api_key::claim_key_writes().await,
+            let revoke = async {
+                let _writes = match held {
+                    Some(guard) => guard,
+                    None => crate::services::api_key::claim_key_writes().await,
+                };
+                auth.revoke_api_key(&storage).await
             };
-            if let Err(e) = auth.revoke_api_key(&storage).await {
-                info!(" [API KEY] The API key was not revoked (the next login replaces it): {e:#}");
+            let result =
+                match tokio::time::timeout(crate::backend::auth::KEY_REVOKE_BUDGET, revoke).await {
+                    Ok(result) => result.map_err(|e| format!("{e:#}")),
+                    Err(_) => Err("the server did not answer in time".to_owned()),
+                };
+            if let Err(reason) = &result {
+                warn!(" [API KEY] The API key was not revoked: {reason}");
             }
+            result
         }
     }
 
@@ -2301,6 +2312,82 @@ mod tests {
             )
             .await
             .expect("resume");
+    }
+
+    /// A resumed session on the token pair moves to a key when the server
+    /// takes keys, and saves the key with its owner, leaving the JWT on disk
+    /// alone, so the next launch resumes keyed.
+    #[tokio::test]
+    async fn a_resumed_token_session_moves_to_a_key_and_saves_it() {
+        use crate::services::{
+            api::test_server::{ScriptedServer, extensions, subsonic_failed, subsonic_ok},
+            api_key::KEY_WRITES_TEST_LOCK,
+            storage_keys,
+        };
+
+        let _serial = KEY_WRITES_TEST_LOCK.lock().await;
+        let registered = Arc::new(parking_lot::Mutex::new(None::<String>));
+        let server = ScriptedServer::start(move |r| {
+            if r.is("POST", "/rest/getOpenSubsonicExtensions") {
+                return (200, extensions(&["apiKeyAuthentication"]));
+            }
+            if r.is("GET", "/api/player") {
+                return (200, "[]".to_owned());
+            }
+            if r.is("POST", "/api/player") {
+                *registered.lock() = r.json()["apiKey"].as_str().map(str::to_owned);
+                return (200, r#"{"id":"p-new"}"#.to_owned());
+            }
+            if r.is("POST", "/rest/tokenInfo") && r.form("apiKey") == *registered.lock() {
+                return (200, subsonic_ok(r#""tokenInfo":{"username":"alice"}"#));
+            }
+            (200, subsonic_failed(44, "Invalid API key"))
+        })
+        .await;
+        let (app, db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+        app.storage()
+            .save(storage_keys::JWT_TOKEN, &"jwt-on-disk".to_string())
+            .expect("seed the stored JWT");
+
+        app.upgrade_resumed_session_to_api_key().await;
+
+        let credential = app.auth().get_subsonic_credential().await;
+        assert!(credential.starts_with("apiKey=nds_"), "{credential}");
+        let stored: Option<String> = app
+            .storage()
+            .load(storage_keys::SUBSONIC_CREDENTIAL)
+            .expect("load");
+        assert_eq!(stored.as_deref(), Some(credential.as_str()));
+        let owner: Option<crate::credentials::SessionOwner> = app
+            .storage()
+            .load(storage_keys::SESSION_OWNER)
+            .expect("load");
+        assert_eq!(
+            owner.map(|o| (o.server_url, o.username)),
+            Some((server.base_url.clone(), "alice".to_owned()))
+        );
+        let jwt: Option<String> = app.storage().load(storage_keys::JWT_TOKEN).expect("load");
+        assert_eq!(jwt.as_deref(), Some("jwt-on-disk"), "the JWT is left alone");
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A logout's revoke takes the key-write lock when it is built, before it
+    /// runs, so a login started right after waits for it.
+    #[tokio::test]
+    async fn the_revoke_holds_the_key_lock_from_the_moment_it_is_built() {
+        use crate::services::api_key::{KEY_WRITES_TEST_LOCK, try_claim_key_writes};
+
+        let _serial = KEY_WRITES_TEST_LOCK.lock().await;
+        let (app, db_path) = test_app().await;
+
+        let revoke = app.revoke_api_key();
+        assert!(try_claim_key_writes().is_none(), "held before it runs");
+        assert_eq!(revoke.await, Ok(()), "no player recorded: nothing to do");
+        assert!(try_claim_key_writes().is_some(), "released when done");
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
     }
 
     async fn live_queue_ids(app: &AppService) -> Vec<String> {

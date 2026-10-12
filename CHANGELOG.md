@@ -93,7 +93,8 @@ All notable changes to this project will be documented in this file.
 - Logging back into a server now brings back the queue you left there.
 - The Playing From playlist now switches along with the queue when you log into another server.
 - After config.toml is edited to name another server or user, nokkvi now shows the login screen instead of resuming the old session there.
-- If Navidrome switches off password-token logins, nokkvi now returns to the login screen instead of failing every request.
+- A network error while scrobbling no longer writes your server credentials into nokkvi.log.
+- A server URL typed with a capitalized scheme, like HTTPS://, no longer makes every song fail to play.
 
 ### Removed
 

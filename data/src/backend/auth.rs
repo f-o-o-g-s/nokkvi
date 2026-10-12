@@ -12,10 +12,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     services::{
-        api::{
-            client::ApiClient,
-            players::{PlayerSettings, PlayersApiService},
-        },
+        api::{client::ApiClient, players::PlayersApiService},
         api_key::{self, ApiKey},
         auth::{self as auth_api, AuthService},
         queue::slots::QueueOwner,
@@ -29,10 +26,13 @@ use crate::{
 /// session keeps the token pair.
 const KEY_SETUP_BUDGET: Duration = Duration::from_secs(30);
 
-/// How long one key request may take. A logout's revoke holds the key-write
-/// lock for at most this long, so a login queued behind it waits that long
-/// too.
+/// How long one key request may take.
 const KEY_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a logout's revoke may hold the key-write lock in all: its wait
+/// for the session lock, a read of the player and the revoke itself. A login
+/// queued behind it waits at most this long.
+pub(crate) const KEY_REVOKE_BUDGET: Duration = Duration::from_secs(20);
 
 /// What [`AuthGateway::establish_api_key`] did to the session's `/rest`
 /// credential.
@@ -57,6 +57,9 @@ struct KeySession {
     server_url: String,
     username: String,
     user_id: String,
+    /// The username the session's JWT was issued to (its `sub` claim), when
+    /// it can be read.
+    token_username: Option<String>,
     credential: String,
     client: Option<ApiClient>,
 }
@@ -79,10 +82,10 @@ async fn timed<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
         })?
 }
 
-/// A player that is gone (deleted in the web UI, a reset server) or that
-/// belongs to another user: the record pointing at it is stale.
-fn player_is_stale(e: &anyhow::Error) -> bool {
-    NokkviError::is_not_found(e) || NokkviError::is_forbidden(e)
+/// Whether `username`s name the same Navidrome user. Navidrome looks users
+/// up case-insensitively (`COLLATE NOCASE`).
+fn same_user(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 /// Register a fresh key for `session`: `Ok(None)` when the server takes no
@@ -107,9 +110,18 @@ async fn issue_api_key(
         return Ok(None);
     }
 
+    // Every write below acts as the JWT's user, which must be the session's:
+    // a session whose token names someone else (a config.toml edited under an
+    // older session) would register a player for that other user.
+    if let Some(token_username) = &session.token_username
+        && !same_user(token_username, &session.username)
+    {
+        anyhow::bail!("the session's token belongs to another user");
+    }
+
     // A logout's revoke on this player lands first, or it would kill the
     // key put there next (`api_key::try_claim_key_writes`).
-    let _writes = tokio::time::timeout(2 * KEY_REQUEST_TIMEOUT, api_key::claim_key_writes())
+    let _writes = tokio::time::timeout(KEY_REVOKE_BUDGET, api_key::claim_key_writes())
         .await
         .map_err(|_| anyhow!("another API key change is still running"))?;
 
@@ -117,13 +129,16 @@ async fn issue_api_key(
     let key = ApiKey::mint()?;
     let players = PlayersApiService::new(client);
     let mut on_player = false;
-    if let Some(player_id) = api_key::recorded_player_id(storage, &owner) {
+    if let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id) {
         match timed(players.set_api_key(&player_id, key.as_str())).await {
             Ok(()) => on_player = true,
-            Err(e) if player_is_stale(&e) => {
+            // Deleted in the web UI, or a reset server: make a new one. A
+            // 403 is not taken as gone (the record is per user id, so it is
+            // a proxy refusing, not another user's row); it fails the setup.
+            Err(e) if NokkviError::is_not_found(&e) => {
                 debug!(
                     target: "nokkvi::auth",
-                    "API key player {player_id} is gone or not this user's; registering a new one"
+                    "API key player {player_id} is gone; registering a new one"
                 );
                 if let Err(e) = api_key::forget_player_id(storage, &owner) {
                     warn!(target: "nokkvi::auth", "Couldn't forget the API key player: {e:#}");
@@ -134,16 +149,13 @@ async fn issue_api_key(
     }
     let created = !on_player;
     if created {
-        let settings = match timed(players.list()).await {
-            Ok(rows) => api_key::settings_template(&rows, &session.user_id, &session.username),
-            Err(e) => {
-                debug!(
-                    target: "nokkvi::auth",
-                    "Couldn't read the player list; the new player starts from the defaults: {e:#}"
-                );
-                PlayerSettings::default()
-            }
-        };
+        // Without the list there is no knowing what the user set on their
+        // nokkvi player (scrobbling off, a bit-rate cap): keep the token pair
+        // rather than make a player that undoes it.
+        let rows = timed(players.list())
+            .await
+            .context("reading the player list")?;
+        let settings = api_key::settings_template(&rows, &session.user_id, &session.username);
         let player_id = timed(players.create(
             &api_key::player_name(),
             api_key::PLAYER_CLIENT,
@@ -151,7 +163,7 @@ async fn issue_api_key(
             &settings,
         ))
         .await?;
-        if let Err(e) = api_key::record_player_id(storage, &owner, &player_id) {
+        if let Err(e) = api_key::record_player_id(storage, &owner, &player_id, &session.user_id) {
             // The key works all the same; only a logout can't find it to
             // revoke it (the next login replaces it).
             warn!(target: "nokkvi::auth", "Couldn't remember the API key player: {e:#}");
@@ -167,7 +179,7 @@ async fn issue_api_key(
     ))
     .await
     .context("checking the new API key")?;
-    if confirmed.to_lowercase() != session.username.to_lowercase() {
+    if !same_user(&confirmed, &session.username) {
         anyhow::bail!("the server says the new API key belongs to another user");
     }
     Ok(Some((key, created)))
@@ -302,8 +314,22 @@ impl AuthGateway {
     /// (`getOpenSubsonicExtensions`). Used to gate extension-backed features
     /// like the `indexBasedQueue` play-queue sync.
     pub async fn fetch_open_subsonic_extensions(&self) -> Result<Vec<String>> {
+        // Snapshot under the lock, ask without it: the session lock must not
+        // wait on the network (a logout's revoke reads the session through it).
+        let session = self.key_session().await;
+        let client = session.client.context("Not authenticated")?;
+        auth_api::open_subsonic_extensions(
+            &client.http_client(),
+            &session.server_url,
+            &session.credential,
+        )
+        .await
+    }
+
+    /// Whether the session's `/rest` credential is an API key.
+    pub async fn sends_api_key(&self) -> bool {
         let auth_service = self.auth_service.lock().await;
-        auth_service.fetch_open_subsonic_extensions().await
+        api_key::is_api_key_credential(auth_service.get_subsonic_credential())
     }
 
     async fn key_session(&self) -> KeySession {
@@ -312,6 +338,7 @@ impl AuthGateway {
             server_url: auth.get_server_url().to_owned(),
             username: auth.username().to_owned(),
             user_id: auth.user_id().to_owned(),
+            token_username: crate::services::api::client::decode_jwt_sub(auth.get_token()).ok(),
             credential: auth.get_subsonic_credential().to_owned(),
             client: auth.get_client().cloned(),
         }
@@ -402,21 +429,53 @@ impl AuthGateway {
     /// Revoke the API key on nokkvi's player for this session's server and
     /// user (an explicit logout). The player stays, with its settings, and
     /// the next login puts a new key on it. Nothing to do when nokkvi has no
-    /// player there. Call it holding the key-write lock
-    /// (`api_key::try_claim_key_writes`).
+    /// player there, or its key is already gone.
+    ///
+    /// The player is read first: a revoke is owner-or-admin on the server, so
+    /// a record that somehow names another user's player must never revoke
+    /// that user's key. The requests run on a client that never persists a
+    /// refreshed JWT, since the session's tokens are being cleared. Call it
+    /// holding the key-write lock (`api_key::try_claim_key_writes`).
     pub async fn revoke_api_key(&self, storage: &StateStorage) -> Result<()> {
         let session = self.key_session().await;
         let owner = session.owner();
-        let Some(player_id) = api_key::recorded_player_id(storage, &owner) else {
+        let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id) else {
             return Ok(());
         };
-        let client = session.client.context("Not authenticated")?;
-        match timed(PlayersApiService::new(client).set_api_key(&player_id, "")).await {
+        let client = session
+            .client
+            .as_ref()
+            .context("Not authenticated")?
+            .without_token_refresh();
+        let players = PlayersApiService::new(client);
+        let row = match timed(players.get(&player_id)).await {
+            Ok(row) => row,
+            Err(e) if NokkviError::is_not_found(&e) => {
+                return api_key::forget_player_id(storage, &owner);
+            }
+            Err(e) => return Err(e),
+        };
+        let someone_elses = if !session.user_id.is_empty() && !row.user_id.is_empty() {
+            row.user_id != session.user_id
+        } else {
+            !same_user(&row.user_name, &session.username)
+        };
+        if someone_elses {
+            warn!(
+                target: "nokkvi::auth",
+                "The recorded API key player belongs to another user; forgetting it"
+            );
+            return api_key::forget_player_id(storage, &owner);
+        }
+        if !row.has_api_key {
+            return Ok(());
+        }
+        match timed(players.set_api_key(&player_id, "")).await {
             Ok(()) => {
                 info!(target: "nokkvi::auth", "Revoked the API key at logout");
                 Ok(())
             }
-            Err(e) if player_is_stale(&e) => api_key::forget_player_id(storage, &owner),
+            Err(e) if NokkviError::is_not_found(&e) => api_key::forget_player_id(storage, &owner),
             Err(e) => Err(e),
         }
     }
@@ -471,14 +530,21 @@ mod tests {
     };
 
     const TOKEN_PAIR: &str = "u=alice&s=salt&t=tok";
+    const KEYED: &str = "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa";
 
-    /// A scripted Navidrome: it advertises keys when `offers_keys`, answers
-    /// `PUT /api/player/{id}` for the ids in `players` (404 otherwise),
-    /// creates `p-new` on a POST, and confirms through `tokenInfo` only the
-    /// last key it was given, as `confirms_as`.
+    /// A scripted Navidrome: it advertises keys when `offers_keys`; its
+    /// players are `players` (owned by `player_owner`, keyed when
+    /// `players_keyed`), answered on GET and on PUT (`put_status` overrides
+    /// the PUT), 404 for any other id; the list answers `list_status` with
+    /// `player_list`; a POST creates `p-new`; `tokenInfo` confirms, as
+    /// `confirms_as`, only the last key it was given, sent alone in the body.
     struct FakeNavidrome {
         offers_keys: bool,
         players: Vec<&'static str>,
+        player_owner: &'static str,
+        players_keyed: bool,
+        put_status: u16,
+        list_status: u16,
         player_list: &'static str,
         create_status: u16,
         confirms_as: &'static str,
@@ -489,6 +555,10 @@ mod tests {
             Self {
                 offers_keys: true,
                 players: Vec::new(),
+                player_owner: "alice",
+                players_keyed: true,
+                put_status: 200,
+                list_status: 200,
                 player_list: "[]",
                 create_status: 200,
                 confirms_as: "alice",
@@ -509,7 +579,7 @@ mod tests {
                     return (200, extensions(names));
                 }
                 if r.is("GET", "/api/player") {
-                    return (200, self.player_list.to_owned());
+                    return (self.list_status, self.player_list.to_owned());
                 }
                 if r.is("POST", "/api/player") {
                     if self.create_status != 200 {
@@ -518,19 +588,30 @@ mod tests {
                     *registered.lock() = r.json()["apiKey"].as_str().map(str::to_owned);
                     return (200, r#"{"id":"p-new"}"#.to_owned());
                 }
-                if r.method == "PUT"
-                    && let Some(id) = r.path.strip_prefix("/api/player/")
-                {
+                if let Some(id) = r.path.strip_prefix("/api/player/") {
                     if !self.players.contains(&id) {
                         return (404, r#""player not found""#.to_owned());
                     }
-                    let key = r.json()["apiKey"].as_str().map(str::to_owned);
-                    *registered.lock() = key.filter(|k| !k.is_empty());
-                    return (200, format!(r#"{{"id":"{id}","name":"nokkvi (host)"}}"#));
+                    let row = format!(
+                        r#"{{"id":"{id}","name":"nokkvi (host)","client":"nokkvi","userName":"{}","hasApiKey":{}}}"#,
+                        self.player_owner, self.players_keyed
+                    );
+                    if r.method == "GET" {
+                        return (200, row);
+                    }
+                    if r.method == "PUT" {
+                        if self.put_status != 200 {
+                            return (self.put_status, "refused".to_owned());
+                        }
+                        let key = r.json()["apiKey"].as_str().map(str::to_owned);
+                        *registered.lock() = key.filter(|k| !k.is_empty());
+                        return (200, row);
+                    }
                 }
                 if r.is("POST", "/rest/tokenInfo") {
-                    let sent = r.param("apiKey");
-                    if r.param("u").is_none() && sent.is_some() && sent == *registered.lock() {
+                    let sent = r.form("apiKey");
+                    let alone = r.form("u").is_none() && !r.query.contains("apiKey");
+                    if alone && sent.is_some() && sent == *registered.lock() {
                         return (
                             200,
                             subsonic_ok(&format!(
@@ -547,18 +628,22 @@ mod tests {
         }
     }
 
-    async fn gateway_on(server: &ScriptedServer, credential: &str) -> AuthGateway {
+    async fn gateway_with(server: &ScriptedServer, credential: &str, jwt: &str) -> AuthGateway {
         let gateway = AuthGateway::new().expect("auth gateway");
         gateway
             .resume_session(
                 server.base_url.clone(),
                 "alice".to_string(),
-                "jwt".to_string(),
+                jwt.to_string(),
                 credential.to_string(),
             )
             .await
             .expect("resume session");
         gateway
+    }
+
+    async fn gateway_on(server: &ScriptedServer, credential: &str) -> AuthGateway {
+        gateway_with(server, credential, "jwt").await
     }
 
     fn storage() -> (StateStorage, tempfile::TempDir) {
@@ -571,6 +656,14 @@ mod tests {
         QueueOwner::new(&server.base_url, "alice")
     }
 
+    fn recorded(storage: &StateStorage, server: &ScriptedServer) -> Option<String> {
+        api_key::recorded_player_id(storage, &owner_of(server), "")
+    }
+
+    fn record(storage: &StateStorage, server: &ScriptedServer, player_id: &str) {
+        api_key::record_player_id(storage, &owner_of(server), player_id, "").expect("record");
+    }
+
     /// The key the session sends, out of its credential.
     async fn sent_key(gateway: &AuthGateway) -> Option<String> {
         gateway
@@ -580,12 +673,20 @@ mod tests {
             .map(str::to_owned)
     }
 
-    fn player_writes(server: &ScriptedServer) -> Vec<Recorded> {
+    /// The requests to `/api/player…` with `method`.
+    fn player_requests(server: &ScriptedServer, method: &str) -> Vec<Recorded> {
         server
             .requests()
             .into_iter()
-            .filter(|r| r.path.starts_with("/api/player"))
+            .filter(|r| r.method == method && r.path.starts_with("/api/player"))
             .collect()
+    }
+
+    fn any_player_request(server: &ScriptedServer) -> bool {
+        server
+            .requests()
+            .iter()
+            .any(|r| r.path.starts_with("/api/player"))
     }
 
     /// The extension gate: a server that doesn't advertise
@@ -607,24 +708,22 @@ mod tests {
 
         assert_eq!(outcome, ApiKeyOutcome::NotOffered);
         assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
-        assert!(player_writes(&server).is_empty());
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)),
-            None
-        );
+        assert!(!any_player_request(&server));
+        assert_eq!(recorded(&storage, &server), None);
     }
 
     /// The first login on a server with keys makes nokkvi's player, copying
     /// the settings of the player Navidrome registered for its token
     /// requests, and switches the session to the key once the server
-    /// confirms it.
+    /// confirms it. Every player request carries the session's JWT.
     #[tokio::test]
     async fn the_first_login_creates_a_keyed_player() {
         let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
         let server = FakeNavidrome {
             player_list: r#"[{"id":"auto","name":"nokkvi [nokkvi]","client":"nokkvi",
-                "userName":"alice","lastSeen":"2026-10-01T00:00:00Z","maxBitRate":192,
-                "transcodingId":"opus","scrobbleEnabled":false,"hasApiKey":false}]"#,
+                "userAgent":"nokkvi","userName":"alice","lastSeen":"2026-10-01T00:00:00Z",
+                "maxBitRate":192,"transcodingId":"opus","scrobbleEnabled":false,
+                "hasApiKey":false}]"#,
             ..FakeNavidrome::default()
         }
         .start()
@@ -635,11 +734,7 @@ mod tests {
         let outcome = gateway.establish_api_key(&storage).await.expect("setup");
 
         assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
-        let creates: Vec<_> = server
-            .requests()
-            .into_iter()
-            .filter(|r| r.is("POST", "/api/player"))
-            .collect();
+        let creates = player_requests(&server, "POST");
         assert_eq!(creates.len(), 1);
         let body = creates[0].json();
         assert!(
@@ -653,10 +748,14 @@ mod tests {
         assert_eq!(body["scrobbleEnabled"], false);
         let posted = body["apiKey"].as_str().expect("a key").to_owned();
         assert_eq!(sent_key(&gateway).await.as_deref(), Some(posted.as_str()));
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
-            Some("p-new")
-        );
+        assert_eq!(recorded(&storage, &server).as_deref(), Some("p-new"));
+        for request in player_requests(&server, "GET").iter().chain(creates.iter()) {
+            assert_eq!(
+                request.header("x-nd-authorization"),
+                Some("Bearer jwt"),
+                "{request:?}"
+            );
+        }
     }
 
     /// A later login puts a fresh key on the same player and creates nothing.
@@ -671,15 +770,17 @@ mod tests {
         .await;
         let gateway = gateway_on(&server, TOKEN_PAIR).await;
         let (storage, _dir) = storage();
-        api_key::record_player_id(&storage, &owner_of(&server), "p1").expect("record");
+        record(&storage, &server, "p1");
 
         let outcome = gateway.establish_api_key(&storage).await.expect("setup");
 
         assert_eq!(outcome, ApiKeyOutcome::Adopted { created: false });
-        let writes = player_writes(&server);
-        assert_eq!(writes.len(), 1, "one PUT, no list, no create: {writes:?}");
-        assert!(writes[0].is("PUT", "/api/player/p1"));
-        let body = writes[0].json();
+        let puts = player_requests(&server, "PUT");
+        assert_eq!(puts.len(), 1);
+        assert!(puts[0].is("PUT", "/api/player/p1"));
+        assert!(player_requests(&server, "POST").is_empty());
+        assert!(player_requests(&server, "GET").is_empty());
+        let body = puts[0].json();
         assert_eq!(
             body.as_object()
                 .map(|o| o.keys().cloned().collect::<Vec<_>>()),
@@ -697,25 +798,85 @@ mod tests {
         let server = FakeNavidrome::default().start().await;
         let gateway = gateway_on(&server, TOKEN_PAIR).await;
         let (storage, _dir) = storage();
-        api_key::record_player_id(&storage, &owner_of(&server), "p-gone").expect("record");
+        record(&storage, &server, "p-gone");
 
         let outcome = gateway.establish_api_key(&storage).await.expect("setup");
 
         assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
-        let create = server
-            .requests()
+        let create = player_requests(&server, "POST")
             .into_iter()
-            .find(|r| r.is("POST", "/api/player"))
+            .next()
             .expect("a create");
         assert_eq!(
             create.json()["scrobbleEnabled"],
             true,
             "Navidrome's default"
         );
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
-            Some("p-new")
+        assert_eq!(recorded(&storage, &server).as_deref(), Some("p-new"));
+    }
+
+    /// A 403 on the key write is a refusal (a proxy), not a player that is
+    /// gone: the record stays, nothing is created, the token pair stays.
+    #[tokio::test]
+    async fn a_refused_key_write_keeps_the_record() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            put_status: 403,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p1");
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
+        assert!(player_requests(&server, "POST").is_empty());
+        assert_eq!(recorded(&storage, &server).as_deref(), Some("p1"));
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+    }
+
+    /// Without the player list there is no knowing what the user set on their
+    /// nokkvi player, so no player is made from the defaults.
+    #[tokio::test]
+    async fn an_unreadable_player_list_keeps_the_token_pair() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            list_status: 500,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
+        assert!(player_requests(&server, "POST").is_empty());
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+    }
+
+    /// A session whose JWT names another user writes nothing: every write
+    /// would act as that other user.
+    #[tokio::test]
+    async fn a_token_for_another_user_writes_nothing() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome::default().start().await;
+        let jwt = crate::services::api::client::jwt_for_test(
+            &serde_json::json!({ "sub": "bob", "uid": "u-bob" }),
         );
+        let gateway = gateway_with(&server, TOKEN_PAIR, &jwt).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
+        assert!(!any_player_request(&server));
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
     }
 
     /// The session only switches to a key the server confirms for this user.
@@ -756,17 +917,14 @@ mod tests {
         };
         assert!(!reason.contains("nds_"), "the reason never holds the key");
         assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)),
-            None
-        );
+        assert_eq!(recorded(&storage, &server), None);
     }
 
     /// A resumed keyed session asks nothing of the server.
     #[tokio::test]
     async fn a_keyed_session_is_left_alone() {
         let server = FakeNavidrome::default().start().await;
-        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let gateway = gateway_on(&server, KEYED).await;
         let (storage, _dir) = storage();
 
         let outcome = gateway.establish_api_key(&storage).await.expect("setup");
@@ -801,8 +959,8 @@ mod tests {
         assert!(sent_key(&gateway).await.is_some());
     }
 
-    /// An explicit logout revokes the key with a key-only PUT and keeps the
-    /// player for the next login.
+    /// An explicit logout reads its player, then revokes the key with a
+    /// key-only PUT and keeps the player for the next login.
     #[tokio::test]
     async fn logout_revokes_the_key_and_keeps_the_player() {
         let server = FakeNavidrome {
@@ -811,35 +969,69 @@ mod tests {
         }
         .start()
         .await;
-        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let gateway = gateway_on(&server, KEYED).await;
         let (storage, _dir) = storage();
-        api_key::record_player_id(&storage, &owner_of(&server), "p1").expect("record");
+        record(&storage, &server, "p1");
 
         gateway.revoke_api_key(&storage).await.expect("revoke");
 
-        let writes = player_writes(&server);
-        assert_eq!(writes.len(), 1);
-        assert!(writes[0].is("PUT", "/api/player/p1"));
-        assert_eq!(writes[0].json(), serde_json::json!({ "apiKey": "" }));
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)).as_deref(),
-            Some("p1")
-        );
+        let puts = player_requests(&server, "PUT");
+        assert_eq!(puts.len(), 1);
+        assert!(puts[0].is("PUT", "/api/player/p1"));
+        assert_eq!(puts[0].json(), serde_json::json!({ "apiKey": "" }));
+        assert_eq!(recorded(&storage, &server).as_deref(), Some("p1"));
+    }
+
+    /// A revoke is owner-or-admin on the server: an admin's record that names
+    /// another user's player must never revoke that user's key.
+    #[tokio::test]
+    async fn logout_never_revokes_another_users_key() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            player_owner: "bob",
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p1");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert!(player_requests(&server, "PUT").is_empty());
+        assert_eq!(recorded(&storage, &server), None);
+    }
+
+    #[tokio::test]
+    async fn logout_skips_a_player_without_a_key() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            players_keyed: false,
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p1");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert!(player_requests(&server, "PUT").is_empty());
+        assert_eq!(recorded(&storage, &server).as_deref(), Some("p1"));
     }
 
     #[tokio::test]
     async fn revoking_a_deleted_player_forgets_it() {
         let server = FakeNavidrome::default().start().await;
-        let gateway = gateway_on(&server, "apiKey=nds_aaaaaaaaaaaaaaaaaaaaaa").await;
+        let gateway = gateway_on(&server, KEYED).await;
         let (storage, _dir) = storage();
-        api_key::record_player_id(&storage, &owner_of(&server), "p-gone").expect("record");
+        record(&storage, &server, "p-gone");
 
         gateway.revoke_api_key(&storage).await.expect("revoke");
 
-        assert_eq!(
-            api_key::recorded_player_id(&storage, &owner_of(&server)),
-            None
-        );
+        assert_eq!(recorded(&storage, &server), None);
     }
 
     #[tokio::test]
