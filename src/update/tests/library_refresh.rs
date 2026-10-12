@@ -323,7 +323,7 @@ fn library_refresh_skips_kinds_with_empty_buffers() {
 
 #[test]
 fn library_refresh_skips_random_sort_for_paginated_kinds() {
-    // Random-sort SSE protection (per gotchas.md): a background reload during
+    // Random-sort SSE protection (per gotchas/artwork.md): a background reload during
     // Random sort would return a new random order, corrupting the artwork ref
     // and jarring the user mid-browse. The user can press F5 to re-randomize
     // intentionally. Applies to the three paged kinds (albums/artists/songs);

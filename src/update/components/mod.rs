@@ -1683,7 +1683,7 @@ impl Nokkvi {
     /// render thread are torn down cleanly — preventing orphaned audio
     /// after logout. `StateStorage` is cached on `self.cached_storage`
     /// (the redb exclusive lock would block a fresh open on re-login —
-    /// see gotchas.md "Database lock on re-login").
+    /// see CLAUDE.md "Database lock on re-login").
     ///
     /// Caller-specific concerns (toast, log prefix) stay at the call
     /// site; this helper logs a single `debug!` line summarizing the

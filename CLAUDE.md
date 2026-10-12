@@ -24,7 +24,7 @@ CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build
 
 System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang`. The audio engine links against `libpipewire-0.3` at build time; `clang` provides the libclang that `bindgen` loads to generate the `pipewire-sys` / `libspa-sys` bindings (build-only); `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
 
-Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
+Per-user data follows the XDG Base Directory Specification, split across four roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`), `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`), `~/.local/share/nokkvi/lyrics/` for the lyrics store, and `~/.cache/nokkvi/` for MPRIS cover art. The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
 
 ## Workspace layout
 
@@ -81,8 +81,8 @@ AppService (orchestrator)
 
 The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no backend `ArtworkPrefetch` component — artwork prefetching is dispatched via Iced `Task::perform` from the shared task builders in `src/update/components/artwork_prefetch.rs`; it does not go through `TaskManager`.
 
-- **`PagedBuffer<T>`** (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it drop-in. Load state via `set_loading()` / `needs_fetch()`. Always call `set_loading(true)` before dispatching a page fetch — otherwise rapid scroll triggers duplicate fetches.
-- **Persistence**: `redb` (`app.redb`) for queue/session/structured state via `services/state_storage.rs`; TOML (`config.toml`) for user-editable config via `services/toml_settings_io.rs` and `src/config_writer.rs`. **Routing matters**: `update_config_value()` writes `config.toml`; `update_theme_value()` writes the active theme file in `~/.config/nokkvi/themes/`. Misrouting silently overwrites the wrong file.
+- **`PagedBuffer<T>`** (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it drop-in. Load state via `set_loading()` / `needs_fetch()`. Always call `set_loading(true)` before dispatching a page fetch — otherwise rapid scroll triggers duplicate fetches. `Nokkvi::load_paged` does this for paged views.
+- **Persistence**: `redb` (`app.redb`) for queue/session/structured state via `services/state_storage.rs`; TOML (`config.toml`) for user-editable config via `services/toml_settings_io.rs` and `src/config_writer.rs`. **Routing matters**: the `ConfigKey` variant picks the writer: `AppScalar` → `update_config_value()` → `config.toml`; `Theme` / `ThemeArrayEntry` → `update_theme_value()` → the active theme file in `~/.config/nokkvi/themes/`. Misrouting silently overwrites the wrong file.
 - **Queue serialization** is bincode (`Encode`/`Decode`) via `StateStorage::save_binary()` / `load_binary()` — no JSON fallback path.
 - **Domain types are iced-free.** Anything in `data/src/types/` must not import `iced`.
 
@@ -94,8 +94,9 @@ Native PipeWire output via a shared `rodio::Mixer`:
 CustomAudioEngine
 ├── AudioDecoder (Symphonia) — Standard: HTTP w/ RangeHttpReader (256KB chunks, 16-chunk LRU, prefetch)
 │                              Radio: AsyncNetworkBuffer (tokio→bounded mpsc→sync Read) + auto-reconnect
+│                              Unsized: a length-less transcode, one GET, finite, not seekable
 ├── AudioRenderer → RodioOutput (shared Mixer) → ActiveStream per track
-│   └── decoder → ActiveStream ring → StreamingSource (EQ · volume · fade · gain; visualizer tap) → limiter → Mixer → PipeWire
+│   └── decoder → ActiveStream ring → StreamingSource (EQ · volume · fade · norm gain; visualizer tap) → AGC/limiter → Mixer → PipeWire
 ├── CrossfadePhase: Idle → Active → OutgoingFinished
 └── EqState — shared atomic gains, biquad filter bank per stream
 ```
@@ -105,7 +106,7 @@ Critical invariants:
 - **Visualizer FFT thread uses `try_lock()` only**; only the main render thread may use `lock()`.
 - **`SourceGeneration`** (typed newtype around `AtomicU64`, `audio/generation.rs`) — engine bumps via `bump_for_user_action()` on user-driven source changes (and `bump_for_gapless()` at the decode loop's inline gapless swap / `accept_internal_swap()` on completion-driven swaps). Renderer snapshots `current()` before releasing the engine lock and discards stale callbacks. Prevents consume+shuffle from replaying the just-consumed track.
 - **Crossfade trigger must be synchronous**: `render_tick` swaps `crossfade_state` from `Armed` to `Active` via `mem::replace` in the same tick as the position check, then signals the engine async. Otherwise EOF fires first → hard cut.
-- **Mode toggles** (shuffle/repeat/consume) must call `reset_next_track()` to clear the prepared decoder and disarm crossfade.
+- **Mode toggles** (shuffle/repeat/consume) mutate the queue, which returns a `#[must_use]` `NextTrackResetEffect`; discharging it runs `reset_next_track()` to clear the prepared decoder and disarm crossfade.
 - **Visualizer samples are pre-volume**, scaled to S16 range — FFT is volume-independent.
 
 ## Conventions and required rules
@@ -134,7 +135,7 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 
 ## Gotchas (the silent ones)
 
-- **Embedded SVG icons fall back silently to play.svg.** `build.rs` walks `assets/icons/` + `assets/icons-phosphor/` at compile time and emits the `get_svg()` lookup table + `KNOWN_PATHS` array; a new icon needs the Lucide file, its Phosphor counterpart, and a `NAME_MAP` row in `src/embedded_svg.rs` (test-enforced — full mechanics in `widgets.md`). The silent fallback still bites when code references a path that doesn't exist on disk; `cargo test --bin nokkvi -- embedded_svg` runs `all_svg_paths_in_source_are_registered`, which scans every `.rs` file for `assets/icons/*.svg` string literals and asserts each one ships.
+- **Embedded SVG icons fall back silently to play.svg.** `build.rs` walks `assets/icons/` + `assets/icons-phosphor/` at compile time and emits the `lookup()` table behind `get_svg()` + the `KNOWN_PATHS` array; a new icon needs the Lucide file, its Phosphor counterpart, and a `NAME_MAP` row in `src/embedded_svg.rs` (test-enforced — full mechanics in `widgets.md`). The silent fallback still bites when code references a path that doesn't exist on disk; `cargo test --bin nokkvi -- embedded_svg` runs `all_svg_paths_in_source_are_registered`, which scans every `.rs` file for `assets/icons/*.svg` string literals and asserts each one ships.
 - **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. All artwork LRUs are `SnapshottedLru<K, V>` newtypes (`src/state/snapshotted_lru.rs`); never pair a bare `lru::LruCache` with a manual `HashMap` snapshot.
 - **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST use the user's `artwork_resolution` setting (`ArtworkResolution::to_size()` → 1000/1500/2000 or `None` for Original) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to the `filter_queue_songs()` result. Always map through the filtered view before doing queue mutations.
@@ -145,7 +146,7 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
 - **`CenterOnPlaying` (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path instead.
 
-The full rule set lives in `.claude/rules/` and **auto-injects**: `code-standards.md` loads in every session; the rest are path-scoped and inject on the first Read of a matching file (`audio-engine.md` — engine internals, crossfade, EQ; `backend-services.md` — services, persistence, queue system; `ui-views.md` — slot list views, expansion, browsing panel, modals; `widgets.md` — widget catalog, layout constants, menu/modal chrome, SVG icons; `visualizer.md` — FFT pipeline, shaders, effects; `settings-view.md` — settings module structure, SettingValue types; `gotchas.md` — the subtle pitfalls, fires on any code read). Subagents spawned without having read matching files can Read these directly.
+The full rule set lives in `.claude/rules/` and **auto-injects**: `code-standards.md` loads in every session; the rest are path-scoped and inject once per session, on the first Read/Edit/Write (or single-file `cat`/`head`) of a file matching their `paths:` globs, and again after /compact only once a matching file is touched (`audio-engine.md` — engine internals, crossfade, EQ; `backend-services.md` — services, persistence, queue system; `ui-views.md` — slot list views, expansion, browsing panel, modals; `widgets.md` — widget catalog, layout constants, menu/modal chrome, SVG icons; `visualizer.md` — FFT pipeline, shaders, effects; `settings-view.md` — settings module structure, SettingValue types; `gotchas/*.md` — the subtle pitfalls, one file per area). Subagents get the same injection on their own reads, but the built-in Explore and Plan agents skip CLAUDE.md and `code-standards.md`: restate what they need in the prompt, or have them Read the rule files.
 
 Building or extending a feature (new view, setting, hotkey, menu entry, playback behavior)? Read `.claude/skills/new-feature-checklist/SKILL.md` before writing code and re-check it before committing (also auto-invocable as the `new-feature-checklist` skill; its `new-view.md` covers adding a slot-list view).
 

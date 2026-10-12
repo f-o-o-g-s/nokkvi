@@ -4,9 +4,9 @@ description: Audit and update .claude/rules/, .claude/skills/, and CLAUDE.md to 
 
 # Sync Agent Rules
 
-Audit every `.claude/rules/*.md` rule and every `.md` file under `.claude/skills/` (each `SKILL.md` plus its supporting files) against the live codebase and rewrite the stale ones. Then audit `CLAUDE.md` separately under a stricter rubric.
+Audit every `.claude/rules/**/*.md` rule and every `.md` file under `.claude/skills/` (each `SKILL.md` plus its supporting files) against the live codebase and rewrite the stale ones. Then audit `CLAUDE.md` separately under a stricter rubric.
 
-**Economics (this inverts the old rubric):** `.claude/rules/` files AUTO-INJECT — `code-standards.md` (no `paths:`) loads in every session; path-scoped rules inject on the first Read of a matching file, including in subagents. Verbosity is no longer free. Rules hold **invariants, contracts, and whys** — never enumerated variant lists, field catalogs, file inventories, or churning counts (in-code doc-comments are canonical for those). Treat re-introduction of a catalog into a rule file as a sync FAILURE: point the author at the code instead. Skill **bodies** and supporting files load only when the skill runs, so verbosity there is still acceptable when accuracy demands it — but every model-invocable skill's `description` frontmatter loads in every session, so keep descriptions to one or two sentences.
+**Economics (this inverts the old rubric):** `.claude/rules/**/*.md` files AUTO-INJECT. `code-standards.md` (no `paths:`) loads in every session, like CLAUDE.md. A path-scoped rule injects once per session on the first Read/Edit/Write (or single-file `cat`/`head`) of a file matching its globs, in subagents too; after /compact it returns only once a matching file is touched again. The built-in Explore and Plan agents skip CLAUDE.md and `code-standards.md` but still get path-scoped rules. Claude Code's own size warning only measures the always-loaded files, so nothing else flags a path-scoped file that keeps growing: `check_rules.py` (below) reports sizes against a budget. Verbosity is no longer free. Rules hold **invariants, contracts, and whys** — never enumerated variant lists, field catalogs, file inventories, or churning counts (in-code doc-comments are canonical for those). Treat re-introduction of a catalog into a rule file as a sync FAILURE: point the author at the code instead. Skill **bodies** and supporting files load only when the skill runs, so verbosity there is still acceptable when accuracy demands it — but every model-invocable skill's `description` frontmatter loads in every session, so keep descriptions to one or two sentences.
 
 ## 1. Enumerate files and check staleness
 
@@ -39,33 +39,15 @@ For each stale file:
 
 ## 4. Structural audits (every run, cheap)
 
-- **Glob liveness** — every `paths:` glob in `.claude/rules/*.md` frontmatter must still match at least one existing file; a stale glob is a silently dead rule:
-  ```bash
-  python3 - << 'EOF'
-  import glob, re, sys, pathlib
-  ok = True
-  for rule in sorted(glob.glob('.claude/rules/*.md')):
-      text = pathlib.Path(rule).read_text()
-      m = re.match(r'^---\n(.*?)\n---', text, re.S)
-      if not m: continue
-      for g in re.findall(r'-\s*"([^"]+)"', m.group(1)):
-          if not glob.glob(g, recursive=True):
-              print(f'DEAD GLOB in {rule}: {g}'); ok = False
-  sys.exit(0 if ok else 1)
-  EOF
-  ```
-- **Anchor integrity** — source comments cite `gotchas.md` (and CLAUDE.md) by SECTION or bullet NAME, never by line number. Every cited name must still exist verbatim in the file it names:
-  ```bash
-  grep -rn -A1 "gotchas.md" src/ data/ | grep -o '"[^"]*"' | sort -u
-  # assert each quoted name appears in .claude/rules/gotchas.md or CLAUDE.md
-  # (-A1 catches citations that wrap onto the next comment line; skim the rest by hand)
-  ```
+- **Rules checker** — `python3 .claude/skills/sync-rules/check_rules.py` must exit 0. It fails on a `paths:` glob (brace groups expanded) that matches no tracked file, which is a silently dead rule; on a citation `<file>.md "Name"` in a rule, skill, CLAUDE.md or source comment (wrapped comment lines included) whose quoted name matches no heading, bold span or text in the file it names; and on any bare `gotchas.md` reference. It also prints each rule file's size against its budget (10 KB per `gotchas/` file, 50 KB per topical file, 40 KB always-on). Source comments cite rules by SECTION or bullet NAME, never by line number.
 - **No stale paths** — `git grep -nE '\.agent/|\.claude/commands' -- ':!.claude/skills/sync-rules/' ':!CHANGELOG.md' ':!changelog-archive/'` must return nothing. Both directories are gone: rules live in `.claude/rules/`, and procedures (the old commands + workflows) live as skills in `.claude/skills/`. The exclusions skip this procedure's own text and the immutable release history.
 
 ## 5. Rewrite stale files
 
 - **Accuracy** — every claim must match current code
 - **Brevity** — rules auto-inject, so every line costs tokens in matching sessions; keep invariants, cut derivable content
+- **One home per fact** — a fact CLAUDE.md or `code-standards.md` already states (always loaded) gets no path-scoped copy; between two path-scoped files, keep it in the one whose globs cover the code it guards
+- **Gotchas placement** — a gotcha lives in the `gotchas/<area>.md` whose `paths:` cover the files where it can be violated: the code it names, its callers, and where new code of that kind gets written. Widen that file's globs when a new site appears; never fall back to a catch-all like `src/**`. A file past its budget splits by area
 - **Anchors win** — a bullet cited by a source comment survives any dedupe, with its section heading intact
 - **Skip** files that are still accurate
 
@@ -76,7 +58,7 @@ CLAUDE.md is auto-injected every session. Treat it as an index + load-bearing ru
 Verify only:
 - **Catalog accuracy** — the `.claude/rules/` description block and the skills list point to files that still exist with descriptions that still match.
 - **Architecture summaries** — the workspace table, TEA pattern, `AppService` tree, and `CustomAudioEngine` diagram still describe reality at a coarse level.
-- **Inline gotchas** — each one still applies. Resolved gotchas get deleted, not updated. The inline "Gotchas (the silent ones)" block STAYS even though `gotchas.md` auto-injects — path-scoped rules are lost after /compact until a matching file is re-read; the inline block is the compaction-resilient safety net.
+- **Inline gotchas** — each one still applies. Resolved gotchas get deleted, not updated. The inline "Gotchas (the silent ones)" block STAYS even though the `gotchas/` files auto-inject — path-scoped rules are lost after /compact until a matching file is re-read; the inline block is the compaction-resilient safety net.
 - **Commands** — build/test invocations, system deps still correct.
 - **Conventions** — error/logging/cloning/threading/dependency rules still hold.
 

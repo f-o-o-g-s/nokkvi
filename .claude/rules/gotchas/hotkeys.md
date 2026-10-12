@@ -1,0 +1,17 @@
+---
+paths:
+  - "src/update/hotkeys/**"
+  - "src/hotkeys/**"
+  - "data/src/types/hotkey_config/**"
+  - "src/views/settings/**"
+  - "src/update/{theater,settings,rules_editor}.rs"
+  - "src/update/tests/hotkeys.rs"
+  - "src/main.rs"
+---
+
+# Gotchas: Hotkeys
+
+- **Global hotkeys are suppressed on the login screen**: `handle_raw_key_event` early-returns when `screen == Screen::Login`. The login form owns its own keyboard (Tab focus + Enter on_submit); without the guard the always-on keyboard subscription double-dispatches — Tab is whitelisted past the capture guard and resolves to `SlotList(NavigateDown)` against the off-screen queue (firing the Tab SFX twice, churning hidden selection), and bare `x`/`c` toggle random/consume against an idle engine. Leave the `event::listen_with` subscription intact (reverting it reintroduces the swallowed Escape/Enter regression).
+- **Bare modifier/lock keydowns are dropped**: `handle_raw_key_event` drops bare Shift/Ctrl/Alt/Super/CapsLock keydowns AFTER the hotkey-capture forward and BEFORE dispatch. They resolve to no hotkey, but otherwise a bare Shift arrives `Status::Ignored` and trips the smart-playlist rules editor's Editing-mode focus-loss grammar — committing + blurring the cell so the following typed capital leaks to a global hotkey (Shift+S = FindSimilar, Shift+D = ClearQueue). Placement after the capture forward is load-bearing so chord rebinding still sees the modifiers.
+- **Shared key combos resolve deterministically**: `HotkeyConfig::lookup` and `find_conflict` share one `resolve` — a RESERVED action, then a configurable action whose binding differs from its default (the user put it there), then declaration order. Never iterate the `bindings` HashMap to pick a winner.
+- **Moving a hotkey default means adding a `RETIRED_DEFAULTS` row** (`data/src/types/hotkey_config/config.rs`) in the same commit. `normalize` then moves an action still sitting on its retired default to the new one — but only when the retired combo is contested AND the new default is free, so it can never strand an action on a key another binding already wins. Startup rewrites `[hotkeys]` once when it changed something; the hot-reload path never writes (config-watcher feedback loop).

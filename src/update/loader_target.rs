@@ -103,8 +103,9 @@ pub(crate) trait LoaderTarget {
             // absolute indices would point at DIFFERENT items after a
             // reorder / membership change, and a later positional batch op
             // would silently target the wrong songs. Matches the foreground
-            // branch and the queue precedent (gotchas.md). The anchor-id
-            // VIEWPORT relocation above is preserved.
+            // branch and the queue precedent (gotchas/queue.md "Stale
+            // multi-selection across refreshes"). The anchor-id VIEWPORT
+            // relocation above is preserved.
             sl.clear_selection_for_refresh();
         }
     }

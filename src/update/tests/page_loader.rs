@@ -354,7 +354,7 @@ fn prefetch_and_maybe_load_next_page_skips_load_page_when_library_empty() {
 // to Playlist) resolves them positionally, silently targeting the wrong
 // songs. The old background branch only ran `retain(|&i| i < new_len)`, which
 // guards the out-of-range case but not the wrong-target case. Matching the
-// foreground branch and the queue precedent (gotchas.md), clear both
+// foreground branch and the queue precedent (gotchas/queue.md), clear both
 // `selected_indices` and `anchor_index` on background reload too.
 
 #[test]

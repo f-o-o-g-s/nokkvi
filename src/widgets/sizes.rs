@@ -3,7 +3,7 @@
 //! Consolidates icon-button / toolbar-button literals that recur across
 //! multiple widget files. Restraint: only the obviously-duplicated sizes
 //! live here. One-off literals stay in their owning widget; premature
-//! consolidation is an anti-pattern per CLAUDE.md ("Reuse existing
+//! consolidation is an anti-pattern per code-standards.md ("Reuse existing
 //! patterns. Check the codebase before building something new.").
 //!
 //! Module-level UPPER_SNAKE matches the longstanding flat-literal widget

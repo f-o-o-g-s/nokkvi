@@ -199,7 +199,7 @@ pub(crate) fn search_warm_album_ids(
 /// NAME, Harbour's genre identity throughout (the quad/collage side-maps,
 /// `PlayTarget::GenreRandom`). Shared by the shelf warm (`warm_harbour_artwork`)
 /// and the search warm (`fan_out_search_collage_ids`) so both resolve genres
-/// identically. See gotchas.md "Genre identity".
+/// identically. See gotchas/server-api.md "Genre identity".
 async fn resolve_genre_album_ids(
     shell: &AppService,
     genres: Vec<(String, String)>,

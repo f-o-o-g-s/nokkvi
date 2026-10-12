@@ -685,7 +685,7 @@ impl Nokkvi {
     /// filtered index must be mapped back through the canonical per-row
     /// identifier rather than used verbatim.
     ///
-    /// Queue rows are addressed by `entry_id` (gotchas.md), which is
+    /// Queue rows are addressed by `entry_id` (gotchas/queue.md), which is
     /// duplicate-safe — `track_number` and bare positions drift the moment an
     /// optimistic mutation lands. Resolve the filtered row's `entry_id`, then
     /// find its live position in `queue_songs`. Returns `None` when the

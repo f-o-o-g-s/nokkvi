@@ -107,8 +107,8 @@ impl<'a> LibraryOrchestrator<'a> {
         self.artists.load_artist_songs(artist_id).await
     }
 
-    /// Fetches by the genre's tag id (`genre_id`; see gotchas.md "Genre
-    /// identity"). Constructs `SongsApiService` on demand through the shared
+    /// Fetches by the genre's tag id (`genre_id`; see gotchas/server-api.md
+    /// "Genre identity"). Constructs `SongsApiService` on demand through the shared
     /// [`AuthGateway::build_native_api`] factory path.
     pub(crate) async fn resolve_genre(&self, genre: &GenreRef) -> Result<Vec<Song>> {
         let songs_api = self.auth.build_native_api(SongsApiService::new).await?;

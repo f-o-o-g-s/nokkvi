@@ -82,7 +82,7 @@ pub(crate) fn hold_slot_lock_blocking(dur: Duration) {
 ///
 /// `is_wildcard = true` corresponds to the `{"*": "*"}` payload (full scan).
 /// In that case every kind is considered changed and all id vectors are empty.
-/// Per gotchas.md "SSE refreshes covers only through the reload", no event
+/// Per gotchas/artwork.md "SSE refreshes covers only through the reload", no event
 /// evicts artwork itself: the reload's viewport prefetch refetches only
 /// covers whose version changed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

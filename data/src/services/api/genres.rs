@@ -257,8 +257,8 @@ impl GenresApiService {
     /// Since Navidrome 0.64 the `genre_id` filter is an indexed
     /// `tag_id = ?` join (`genreFilter` in `persistence/sql_tags.go`), so a
     /// genre NAME matches nothing and the server still answers 200 with an
-    /// empty list. Older servers matched the id too. See gotchas.md
-    /// "Genre identity".
+    /// empty list. Older servers matched the id too. See
+    /// gotchas/server-api.md "Genre identity".
     pub async fn load_genre_albums(&self, genre_id: &str) -> Result<Vec<String>> {
         // Only need 9 for the collage.
         let params = Self::build_genre_albums_params(genre_id, "9");
