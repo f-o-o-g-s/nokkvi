@@ -2882,7 +2882,10 @@ impl Nokkvi {
                 // ── Dynamic accent: follow the playing cover ────────────
                 let accent = self.dynamic_accent_tick();
 
-                Task::batch([autoscroll, milkdrop, accent, self.handle_tick()])
+                // ── Waveform seek bar: envelope for the playing song ────
+                let waveform = self.waveform_tick();
+
+                Task::batch([autoscroll, milkdrop, accent, waveform, self.handle_tick()])
             }
             PlaybackMessage::PlaybackStateUpdated(update) => {
                 self.handle_playback_state_updated(*update)

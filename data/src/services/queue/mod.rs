@@ -717,6 +717,20 @@ impl QueueManager {
         Ok(tx.commit_save_order())
     }
 
+    /// The song after the playing one in PLAY order (the shuffled order when
+    /// shuffle is on), without wrapping at the end and without touching the
+    /// navigation state — a read for prefetching, not a transition (that goes
+    /// through `peek_next_song()` → `PeekedQueue::transition()`).
+    pub fn next_in_play_order(&self) -> Option<Song> {
+        let next = self.queue.current_order?.checked_add(1)?;
+        let row = *self.queue.order.get(next)?;
+        self.queue
+            .rows
+            .get(row)
+            .and_then(|row| self.pool.get(&row.song_id))
+            .cloned()
+    }
+
     pub fn get_current_song(&self) -> Option<Song> {
         self.queue
             .current_index()
@@ -1176,6 +1190,29 @@ pub(crate) mod tests {
         qm.pool.insert_many(songs);
         qm.replace_song_ids_for_test(ids, current_index);
         (qm, temp)
+    }
+
+    /// The waveform prefetch reads the next song in PLAY order: the physical
+    /// next row without shuffle, the shuffled order's next with it, nothing
+    /// past the end — and the read leaves the navigation state alone.
+    #[test]
+    fn next_in_play_order_follows_the_play_order_without_wrapping() {
+        let songs: Vec<Song> = ["a", "b", "c", "d"].map(make_test_song).into();
+        let (mut qm, _tmp) = make_test_manager(songs, Some(1));
+        assert_eq!(qm.next_in_play_order().map(|s| s.id), Some("c".into()));
+
+        let _effect = qm.toggle_shuffle().expect("shuffle");
+        let order = qm.queue.order.to_vec();
+        let current_order = qm.queue.current_order.expect("playhead");
+        let expected = order
+            .get(current_order + 1)
+            .map(|&row| qm.queue.rows[row].song_id.clone());
+        let queued_before = qm.queue.queued;
+        assert_eq!(qm.next_in_play_order().map(|s| s.id), expected);
+        assert_eq!(qm.queue.queued, queued_before, "a read, not a peek");
+
+        let (last, _tmp) = make_test_manager(["a", "b"].map(make_test_song).into(), Some(1));
+        assert!(last.next_in_play_order().is_none());
     }
 
     // ── Wire-compat + row-identity characterization (pre-QueueRow lock) ──

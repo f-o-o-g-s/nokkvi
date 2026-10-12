@@ -98,6 +98,7 @@ pub(crate) mod theater;
 mod toast;
 mod trawl_modal;
 mod tray;
+mod waveform;
 mod window;
 
 pub(crate) use chrome::dispatch_view_chrome;
@@ -253,6 +254,7 @@ impl Nokkvi {
             }
             Message::LyricsIndexReady(index) => self.handle_lyrics_index_ready(index),
             Message::LyricsLoader(msg) => self.handle_lyrics_loader(msg),
+            Message::Waveform(msg) => self.handle_waveform(msg),
 
             // -----------------------------------------------------------------
             // Data Loading: Albums

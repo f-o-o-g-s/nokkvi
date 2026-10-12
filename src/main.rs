@@ -268,6 +268,9 @@ pub struct Nokkvi {
     /// The accent that follows the playing cover (see
     /// `update/dynamic_accent.rs`). Transient, never persisted.
     pub dynamic_accent: crate::state::DynamicAccentState,
+    /// The Waveform seek bar's envelopes: the one on screen, the one ready
+    /// for the next song, the job in flight (see `update/waveform.rs`).
+    pub waveform: crate::state::WaveformState,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -534,6 +537,7 @@ impl Default for Nokkvi {
             theater: crate::state::TheaterState::default(),
             milkdrop: crate::state::MilkdropState::default(),
             dynamic_accent: crate::state::DynamicAccentState::default(),
+            waveform: crate::state::WaveformState::default(),
             // Misc state
             queue_current: crate::state::QueueCurrent::default(),
             playlist_editor: None,

@@ -6,7 +6,7 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use parking_lot::RwLock;
 use tokio::sync::{Mutex, mpsc::UnboundedReceiver};
 use tracing::{debug, info, warn};
@@ -107,6 +107,10 @@ pub struct AppService {
     ///
     /// [`LyricsSessionCache`]: crate::services::lyrics_source::LyricsSessionCache
     lyrics_cache: Arc<crate::services::lyrics_source::LyricsSessionCache>,
+    /// The Waveform seek bar's envelopes: the on-disk cache and this
+    /// session's scans. `Arc` so the per-`shell_task` clones share one
+    /// "scanning stopped" flag.
+    waveforms: Arc<crate::services::waveform::WaveformService>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -189,6 +193,15 @@ impl AppService {
         )
         .await?;
 
+        // Trim the waveform cache once per session, in the background.
+        let waveforms = Arc::new(crate::services::waveform::WaveformService::new());
+        {
+            let waveforms = Arc::clone(&waveforms);
+            task_manager.spawn("waveform_cache_prune", move || async move {
+                waveforms.prune().await;
+            });
+        }
+
         Ok(Self {
             auth_gateway,
             queue_service,
@@ -205,6 +218,7 @@ impl AppService {
             all_libraries: Arc::new(RwLock::new(Vec::new())),
             radio_scrobble_http,
             lyrics_cache: Arc::new(crate::services::lyrics_source::LyricsSessionCache::default()),
+            waveforms,
         })
     }
 
@@ -1170,6 +1184,70 @@ impl AppService {
 
 // === Lyrics resolution ===
 impl AppService {
+    /// The queue song `song_id`'s waveform envelope from the cache, when one
+    /// was worked out from the same audio. `None` for a song no longer in the
+    /// queue.
+    pub async fn cached_waveform(
+        &self,
+        song_id: &str,
+    ) -> Option<Arc<crate::types::waveform::Waveform>> {
+        let song = self.queue_song(song_id).await?;
+        let (server_url, _) = self.auth_gateway.server_config().await;
+        self.waveforms
+            .cached(
+                &server_url,
+                &crate::services::waveform::WaveformIdentity::of(&song),
+            )
+            .await
+    }
+
+    /// Work the queue song `song_id`'s waveform envelope out from its stream
+    /// (the URL playback uses) and cache it. `cancel` stops the scan; a song
+    /// that left the queue ends as cancelled.
+    pub async fn scan_waveform(
+        &self,
+        song_id: &str,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<crate::services::waveform::ScanEnd> {
+        let Some(song) = self.queue_song(song_id).await else {
+            return Ok(crate::services::waveform::ScanEnd::Cancelled);
+        };
+        let session = self
+            .queue_service
+            .stream_session()
+            .await
+            .context("no server to stream from")?;
+        let (server_url, _) = self.auth_gateway.server_config().await;
+        self.waveforms
+            .scan(
+                &server_url,
+                &crate::services::waveform::WaveformIdentity::of(&song),
+                &session.stream_url(&song.id),
+                cancel,
+            )
+            .await
+    }
+
+    /// Whether this session still scans for waveforms (it stops after a scan
+    /// that ran too slowly for the link).
+    pub fn waveform_scanning(&self) -> bool {
+        self.waveforms.scanning()
+    }
+
+    /// The id of the song after the playing one in play order, for the
+    /// waveform prefetch.
+    pub async fn next_song_id_in_play_order(&self) -> Option<String> {
+        let qm = self.queue_service.queue_manager();
+        let qm = qm.lock().await;
+        qm.next_in_play_order().map(|song| song.id)
+    }
+
+    async fn queue_song(&self, song_id: &str) -> Option<crate::types::song::Song> {
+        let qm = self.queue_service.queue_manager();
+        let qm = qm.lock().await;
+        qm.get_song(song_id).cloned()
+    }
+
     /// Shared session cache for `resolve_lyrics`. The UI drops entries from it
     /// when the server announces a library change, so lyrics added by a rescan
     /// show up without a restart.

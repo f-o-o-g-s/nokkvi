@@ -22,3 +22,4 @@ pub(crate) mod storage_keys;
 pub mod task_manager;
 pub mod theme_loader;
 pub mod toml_settings_io;
+pub mod waveform;

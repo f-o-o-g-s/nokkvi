@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 - The mini player keeps its own Seekbar Style, so it stays on the Capsule while the other modes keep the handle bar.
 - Hovering the Line, Capsule, Cells or Waveform seek bar shows the time under the cursor.
 - The mini player's Visible Controls can now hide the cover art.
+- The Waveform seek bar works out each song's shape once in the background and keeps it, so replays draw it instantly.
+- The Waveform seek bar fetches the next song's shape ahead, so it is there the moment that song starts.
+- On a link too slow to scan without crowding playback, the Waveform seek bar stops scanning and shows a plain line.
 
 ### Changed
 

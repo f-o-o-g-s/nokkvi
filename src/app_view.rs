@@ -742,7 +742,7 @@ impl Nokkvi {
             bit_perfect_status: self.playback.bit_perfect_status,
             bit_perfect_holder: self.playback.bit_perfect_holder.clone(),
             artwork_handle: mini_player_artwork,
-            waveform: None,
+            waveform: self.waveform_for_bar(),
             hamburger_open: matches!(
                 self.open_menu,
                 Some(crate::app_message::OpenMenu::Hamburger)

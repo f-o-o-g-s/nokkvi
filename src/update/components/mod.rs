@@ -1734,6 +1734,8 @@ impl Nokkvi {
             // Renderer, picker and cover; the preset library stays.
             milkdrop: _,
             dynamic_accent: _,
+            // Envelopes on screen and the job in flight (a scan is stopped).
+            waveform: _,
             // The root modals, through `ActiveModal::STACK`.
             text_input_dialog: _,
             info_modal: _,
@@ -1812,6 +1814,8 @@ impl Nokkvi {
         // The cover accent belongs to the session too: the Login screen and
         // the next server start on the theme's own accent.
         self.dynamic_accent_reset();
+        // The waveform on screen and any scan belong to the session.
+        self.waveform.reset();
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /

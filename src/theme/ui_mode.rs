@@ -640,6 +640,17 @@ pub(crate) fn set_mini_player_seekbar_style(style: SeekbarStyle) {
         .store(style.to_u8(), Ordering::Relaxed);
 }
 
+/// The seek bar look the player bar draws right now: the mini player's in
+/// MiniPlayer mode, the normal bar's everywhere else.
+#[inline]
+pub(crate) fn active_seekbar_style() -> SeekbarStyle {
+    if track_info_display() == TrackInfoDisplay::MiniPlayer {
+        mini_player_seekbar_style()
+    } else {
+        seekbar_style()
+    }
+}
+
 // ============================================================================
 // Strip Field Visibility Controls
 // ============================================================================

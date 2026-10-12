@@ -68,4 +68,5 @@ mod theater;
 mod trawl_menu;
 mod trawl_modal;
 mod visualizer;
+mod waveform;
 mod window;

@@ -26,7 +26,10 @@ use std::{
 };
 
 use tokio::{sync::Mutex, time::timeout};
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
+/// Re-exported so the UI crate can hold the tokens [`TaskManager::child_token`]
+/// hands out without depending on tokio-util itself.
+pub use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, trace, warn};
 
 /// The longest logout and quit wait for in-flight tasks once the token
@@ -132,6 +135,14 @@ impl TaskManager {
             "[TASK MANAGER] Shutdown budget elapsed with {remaining} task(s) still running; no longer waiting for them"
         );
         in_flight.saturating_sub(remaining)
+    }
+
+    /// A token that fires with the shared shutdown (logout, quit) and can
+    /// also be cancelled on its own without touching the shared one. For
+    /// blocking work that can't sit in a `select!` (a decode loop on a
+    /// `spawn_blocking` thread polls it between reads).
+    pub fn child_token(&self) -> CancellationToken {
+        self.cancellation_token.child_token()
     }
 
     /// Spawn a tracked task with automatic error logging.

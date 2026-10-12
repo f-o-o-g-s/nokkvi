@@ -24,7 +24,7 @@ CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build
 
 System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang`. The audio engine links against `libpipewire-0.3` at build time; `clang` provides the libclang that `bindgen` loads to generate the `pipewire-sys` / `libspa-sys` bindings (build-only); `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
 
-Per-user data follows the XDG Base Directory Specification, split across four roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`), `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`), `~/.local/share/nokkvi/lyrics/` for the lyrics store, and `~/.cache/nokkvi/` for MPRIS cover art. The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
+Per-user data follows the XDG Base Directory Specification, split across four roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`), `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`), `~/.local/share/nokkvi/lyrics/` for the lyrics store, and `~/.cache/nokkvi/` for MPRIS cover art and the Waveform seek bar's per-song envelopes (`waveforms/`). The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
 
 ## Workspace layout
 

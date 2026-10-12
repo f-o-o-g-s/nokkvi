@@ -62,6 +62,7 @@ mod stale_drop;
 mod theater;
 mod toast;
 mod trawl;
+mod waveform;
 mod window;
 
 pub(crate) use artist_info::*;
@@ -87,4 +88,5 @@ pub(crate) use stale_drop::*;
 pub(crate) use theater::*;
 pub(crate) use toast::*;
 pub(crate) use trawl::*;
+pub(crate) use waveform::*;
 pub(crate) use window::*;

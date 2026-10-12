@@ -314,6 +314,17 @@ pub fn get_lyrics_dir() -> Result<PathBuf> {
     Ok(lyrics_dir)
 }
 
+/// Get the cache directory (`~/.cache/nokkvi`).
+///
+/// Holds data nokkvi can always rebuild: the Waveform seek bar's per-song
+/// envelopes. Per the XDG Base Directory Specification this is
+/// `$XDG_CACHE_HOME`; deleting it costs only a re-scan.
+pub fn get_cache_dir() -> Result<PathBuf> {
+    let base_dirs = directories::BaseDirs::new()
+        .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    Ok(base_dirs.cache_dir().join(APP_NAME))
+}
+
 /// Get the credentials config file path (`~/.config/nokkvi/config.toml`,
 /// or `config.debug.toml` in debug builds — see `CONFIG_FILENAME`).
 pub fn get_config_path() -> Result<PathBuf> {

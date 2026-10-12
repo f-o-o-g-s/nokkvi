@@ -188,6 +188,30 @@ pub enum LyricsLoaderMessage {
     },
 }
 
+/// Waveform seek bar results, carried by `Message::Waveform` (see
+/// `update/waveform.rs`).
+#[derive(Debug, Clone)]
+pub enum WaveformMessage {
+    /// A cache lookup finished: the song's envelope, or `None` when the cache
+    /// has none for its audio.
+    Looked {
+        song_id: String,
+        waveform: Option<std::sync::Arc<nokkvi_data::types::waveform::Waveform>>,
+    },
+    /// A scan finished. `scanning` is whether the session still scans after
+    /// it (a too-slow scan turns scanning off).
+    Scanned {
+        song_id: String,
+        end: Result<nokkvi_data::services::waveform::ScanEnd, String>,
+        scanning: bool,
+    },
+    /// The song after `for_current` in play order (`None` at the end).
+    NextFound {
+        for_current: String,
+        next: Option<String>,
+    },
+}
+
 /// Playback-related messages, namespaced under `Message::Playback(..)`
 #[derive(Debug, Clone)]
 pub enum PlaybackMessage {
@@ -1524,6 +1548,8 @@ pub enum Message {
     LyricsIndexReady(std::sync::Arc<nokkvi_data::types::lyrics::LyricsIndex>),
     /// Carrier for the async lyrics resolve pipeline (debounce + results).
     LyricsLoader(LyricsLoaderMessage),
+    /// Carrier for the Waveform seek bar's lookups and scans.
+    Waveform(WaveformMessage),
     /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
     SessionExpired,
     /// A `shell_task` result, stamped with `Nokkvi::session_generation` as it

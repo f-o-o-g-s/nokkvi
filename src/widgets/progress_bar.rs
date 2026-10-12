@@ -285,8 +285,11 @@ impl<'a, Message> ProgressBar<'a, Message> {
     }
 
     /// Measure the end caps beside the track, re-shaping only when their
-    /// strings change. The left cap is measured with its elapsed time swapped
-    /// for a widest-digits template, so its width holds while the time ticks.
+    /// templates change. Both caps carry numbers that move during playback:
+    /// the left one its elapsed time (measured against a widest-digits
+    /// template), the right one the live bitrate (every digit run padded to
+    /// [`MIN_TEMPLATE_DIGITS`] zeros). So the widths, and the track's edges,
+    /// hold while those numbers change.
     fn measure_caps(&self, caps: &mut CapWidths) {
         let Some((left, right)) = &self.time_labels else {
             return;
@@ -296,7 +299,15 @@ impl<'a, Message> ProgressBar<'a, Message> {
             Some(meta) => format!("{template}{meta}"),
             None => left.full.clone(),
         };
-        let key = (left_key, right.full.clone());
+        let right_key = match right.full.strip_suffix(right.time.as_str()) {
+            Some(meta) => format!(
+                "{}{}",
+                padded_digit_template(meta),
+                widest_time_template(&right.time, "")
+            ),
+            None => padded_digit_template(&right.full),
+        };
+        let key = (left_key, right_key);
         if caps.key == key {
             return;
         }
@@ -319,6 +330,33 @@ fn widest_time_template(elapsed: &str, duration: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_digit() { '0' } else { c })
         .collect()
+}
+
+/// Digits a number in the right cap's template reserves at least: a live
+/// bitrate under 10 000 kbps never changes the cap's width.
+const MIN_TEMPLATE_DIGITS: usize = 4;
+
+/// `text` with every run of digits swapped for at least
+/// [`MIN_TEMPLATE_DIGITS`] zeros (more when the run is longer).
+fn padded_digit_template(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + MIN_TEMPLATE_DIGITS);
+    let mut run = 0;
+    let flush = |out: &mut String, run: &mut usize| {
+        if *run > 0 {
+            out.extend(std::iter::repeat_n('0', (*run).max(MIN_TEMPLATE_DIGITS)));
+            *run = 0;
+        }
+    };
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            run += 1;
+        } else {
+            flush(&mut out, &mut run);
+            out.push(c);
+        }
+    }
+    flush(&mut out, &mut run);
+    out
 }
 
 /// The end-cap text spec, shared by measuring and drawing so both shape the
@@ -1357,6 +1395,16 @@ mod tests {
         assert_eq!(widest_time_template("9:59", "4:12"), "0:00");
         // Radio: the elapsed time outgrows the placeholder duration.
         assert_eq!(widest_time_template("125:03", "--:--"), "000:00");
+    }
+
+    /// The right cap's live bitrate moves every second; its template holds
+    /// the width for any bitrate under 10 000 kbps.
+    #[test]
+    fn padded_digit_template_holds_the_bitrate_width() {
+        assert_eq!(padded_digit_template("957kbps · "), "0000kbps · ");
+        assert_eq!(padded_digit_template("1411kbps · "), "0000kbps · ");
+        assert_eq!(padded_digit_template("12345kbps · "), "00000kbps · ");
+        assert_eq!(padded_digit_template("no digits"), "no digits");
     }
 
     #[test]
