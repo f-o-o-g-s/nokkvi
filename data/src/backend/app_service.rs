@@ -2338,14 +2338,27 @@ mod tests {
                 *registered.lock() = r.json()["apiKey"].as_str().map(str::to_owned);
                 return (200, r#"{"id":"p-new"}"#.to_owned());
             }
-            if r.is("POST", "/rest/tokenInfo") && r.form("apiKey") == *registered.lock() {
+            if r.is("POST", "/rest/tokenInfo")
+                && r.form("apiKey").is_some()
+                && r.form("apiKey") == *registered.lock()
+            {
                 return (200, subsonic_ok(r#""tokenInfo":{"username":"alice"}"#));
             }
             (200, subsonic_failed(44, "Invalid API key"))
         })
         .await;
         let (app, db_path) = test_app().await;
-        resume_as(&app, &server.base_url, "alice").await;
+        app.auth()
+            .resume_session(
+                server.base_url.clone(),
+                "alice".to_owned(),
+                crate::services::api::client::jwt_for_test(
+                    &serde_json::json!({ "sub": "alice", "uid": "u-alice" }),
+                ),
+                "u=alice&t=x&s=y".to_owned(),
+            )
+            .await
+            .expect("resume");
         app.storage()
             .save(storage_keys::JWT_TOKEN, &"jwt-on-disk".to_string())
             .expect("seed the stored JWT");

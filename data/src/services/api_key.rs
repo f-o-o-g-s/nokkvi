@@ -28,7 +28,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::services::{
     api::players::{PlayerRow, PlayerSettings},
@@ -188,26 +188,21 @@ fn is_plausible_player_id(id: &str) -> bool {
 }
 
 /// The player nokkvi registered for `owner`, if it remembers one for the user
-/// with id `user_id` (an empty id on either side matches).
+/// with id `user_id` (an empty id on either side matches). A failed read is
+/// an error: taken as "no record", it would make a new player and leave the
+/// recorded one's key live and unrevoked.
 pub(crate) fn recorded_player_id(
     storage: &StateStorage,
     owner: &QueueOwner,
     user_id: &str,
-) -> Option<String> {
-    let records = match load_records(storage) {
-        Ok(records) => records,
-        Err(e) => {
-            warn!(" [API KEY] {e:#}");
-            return None;
-        }
-    };
-    records
+) -> Result<Option<String>> {
+    Ok(load_records(storage)?
         .get(owner.key())
         .filter(|record| {
             record.user_id.is_empty() || user_id.is_empty() || record.user_id == user_id
         })
         .map(|record| record.player_id.clone())
-        .filter(|id| is_plausible_player_id(id))
+        .filter(|id| is_plausible_player_id(id)))
 }
 
 /// Remember `player_id` as `owner`'s player, registered for user `user_id`.
@@ -401,19 +396,31 @@ mod tests {
         // Same server (trailing slash dropped), same user (case-insensitive).
         let alice_again = QueueOwner::new("https://music.example.com", "alice");
         assert_eq!(
-            recorded_player_id(&storage, &alice_again, "u-alice").as_deref(),
+            recorded_player_id(&storage, &alice_again, "u-alice")
+                .expect("read")
+                .as_deref(),
             Some("p-alice")
         );
-        assert_eq!(recorded_player_id(&storage, &alice_there, "u-alice"), None);
         assert_eq!(
-            recorded_player_id(&storage, &bob_here, "u-bob").as_deref(),
+            recorded_player_id(&storage, &alice_there, "u-alice").expect("read"),
+            None
+        );
+        assert_eq!(
+            recorded_player_id(&storage, &bob_here, "u-bob")
+                .expect("read")
+                .as_deref(),
             Some("p-bob")
         );
 
         forget_player_id(&storage, &alice_again).expect("forget");
-        assert_eq!(recorded_player_id(&storage, &alice_here, "u-alice"), None);
         assert_eq!(
-            recorded_player_id(&storage, &bob_here, "u-bob").as_deref(),
+            recorded_player_id(&storage, &alice_here, "u-alice").expect("read"),
+            None
+        );
+        assert_eq!(
+            recorded_player_id(&storage, &bob_here, "u-bob")
+                .expect("read")
+                .as_deref(),
             Some("p-bob")
         );
     }
@@ -423,16 +430,24 @@ mod tests {
         let (storage, _dir) = storage();
         let owner = QueueOwner::new("https://music.example.com", "alice");
         record_player_id(&storage, &owner, "../../api/user", "").expect("save");
-        assert_eq!(recorded_player_id(&storage, &owner, ""), None);
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "").expect("read"),
+            None
+        );
 
         storage
             .save(PLAYER_RECORDS_KEY, &"not a map")
             .expect("save junk");
-        assert_eq!(recorded_player_id(&storage, &owner, ""), None);
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "").expect("read"),
+            None
+        );
         // A write over junk starts a fresh map instead of failing.
         record_player_id(&storage, &owner, "p1", "").expect("save over junk");
         assert_eq!(
-            recorded_player_id(&storage, &owner, "").as_deref(),
+            recorded_player_id(&storage, &owner, "")
+                .expect("read")
+                .as_deref(),
             Some("p1")
         );
     }
@@ -446,18 +461,27 @@ mod tests {
         let owner = QueueOwner::new("https://music.example.com", "alice");
         record_player_id(&storage, &owner, "p1", "u-old").expect("save");
 
-        assert_eq!(recorded_player_id(&storage, &owner, "u-new"), None);
         assert_eq!(
-            recorded_player_id(&storage, &owner, "u-old").as_deref(),
+            recorded_player_id(&storage, &owner, "u-new").expect("read"),
+            None
+        );
+        assert_eq!(
+            recorded_player_id(&storage, &owner, "u-old")
+                .expect("read")
+                .as_deref(),
             Some("p1")
         );
         assert_eq!(
-            recorded_player_id(&storage, &owner, "").as_deref(),
+            recorded_player_id(&storage, &owner, "")
+                .expect("read")
+                .as_deref(),
             Some("p1")
         );
         record_player_id(&storage, &owner, "p1", "").expect("save");
         assert_eq!(
-            recorded_player_id(&storage, &owner, "u-new").as_deref(),
+            recorded_player_id(&storage, &owner, "u-new")
+                .expect("read")
+                .as_deref(),
             Some("p1")
         );
     }

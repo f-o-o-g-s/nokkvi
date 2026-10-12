@@ -68,6 +68,17 @@ impl KeySession {
     fn owner(&self) -> QueueOwner {
         QueueOwner::new(&self.server_url, &self.username)
     }
+
+    /// Fails unless the session's JWT names the session's user. A write to
+    /// `/api/player` acts as the JWT's user, so a token that can't be read
+    /// fails too (Navidrome's tokens always carry `sub`).
+    fn check_token_user(&self) -> Result<()> {
+        match &self.token_username {
+            Some(token_username) if same_user(token_username, &self.username) => Ok(()),
+            Some(_) => Err(anyhow!("the session's token belongs to another user")),
+            None => Err(anyhow!("the session's token can't be read")),
+        }
+    }
 }
 
 /// Run one key request under [`KEY_REQUEST_TIMEOUT`].
@@ -113,11 +124,7 @@ async fn issue_api_key(
     // Every write below acts as the JWT's user, which must be the session's:
     // a session whose token names someone else (a config.toml edited under an
     // older session) would register a player for that other user.
-    if let Some(token_username) = &session.token_username
-        && !same_user(token_username, &session.username)
-    {
-        anyhow::bail!("the session's token belongs to another user");
-    }
+    session.check_token_user()?;
 
     // A logout's revoke on this player lands first, or it would kill the
     // key put there next (`api_key::try_claim_key_writes`).
@@ -129,7 +136,7 @@ async fn issue_api_key(
     let key = ApiKey::mint()?;
     let players = PlayersApiService::new(client);
     let mut on_player = false;
-    if let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id) {
+    if let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id)? {
         match timed(players.set_api_key(&player_id, key.as_str())).await {
             Ok(()) => on_player = true,
             // Deleted in the web UI, or a reset server: make a new one. A
@@ -163,11 +170,10 @@ async fn issue_api_key(
             &settings,
         ))
         .await?;
-        if let Err(e) = api_key::record_player_id(storage, &owner, &player_id, &session.user_id) {
-            // The key works all the same; only a logout can't find it to
-            // revoke it (the next login replaces it).
-            warn!(target: "nokkvi::auth", "Couldn't remember the API key player: {e:#}");
-        }
+        // Unrecorded, the key could never be revoked at a logout: rather keep
+        // the token pair (the key on the new player is known to no one).
+        api_key::record_player_id(storage, &owner, &player_id, &session.user_id)
+            .context("remembering the new API key player")?;
     }
 
     // The server must take the key, and name this user for it, before the
@@ -439,9 +445,17 @@ impl AuthGateway {
     pub async fn revoke_api_key(&self, storage: &StateStorage) -> Result<()> {
         let session = self.key_session().await;
         let owner = session.owner();
-        let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id) else {
+        let Some(player_id) = api_key::recorded_player_id(storage, &owner, &session.user_id)?
+        else {
+            // A session that sends a key always has its player recorded; one
+            // without a record has a key nokkvi can't revoke.
+            if api_key::is_api_key_credential(&session.credential) {
+                anyhow::bail!("nokkvi has no record of the player its API key is on");
+            }
             return Ok(());
         };
+        // The revoke acts as the JWT's user (see `issue_api_key`).
+        session.check_token_user()?;
         let client = session
             .client
             .as_ref()
@@ -542,12 +556,17 @@ mod tests {
         offers_keys: bool,
         players: Vec<&'static str>,
         player_owner: &'static str,
+        /// The players' `userId` (empty: the row carries none).
+        player_owner_id: &'static str,
         players_keyed: bool,
         put_status: u16,
         list_status: u16,
         player_list: &'static str,
         create_status: u16,
         confirms_as: &'static str,
+        /// A refreshed JWT every answer carries in `X-ND-Authorization`, as
+        /// Navidrome's JWTRefresher sends one.
+        refreshed_jwt: Option<String>,
     }
 
     impl Default for FakeNavidrome {
@@ -556,12 +575,14 @@ mod tests {
                 offers_keys: true,
                 players: Vec::new(),
                 player_owner: "alice",
+                player_owner_id: "",
                 players_keyed: true,
                 put_status: 200,
                 list_status: 200,
                 player_list: "[]",
                 create_status: 200,
                 confirms_as: "alice",
+                refreshed_jwt: None,
             }
         }
     }
@@ -569,7 +590,12 @@ mod tests {
     impl FakeNavidrome {
         async fn start(self) -> ScriptedServer {
             let registered = Arc::new(parking_lot::Mutex::new(None::<String>));
-            ScriptedServer::start(move |r: &Recorded| {
+            let headers = self
+                .refreshed_jwt
+                .iter()
+                .map(|jwt| ("X-ND-Authorization".to_owned(), format!("Bearer {jwt}")))
+                .collect();
+            ScriptedServer::start_with_headers(headers, move |r: &Recorded| {
                 if r.is("POST", "/rest/getOpenSubsonicExtensions") {
                     let names: &[&str] = if self.offers_keys {
                         &["formPost", "apiKeyAuthentication"]
@@ -593,8 +619,8 @@ mod tests {
                         return (404, r#""player not found""#.to_owned());
                     }
                     let row = format!(
-                        r#"{{"id":"{id}","name":"nokkvi (host)","client":"nokkvi","userName":"{}","hasApiKey":{}}}"#,
-                        self.player_owner, self.players_keyed
+                        r#"{{"id":"{id}","name":"nokkvi (host)","client":"nokkvi","userName":"{}","userId":"{}","hasApiKey":{}}}"#,
+                        self.player_owner, self.player_owner_id, self.players_keyed
                     );
                     if r.method == "GET" {
                         return (200, row);
@@ -609,9 +635,17 @@ mod tests {
                     }
                 }
                 if r.is("POST", "/rest/tokenInfo") {
+                    // Navidrome's `apiKeyConflicts`: any other credential
+                    // beside the key, in the body or the query, is code 43.
+                    let mixed = ["u", "p", "t", "s", "jwt"]
+                        .iter()
+                        .any(|name| r.param(name).is_some());
+                    if mixed {
+                        return (200, subsonic_failed(43, "Multiple conflicting authentication mechanisms provided"));
+                    }
                     let sent = r.form("apiKey");
-                    let alone = r.form("u").is_none() && !r.query.contains("apiKey");
-                    if alone && sent.is_some() && sent == *registered.lock() {
+                    let in_body_only = !r.query.contains("apiKey");
+                    if in_body_only && sent.is_some() && sent == *registered.lock() {
                         return (
                             200,
                             subsonic_ok(&format!(
@@ -642,8 +676,15 @@ mod tests {
         gateway
     }
 
+    /// A Navidrome-shaped JWT for alice (`sub` and `uid` claims).
+    fn alice_jwt() -> String {
+        crate::services::api::client::jwt_for_test(
+            &serde_json::json!({ "sub": "alice", "uid": "u-alice" }),
+        )
+    }
+
     async fn gateway_on(server: &ScriptedServer, credential: &str) -> AuthGateway {
-        gateway_with(server, credential, "jwt").await
+        gateway_with(server, credential, &alice_jwt()).await
     }
 
     fn storage() -> (StateStorage, tempfile::TempDir) {
@@ -657,7 +698,7 @@ mod tests {
     }
 
     fn recorded(storage: &StateStorage, server: &ScriptedServer) -> Option<String> {
-        api_key::recorded_player_id(storage, &owner_of(server), "")
+        api_key::recorded_player_id(storage, &owner_of(server), "").expect("read")
     }
 
     fn record(storage: &StateStorage, server: &ScriptedServer, player_id: &str) {
@@ -752,7 +793,7 @@ mod tests {
         for request in player_requests(&server, "GET").iter().chain(creates.iter()) {
             assert_eq!(
                 request.header("x-nd-authorization"),
-                Some("Bearer jwt"),
+                Some(format!("Bearer {}", alice_jwt()).as_str()),
                 "{request:?}"
             );
         }
@@ -876,6 +917,37 @@ mod tests {
 
         assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
         assert!(!any_player_request(&server));
+        assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
+    }
+
+    /// A token whose user can't be read gives no assurance whose player a
+    /// write would touch: nothing is written.
+    #[tokio::test]
+    async fn an_unreadable_token_writes_nothing() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_with(&server, TOKEN_PAIR, "not-a-jwt").await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
+        assert!(!any_player_request(&server));
+    }
+
+    /// A player nokkvi can't record would carry a key no logout could
+    /// revoke: the session keeps the token pair instead.
+    #[tokio::test]
+    async fn a_player_that_cant_be_recorded_keeps_the_token_pair() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        storage.fail_writes_for_test(true);
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert!(matches!(outcome, ApiKeyOutcome::FellBack(_)), "{outcome:?}");
         assert_eq!(gateway.get_subsonic_credential().await, TOKEN_PAIR);
     }
 
@@ -1031,6 +1103,150 @@ mod tests {
 
         gateway.revoke_api_key(&storage).await.expect("revoke");
 
+        assert_eq!(recorded(&storage, &server), None);
+    }
+
+    /// A keyed session whose player nokkvi has no record of can't revoke its
+    /// key: the logout says so instead of passing over it.
+    #[tokio::test]
+    async fn logout_reports_a_key_it_cannot_revoke() {
+        let server = FakeNavidrome::default().start().await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let (storage, _dir) = storage();
+
+        let err = gateway
+            .revoke_api_key(&storage)
+            .await
+            .expect_err("a key with no record");
+        assert!(format!("{err:#}").contains("no record"), "{err:#}");
+        assert!(server.requests().is_empty());
+    }
+
+    /// A JWT Navidrome refreshed on an answer, with a full lifetime ahead.
+    fn refreshed_jwt() -> String {
+        let exp = chrono::Utc::now().timestamp() + 48 * 3600;
+        crate::services::api::client::jwt_for_test(
+            &serde_json::json!({ "sub": "alice", "uid": "u-alice", "exp": exp }),
+        )
+    }
+
+    async fn count_persisted_tokens(gateway: &AuthGateway) -> Arc<std::sync::atomic::AtomicUsize> {
+        let persisted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = persisted.clone();
+        gateway
+            .set_token_refresh_callback(Arc::new(move |_token: &str| {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }))
+            .await;
+        persisted
+    }
+
+    /// The control for the revoke below: on a live session a refreshed JWT
+    /// from these answers does reach the persistence callback.
+    #[tokio::test]
+    async fn a_live_session_persists_a_refreshed_token() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            refreshed_jwt: Some(refreshed_jwt()),
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let persisted = count_persisted_tokens(&gateway).await;
+        let (storage, _dir) = storage();
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
+        assert!(persisted.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    }
+
+    /// A logout's revoke runs after the session's tokens are cleared from
+    /// redb, so a refreshed JWT on its answers must never be written back.
+    #[tokio::test]
+    async fn the_logout_revoke_never_persists_a_refreshed_token() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            refreshed_jwt: Some(refreshed_jwt()),
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let persisted = count_persisted_tokens(&gateway).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p1");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert_eq!(player_requests(&server, "PUT").len(), 1, "it did revoke");
+        assert_eq!(persisted.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// A record left by another user who had the same name (the record keeps
+    /// the user id) is not this user's player: a new one is made, and the
+    /// record moves to this user's id.
+    #[tokio::test]
+    async fn a_record_for_another_user_id_is_not_used() {
+        let _serial = api_key::KEY_WRITES_TEST_LOCK.lock().await;
+        let server = FakeNavidrome {
+            players: vec!["p-old"],
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        let owner = owner_of(&server);
+        api_key::record_player_id(&storage, &owner, "p-old", "u-other").expect("record");
+
+        let outcome = gateway.establish_api_key(&storage).await.expect("setup");
+
+        assert_eq!(outcome, ApiKeyOutcome::Adopted { created: true });
+        assert!(player_requests(&server, "PUT").is_empty());
+        let lookup =
+            |user_id: &str| api_key::recorded_player_id(&storage, &owner, user_id).expect("read");
+        assert_eq!(lookup("u-other"), None);
+        assert_eq!(lookup("u-alice").as_deref(), Some("p-new"));
+    }
+
+    /// The revoke looks its player up by the session's user id too.
+    #[tokio::test]
+    async fn logout_ignores_a_record_for_another_user_id() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+        api_key::record_player_id(&storage, &owner_of(&server), "p1", "u-other").expect("record");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert!(server.requests().is_empty());
+    }
+
+    /// The ownership check compares user ids when both sides have one, even
+    /// when the names match.
+    #[tokio::test]
+    async fn logout_never_revokes_another_user_id_s_key() {
+        let server = FakeNavidrome {
+            players: vec!["p1"],
+            player_owner_id: "u-bob",
+            ..FakeNavidrome::default()
+        }
+        .start()
+        .await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p1");
+
+        gateway.revoke_api_key(&storage).await.expect("revoke");
+
+        assert!(player_requests(&server, "PUT").is_empty());
         assert_eq!(recorded(&storage, &server), None);
     }
 

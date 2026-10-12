@@ -78,6 +78,19 @@ impl ScriptedServer {
     pub(crate) async fn start(
         handler: impl Fn(&Recorded) -> (u16, String) + Send + Sync + 'static,
     ) -> Self {
+        Self::start_with_headers(Vec::new(), handler).await
+    }
+
+    /// [`Self::start`], adding `headers` to every response (Navidrome's
+    /// `X-ND-Authorization` refreshed token, say).
+    pub(crate) async fn start_with_headers(
+        headers: Vec<(String, String)>,
+        handler: impl Fn(&Recorded) -> (u16, String) + Send + Sync + 'static,
+    ) -> Self {
+        let extra: String = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect();
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind ephemeral port");
@@ -93,7 +106,7 @@ impl ScriptedServer {
                 let (status, body) = handler(&request);
                 seen.lock().push(request);
                 let response = format!(
-                    "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\n\
+                    "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\n{extra}\
                      Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     reason(status),
                     body.len()

@@ -1237,47 +1237,24 @@ fn genre_focus_and_expand_triggers_collage_load() {
 // Resume-Session Backfill (navigation.rs)
 // ============================================================================
 
+/// A resume shows the session's username, and never one read out of the
+/// credential (an API key credential holds none).
 #[test]
-fn resume_session_backfills_username_from_credential() {
+fn resume_session_shows_the_session_username() {
     use crate::state::StoredSession;
 
     let mut app = test_app();
-    app.login_page.username = String::new();
+    app.login_page.username = "typed-before".to_string();
     app.stored_session = Some(StoredSession {
         server_url: "http://localhost:4533".to_string(),
-        username: String::new(),
+        username: "alice".to_string(),
         jwt_token: "fake.jwt.token".to_string(),
-        subsonic_credential: "u=foogs&s=salt&t=token".to_string(),
+        subsonic_credential: "u=mallory&s=salt&t=token".to_string(),
     });
 
     let _ = app.handle_resume_session();
 
-    assert_eq!(
-        app.login_page.username, "foogs",
-        "resume should backfill login_page.username from the credential's u= field \
-         so the next save_credentials closes the loop with a real value"
-    );
-}
-
-#[test]
-fn resume_session_does_not_clobber_when_credential_lacks_u() {
-    use crate::state::StoredSession;
-
-    let mut app = test_app();
-    app.login_page.username = "preexisting".to_string();
-    app.stored_session = Some(StoredSession {
-        server_url: "http://localhost:4533".to_string(),
-        username: "preexisting".to_string(),
-        jwt_token: "fake.jwt.token".to_string(),
-        subsonic_credential: "s=salt&t=token".to_string(),
-    });
-
-    let _ = app.handle_resume_session();
-
-    assert_eq!(
-        app.login_page.username, "preexisting",
-        "a malformed credential without u= should leave login_page.username untouched"
-    );
+    assert_eq!(app.login_page.username, "alice");
 }
 
 // ============================================================================

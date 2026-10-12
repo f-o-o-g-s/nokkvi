@@ -472,6 +472,8 @@ impl Nokkvi {
                 // Cloned, not taken: a failed attempt drops its shell, and the
                 // retry must not open a second handle on a database that a
                 // background task (a logout's key revoke) still holds open.
+                // Two shells never use it at once: `login_in_progress` lets
+                // one attempt (or the resume) run at a time.
                 let cached = self.cached_storage.clone();
                 // Chain the login task with the mapped task
                 Task::batch([
@@ -569,18 +571,10 @@ impl Nokkvi {
         // on_login_error via handle_login_result.
         self.login_page.login_in_progress = true;
 
-        // Show the stored username; fall back to the credential's u= field
-        // when it is empty (a session predating save_credentials writes).
-        // The stored one comes first: a credential saved before the username
-        // was form-encoded holds it raw, and decoding would turn a `+` into
-        // a space.
-        if !username.is_empty() {
-            self.login_page.username.clone_from(&username);
-        } else if let Some(parsed) =
-            nokkvi_data::credentials::parse_username_from_credential(&subsonic_credential)
-        {
-            self.login_page.username = parsed;
-        }
+        // Show the session's username: config.toml's, or the stored owner's
+        // (`resume_identity` hands over no session without one). Never read
+        // it out of the credential, which an API key credential doesn't hold.
+        self.login_page.username.clone_from(&username);
 
         // Share the cached storage from a previous logout (if any); see the
         // login attempt for why it is cloned, not taken.
