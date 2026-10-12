@@ -8,15 +8,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The About modal now credits Claude Opus 5.5 and Fable 5.1 as the shipwrights (previously Opus 5).
+### Fixed
+
+### Removed
+
+## v0.24.1 — 2026-10-12
+
+### Changed
+
+- The About modal now credits Claude Opus 5.5 instead of Opus 5 among the shipwrights.
 - The metadata strip now defaults to Player Bar Above instead of Mini Player.
 - A config.toml that doesn't set `track_info_display` now loads the metadata strip on Player Bar Above.
 
 ### Fixed
 
 - With Merged Mode off, the metadata strip's fields now fill the space between format and bitrate instead of the middle third.
-
-### Removed
 
 ## v0.24.0 — 2026-10-11
 
