@@ -113,10 +113,13 @@ pub async fn subsonic_post_ok(
 
 /// Subsonic error codes that mean the credential itself was rejected, so the
 /// session is dead: 40 (wrong username or password, which is also what
-/// Navidrome answers a stale token with) and the OpenSubsonic 44 (invalid API
-/// key). 41 (token auth not supported) stays a plain error: it is a server
-/// setup problem that logging in again cannot fix.
-const SESSION_REJECTED_CODES: [i64; 2] = [40, 44];
+/// Navidrome answers a stale token with), 41 (token auth switched off), 42
+/// (the credential's mechanism switched off) and 44 (invalid or revoked API
+/// key). Logging in again fixes each: a fresh login sets up an API key where
+/// the server takes them (`services::api_key`), and a revoked key is replaced.
+/// 43 (a key sent beside another credential) stays a plain error: it is
+/// nokkvi's own bug, which a re-login would only repeat.
+const SESSION_REJECTED_CODES: [i64; 4] = [40, 41, 42, 44];
 
 /// Apply Subsonic response status/body policy.
 ///
@@ -389,12 +392,14 @@ pub(crate) mod tests {
 
     /// A rejected credential comes back as HTTP 200 with a failed envelope:
     /// code 40 (wrong username or password, which is also what a stale token
-    /// gets) or the OpenSubsonic code 44 (invalid API key). Both mean the
-    /// session is dead, so they route to login like HTTP 401, on reads and
-    /// writes alike.
+    /// gets), 41 (token login switched off), 42 (that login method switched
+    /// off) or 44 (invalid or revoked API key). Each means the session's
+    /// credential is dead, and a fresh login gets a working one (an API key
+    /// where the server takes them), so they route to login like HTTP 401,
+    /// on reads and writes alike.
     #[test]
     fn check_subsonic_response_status_routes_auth_codes_to_unauthorized() {
-        for code in [40, 44] {
+        for code in [40, 41, 42, 44] {
             let body = format!(
                 r#"{{"subsonic-response":{{"status":"failed","error":{{"code":{code},"message":"rejected"}}}}}}"#
             );
@@ -410,12 +415,13 @@ pub(crate) mod tests {
         }
     }
 
-    /// Every other failure code stays a plain error: 41 (token auth not
-    /// supported) is a server setup problem a re-login cannot fix, and 50
-    /// (not authorized) is a permission refusal on one operation.
+    /// Every other failure code stays a plain error: 43 (a key sent beside
+    /// another credential) is nokkvi's own bug, which a re-login would only
+    /// repeat, and 50 (not authorized) is a permission refusal on one
+    /// operation.
     #[test]
     fn check_subsonic_response_status_keeps_other_codes_plain() {
-        for code in [0, 41, 50, 70] {
+        for code in [0, 43, 50, 70] {
             let body = format!(
                 r#"{{"subsonic-response":{{"status":"failed","error":{{"code":{code},"message":"nope"}}}}}}"#
             );
