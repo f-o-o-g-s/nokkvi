@@ -1,30 +1,38 @@
-//! Redact Subsonic auth tokens (`s=<salt>` / `t=<md5(password+salt)>`) from URLs
-//! before they reach the log file.
+//! Redact Subsonic credentials (`s=<salt>` / `t=<md5(password+salt)>`, an
+//! OpenSubsonic `apiKey=`, a `p=` password, a `jwt=`) from URLs before they
+//! reach the log file.
 //!
 //! Users attach `~/.local/state/nokkvi/nokkvi.log` to bug reports per
-//! `CONTRIBUTING.md`. The Subsonic stream URLs we log embed `&s=<salt>&t=<token>`,
-//! which together are enough to impersonate the user against the Navidrome API
-//! until they rotate their password. Anywhere a Subsonic URL crosses into a
-//! `tracing` call site, wrap it with `redact_subsonic_url`.
+//! `CONTRIBUTING.md`. The Subsonic stream URLs we log embed the session's
+//! credential: `&s=<salt>&t=<token>`, which together are enough to impersonate
+//! the user against the Navidrome API until they rotate their password, or
+//! `&apiKey=<key>`, which works until the key is revoked. Anywhere a Subsonic URL
+//! crosses into a `tracing` call site, wrap it with `redact_subsonic_url`.
 //!
 //! The helper preserves the path and every other query parameter (`id=`, `u=`,
 //! `f=`, `v=`, `c=`, `_=`, etc.) so logs remain useful for debugging.
 
 use std::borrow::Cow;
 
-/// Strip the `s=` (salt) and `t=` (token) query parameters from a Subsonic URL.
+/// The query keys that authenticate a Subsonic request on their own (or, for
+/// `s` and `t`, as a pair). `u` is the username, not a secret, and stays.
+const SECRET_PARAMS: [&str; 5] = ["s", "t", "apiKey", "p", "jwt"];
+
+/// Strip every [`SECRET_PARAMS`] query parameter (`s`, `t`, `apiKey`, `p`,
+/// `jwt`) from a Subsonic URL.
 ///
 /// Returns `Cow::Borrowed` when no redaction is needed (no query string, or
-/// no `s=` / `t=` params present) and `Cow::Owned` when at least one of the
+/// no secret params present) and `Cow::Owned` when at least one of the
 /// sensitive params was removed.
 ///
 /// # Behavior
 /// - Non-URL inputs (no `?`) are returned unchanged.
 /// - Param ordering is preserved for the params that remain.
-/// - If `s=` and `t=` are the only params, the trailing `?` is dropped so the
+/// - If the secrets are the only params, the trailing `?` is dropped so the
 ///   result is a clean base URL.
-/// - Matching is exact on the key name (`s` and `t`), case-sensitive, so an
-///   `id=...` containing the substring `s=` is not mistakenly stripped.
+/// - Matching is exact on the key name, case-sensitive, so an `id=...`
+///   containing the substring `s=`, or the cover cache buster `_u=`, is not
+///   mistakenly stripped.
 pub fn redact_subsonic_url(url: &str) -> Cow<'_, str> {
     let Some(query_start) = url.find('?') else {
         return Cow::Borrowed(url);
@@ -38,7 +46,7 @@ pub fn redact_subsonic_url(url: &str) -> Cow<'_, str> {
     let mut redacted_any = false;
     for pair in query.split('&') {
         let key = pair.split_once('=').map_or(pair, |(k, _)| k);
-        if key == "s" || key == "t" {
+        if SECRET_PARAMS.contains(&key) {
             redacted_any = true;
         } else {
             kept.push(pair);
@@ -152,6 +160,41 @@ mod tests {
         let url = "http://srv/rest/stream?id=al-1&s=&t=";
         let redacted = redact_subsonic_url(url);
         assert_eq!(redacted, "http://srv/rest/stream?id=al-1");
+    }
+
+    /// An OpenSubsonic API key logs in on its own, and so does a plain or
+    /// `enc:` password, or a Navidrome `jwt`: each is stripped like the
+    /// salt/token pair.
+    #[test]
+    fn api_key_password_and_jwt_are_redacted() {
+        let url =
+            "http://srv/rest/stream?id=al-1&apiKey=nds_KEYSECRET0123456789abc&f=json&c=nokkvi";
+        assert_eq!(
+            redact_subsonic_url(url),
+            "http://srv/rest/stream?id=al-1&f=json&c=nokkvi"
+        );
+
+        let url = "http://srv/rest/ping?u=alice&p=enc:736563726574&v=1.8.0";
+        assert_eq!(
+            redact_subsonic_url(url),
+            "http://srv/rest/ping?u=alice&v=1.8.0"
+        );
+
+        let url = "http://srv/rest/getCoverArt?id=al-1&jwt=eyJ.SECRET.sig";
+        assert_eq!(
+            redact_subsonic_url(url),
+            "http://srv/rest/getCoverArt?id=al-1"
+        );
+    }
+
+    /// Only the exact key names are secrets: `_u=` (the cover cache buster)
+    /// and an `apiKeyX=` lookalike stay.
+    #[test]
+    fn lookalike_keys_are_kept() {
+        let url = "http://srv/rest/getCoverArt?id=al-1&_u=2026&apiKeyX=1&pp=2";
+        let redacted = redact_subsonic_url(url);
+        assert_eq!(redacted, url);
+        assert!(matches!(redacted, Cow::Borrowed(_)));
     }
 
     /// The string helper above only protects URLs we log *directly*. The other

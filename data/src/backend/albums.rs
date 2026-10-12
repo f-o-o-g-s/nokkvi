@@ -469,7 +469,7 @@ impl AlbumsService {
             .send()
             .await
             // `reqwest::Error`'s `Display`/`Debug` embed the full request URL —
-            // including the `s=`/`t=` Subsonic credential — and that text is baked
+            // including the Subsonic credential (`s=`/`t=` or `apiKey=`) — and that text is baked
             // permanently into the `anyhow` message string here, so it must be
             // stripped at construction (no downstream redaction can recover it).
             .map_err(|e| anyhow::anyhow!("artwork fetch failed: {}", e.without_url()))?;
@@ -951,7 +951,7 @@ mod tests {
 
     /// Regression guard for the leak that surfaced in a user's MPRIS "art fetch
     /// failed" WARN: a transport failure on the REAL artwork path must not carry
-    /// the `s=`/`t=` Subsonic credential into the returned error (it is logged at
+    /// the Subsonic credential (`s=`/`t=` or `apiKey=`) into the returned error (it is logged at
     /// WARN level and ships in bug-report logs). Unlike the `without_url()` unit
     /// test in `utils::url_redaction`, this exercises the actual call site, so it
     /// fails if a future edit drops the strip at `fetch_artwork_by_url`.
