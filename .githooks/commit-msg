@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Removes a Claude Co-Authored-By trailer from the commit message. Commits here
+# carry no AI attribution: the `attribution` setting in .claude/settings.json
+# stops Claude Code from adding one, and this hook catches an agent that types
+# the trailer by hand. Trailers naming anyone else are left alone.
+
+set -e
+
+msg_file="$1"
+pattern='^Co-Authored-By:.*(Claude|noreply@anthropic\.com)'
+
+if grep -qiE "$pattern" "$msg_file"; then
+    tmp="$msg_file.tmp.$$"
+    grep -viE "$pattern" "$msg_file" > "$tmp" || true
+    mv "$tmp" "$msg_file"
+    echo "commit-msg: removed a Claude Co-Authored-By trailer (this repo carries no AI attribution)" >&2
+fi
