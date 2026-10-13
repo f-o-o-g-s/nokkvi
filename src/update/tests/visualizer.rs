@@ -100,6 +100,9 @@ fn visualizer_secondary_writes_derive_from_setter_state() {
 /// `VisualizerConfigChanged` reload).
 #[test]
 fn player_settings_loaded_applies_visualizer_to_shared_config() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     let mut settings = nokkvi_data::types::player_settings::LivePlayerSettings::default();
     settings.visualizer.noise_reduction = 0.42;
@@ -205,6 +208,9 @@ fn cycling_the_visualizer_points_the_fft_worker_at_each_mode() {
 /// and leaving MilkDrop through a reload moves it off the analyzer.
 #[test]
 fn loaded_settings_point_the_fft_worker_at_their_mode() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     use nokkvi_data::types::player_settings::{LivePlayerSettings, VisualizationMode as Setting};
 
     use crate::widgets::visualizer::VisualizationMode as Worker;

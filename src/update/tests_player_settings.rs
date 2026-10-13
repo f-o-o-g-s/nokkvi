@@ -323,8 +323,9 @@ fn every_interface_field_is_applied_on_settings_load() {
         },
     };
 
-    // `font_family` is set on its own path (`Message::ApplyFont`) and is a
-    // process-wide font other tests draw with, so both loads leave it alone.
+    // `font_family` is a process-wide font other tests draw with, so both
+    // loads carry the same value (it is also set on its own path,
+    // `Message::ApplyFont`).
     const SAME_IN_BOTH: &[&str] = &["font_family"];
 
     // The shipped defaults, as a fresh install loads them.

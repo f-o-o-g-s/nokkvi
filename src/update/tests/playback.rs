@@ -827,6 +827,9 @@ fn a_readable_probe_resets_the_unverifiable_grace_streak() {
 
 #[test]
 fn settings_load_keeps_crossfade_when_bit_perfect_off() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     use nokkvi_data::types::player_settings::{BitPerfectMode, LivePlayerSettings};
     let mut app = test_app();
     // The shipped default: crossfade on, bit-perfect off. Loading it leaves both
@@ -845,6 +848,9 @@ fn settings_load_keeps_crossfade_when_bit_perfect_off() {
 
 #[test]
 fn settings_load_reconciles_both_on_bit_perfect_wins() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     use nokkvi_data::types::player_settings::{BitPerfectMode, LivePlayerSettings};
     let mut app = test_app();
     // Crossfade and bit-perfect are mutually exclusive. A hand-edited / pre-
@@ -868,6 +874,9 @@ fn settings_load_reconciles_both_on_bit_perfect_wins() {
 
 #[test]
 fn settings_load_keeps_crossfade_when_bit_perfect_off_after_migration() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     use nokkvi_data::types::player_settings::{BitPerfectMode, LivePlayerSettings};
     let mut app = test_app();
     // The common case: crossfade on, bit-perfect Off → both survive untouched.
@@ -1923,6 +1932,9 @@ fn a_landed_seek_stores_the_whole_second_floor_for_the_tick_heuristic() {
 
 #[test]
 fn loaded_settings_carry_the_seek_step_into_the_cluster() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     assert_eq!(
         app.settings.seek_step_secs, 5,

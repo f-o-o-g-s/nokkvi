@@ -1173,6 +1173,9 @@ fn toggle_crossfade_refreshes_cached_playback_entry_when_settings_visible() {
 
 #[test]
 fn hot_reload_visualizer_via_unified_path() {
+    // The load handler mirrors every theme atomic: serialize with the other
+    // theme-mutating tests (THEME_MODE_LOCK).
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     // The unified hot-reload chain is SettingsConfigReloaded ->
     // reload_from_toml (re-reads [visualizer]) -> PlayerSettingsLoaded.
     // Exercise its final hop directly: a PlayerSettingsLoaded carrying a
