@@ -32,6 +32,18 @@ use crate::{
 /// `a/b` would.
 const SEP: char = '\u{1f}';
 
+/// The form of a server URL that keys per-server storage: the session's queue
+/// owner and the waveform cache directory. Scheme and host are lowercased by
+/// the URL parser and a trailing `/` is dropped, so a re-typed URL keeps the
+/// user's queue and cached envelopes; input the parser rejects is kept as
+/// typed, trimmed. Changing it orphans every key built before.
+pub(crate) fn server_key(server_url: &str) -> String {
+    let trimmed = server_url.trim();
+    let normalized =
+        url::Url::parse(trimmed).map_or_else(|_| trimmed.to_owned(), |u| u.as_str().to_owned());
+    normalized.trim_end_matches('/').to_owned()
+}
+
 /// The session a queue belongs to: the server it was built from and the user
 /// logged into it. The same identity keys the stored session's owner check
 /// (`credentials::SessionOwner`) and nokkvi's API-key player on each server
@@ -43,15 +55,11 @@ pub struct QueueOwner {
 }
 
 impl QueueOwner {
-    /// `server_url` is the resolved URL the session connected to; it is
-    /// normalized (scheme and host lowercased by the URL parser, trailing `/`
-    /// dropped) so a re-typed URL maps to the same owner. Navidrome usernames
-    /// are case-insensitive, so the username is lowercased.
+    /// `server_url` is the resolved URL the session connected to, keyed by
+    /// [`server_key`] so a re-typed URL maps to the same owner. Navidrome
+    /// usernames are case-insensitive, so the username is lowercased.
     pub fn new(server_url: &str, username: &str) -> Self {
-        let trimmed = server_url.trim();
-        let server =
-            url::Url::parse(trimmed).map_or_else(|_| trimmed.to_owned(), |u| u.as_str().to_owned());
-        let server = server.trim_end_matches('/').to_owned();
+        let server = server_key(server_url);
         let user = username.trim().to_lowercase();
         Self {
             key: format!("{server}{SEP}{user}"),
@@ -301,6 +309,21 @@ mod tests {
             claim(storage, owner, None, LegacyVerdict::Belongs).expect("claim"),
             QueueClaim::Kept
         );
+    }
+
+    /// The exact keys, since the waveform cache's directory names hash them:
+    /// a change here orphans every cached envelope and parked queue.
+    #[test]
+    fn server_key_lowercases_scheme_and_host_and_drops_the_trailing_slash() {
+        assert_eq!(
+            server_key(" HTTP://Music.Example:4533/ "),
+            "http://music.example:4533"
+        );
+        assert_eq!(
+            server_key("https://example.org/Navidrome/"),
+            "https://example.org/Navidrome"
+        );
+        assert_eq!(server_key("not a url/"), "not a url");
     }
 
     #[test]

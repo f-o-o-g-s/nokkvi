@@ -56,13 +56,11 @@ pub(super) struct WaveformCache {
 
 impl WaveformCache {
     /// `root/<server key>`: song ids are only unique per server. The URL is
-    /// normalized the way the queue's session owner is (scheme and host
-    /// lowercased, trailing `/` dropped) so a re-typed URL shares the cache.
+    /// keyed the way the queue's session owner is
+    /// ([`server_key`](crate::services::queue::slots::server_key)), so a
+    /// re-typed URL shares the cache.
     pub(super) fn for_server(root: &Path, server_url: &str) -> Self {
-        let trimmed = server_url.trim();
-        let normalized =
-            url::Url::parse(trimmed).map_or_else(|_| trimmed.to_owned(), |u| u.as_str().to_owned());
-        let key = hex_md5(normalized.trim_end_matches('/'));
+        let key = hex_md5(&crate::services::queue::slots::server_key(server_url));
         Self {
             dir: root.join(&key[..16]),
         }
