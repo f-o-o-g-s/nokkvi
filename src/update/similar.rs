@@ -174,7 +174,7 @@ impl Nokkvi {
         let exit_theater = self.exit_theater();
 
         // Ensure browsing panel is open and on Similar tab
-        self.ensure_browsing_panel_on_similar();
+        let show_queue = self.ensure_browsing_panel_on_similar();
 
         // Bump generation + set loading
         let generation = self.similar_songs_generation.bump();
@@ -194,7 +194,7 @@ impl Nokkvi {
                 source,
             ))
         });
-        Task::batch([exit_theater, fetch])
+        Task::batch([exit_theater, show_queue, fetch])
     }
 
     /// Handle API response for similar/top songs.
@@ -301,11 +301,16 @@ impl Nokkvi {
     }
 
     /// Ensure the browsing panel is open and focused on the Similar tab.
-    fn ensure_browsing_panel_on_similar(&mut self) {
-        // Switch to Queue view if not already there (browsing panel only shows with Queue)
-        if self.current_view != crate::View::Queue {
-            self.current_view = crate::View::Queue;
-        }
+    /// Returns the view switch's task when it had to leave another view.
+    fn ensure_browsing_panel_on_similar(&mut self) -> Task<Message> {
+        // The panel only shows beside the Queue. Leaving another view goes
+        // through the view switch, so its teardown runs (a roulette spin or
+        // find-and-expand chain on that view stops with it).
+        let show_queue = if self.current_view == crate::View::Queue {
+            Task::none()
+        } else {
+            self.handle_switch_view(crate::View::Queue)
+        };
 
         // Open browsing panel if not open
         if self.browsing_panel.is_none() {
@@ -319,5 +324,6 @@ impl Nokkvi {
 
         // Focus the browser pane
         self.pane_focus = crate::state::PaneFocus::Browser;
+        show_queue
     }
 }

@@ -285,3 +285,48 @@ fn the_rating_keys_still_rate_the_queue_under_queue_focus() {
 
     assert_eq!(info.id, "q1");
 }
+
+// ============================================================================
+// Find Similar opens its results through the view switch
+// ============================================================================
+
+#[test]
+fn find_similar_cancels_a_roulette_spin_on_the_view_it_leaves() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    seed_albums(&mut app, albums_indexed(4));
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
+    assert!(app.roulette.is_some(), "the spin is running");
+
+    let _ = app.handle_find_similar("s1".into(), "Seed".into());
+
+    assert_eq!(app.current_view, View::Queue);
+    assert!(app.roulette.is_none(), "the spin stops with its list");
+}
+
+#[test]
+fn find_similar_cancels_a_find_and_expand_chain_on_the_view_it_leaves() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    arm_pending_album(&mut app, "a1");
+
+    let _ = app.handle_find_similar("s1".into(), "Seed".into());
+
+    assert!(
+        app.pending_expand.target.is_none(),
+        "a chain on the hidden Albums view would keep paginating it"
+    );
+}
+
+#[test]
+fn find_similar_from_settings_shows_the_results() {
+    // Shift+S and the strip's Find Similar work over Settings too.
+    let mut app = test_app();
+    let _ = app.handle_switch_view(View::Albums);
+    let _ = app.handle_switch_view(View::Settings);
+
+    let _ = app.handle_find_similar("s1".into(), "Seed".into());
+
+    assert_eq!(app.current_view, View::Queue);
+    assert_eq!(app.focused_browsing_tab(), Some(BrowsingView::Similar));
+}

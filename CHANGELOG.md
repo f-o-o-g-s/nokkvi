@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Opening the playlist editor now plays the view-change sound, like other view switches.
+- Find Similar from another view now plays the view-change sound.
 
 ### Fixed
 
@@ -26,6 +27,8 @@ All notable changes to this project will be documented in this file.
 - A scrobble the server rejects no longer bumps the song's play count in nokkvi.
 - A scrobble or now-playing update rejected by an expired login now returns you to the login screen.
 - A view switch made while Settings is open (a nav tab, a view hotkey, `nokkvi switch-view`) now opens that view, not the one you came from.
+- Find Similar now stops a roulette spin running on the view it leaves.
+- Find Similar now cancels a pending jump to a clicked album, artist or genre on the view it leaves.
 
 ### Removed
 
