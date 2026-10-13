@@ -124,6 +124,39 @@ pub enum SlotListPageMessage {
     ToolbarDropdownToggled(bool),
 }
 
+impl SlotListPageMessage {
+    /// Whether this is a slot-hover or toolbar-reveal message. These write only
+    /// `hovered_slot` or the reveal flags, never the viewport, the selection or
+    /// the rows, and the slot list republishes `HoverEnterSlot` on every cursor
+    /// move inside a row. So a handler whose normal path rebuilds its rows
+    /// (Harbour) or re-plans the viewport prefetch (the playlist editor) returns
+    /// them first. Exhaustive, so a new variant is sorted here.
+    pub(crate) const fn is_hover_or_reveal(&self) -> bool {
+        match self {
+            Self::HoverEnterSlot(_)
+            | Self::HoverExitSlot(_)
+            | Self::ToolbarHoverEnter
+            | Self::ToolbarHoverExit
+            | Self::ToolbarDropdownToggled(_) => true,
+            Self::NavigateUp
+            | Self::NavigateDown
+            | Self::SetOffset(..)
+            | Self::ScrollSeek(_)
+            | Self::ActivateCenter(_)
+            | Self::ClickPlay(_)
+            | Self::SelectionToggle(_)
+            | Self::SelectAllToggle
+            | Self::AddCenterToQueue
+            | Self::RefreshViewData
+            | Self::CenterOnPlaying
+            | Self::SearchQueryChanged(_)
+            | Self::SearchFocused(_)
+            | Self::SortModeSelected(_)
+            | Self::ToggleSortOrder => false,
+        }
+    }
+}
+
 ///
 /// Views should wrap these in their own action enum, e.g.:
 /// ```

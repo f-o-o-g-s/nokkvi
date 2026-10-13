@@ -3060,3 +3060,38 @@ fn entering_harbour_does_not_stack_fetches_while_one_is_in_flight() {
         "an in-flight load is not restarted by re-entry"
     );
 }
+
+#[test]
+fn hover_and_toolbar_reveal_skip_the_row_build_but_still_land() {
+    // These return before `build_harbour_rows` (hover arrives on every cursor
+    // move), so the bookkeeping must still reach the page state.
+    use crate::widgets::HoveredSlot;
+
+    let mut app = test_app();
+    app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
+    let hover = HoveredSlot::Item {
+        slot_index: 2,
+        item_index: 1,
+        items_len: 3,
+    };
+
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::HoverEnterSlot(hover),
+    ));
+    assert_eq!(app.harbour_page.common.slot_list.hovered_slot, Some(hover));
+
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::HoverExitSlot(hover),
+    ));
+    assert_eq!(app.harbour_page.common.slot_list.hovered_slot, None);
+
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::ToolbarHoverEnter,
+    ));
+    assert!(app.harbour_page.common.toolbar_hovered);
+
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::ToolbarDropdownToggled(true),
+    ));
+    assert!(app.harbour_page.common.toolbar_dropdown_open);
+}

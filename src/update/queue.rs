@@ -255,7 +255,57 @@ impl Nokkvi {
                 self.handle_lyrics_wheel(*delta_lines);
                 return Task::none();
             }
-            _ => {}
+            // Everything else takes the path below. Listed rather than `_`, so
+            // a new variant fails to compile until it is placed: one published
+            // per cursor move joins the arms above. ScrollSeek returned from
+            // its own fast path before this block.
+            QueueMessage::SlotList(
+                SlotListPageMessage::NavigateUp
+                | SlotListPageMessage::NavigateDown
+                | SlotListPageMessage::SetOffset(..)
+                | SlotListPageMessage::ScrollSeek(_)
+                | SlotListPageMessage::ActivateCenter(_)
+                | SlotListPageMessage::ClickPlay(_)
+                | SlotListPageMessage::SelectionToggle(_)
+                | SlotListPageMessage::SelectAllToggle
+                | SlotListPageMessage::AddCenterToQueue
+                | SlotListPageMessage::RefreshViewData
+                | SlotListPageMessage::CenterOnPlaying
+                | SlotListPageMessage::SearchQueryChanged(_)
+                | SlotListPageMessage::SearchFocused(_)
+                | SlotListPageMessage::SortModeSelected(_)
+                | SlotListPageMessage::ToggleSortOrder
+                | SlotListPageMessage::ToolbarHoverEnter
+                | SlotListPageMessage::ToolbarHoverExit
+                | SlotListPageMessage::ToolbarDropdownToggled(_),
+            )
+            | QueueMessage::DragReorder(DragEvent::Picked { .. } | DragEvent::Dropped { .. })
+            | QueueMessage::FocusCurrentPlaying(..)
+            | QueueMessage::ClickSetRating(..)
+            | QueueMessage::ClickToggleStar(_)
+            | QueueMessage::ContextMenuAction(..)
+            | QueueMessage::SortModeSelected(_)
+            | QueueMessage::ToggleColumnVisible(_)
+            | QueueMessage::Roulette
+            | QueueMessage::EditPlaylist
+            | QueueMessage::QuickSavePlaylist
+            | QueueMessage::RefreshArtwork(_)
+            | QueueMessage::EnterTheater
+            | QueueMessage::Milkdrop(_)
+            | QueueMessage::NavigateAndFilter(..)
+            | QueueMessage::NavigateAndExpandAlbum(_)
+            | QueueMessage::NavigateAndExpandArtist(_)
+            | QueueMessage::NavigateAndExpandGenre(_)
+            | QueueMessage::SetOpenMenu(_)
+            | QueueMessage::ArtworkColumnDrag(_)
+            | QueueMessage::ArtworkColumnVerticalDrag(_)
+            | QueueMessage::OpenDefaultPlaylistPicker
+            | QueueMessage::OpenTrawl
+            | QueueMessage::PushQueue
+            | QueueMessage::PullQueue
+            | QueueMessage::PlaylistStripHoverEnter(_)
+            | QueueMessage::PlaylistStripHoverExit(_)
+            | QueueMessage::PlaylistStripHoverSettled(_) => {}
         }
 
         // Slot indices are relative to the rows the view shows: the filtered

@@ -371,6 +371,15 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::widgets::{SlotListPageAction, SlotListPageMessage};
 
+        // Slot hover arrives on every cursor move inside a row: return before
+        // rebuilding every row. `handle` reads no row count for these, so the
+        // 0 is never used. ScrollSeek stays below: it clamps against the
+        // count, which only building the rows gives.
+        if slmsg.is_hover_or_reveal() {
+            self.harbour_page.common.handle(slmsg, 0);
+            return Task::none();
+        }
+
         let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
         let total = rows.len();
         // NavigateUp/Down/SetOffset move the center — warm the new center's art.
