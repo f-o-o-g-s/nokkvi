@@ -475,6 +475,16 @@ impl QueueNavigator {
         Some(effect)
     }
 
+    /// Consume the row a manual skip (Next / Previous) left behind: remove it
+    /// by the `entry_id` captured before the skip's network await, so a queue
+    /// mutation during that await can't shift the target (and a duplicate
+    /// row of the same song stays), then discharge the removal's reset
+    /// against the engine lock the caller holds.
+    async fn consume_entry_after_skip(&self, engine: &mut CustomAudioEngine, entry_id: u64) {
+        let effect = self.queue_manager.lock().await.remove_entry_by_id(entry_id);
+        effect.apply_locked(engine).await;
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Track-finished handler (automatic transitions)
     // ══════════════════════════════════════════════════════════════════════
@@ -853,10 +863,7 @@ impl QueueNavigator {
         // where it only voids the prepared slot (a reset spares a live skip
         // blend in any case).
         if let Some(eid) = consume_entry {
-            let mut qm = self.queue_manager.lock().await;
-            let effect = qm.remove_entry_by_id(eid);
-            drop(qm);
-            effect.apply_locked(engine).await;
+            self.consume_entry_after_skip(engine, eid).await;
         }
 
         Ok(match plan {
@@ -917,10 +924,7 @@ impl QueueNavigator {
                 // On the FadePlanned path this runs BEFORE the fade fires (see
                 // the matching note in `play_next`).
                 if let Some(eid) = consume_entry {
-                    let mut qm = self.queue_manager.lock().await;
-                    let effect = qm.remove_entry_by_id(eid);
-                    drop(qm);
-                    effect.apply_locked(engine).await;
+                    self.consume_entry_after_skip(engine, eid).await;
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
