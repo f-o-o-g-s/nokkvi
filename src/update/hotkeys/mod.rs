@@ -821,105 +821,43 @@ impl Nokkvi {
         // passes (it closes the top modal), plus the keys the top modal takes
         // itself — slot_list.rs routes the list keys to it.
         if let Some(modal) = top_modal {
-            let is_list_nav = matches!(
-                resolved,
-                Some(Message::SlotList(
-                    crate::app_message::SlotListMessage::NavigateUp
-                        | crate::app_message::SlotListMessage::NavigateDown
-                        | crate::app_message::SlotListMessage::ActivateCenter
-                ))
-            );
-            let takes_key = match modal {
-                ActiveModal::MilkdropPicker => {
-                    // The MilkDrop picker also takes the arrow keys (the
-                    // rules-editor sub-picker precedent): stepping a live
-                    // preview is its whole job, and the search field never
-                    // uses Up/Down.
-                    if let iced::keyboard::Key::Named(
-                        named @ (iced::keyboard::key::Named::ArrowUp
-                        | iced::keyboard::key::Named::ArrowDown),
-                    ) = &key
-                    {
-                        use crate::widgets::milkdrop_picker::MilkdropPickerMessage as P;
-                        return self.handle_milkdrop_picker(
-                            if *named == iced::keyboard::key::Named::ArrowUp {
-                                P::SlotListUp
-                            } else {
-                                P::SlotListDown
-                            },
-                        );
-                    }
-                    is_list_nav
-                }
-                ActiveModal::DefaultPlaylistPicker => is_list_nav,
-                // Trawl also admits Ctrl+Enter (ActivateCenterShuffled) and
-                // Shift+A (AddToQueue): the slot-list routing maps the former
-                // to PlayMix and handle_add_to_queue routes the latter to
-                // AddMixToQueue — the one playable/enqueueable thing inside
-                // the modal is the mix. Shift+Tab/Shift+Backspace
-                // (SettingsCategoryMotion) and Left/Right (CycleSortMode,
-                // SeekStep) drive the tray-controls keyboard cursor. All of
-                // these handlers route trawl-first, so admitting them here
-                // never leaks to the obscured view. They are admitted in this
-                // arm only, on purpose: the other modals must keep swallowing
-                // the same keys.
-                ActiveModal::Trawl => matches!(
-                    resolved,
-                    Some(
-                        Message::SlotList(
-                            crate::app_message::SlotListMessage::NavigateUp
-                                | crate::app_message::SlotListMessage::NavigateDown
-                                | crate::app_message::SlotListMessage::ActivateCenter
-                                | crate::app_message::SlotListMessage::ActivateCenterShuffled
-                        ) | Message::Hotkey(
-                            crate::app_message::HotkeyMessage::FocusSearch
-                                | crate::app_message::HotkeyMessage::CycleSortMode(_)
-                                | crate::app_message::HotkeyMessage::SeekStep(_)
-                                | crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
-                                | crate::app_message::HotkeyMessage::AddToQueue
-                                | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
-                        )
-                    )
-                ),
-                // The key that opened EQ / Get Info closes it again (EQ's
-                // Toggle, and handle_get_info's close-if-open).
-                ActiveModal::Eq => matches!(
-                    resolved_action,
-                    Some(nokkvi_data::types::hotkey_config::HotkeyAction::ToggleEqModal)
-                ),
-                ActiveModal::Info => matches!(
-                    resolved_action,
-                    Some(nokkvi_data::types::hotkey_config::HotkeyAction::GetInfo)
-                ),
-                ActiveModal::TextInputDialog | ActiveModal::About => false,
-            };
+            // The MilkDrop picker also takes the arrow keys (the rules-editor
+            // sub-picker precedent): stepping a live preview is its whole job,
+            // and the search field never uses Up/Down.
+            if modal == ActiveModal::MilkdropPicker
+                && let iced::keyboard::Key::Named(
+                    named @ (iced::keyboard::key::Named::ArrowUp
+                    | iced::keyboard::key::Named::ArrowDown),
+                ) = &key
+            {
+                use crate::widgets::milkdrop_picker::MilkdropPickerMessage as P;
+                return self.handle_milkdrop_picker(
+                    if *named == iced::keyboard::key::Named::ArrowUp {
+                        P::SlotListUp
+                    } else {
+                        P::SlotListDown
+                    },
+                );
+            }
+            let takes_key = resolved_action.is_some_and(|action| modal.takes_action(action));
             if !is_escape && !takes_key {
                 return Task::none();
             }
-            // A key the trawl search field CAPTURED already did something in
-            // the field — Shift+Backspace deleted a character, a rebound
-            // Ctrl+V pasted — and must not ALSO drive the tray or enqueue the
-            // mix: one press, one meaning. Keyed on the event status rather
-            // than the `search_input_focused` mirror (the flag goes stale
-            // around mouse clicks — iced sends no focus events) and matched on
-            // EVERY tray action in BOTH directions plus AddToQueue so user
-            // rebinds can't open a double-handling hole. Tab is exempt: a
-            // focused text_input never captures Tab, and the settings
-            // precedent (is_shift_nav + its pinned test) admits even a
-            // theoretically-captured Shift+Tab.
+            // A Trawl key the search field CAPTURED already did something in
+            // the field, so it must not ALSO drive the tray or enqueue the
+            // mix: one press, one meaning (`TRAWL_TRAY_ACTIONS`). Keyed on the
+            // event status rather than the `search_input_focused` mirror (the
+            // flag goes stale around mouse clicks — iced sends no focus
+            // events) and matched on the whole list so user rebinds can't
+            // open a double-handling hole. Tab is exempt: a focused text_input
+            // never captures Tab, and the settings precedent (is_shift_nav +
+            // its pinned test) admits even a theoretically-captured Shift+Tab.
             if modal == ActiveModal::Trawl
                 && status == iced::event::Status::Captured
                 && !is_tab
-                && matches!(
-                    resolved,
-                    Some(Message::Hotkey(
-                        crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
-                            | crate::app_message::HotkeyMessage::CycleSortMode(_)
-                            | crate::app_message::HotkeyMessage::SeekStep(_)
-                            | crate::app_message::HotkeyMessage::AddToQueue
-                            | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
-                    ))
-                )
+                && resolved_action.is_some_and(|action| {
+                    crate::update::modals::TRAWL_TRAY_ACTIONS.contains(&action)
+                })
             {
                 return Task::none();
             }

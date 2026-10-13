@@ -13,6 +13,7 @@
 //! `update/tests/modals.rs`, then follow the compile errors.
 
 use iced::Task;
+use nokkvi_data::types::hotkey_config::HotkeyAction;
 
 use crate::{
     Nokkvi,
@@ -60,7 +61,58 @@ impl ActiveModal {
         Self::MilkdropPicker,
         Self::Trawl,
     ];
+
+    /// Whether this modal, on top, takes the key bound to `action`. Escape
+    /// always passes the key gate (it closes the top modal), and the MilkDrop
+    /// picker's raw arrow keys are taken before any binding is looked up;
+    /// every other key is swallowed, so it never drives the view behind.
+    ///
+    /// The pickers take the list keys (the slot-list routing hands them over).
+    /// Trawl takes them too, plus Ctrl+Enter (`ShufflePlay`, which plays the
+    /// mix), `/` and [`TRAWL_TRAY_ACTIONS`]; they are admitted for Trawl only,
+    /// on purpose: the other modals must keep swallowing the same keys. EQ and
+    /// Get Info take the key that opened them, which closes them again.
+    pub(crate) fn takes_action(self, action: HotkeyAction) -> bool {
+        let list_key = matches!(
+            action,
+            HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
+        );
+        match self {
+            Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key,
+            Self::Trawl => {
+                list_key
+                    || matches!(
+                        action,
+                        HotkeyAction::ShufflePlay | HotkeyAction::FocusSearch
+                    )
+                    || TRAWL_TRAY_ACTIONS.contains(&action)
+            }
+            Self::Eq => action == HotkeyAction::ToggleEqModal,
+            Self::Info => action == HotkeyAction::GetInfo,
+            Self::TextInputDialog | Self::About => false,
+        }
+    }
 }
+
+/// The Trawl modal's keys beyond the list keys, Ctrl+Enter and `/`: the
+/// tray-controls focus ring (Shift+Tab / Shift+Backspace), the value arrows
+/// (the seek pair and the sort pair), Add to Queue (Shift+A, which
+/// `handle_add_to_queue` routes to the mix) and Save as Playlist. Each
+/// handler routes Trawl-first, so admitting them never leaks to the view
+/// behind. One the search field CAPTURED already acted there (Shift+Backspace
+/// deleted a character, a rebound Ctrl+V pasted), so the key gate drops it
+/// rather than act twice; the IPC verbs whose twin is listed here act on the
+/// mix too (`key_gate_instead`).
+pub(crate) const TRAWL_TRAY_ACTIONS: &[HotkeyAction] = &[
+    HotkeyAction::SettingsCategoryNext,
+    HotkeyAction::SettingsCategoryPrev,
+    HotkeyAction::PrevSortMode,
+    HotkeyAction::NextSortMode,
+    HotkeyAction::SeekBackward,
+    HotkeyAction::SeekForward,
+    HotkeyAction::AddToQueue,
+    HotkeyAction::TrawlSaveAsPlaylist,
+];
 
 impl Nokkvi {
     /// Whether `modal` is open, top or not.

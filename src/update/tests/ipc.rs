@@ -1495,3 +1495,37 @@ fn seek_on_a_live_transcode_returns_unavailable() {
         assert!(resp.data.is_none(), "{raw}");
     }
 }
+
+/// Under the Trawl modal a verb does what its key would there: it acts only
+/// where the key gate admits its twin (`ActiveModal::takes_action`), and each
+/// verb's twin is admitted exactly when the verb acts. Walks every action, so
+/// a new verb routed through `key_gate_instead` is held to the same rule.
+#[test]
+fn trawl_verbs_follow_the_key_gate() {
+    use nokkvi_data::types::hotkey_config::HotkeyAction as A;
+
+    use crate::update::{ipc::key_gate_instead, modals::ActiveModal};
+
+    let mut app = test_app();
+    let _ = app.handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+    assert_eq!(app.top_modal(), Some(ActiveModal::Trawl));
+    let verb_twins = [
+        A::SlotListUp,
+        A::SlotListDown,
+        A::Activate,
+        A::AddToQueue,
+        A::RemoveFromQueue,
+    ];
+    for &action in A::ALL.iter().chain(A::RESERVED) {
+        let verb_acts = key_gate_instead(&mut app, action, json!({})).is_none();
+        let key_taken = ActiveModal::Trawl.takes_action(action);
+        if verb_twins.contains(&action) {
+            assert_eq!(verb_acts, key_taken, "{action:?}");
+        } else {
+            assert!(
+                !verb_acts || key_taken,
+                "{action:?} acts where its key can't"
+            );
+        }
+    }
+}

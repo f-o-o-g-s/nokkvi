@@ -715,7 +715,7 @@ define_commands! {
 /// `list_verb_twins_are_exit_only` pins. A twin reclassified to
 /// `ExitThenPerform` would need the verb to run after the exit; revisit this
 /// helper before relying on that class.
-fn key_gate_instead(
+pub(super) fn key_gate_instead(
     app: &mut Nokkvi,
     twin: HotkeyAction,
     mut idle: serde_json::Value,
@@ -724,8 +724,8 @@ fn key_gate_instead(
         let routed_to_modal = matches!(
             twin,
             HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
-        ) || (twin == HotkeyAction::AddToQueue
-            && modal == ActiveModal::Trawl);
+        ) || (modal == ActiveModal::Trawl
+            && crate::update::modals::TRAWL_TRAY_ACTIONS.contains(&twin));
         return (!routed_to_modal).then(|| (Task::none(), idle));
     }
     if !app.theater.active {

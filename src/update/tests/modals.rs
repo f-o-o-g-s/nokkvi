@@ -486,3 +486,32 @@ fn trawl_routes_leave_a_hidden_trawl_alone() {
         "save leaves the hidden mix alone"
     );
 }
+
+/// Trawl takes `TRAWL_TRAY_ACTIONS` plus exactly the list keys, Ctrl+Enter
+/// and `/`. Those five stay out of the tray list on purpose: the tray list is
+/// also what a Captured key may not do a second time, and a captured `/` or
+/// list key has already been dropped (or, for Tab, is never captured).
+#[test]
+fn trawl_takes_the_tray_keys_plus_the_list_keys_and_search() {
+    use nokkvi_data::types::hotkey_config::HotkeyAction as A;
+
+    use crate::update::modals::{ActiveModal, TRAWL_TRAY_ACTIONS};
+
+    let beyond_tray: Vec<A> = A::ALL
+        .iter()
+        .chain(A::RESERVED)
+        .copied()
+        .filter(|a| ActiveModal::Trawl.takes_action(*a) && !TRAWL_TRAY_ACTIONS.contains(a))
+        .collect();
+    let expected = [
+        A::SlotListUp,
+        A::SlotListDown,
+        A::Activate,
+        A::ShufflePlay,
+        A::FocusSearch,
+    ];
+    assert!(
+        beyond_tray.len() == expected.len() && expected.iter().all(|a| beyond_tray.contains(a)),
+        "{beyond_tray:?}"
+    );
+}
