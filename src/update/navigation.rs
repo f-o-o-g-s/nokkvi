@@ -25,7 +25,7 @@ pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) 
         async {
             tokio::time::sleep(Duration::from_secs(2)).await;
         },
-        move |()| Message::Navigation(NavigationMessage::ExpandTimeout(pending.clone())),
+        move |()| Message::Navigation(NavigationMessage::ExpandTimeout(pending)),
     )
 }
 
@@ -850,7 +850,7 @@ impl Nokkvi {
                     // Sweep stray smart-playlist draft workspaces once per
                     // auth — including the re-login after a 401, the exact
                     // moment the own-pid orphan arm exists for.
-                    self.orphan_sweep_task(shell.clone()),
+                    self.orphan_sweep_task(shell),
                 ]);
             }
             Err(e) => {

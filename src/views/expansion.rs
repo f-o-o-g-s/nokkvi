@@ -729,7 +729,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         container(crate::widgets::slot_list::slot_list_text_column(
             crate::widgets::slot_list::SlotTextColumn {
                 title: album.name.clone(),
-                title_on_press: on_album_click.clone(),
+                title_on_press: on_album_click,
                 title_size,
                 subtitle: if show_artist {
                     album.artist.clone()

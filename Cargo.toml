@@ -70,6 +70,10 @@ allow_attributes_without_reason = "warn"
 # body writes through it.
 needless_pass_by_ref_mut = "warn"
 
+# A clone whose original is never used again is a copy for nothing. Move the
+# value instead.
+redundant_clone = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.25.0"

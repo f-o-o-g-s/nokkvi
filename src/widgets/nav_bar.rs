@@ -551,7 +551,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     .border_radius(theme::ui_radius_pill())
                     .on_accent_surface(is_active),
                 )
-                .on_press(on_press.clone())
+                .on_press(on_press)
                 .interaction(iced::mouse::Interaction::Pointer)
                 .boxed();
                 elem
@@ -584,7 +584,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     .border_radius(0.0.into())
                     .on_accent_surface(is_active),
                 )
-                .on_press(on_press.clone())
+                .on_press(on_press)
                 .interaction(iced::mouse::Interaction::Pointer)
                 .boxed();
                 elem

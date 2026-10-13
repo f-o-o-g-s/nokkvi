@@ -139,7 +139,7 @@ mod tests {
         };
 
         let by_ref = PlaylistUIViewData::from(&playlist);
-        let by_value = PlaylistUIViewData::from(playlist.clone());
+        let by_value = PlaylistUIViewData::from(playlist);
 
         assert_eq!(by_ref.id, by_value.id);
         assert_eq!(by_ref.name, by_value.name);

@@ -2310,7 +2310,7 @@ pub(crate) mod tests {
         qm2.queue.shuffle = true;
         // Force qm2 to the same initial shuffled order as qm BEFORE its move,
         // then apply the identical move.
-        qm2.queue.order = before_order.clone();
+        qm2.queue.order = before_order;
         qm2.set_cursor_to_row(Some(0));
         let _ = qm2.move_item(3, 1);
         let next2 = qm2
@@ -2630,7 +2630,7 @@ pub(crate) mod tests {
 
         // Reconstruct a fresh QueueManager on the SAME StateStorage (clone
         // shares the underlying redb Arc) and confirm a consistent snapshot.
-        let storage = qm.storage.clone();
+        let storage = qm.storage;
         let qm2 = QueueManager::new(storage).unwrap();
         assert!(
             qm2.get_current_song().is_some(),
@@ -3404,7 +3404,7 @@ pub(crate) mod tests {
     #[test]
     fn remove_entry_by_id_removes_only_targeted_duplicate() {
         let song = make_test_song("dup");
-        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone()], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song], Some(0));
 
         assert_eq!(qm.song_ids_snapshot(), vec!["dup", "dup"]);
         let entry_ids = qm.entry_ids();
@@ -3445,7 +3445,7 @@ pub(crate) mod tests {
     fn remove_entries_by_ids_removes_each_targeted_row() {
         let song = make_test_song("dup");
         let unique = make_test_song("uniq");
-        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song.clone()], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song], Some(0));
         let entry_ids = qm.entry_ids();
 
         // Remove the two duplicate rows, leave the unique row.
@@ -3727,7 +3727,7 @@ pub(crate) mod tests {
     fn remove_song_by_id_drops_all_duplicates() {
         let song = make_test_song("dup");
         let unique = make_test_song("uniq");
-        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song.clone()], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song], Some(0));
 
         let _ = qm.remove_song_by_id("dup");
 
@@ -3747,7 +3747,7 @@ pub(crate) mod tests {
     fn consume_on_duplicate_keeps_survivor() {
         let song = make_test_song("A");
         let other = make_test_song("B");
-        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone(), other], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song, other], Some(0));
         qm.queue.consume = true;
         let original_entry_ids = qm.entry_ids();
         assert_eq!(original_entry_ids.len(), 3);
@@ -3794,7 +3794,7 @@ pub(crate) mod tests {
     fn consume_through_both_duplicates_drops_pool_only_on_last() {
         let song = make_test_song("A");
         let other = make_test_song("B");
-        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone(), other], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song, other], Some(0));
         qm.queue.consume = true;
 
         // ── First cycle: A1 finishes, consume removes idx 0 ──

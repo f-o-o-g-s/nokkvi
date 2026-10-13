@@ -322,7 +322,7 @@ async fn loaded_applies_libraries_to_backend_cache() {
     assert!(shell.all_libraries().is_empty());
 
     let libs = vec![library(1, "Music"), library(2, "Audiobooks")];
-    let _ = app.handle_library_message(LibraryMessage::Loaded(libs.clone()));
+    let _ = app.handle_library_message(LibraryMessage::Loaded(libs));
 
     let cached = shell.all_libraries();
     assert_eq!(cached.len(), 2);

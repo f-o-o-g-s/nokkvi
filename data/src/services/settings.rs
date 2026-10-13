@@ -1732,7 +1732,7 @@ mod sentinel_roundtrip_tests {
         let internal_src = build_exhaustive_persisted_player_settings();
 
         // Stamp the exhaustive sentinel onto a SettingsManager and dump.
-        let (sm, _tmp) = make_test_manager_with_player(internal_src.clone());
+        let (sm, _tmp) = make_test_manager_with_player(internal_src);
         let ui_ps1 = sm.get_player_settings();
 
         // UI → TOML → bytes → TOML.
@@ -2457,7 +2457,7 @@ name = "sentinel preset"
 
         let sentinel = build_exhaustive_persisted_player_settings();
         let user = UserSettings {
-            player: sentinel.clone(),
+            player: sentinel,
             ..UserSettings::default()
         };
 

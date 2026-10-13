@@ -91,7 +91,7 @@ mod tests {
         };
 
         let by_ref = GenreUIViewData::from(&genre);
-        let by_value = GenreUIViewData::from(genre.clone());
+        let by_value = GenreUIViewData::from(genre);
 
         assert_eq!(by_ref.id, by_value.id);
         assert_eq!(by_ref.name, by_value.name);

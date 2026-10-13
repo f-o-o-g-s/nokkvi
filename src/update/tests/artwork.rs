@@ -149,7 +149,7 @@ fn passive_single_album_queue_does_not_oscillate() {
         should_refetch(&cold, &versions, &no_failures(), &album, &passive_a),
         "cold slot is a miss",
     );
-    versions.insert(album.clone(), passive_a.clone());
+    versions.insert(album.clone(), passive_a);
 
     // Tick 2 (warm): the next same-album row (song B, different per-song
     // updated_at) feeds its passive version → must NOT re-fetch.
@@ -165,7 +165,7 @@ fn passive_single_album_queue_does_not_oscillate() {
     // re-fetches forever: tick 1 recorded song A's version, tick 2 arrives with
     // song B's. `should_refetch`'s own semantics are intentionally unchanged.
     let mut versions_song_a: HashMap<String, Option<String>> = HashMap::new();
-    versions_song_a.insert(album.clone(), song_a_updated.clone());
+    versions_song_a.insert(album.clone(), song_a_updated);
     assert!(
         should_refetch(
             &warm,

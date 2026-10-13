@@ -253,17 +253,18 @@ pub(crate) fn eq_modal_overlay<'a>(
     // Custom display for pick_list items showing custom preset names
     let custom_presets_owned: Vec<nokkvi_data::audio::eq::CustomEqPreset> = custom_presets.to_vec();
 
-    let preset_picker = pick_list(current_choice.clone(), choices, {
-        let presets = custom_presets_owned.clone();
+    let preset_picker = pick_list(
+        current_choice.clone(),
+        choices,
         move |choice: &PresetChoice| match choice {
             PresetChoice::Builtin(i) => nokkvi_data::audio::eq::BUILTIN_PRESETS
                 .get(*i)
                 .map_or_else(|| format!("Preset {i}"), |p| p.name.to_string()),
-            PresetChoice::Custom(i) => presets
+            PresetChoice::Custom(i) => custom_presets_owned
                 .get(*i)
                 .map_or_else(|| format!("Custom #{}", i + 1), |p| format!("★ {}", p.name)),
-        }
-    })
+        },
+    )
     .on_select(EqModalMessage::PresetSelected)
     .font(theme::ui_font())
     .text_size(14.0)

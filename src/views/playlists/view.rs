@@ -857,7 +857,7 @@ impl PlaylistsPage {
 
         if show_song_count_col {
             columns.push(slot_list_metadata_column(
-                count_text.clone(),
+                count_text,
                 Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                 metadata_size,
                 style,
@@ -866,7 +866,7 @@ impl PlaylistsPage {
         }
         if show_duration_col {
             columns.push(slot_list_metadata_column(
-                duration_str.clone(),
+                duration_str,
                 None,
                 metadata_size,
                 style,

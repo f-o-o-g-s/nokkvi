@@ -493,12 +493,11 @@ impl Nokkvi {
             nokkvi_data::backend::update_rating_in_list(items, &song_id, rating_opt, label);
         });
         // Persist to queue storage
-        let sid = song_id.clone();
         self.shell_task(
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                qm.update_song_rating(&sid, rating_opt);
+                qm.update_song_rating(&song_id, rating_opt);
             },
             |_| Message::NoOp,
         )
@@ -514,12 +513,11 @@ impl Nokkvi {
             nokkvi_data::backend::increment_play_count_in_list(items, &song_id, label);
         });
 
-        let sid = song_id.clone();
         self.shell_task(
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                qm.increment_song_play_count(&sid);
+                qm.increment_song_play_count(&song_id);
             },
             |_| Message::NoOp,
         )

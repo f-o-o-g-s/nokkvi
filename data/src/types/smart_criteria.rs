@@ -2985,7 +2985,7 @@ mod tests {
         });
         let rules = SmartRules::parse(&v);
         assert_eq!(rules.to_value(), v, "to_value unchanged");
-        let mut expected = v.clone();
+        let mut expected = v;
         expected
             .as_object_mut()
             .expect("object")

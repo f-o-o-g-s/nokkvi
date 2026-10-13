@@ -1644,7 +1644,7 @@ mod tests {
             ("world", Some(2_000))
         );
         // A word that already has an end keeps it.
-        let mut kept = s.clone();
+        let mut kept = s;
         kept.cue_lines[0].cues[0].end_ms = Some(1_300);
         let doc = LrcDocument::from_structured(&kept);
         assert_eq!(doc.lines[0].words[0].end_ms, Some(1_300));

@@ -279,7 +279,7 @@ mod tests {
             assert!(decode(&good[..cut], &id).is_none(), "cut at {cut}");
         }
         // Another layout version.
-        let mut old = good.clone();
+        let mut old = good;
         old[4] = VERSION + 1;
         assert!(decode(&old, &id).is_none());
     }

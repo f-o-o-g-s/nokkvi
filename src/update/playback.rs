@@ -1630,7 +1630,7 @@ impl Nokkvi {
                 });
 
             let stream_url = next_station.stream_url;
-            let station_id = next_station.id.clone();
+            let station_id = next_station.id;
 
             // Optimistic UI toggle immediately
             self.playback.playing = true;

@@ -1426,7 +1426,7 @@ mod tests {
         assert!(base.get("sync").is_none());
 
         // put_playlist_full assembles base + sync — mirror its insertion.
-        let mut with_sync = base.clone();
+        let mut with_sync = base;
         with_sync
             .as_object_mut()
             .expect("object")

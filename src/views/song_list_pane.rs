@@ -282,10 +282,8 @@ where
                         title,
                         title_on_press: title_click,
                         title_size,
-                        subtitle: artist.clone(),
-                        subtitle_on_press: Some(on_event(SongListRowEvent::NavArtist(
-                            artist_id.clone(),
-                        ))),
+                        subtitle: artist,
+                        subtitle_on_press: Some(on_event(SongListRowEvent::NavArtist(artist_id))),
                         subtitle_size,
                         is_bold: ctx.is_center || is_current,
                     },
@@ -306,7 +304,7 @@ where
                         let genre_label = if genre.is_empty() {
                             "Unknown".to_string()
                         } else {
-                            genre.clone()
+                            genre
                         };
                         let make_link =
                             |label: String, font_size: f32, click: M| -> Element<'_, M> {
@@ -437,12 +435,11 @@ where
                 .width(Length::Fill);
 
             // Make it interactive
-            let on_event_slot = on_event.clone();
             let slot_button = crate::widgets::slot_list::primary_slot_button(
                 clickable,
                 &ctx,
                 stable_viewport,
-                move |m| on_event_slot(SongListRowEvent::Slot(m)),
+                move |m| on_event(SongListRowEvent::Slot(m)),
             );
 
             // Overlay the breathing glow (pulsing inner glow + travelling

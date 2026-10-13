@@ -146,7 +146,7 @@ impl Nokkvi {
                     rules,
                     caps,
                 );
-                session.preview.evaluated_at = row.evaluated_at.clone();
+                session.preview.evaluated_at = row.evaluated_at;
                 (edit, session)
             }
         };
@@ -1859,7 +1859,7 @@ impl Nokkvi {
                 Ok((rows, total, evaluated_at)) => {
                     Message::RulesEditor(RulesEditorMessage::PreviewLoaded {
                         generation,
-                        source_id: source_for_msg.clone(),
+                        source_id: source_for_msg,
                         rows,
                         total,
                         evaluated_at,
@@ -1931,7 +1931,7 @@ impl Nokkvi {
             // Changed rules on a caps-confirmed PUT-nil server: the atomic
             // PUT-then-read.
             Some(d) if caps.put_nils_evaluated_at => {
-                let draft_id = d.id.clone();
+                let draft_id = d.id;
                 let marker_for_msg = marker.clone();
                 let rules_for_msg = rules_value.clone();
                 self.shell_task(
@@ -1961,7 +1961,7 @@ impl Nokkvi {
                                     id,
                                     marker: marker_for_msg.clone(),
                                 },
-                                written_rules: rules_for_msg.clone(),
+                                written_rules: rules_for_msg,
                                 rows,
                                 total,
                                 evaluated_at,
@@ -1977,7 +1977,7 @@ impl Nokkvi {
             // Changed rules on every RELEASED server today: delete +
             // recreate — deterministic freshness by the create-path nil.
             Some(d) => {
-                let old_id = d.id.clone();
+                let old_id = d.id;
                 let marker_for_msg = marker.clone();
                 let rules_for_msg = rules_value.clone();
                 self.shell_task(
@@ -2010,7 +2010,7 @@ impl Nokkvi {
                                     id,
                                     marker: marker_for_msg.clone(),
                                 },
-                                written_rules: rules_for_msg.clone(),
+                                written_rules: rules_for_msg,
                                 rows,
                                 total,
                                 evaluated_at,
@@ -2053,7 +2053,7 @@ impl Nokkvi {
                                     id,
                                     marker: marker_for_msg.clone(),
                                 },
-                                written_rules: rules_for_msg.clone(),
+                                written_rules: rules_for_msg,
                                 rows,
                                 total,
                                 evaluated_at,
@@ -2277,7 +2277,7 @@ impl Nokkvi {
                 let create_name = if spun_off {
                     format!("{name} (copy)")
                 } else {
-                    name.clone()
+                    name
                 };
                 let toast_name = create_name.clone();
                 // With a live draft, the finalize is ONE atomic PUT: the
@@ -2290,7 +2290,7 @@ impl Nokkvi {
                 // create-finalize — a spin-off leaves the original's draft
                 // untouched (it belongs to the continuing session) and POSTs
                 // a fresh copy.
-                let fork_draft = (!spun_off).then_some(draft.clone()).flatten();
+                let fork_draft = (!spun_off).then_some(draft).flatten();
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
@@ -2355,7 +2355,6 @@ impl Nokkvi {
                 let toast_name = name.clone();
                 let detached = sync_detach.is_some();
                 let id_for_msg = playlist_id.clone();
-                let draft_for_task = draft.clone();
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
@@ -2392,7 +2391,7 @@ impl Nokkvi {
                         // last evaluation: the real playlist's own
                         // evaluatedAt stays stale until its owner's next
                         // first-page read (documented cosmetic caveat).
-                        if let Some(d) = draft_for_task
+                        if let Some(d) = draft
                             && let Err(e) = service.delete_playlist(&d.id).await
                         {
                             debug!(
@@ -2526,11 +2525,11 @@ impl Nokkvi {
             },
             move |result: Result<Box<Playlist>, anyhow::Error>| match result {
                 Ok(meta) => Message::RulesEditor(RulesEditorMessage::PlaylistKindResolved {
-                    playlist_id: id_for_msg.clone(),
+                    playlist_id: id_for_msg,
                     result: Ok(meta),
                 }),
                 Err(e) => Message::RulesEditor(RulesEditorMessage::PlaylistKindResolved {
-                    playlist_id: id_for_msg.clone(),
+                    playlist_id: id_for_msg,
                     result: Err(format!("{e:#}")),
                 }),
             },

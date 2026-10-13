@@ -533,7 +533,7 @@ impl Nokkvi {
                     },
                     move |result: Result<bool, anyhow::Error>| match result {
                         Ok(removed) => Message::Playlists(PlaylistsMessage::TrackRemovalSettled {
-                            playlist_id: pid.clone(),
+                            playlist_id: pid,
                             removed,
                         }),
                         Err(e) => {

@@ -891,7 +891,7 @@ mod tests {
         let mut ts = crate::types::toml_settings::TomlSettings::default();
         ts.font_family = "MockFont".to_string();
         ts.eq_gains = [1.5; 10];
-        ts.custom_eq_presets = vec![preset.clone()];
+        ts.custom_eq_presets = vec![preset];
         let mut p = crate::types::settings::PersistedPlayerSettings::default();
         mock_apply_toml(&ts, &mut p);
         assert_eq!(p.font_family, "MockFont");

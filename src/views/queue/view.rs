@@ -910,7 +910,6 @@ impl QueuePage {
                 let cm_id = crate::app_message::ContextMenuId::QueueRow(item_idx);
                 let (cm_open, cm_position) =
                     crate::widgets::context_menu::open_state_for(overlay_open_menu, &cm_id);
-                let cm_id_for_msg = cm_id.clone();
                 context_menu(
                     slot_button,
                     entries,
@@ -1003,7 +1002,7 @@ impl QueuePage {
                     move |position| match position {
                         Some(p) => {
                             QueueMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                                id: cm_id_for_msg.clone(),
+                                id: cm_id.clone(),
                                 position: p,
                             }))
                         }

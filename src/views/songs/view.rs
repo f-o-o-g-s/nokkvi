@@ -306,7 +306,7 @@ impl SongsPage {
                     let genre_label = if song_genre.is_empty() {
                         "Unknown".to_string()
                     } else {
-                        song_genre.clone()
+                        song_genre
                     };
                     let links_enabled = crate::theme::is_slot_text_links();
                     let make_link = |label: String,

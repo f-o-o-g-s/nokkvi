@@ -195,8 +195,8 @@ impl Nokkvi {
         // during the edit session.
         let mut edit_state = nokkvi_data::types::playlist_edit::PlaylistEditState::new(
             playlist_id.clone(),
-            playlist_name.clone(),
-            playlist_comment.clone(),
+            playlist_name,
+            playlist_comment,
             playlist_public,
             Vec::new(),
         );
@@ -477,8 +477,6 @@ impl Nokkvi {
             if let Some(e) = self.playlist_editor.as_mut() {
                 e.creating = true;
             }
-            let create_name = playlist_name.clone();
-            let create_comment = playlist_comment.clone();
             return self.shell_task(
                 move |shell| async move {
                     let service = shell.playlists_api().await?;
@@ -486,7 +484,12 @@ impl Nokkvi {
                     // comment rides the create POST (the endpoint accepts it),
                     // so a typed description is never dropped.
                     let new_id = service
-                        .create_playlist(&create_name, &create_comment, &song_ids, playlist_public)
+                        .create_playlist(
+                            &playlist_name,
+                            &playlist_comment,
+                            &song_ids,
+                            playlist_public,
+                        )
                         .await?;
                     // Seed the concurrency token from the freshly-minted row so a
                     // second Save in the same session guards correctly.

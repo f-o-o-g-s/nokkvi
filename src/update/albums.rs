@@ -56,7 +56,7 @@ impl Nokkvi {
                     result,
                     total_count,
                     background,
-                    anchor_id: anchor_id.clone(),
+                    anchor_id,
                 })
             },
             Self::fetch_albums_page,
@@ -601,7 +601,7 @@ impl Nokkvi {
                                 album.id.clone()
                             }
                             crate::views::expansion::SlotListEntry::Child(_song, parent_id) => {
-                                parent_id.clone()
+                                parent_id
                             }
                         });
 

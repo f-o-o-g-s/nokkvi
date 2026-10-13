@@ -427,7 +427,7 @@ mod tests {
 
         let mut sorted_items = items.clone();
         sorted_items.sort_unstable();
-        let mut sorted_original = original.clone();
+        let mut sorted_original = original;
         sorted_original.sort_unstable();
         assert_eq!(
             sorted_items, sorted_original,

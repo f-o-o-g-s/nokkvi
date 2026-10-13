@@ -84,7 +84,7 @@ impl Nokkvi {
                     result,
                     total_count,
                     background,
-                    anchor_id: anchor_id.clone(),
+                    anchor_id,
                 })
             },
             move |shell, params| {

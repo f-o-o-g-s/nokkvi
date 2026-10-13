@@ -480,7 +480,6 @@ impl RadiosPage {
                 let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
                 let (cm_open, cm_position) =
                     crate::widgets::context_menu::open_state_for(open_menu_for_rows, &cm_id);
-                let cm_id_for_msg = cm_id.clone();
                 crate::widgets::context_menu::context_menu(
                     glowing,
                     crate::widgets::context_menu::radio_entries(
@@ -524,7 +523,7 @@ impl RadiosPage {
                     move |position| match position {
                         Some(p) => RadiosMessage::SetOpenMenu(Some(
                             crate::app_message::OpenMenu::Context {
-                                id: cm_id_for_msg.clone(),
+                                id: cm_id.clone(),
                                 position: p,
                             },
                         )),

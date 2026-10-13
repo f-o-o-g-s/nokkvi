@@ -206,7 +206,6 @@ impl Nokkvi {
             + 'static,
         Fut: Future<Output = Vec<String>> + Send,
     {
-        let entity_id_clone = entity_id.clone();
         let artwork_size = self.settings.artwork_resolution.to_size();
 
         self.shell_task(
@@ -220,19 +219,19 @@ impl Nokkvi {
                 } else {
                     let client = match auth_vm.get_client().await {
                         Some(c) => c,
-                        None => return (entity_id_clone, None, Vec::new(), Vec::new()),
+                        None => return (entity_id, None, Vec::new(), Vec::new()),
                     };
                     fetch_album_ids_fn(
                         client,
                         server_url.clone(),
                         subsonic_credential.clone(),
-                        entity_id_clone.clone(),
+                        entity_id.clone(),
                     )
                     .await
                 };
 
                 if album_ids.is_empty() {
-                    return (entity_id_clone, None, Vec::new(), Vec::new());
+                    return (entity_id, None, Vec::new(), Vec::new());
                 }
 
                 // Single-album special case: the 300px mini plus full-res
@@ -269,7 +268,7 @@ impl Nokkvi {
                         collage_handles.push(image::Handle::from_bytes(bytes));
                     }
 
-                    return (entity_id_clone, mini_handle, collage_handles, album_ids);
+                    return (entity_id, mini_handle, collage_handles, album_ids);
                 }
 
                 // Multiple albums: fetch up to 9 tiles at 300px in parallel.
@@ -293,7 +292,7 @@ impl Nokkvi {
                 let collage_results = futures::future::join_all(collage_tiles_futs).await;
                 let (mini_handle, collage_handles) = collage_handles_with_mini(collage_results);
 
-                (entity_id_clone, mini_handle, collage_handles, album_ids)
+                (entity_id, mini_handle, collage_handles, album_ids)
             },
             move |(entity_id, mini_handle, collage_handles, album_ids)| {
                 Message::Artwork(ArtworkMessage::CollageLoaded(
@@ -328,8 +327,6 @@ impl Nokkvi {
             + 'static,
         Fut: Future<Output = Vec<String>> + Send,
     {
-        let entity_id_clone = entity_id.clone();
-
         self.shell_task(
             move |shell| async move {
                 let auth_vm = shell.auth().clone();
@@ -340,19 +337,14 @@ impl Nokkvi {
                 } else {
                     let client = match auth_vm.get_client().await {
                         Some(c) => c,
-                        None => return (entity_id_clone, None),
+                        None => return (entity_id, None),
                     };
-                    fetch_album_ids_fn(
-                        client,
-                        server_url,
-                        subsonic_credential,
-                        entity_id_clone.clone(),
-                    )
-                    .await
+                    fetch_album_ids_fn(client, server_url, subsonic_credential, entity_id.clone())
+                        .await
                 };
 
                 if album_ids.is_empty() {
-                    return (entity_id_clone, None);
+                    return (entity_id, None);
                 }
 
                 let mini_handle = albums_vm
@@ -361,7 +353,7 @@ impl Nokkvi {
                     .ok()
                     .map(image::Handle::from_bytes);
 
-                (entity_id_clone, mini_handle)
+                (entity_id, mini_handle)
             },
             move |(entity_id, mini_handle)| {
                 Message::Artwork(ArtworkMessage::CollageMiniLoaded(

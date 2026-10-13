@@ -194,7 +194,7 @@ impl Nokkvi {
                         icy_url: None,
                     });
 
-                let stream_url = station.stream_url.clone();
+                let stream_url = station.stream_url;
 
                 // Warm the now-playing logo station's art for the MiniPlayer
                 // alongside starting the stream (a logo-less station re-captures

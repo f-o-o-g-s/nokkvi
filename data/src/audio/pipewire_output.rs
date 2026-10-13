@@ -65,7 +65,6 @@ impl NativePipeWireSink {
         let (quit_tx, quit_rx) = pw::channel::channel::<()>();
         let (title_tx, title_rx) = pw::channel::channel::<String>();
         let (volume_tx, volume_rx) = pw::channel::channel::<f32>();
-        let mixer_clone = mixer.clone();
 
         // Spawn the dedicated pw_out thread
         let handle = thread::Builder::new()
@@ -300,7 +299,7 @@ impl NativePipeWireSink {
             .map_err(|e| anyhow!("Failed to spawn native pipewire thread: {e}"))?;
 
         Ok(Self {
-            mixer: mixer_clone,
+            mixer,
             rate,
             handle: Some(handle),
             quit_tx,

@@ -180,7 +180,7 @@ fn search(query: &str) -> Vec<String> {
     SettingsPage::search_all_entries(&data, query)
         .into_iter()
         .filter_map(|e| match e {
-            SettingsEntry::Item(i) => Some(i.label.clone()),
+            SettingsEntry::Item(i) => Some(i.label),
             SettingsEntry::Header { .. } => None,
         })
         .collect()

@@ -235,7 +235,7 @@ fn song_rating_zero_clears_rating_everywhere() {
     // Song in multiple locations with existing rating
     let mut song = make_song("s1", "Rated Song", "Artist");
     song.rating = Some(3);
-    app.library.songs.set_from_vec(vec![song.clone()]);
+    app.library.songs.set_from_vec(vec![song]);
     let mut queue_song = make_queue_song("s1", "Rated Song", "Artist", "Album");
     queue_song.rating = Some(3);
     app.library.queue_songs = vec![queue_song];

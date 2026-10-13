@@ -55,7 +55,7 @@ impl Nokkvi {
                     result,
                     total_count,
                     background,
-                    anchor_id: anchor_id.clone(),
+                    anchor_id,
                 })
             },
             Self::fetch_songs_page,
