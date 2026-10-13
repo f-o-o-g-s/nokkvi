@@ -30,6 +30,8 @@ All notable changes to this project will be documented in this file.
 - Find Similar now stops a roulette spin running on the view it leaves.
 - Find Similar now cancels a pending jump to a clicked album, artist or genre on the view it leaves.
 - With Enter set to Append & Play and shuffle on, Enter while stopped or paused now plays every appended song instead of skipping some.
+- A radio station started just as a gapless song change lands now shows what it is playing.
+- A radio station started just as a gapless song change lands now scrobbles its songs when radio scrobbling is on.
 
 ### Removed
 
