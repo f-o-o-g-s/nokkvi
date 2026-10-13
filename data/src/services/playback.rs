@@ -34,6 +34,15 @@ impl StreamSession {
     pub fn stream_url(&self, song_id: &str) -> String {
         crate::utils::artwork_url::build_stream_url(song_id, &self.server_url, &self.credential)
     }
+
+    /// The song id of a URL [`Self::stream_url`] built, or `None` for any
+    /// other URL (a station's stream, an empty engine source). Compare songs
+    /// by this rather than by whole URL: every built URL ends in a fresh
+    /// `_=<timestamp>` cache-buster, so two URLs for one song never match.
+    pub fn song_id_of(url: &str) -> Option<&str> {
+        let (_, query) = url.split_once("/rest/stream?id=")?;
+        query.split('&').next().filter(|id| !id.is_empty())
+    }
 }
 
 impl std::fmt::Debug for StreamSession {
@@ -1030,6 +1039,22 @@ mod tests {
             session
                 .stream_url("abc")
                 .starts_with("http://server/rest/stream?id=abc&u=test&p=test")
+        );
+    }
+
+    /// `song_id_of` reads back the id `stream_url` put in, cache-buster and
+    /// all, and names no song for a URL the builder didn't make.
+    #[test]
+    fn song_id_of_reads_back_the_built_stream_url() {
+        let session = session("http://server");
+        assert_eq!(
+            StreamSession::song_id_of(&session.stream_url("abc")),
+            Some("abc")
+        );
+        assert_eq!(StreamSession::song_id_of(""), None);
+        assert_eq!(
+            StreamSession::song_id_of("http://radio.example/live?station_id=abc"),
+            None
         );
     }
 

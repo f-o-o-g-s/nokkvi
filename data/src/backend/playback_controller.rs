@@ -738,6 +738,7 @@ impl PlaybackController {
         // engine boundary carries no Song metadata, so the crossfade-vs-gapless
         // policy decision (M4) is computed here, controller-side.
         struct PeekedPrep {
+            song_id: String,
             url: String,
             replay_gain: Option<crate::types::song::ReplayGain>,
             expected_duration_ms: Option<u64>,
@@ -797,6 +798,7 @@ impl PlaybackController {
                 };
                 (
                     Some(PeekedPrep {
+                        song_id: next_song.id.clone(),
                         url,
                         replay_gain: next_song.replay_gain.clone(),
                         expected_duration_ms: next_song.expected_duration_ms(),
@@ -814,6 +816,7 @@ impl PlaybackController {
         };
 
         let Some(PeekedPrep {
+            song_id: next_song_id,
             url,
             replay_gain,
             expected_duration_ms,
@@ -823,10 +826,8 @@ impl PlaybackController {
             return false;
         };
 
-        // Check if the song ID matches the currently-playing source.
-        // Compare extracted song IDs rather than full URLs, because each URL
-        // contains a unique `_=timestamp` parameter that makes full-URL
-        // comparison always fail even for the same song.
+        // Check if the song ID matches the currently-playing source
+        // (`StreamSession::song_id_of`: a whole-URL compare never matches).
         // Skip this guard in repeat-track mode — same-song prep is intentional there.
         //
         // The guard is for an engine AHEAD of the queue: the inline gapless
@@ -839,23 +840,10 @@ impl PlaybackController {
         // the target (its mid-window branch; finalize re-arms from it).
         if !is_repeat_track {
             let engine = self.audio_engine.lock().await;
-            let current_source = if engine.skip_landing_pending() {
-                ""
-            } else {
-                engine.source()
-            };
-            if !current_source.is_empty() {
-                let current_id = current_source
-                    .find("id=")
-                    .map(|i| &current_source[i + 3..])
-                    .and_then(|s| s.find('&').map(|e| &s[..e]).or(Some(s)));
-                let next_id = url
-                    .find("id=")
-                    .map(|i| &url[i + 3..])
-                    .and_then(|s| s.find('&').map(|e| &s[..e]).or(Some(s)));
-                if current_id.is_some() && current_id == next_id {
-                    return false;
-                }
+            if !engine.skip_landing_pending()
+                && StreamSession::song_id_of(engine.source()) == Some(next_song_id.as_str())
+            {
+                return false;
             }
         }
 
