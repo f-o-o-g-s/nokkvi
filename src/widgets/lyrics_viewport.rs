@@ -1367,7 +1367,7 @@ mod tests {
         // A repeated word lands on its own occurrence, not the first again.
         let ranges = word_byte_ranges("la la land", &spans(&["la", "la", "land"])).expect("placed");
         assert_eq!(ranges, vec![0..2, 3..5, 6..10]);
-        // A server cue keeps its trailing space; the match trims it.
+        // Stray whitespace on a word still finds it in the text.
         let ranges = word_byte_ranges("Hello world", &spans(&["Hello ", "world"])).expect("placed");
         assert_eq!(ranges, vec![0..5, 6..11]);
         // Timing that names a word the text lacks is a disagreement: no layout.

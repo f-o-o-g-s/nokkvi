@@ -519,27 +519,34 @@ fn extract_words(text: &str, offset_ms: i64) -> (String, Vec<WordSpan>) {
         word.text.push_str(rest);
     }
 
-    for word in &mut words {
-        word.text = word.text.trim().to_string();
-    }
-    // A marker with no text after it is a moment, not a word: the end of the
-    // word before it, when that word has none yet. That covers the bare stamp
-    // closing a line (`… <00:01.60>world <00:02.00>`) and one between two
-    // words (`Hello<00:01.40> <00:01.60>world`), matching how the server
-    // reads the same line. A blank marker with no word before it is dropped.
+    (display.trim().to_string(), fold_word_markers(words))
+}
+
+/// The one shape both word sources end in: every word's text trimmed, and a
+/// marker with no text folded away. A textless marker is a moment, not a
+/// word: the end of the word before it, when that word has none yet. That
+/// covers the bare stamp closing an enhanced-LRC line
+/// (`… <00:01.60>world <00:02.00>`), one between two words
+/// (`Hello<00:01.40> <00:01.60>world`), and the cue Navidrome makes of the
+/// space between two word stamps, so a local sidecar and the same file served
+/// by the server time alike. A textless marker with no word before it is
+/// dropped.
+fn fold_word_markers(words: Vec<WordSpan>) -> Vec<WordSpan> {
     let mut kept: Vec<WordSpan> = Vec::with_capacity(words.len());
-    for word in words {
-        if word.text.is_empty() {
+    for mut word in words {
+        let trimmed = word.text.trim();
+        if trimmed.is_empty() {
             if let Some(previous) = kept.last_mut()
                 && previous.end_ms.is_none()
             {
                 previous.end_ms = Some(word.start_ms);
             }
         } else {
+            word.text = trimmed.to_owned();
             kept.push(word);
         }
     }
-    (display.trim().to_string(), kept)
+    kept
 }
 
 // ---------------------------------------------------------------------------
@@ -615,11 +622,12 @@ fn is_main_kind(kind: Option<&str>) -> bool {
 impl LrcDocument {
     /// Convert one structured entry into the internal document. Word timings
     /// come from the matching `cueLine` (joined by `.index`); each word's text
-    /// is the cue's own `value` (never a byte-slice — the server's byteStart/
-    /// End are inclusive, line-relative, and off-by-one against a Rust range).
-    /// A cue with no text (Navidrome keeps the space between two stamps as a
-    /// cue of its own) is no word: its start becomes the previous word's end
-    /// when that word had none, exactly as the parser's blank markers.
+    /// is the cue's own `value`, trimmed (never a byte-slice — the server's
+    /// byteStart/End are inclusive, line-relative, and off-by-one against a
+    /// Rust range). A cue with no text (Navidrome keeps the space between two
+    /// stamps as a cue of its own) is no word: its start becomes the previous
+    /// word's end when that word had none. Both steps are the parser's own
+    /// (`fold_word_markers`), so a sidecar reads the same either way.
     ///
     /// A line's last word whose end equals the NEXT line's start is read as
     /// untimed: that is the value Navidrome invents for a last cue with no end
@@ -643,25 +651,16 @@ impl LrcDocument {
                         .iter()
                         .find(|cl| cl.index == i)
                         .map(|cl| {
-                            cl.cues
-                                .iter()
-                                .fold(Vec::new(), |mut words: Vec<WordSpan>, cue| {
-                                    let start_ms = apply_offset(cue.start_ms, offset);
-                                    if cue.value.trim().is_empty() {
-                                        if let Some(last) = words.last_mut()
-                                            && last.end_ms.is_none()
-                                        {
-                                            last.end_ms = Some(start_ms);
-                                        }
-                                    } else {
-                                        words.push(WordSpan {
-                                            start_ms,
-                                            end_ms: cue.end_ms.map(|end| apply_offset(end, offset)),
-                                            text: cue.value.clone(),
-                                        });
-                                    }
-                                    words
-                                })
+                            fold_word_markers(
+                                cl.cues
+                                    .iter()
+                                    .map(|cue| WordSpan {
+                                        start_ms: apply_offset(cue.start_ms, offset),
+                                        end_ms: cue.end_ms.map(|end| apply_offset(end, offset)),
+                                        text: cue.value.clone(),
+                                    })
+                                    .collect(),
+                            )
                         })
                         .unwrap_or_default();
                     (apply_offset(line.start_ms.unwrap_or(0), offset), words)
@@ -1649,6 +1648,48 @@ mod tests {
         kept.cue_lines[0].cues[0].end_ms = Some(1_300);
         let doc = LrcDocument::from_structured(&kept);
         assert_eq!(doc.lines[0].words[0].end_ms, Some(1_300));
+    }
+
+    /// The same enhanced-LRC sidecar read locally and as Navidrome serves it
+    /// (the space between two stamps as a cue of its own, every missing end
+    /// filled from the next cue, the trailing space kept on a cue) gives the
+    /// same words, so a store file and a server sheet time alike.
+    #[test]
+    fn a_sidecar_and_the_server_cues_for_it_give_the_same_words() {
+        let local = parse("[00:01.00]<00:01.00>Hello<00:01.40> <00:01.60>world <00:02.00>");
+        let cue = |start_ms, end_ms, value: &str| StructuredCue {
+            start_ms,
+            end_ms: Some(end_ms),
+            value: value.into(),
+        };
+        let served = LrcDocument::from_structured(&StructuredLyrics {
+            synced: true,
+            offset_ms: 0,
+            kind: None,
+            lines: vec![StructuredLine {
+                start_ms: Some(1_000),
+                value: "Hello world".into(),
+            }],
+            cue_lines: vec![StructuredCueLine {
+                index: 0,
+                agent_id: None,
+                cues: vec![
+                    cue(1_000, 1_400, "Hello"),
+                    cue(1_400, 1_600, " "),
+                    cue(1_600, 2_000, "world "),
+                    cue(2_000, 2_000, ""),
+                ],
+            }],
+        });
+        assert_eq!(local.lines[0].words, served.lines[0].words);
+        assert_eq!(
+            local.lines[0]
+                .words
+                .iter()
+                .map(|w| (w.text.as_str(), w.start_ms, w.end_ms))
+                .collect::<Vec<_>>(),
+            vec![("Hello", 1_000, Some(1_400)), ("world", 1_600, Some(2_000))]
+        );
     }
 
     #[test]

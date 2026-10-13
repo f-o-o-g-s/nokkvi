@@ -914,8 +914,9 @@ impl Nokkvi {
                 // BOTH kinds of sheet follow the clock. A synced one needs it
                 // to find its current line; a plain one because the per-frame
                 // tick reads it back through `drift_center`. This block
-                // is the only writer of `position_ms`, and it anchors the
-                // lyric clock the frame tick runs on between ticks.
+                // keeps `position_ms` current (the lyrics apply path only
+                // seeds it, from whole seconds, while it is still 0), and it
+                // anchors the lyric clock the frame tick runs on between ticks.
                 self.lyrics.position_ms = position_ms;
                 let now = std::time::Instant::now();
                 self.lyrics.clock_anchor = Some(now);
