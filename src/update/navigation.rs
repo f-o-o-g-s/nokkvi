@@ -344,19 +344,9 @@ impl Nokkvi {
         if view == View::Settings && self.current_view != View::Settings {
             self.pre_settings_view = self.current_view;
         }
-        // When leaving Settings via SwitchView, redirect to the saved pre-settings view
-        // unless the user explicitly picked a specific tab (not Queue, which is the
-        // default dummy emitted by the settings tab button). The playlist editor is
-        // never that dummy: a switch to it is an editor entry (some land after an
-        // async fetch, with Settings opened meanwhile) or the Editing pill.
-        let view = if self.current_view == View::Settings
-            && view != View::Settings
-            && view != View::PlaylistEditor
-        {
-            self.pre_settings_view
-        } else {
-            view
-        };
+        // A switch out of Settings goes where it was sent; closing Settings
+        // (its toggle, its nav tab, Escape at its top level) goes through
+        // `handle_close_settings`, which sends it back to `pre_settings_view`.
         // The playlist editor is reachable only while a session is active
         // (via the contextual "Editing" pill). Guard against routing here
         // without one — fall back to the queue rather than rendering an

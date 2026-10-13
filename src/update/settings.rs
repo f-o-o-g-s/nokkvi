@@ -257,9 +257,7 @@ impl Nokkvi {
         let action = self.settings_page.update(msg, &data);
         let task = match action {
             crate::views::SettingsAction::None => Task::none(),
-            crate::views::SettingsAction::ExitSettings => {
-                self.handle_switch_view(crate::View::Queue)
-            }
+            crate::views::SettingsAction::ExitSettings => self.handle_close_settings(),
             crate::views::SettingsAction::FocusHexInput => {
                 iced::widget::operation::focus(crate::views::settings::HEX_EDITOR_INPUT_ID)
             }

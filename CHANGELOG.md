@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Clicking the Editing tab while Settings is open now opens the playlist editor.
 - A scrobble the server rejects no longer bumps the song's play count in nokkvi.
 - A scrobble or now-playing update rejected by an expired login now returns you to the login screen.
+- A view switch made while Settings is open (a nav tab, a view hotkey, `nokkvi switch-view`) now opens that view, not the one you came from.
 
 ### Removed
 

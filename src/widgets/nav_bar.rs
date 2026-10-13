@@ -139,6 +139,9 @@ pub enum NavBarMessage {
     SwitchToHarbour,
     ToggleLightMode,
     OpenSettings,
+    /// The Settings tab, shown while Settings is open: back to the view
+    /// Settings was opened from.
+    CloseSettings,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     StripContextAction(super::context_menu::StripContextEntry),
@@ -757,15 +760,14 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         tabs
     };
 
-    // Settings indicator: reuses the same nav_tab builder, always active.
+    // Settings indicator: reuses the same nav_tab builder, always active;
+    // clicking it closes Settings.
     if settings_open {
-        // Use Queue as a dummy target — switching away from Settings restores
-        // the pre-settings view rather than navigating to Queue.
         left_section = left_section.push(nav_tab(
             "Settings",
             "assets/icons/settings.svg",
             true,
-            NavBarMessage::SwitchView(NavView::Queue),
+            NavBarMessage::CloseSettings,
         ));
         left_section = left_section.push(tab_separator(true));
     }

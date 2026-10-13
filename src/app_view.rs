@@ -194,6 +194,7 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::OpenSettings => {
             Message::Navigation(NavigationMessage::SwitchView(View::Settings))
         }
+        widgets::NavBarMessage::CloseSettings => Message::ToggleSettings,
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
         widgets::NavBarMessage::SetOpenMenu(next) => Message::SetOpenMenu(next),

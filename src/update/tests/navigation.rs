@@ -46,6 +46,41 @@ fn switch_view_updates_current_view() {
     assert_eq!(app.current_view, View::Playlists);
 }
 
+/// A switch out of Settings goes where it was sent (a nav tab, a view
+/// hotkey, the strip's Go to Queue, `nokkvi switch-view`); every one used to
+/// land on the view Settings was opened from.
+#[test]
+fn a_switch_out_of_settings_goes_where_it_was_sent() {
+    for target in [View::Albums, View::Queue, View::Radios] {
+        let mut app = test_app();
+        let _ = app.handle_switch_view(View::Songs);
+        let _ = app.handle_switch_view(View::Settings);
+        assert_eq!(app.pre_settings_view, View::Songs);
+
+        let _ = app.handle_switch_view(target);
+
+        assert_eq!(app.current_view, target);
+    }
+}
+
+/// Closing Settings (its toggle, or Escape at its top level) returns to the
+/// view it was opened from.
+#[test]
+fn closing_settings_returns_to_the_view_it_was_opened_from() {
+    let mut app = test_app();
+    let _ = app.handle_switch_view(View::Songs);
+    let _ = app.handle_switch_view(View::Settings);
+    let _ = app.update(crate::app_message::Message::ToggleSettings);
+    assert_eq!(app.current_view, View::Songs, "the toggle");
+
+    let _ = app.handle_switch_view(View::Albums);
+    let _ = app.handle_switch_view(View::Settings);
+    let _ = app.update(crate::app_message::Message::Settings(
+        crate::views::SettingsMessage::Escape,
+    ));
+    assert_eq!(app.current_view, View::Albums, "Escape at the top level");
+}
+
 // ============================================================================
 // FocusSearch routing with browsing panel open (navigation.rs)
 // ============================================================================
