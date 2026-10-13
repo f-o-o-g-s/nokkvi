@@ -68,21 +68,10 @@ impl Nokkvi {
                 source,
                 palette,
             } => self.handle_accent_extracted(owner, source, palette),
-            ArtworkMessage::LargeLoaded(id, handle) => self.handle_large_artwork_loaded(id, handle),
-            ArtworkMessage::LargeArtistLoaded(id, handle) => {
-                // Mirror `handle_large_artwork_loaded`'s id-gated clear:
-                // if the user scrolled from A to B before A's fetch
-                // returned, B is now in flight (marker = Some(B)) and we
-                // must NOT clear it. Caching the late A handle is still
-                // fine — the cache is keyed by id.
-                self.artwork.large_artwork_pending.remove(&id);
-                if let Some(h) = handle {
-                    self.artwork.large_artwork.put(id.clone(), h);
-                }
-                if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
-                    self.artwork.loading_large_artwork = None;
-                }
-                Task::none()
+            // Artists share the albums' large-art cache, gate and marker.
+            ArtworkMessage::LargeLoaded(id, handle)
+            | ArtworkMessage::LargeArtistLoaded(id, handle) => {
+                self.handle_large_artwork_loaded(id, handle)
             }
             ArtworkMessage::RefreshAlbumArtwork(album_id) => {
                 self.handle_refresh_album_artwork(album_id)
