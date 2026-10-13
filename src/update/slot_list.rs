@@ -356,55 +356,10 @@ impl Nokkvi {
                         audio::SfxType::Escape
                     }
                 }
+            } else if self.focused_list_is_empty(target_view) {
+                audio::SfxType::Escape
             } else {
-                // Check if the focused list is empty (accounts for search
-                // filtering). We use the same filter_* helpers as view() to detect
-                // when the results are empty even if the raw library is not. `None`
-                // means the Similar browser tab is focused — read its songs list so
-                // the SFX matches the focused list rather than the host view.
-                let is_empty = match target_view {
-                    Some(View::Queue) => self.filter_queue_songs().is_empty(),
-                    Some(View::Albums) => self.filter_albums().is_empty(),
-                    Some(View::Songs) => {
-                        // Filter songs manually since there's no main.rs helper for it yet
-                        nokkvi_data::utils::search::filter_items(
-                            &self.library.songs,
-                            &self.songs_page.common.search_query,
-                        )
-                        .is_empty()
-                    }
-                    Some(View::Artists) => nokkvi_data::utils::search::filter_items(
-                        &self.library.artists,
-                        &self.artists_page.common.search_query,
-                    )
-                    .is_empty(),
-                    Some(View::Genres) => nokkvi_data::utils::search::filter_items(
-                        &self.library.genres,
-                        &self.genres_page.common.search_query,
-                    )
-                    .is_empty(),
-                    Some(View::Playlists) => nokkvi_data::utils::search::filter_items(
-                        &self.library.playlists,
-                        &self.playlists_page.common.search_query,
-                    )
-                    .is_empty(),
-                    Some(View::Radios) => self.filter_radio_stations().is_empty(),
-                    Some(View::Harbour | View::Settings) => false,
-                    Some(View::PlaylistEditor) => self
-                        .playlist_editor
-                        .as_ref()
-                        .is_none_or(|e| e.songs.is_empty()),
-                    // Similar browser tab focused (no `View` variant).
-                    None => self
-                        .similar_songs
-                        .as_ref()
-                        .is_none_or(|s| s.songs.is_empty()),
-                };
-                if is_empty {
-                    audio::SfxType::Escape
-                } else {
-                    audio::SfxType::Enter
-                }
+                audio::SfxType::Enter
             };
             self.sfx_engine.play(sfx);
         }
@@ -414,5 +369,29 @@ impl Nokkvi {
         let activate = crate::widgets::SlotListPageMessage::ActivateCenter(shuffled);
         self.current_view_page()
             .map_or_else(Task::none, |p| Task::done(p.slot_list_message(activate)))
+    }
+
+    /// Whether the focused list shows no rows, by the rule its view renders
+    /// with: the library views render their buffer as the server returned it
+    /// (their search runs on the server), while the Queue, Radios and the
+    /// playlist editor filter client-side. `None` is the Similar browser tab
+    /// (no `View` variant), so the answer follows the focused list rather than
+    /// the host view.
+    pub(crate) fn focused_list_is_empty(&self, target_view: Option<View>) -> bool {
+        match target_view {
+            Some(View::Queue) => self.filter_queue_songs().is_empty(),
+            Some(View::Albums) => self.library.albums.is_empty(),
+            Some(View::Songs) => self.library.songs.is_empty(),
+            Some(View::Artists) => self.library.artists.is_empty(),
+            Some(View::Genres) => self.library.genres.is_empty(),
+            Some(View::Playlists) => self.library.playlists.is_empty(),
+            Some(View::Radios) => self.filter_radio_stations().is_empty(),
+            Some(View::Harbour | View::Settings) => false,
+            Some(View::PlaylistEditor) => self.filter_editor_songs().is_empty(),
+            None => self
+                .similar_songs
+                .as_ref()
+                .is_none_or(|s| s.songs.is_empty()),
+        }
     }
 }

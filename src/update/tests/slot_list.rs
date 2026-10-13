@@ -442,3 +442,25 @@ fn albums_foreground_reload_still_pins_a_pending_find_and_expand() {
         "and it lands as a top-pin, not a click marker"
     );
 }
+
+/// Enter's sound asks whether the focused list shows rows by the rule the
+/// view renders with. A library view shows its buffer as the server answered
+/// the search, which can match rows the client filter would not (Navidrome
+/// folds accents), so the buffer decides; the Queue filters client-side.
+#[test]
+fn enter_reads_a_server_searched_list_as_the_server_returned_it() {
+    let mut app = test_app();
+    app.albums_page.common.search_query = "beyonce".into();
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "Lemonade", "Beyoncé")]);
+    assert!(!app.focused_list_is_empty(Some(View::Albums)));
+
+    app.albums_page.common.search_query.clear();
+    app.library.albums.set_from_vec(Vec::new());
+    assert!(app.focused_list_is_empty(Some(View::Albums)));
+
+    app.library.queue_songs = vec![make_queue_song("s1", "Formation", "Beyoncé", "Lemonade")];
+    app.queue_page.common.search_query = "zzz".into();
+    assert!(app.focused_list_is_empty(Some(View::Queue)));
+}

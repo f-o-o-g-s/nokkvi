@@ -959,17 +959,6 @@ impl Nokkvi {
     // SECTION: Helpers (KEEP IN main.rs)
     // =========================================================================
 
-    /// Filter albums based on search query (client-side).
-    /// Returns `Cow::Borrowed` when no search is active (zero-cost).
-    pub fn filter_albums(
-        &self,
-    ) -> std::borrow::Cow<'_, [nokkvi_data::backend::albums::AlbumUIViewData]> {
-        nokkvi_data::utils::search::filter_items(
-            &self.library.albums,
-            &self.albums_page.common.search_query,
-        )
-    }
-
     /// Filter queue songs based on search query (client-side).
     /// Returns `Cow::Borrowed` when no search is active (zero-cost).
     pub fn filter_queue_songs(
