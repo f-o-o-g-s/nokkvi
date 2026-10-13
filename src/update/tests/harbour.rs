@@ -89,32 +89,8 @@ fn shelves_with_albums() -> Box<HarbourShelvesData> {
         random_artist: Some(search_artist("rar1", "Draw Artist")),
         random_songs: vec![make_recent_song("rs1", "Draw Track", "Artist", "al9")],
         random_genre: Some(make_genre("Rock", "Rock")),
-        random_playlist: Some(harbour_playlist("p1", "Mix")),
+        random_playlist: Some(make_playlist("p1", "Mix")),
     })
-}
-
-/// Minimal `PlaylistUIViewData` for the Random Playlist pick fixtures.
-fn harbour_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
-    nokkvi_data::backend::playlists::PlaylistUIViewData {
-        id: id.to_string(),
-        name: name.to_string(),
-        comment: String::new(),
-        duration: 0.0,
-        song_count: 0,
-        owner_name: String::new(),
-        public: false,
-        updated_at: String::new(),
-        artwork_album_ids: Vec::new(),
-        uploaded_image: None,
-        is_smart: false,
-        rules: None,
-        evaluated_at: None,
-        is_file_backed: false,
-        sync: false,
-        owner_id: String::new(),
-        searchable_lower: name.to_lowercase(),
-        image: Default::default(),
-    }
 }
 
 #[test]
@@ -265,7 +241,7 @@ fn shelves_load_error_clears_loading_and_toasts() {
 #[test]
 fn playlist_quad_ids_loaded_sets_ids_on_the_random_pick() {
     let mut app = test_app();
-    app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
+    app.harbour.random_playlist = Some(make_playlist("p1", "Mix"));
     let generation = app.harbour.shelves_generation.current();
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::PlaylistQuadIdsLoaded {
@@ -286,7 +262,7 @@ fn playlist_quad_ids_loaded_sets_ids_on_the_random_pick() {
 #[test]
 fn playlist_quad_ids_loaded_stale_generation_dropped() {
     let mut app = test_app();
-    app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
+    app.harbour.random_playlist = Some(make_playlist("p1", "Mix"));
     app.harbour.shelves_generation = crate::state::StaleDropGen::at(9);
 
     let _ = app.handle_harbour_loader(HarbourLoaderMessage::PlaylistQuadIdsLoaded {
@@ -639,7 +615,7 @@ fn random_teaser_shows_the_picks_facts_and_art_keys() {
     let mut g = make_genre("Rock", "Rock");
     g.artwork_album_ids = vec!["g1".into(), "g2".into()];
     app.harbour.random_genre = Some(g);
-    let mut p = harbour_playlist("p1", "Morning Mix");
+    let mut p = make_playlist("p1", "Morning Mix");
     p.song_count = 32;
     p.duration = 8100.0; // 2h 15m
     p.artwork_album_ids = vec!["pl1".into()];
@@ -722,7 +698,7 @@ fn random_teasers_pluralise_single_counts() {
     let mut g = make_genre("Ambient", "Ambient");
     g.song_count = 1;
     app.harbour.random_genre = Some(g);
-    let mut p = harbour_playlist("p1", "Solo");
+    let mut p = make_playlist("p1", "Solo");
     p.song_count = 1;
     app.harbour.random_playlist = Some(p);
     app.harbour.random_songs = vec![make_recent_song("s1", "Only", "A", "al1")];
@@ -753,7 +729,7 @@ fn seed_only_pick(app: &mut crate::Nokkvi, kind: crate::views::harbour::RandomKi
             app.harbour.random_songs = vec![make_recent_song("rs1", "Song", "Artist", "al1")];
         }
         RandomKind::Genres => app.harbour.random_genre = Some(make_genre("Rock", "Rock")),
-        RandomKind::Playlists => app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix")),
+        RandomKind::Playlists => app.harbour.random_playlist = Some(make_playlist("p1", "Mix")),
     }
 }
 
@@ -970,7 +946,7 @@ fn activate_center_on_random_playlist_sets_playing_from_context() {
     // The queue's "Playing From" strip renders from active_playlist_info — the
     // Playlists view's play path sets it BEFORE playing, and the Random
     // Playlist row must too (regression: the strip vanished for random plays).
-    let mut p = harbour_playlist("p1", "Comeback Queue");
+    let mut p = make_playlist("p1", "Comeback Queue");
     p.song_count = 12;
     app.harbour.random_playlist = Some(p);
     center_random_play_row(&mut app, crate::views::harbour::RandomKind::Playlists);
@@ -1078,7 +1054,7 @@ fn random_kind_batch_payload_resolves_each_picks_batch_items() {
         make_recent_song("rs1", "One", "A", "al1"),
         make_recent_song("rs2", "Two", "B", "al2"),
     ];
-    app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
+    app.harbour.random_playlist = Some(make_playlist("p1", "Mix"));
     app.harbour.random_genre = Some(make_genre("Rock", "Rock"));
 
     let items = |kind| {

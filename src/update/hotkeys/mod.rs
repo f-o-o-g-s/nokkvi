@@ -22,63 +22,43 @@ use crate::{
 };
 
 impl Nokkvi {
-    /// Get the current view as a `&dyn ViewPage` for trait-based dispatch.
-    /// Returns None for Settings (which doesn't implement ViewPage).
-    ///
-    /// In playlist edit mode with browser focus, returns the browsing panel's
-    /// active view page so all existing hotkey handlers work on the browser pane.
-    pub(crate) fn current_view_page(&self) -> Option<&dyn views::ViewPage> {
-        // Pane-aware routing: with browser focus in the split view, delegate
-        // to the active tab. The panel and the focus outlive the split view
-        // (another nav view), so gate on it being on screen.
-        if self.split_view_active()
-            && self.pane_focus == crate::state::PaneFocus::Browser
-            && let Some(panel) = &self.browsing_panel
-        {
-            return match panel.active_view {
-                views::BrowsingView::Albums => Some(&self.albums_page),
-                views::BrowsingView::Songs => Some(&self.songs_page),
-                views::BrowsingView::Artists => Some(&self.artists_page),
-                views::BrowsingView::Genres => Some(&self.genres_page),
-                views::BrowsingView::Similar => Some(&self.similar_page),
-            };
+    /// The browsing panel's tab while the keyboard steers it: the split view
+    /// is on screen and the browser pane has focus. The panel and the focus
+    /// outlive the split view (another nav view), so the split view being up
+    /// is part of the test. Every pane-aware resolver below starts here.
+    pub(crate) fn focused_browsing_tab(&self) -> Option<views::BrowsingView> {
+        if self.split_view_active() && self.pane_focus == crate::state::PaneFocus::Browser {
+            self.browsing_panel.as_ref().map(|panel| panel.active_view)
+        } else {
+            None
         }
-
-        self.view_page(self.current_view)
     }
 
-    /// Get the current view as a `&mut dyn ViewPage` for trait-based dispatch.
-    /// Returns None for Settings (which doesn't implement ViewPage).
-    ///
-    /// In playlist edit mode with browser focus, returns the browsing panel's
-    /// active view page so all existing hotkey handlers work on the browser pane.
-    pub(crate) fn current_view_page_mut(&mut self) -> Option<&mut dyn views::ViewPage> {
-        // Pane-aware routing: with browser focus in the split view, delegate
-        // to the active tab. The panel and the focus outlive the split view
-        // (another nav view), so gate on it being on screen.
-        if self.split_view_active()
-            && self.pane_focus == crate::state::PaneFocus::Browser
-            && let Some(panel) = &self.browsing_panel
-        {
-            return match panel.active_view {
-                views::BrowsingView::Albums => Some(&mut self.albums_page),
-                views::BrowsingView::Songs => Some(&mut self.songs_page),
-                views::BrowsingView::Artists => Some(&mut self.artists_page),
-                views::BrowsingView::Genres => Some(&mut self.genres_page),
-                views::BrowsingView::Similar => Some(&mut self.similar_page),
-            };
+    /// Get the focused list's page as a `&dyn ViewPage` for trait-based
+    /// dispatch: the browsing panel's tab under browser focus (Similar
+    /// included), else the current view. Returns None for Settings and the
+    /// playlist editor (no `ViewPage` impl).
+    pub(crate) fn current_view_page(&self) -> Option<&dyn views::ViewPage> {
+        match self.current_target_view() {
+            Some(view) => self.view_page(view),
+            None => Some(&self.similar_page),
         }
+    }
 
-        self.view_page_mut(self.current_view)
+    /// Mutable twin of [`Self::current_view_page`].
+    pub(crate) fn current_view_page_mut(&mut self) -> Option<&mut dyn views::ViewPage> {
+        match self.current_target_view() {
+            Some(view) => self.view_page_mut(view),
+            None => Some(&mut self.similar_page),
+        }
     }
 
     /// Resolve the `View` whose slot list the keyboard is currently steering,
     /// accounting for the split-view browsing panel.
     ///
-    /// When the split view is shown with browser focus, the focused list is
-    /// the panel's active tab — not `self.current_view` (which is pinned to the
-    /// host view, e.g. `View::PlaylistEditor` during playlist edit). Maps each
-    /// non-`Similar` browser tab to its `View` counterpart.
+    /// Under browser focus the focused list is the panel's active tab — not
+    /// `self.current_view` (which is pinned to the host view, e.g.
+    /// `View::PlaylistEditor` during playlist edit).
     ///
     /// Returns `None` when the focused tab is `BrowsingView::Similar`: the
     /// `View` enum has no `Similar` variant, so callers that need a concrete
@@ -86,19 +66,22 @@ impl Nokkvi {
     /// intentionally unsupported there). Trait-based dispatch should prefer
     /// `current_view_page()` / `current_view_page_mut()`, which cover Similar.
     pub(crate) fn current_target_view(&self) -> Option<View> {
-        if self.split_view_active()
-            && self.pane_focus == crate::state::PaneFocus::Browser
-            && let Some(panel) = self.browsing_panel.as_ref()
-        {
-            return match panel.active_view {
-                views::BrowsingView::Albums => Some(View::Albums),
-                views::BrowsingView::Songs => Some(View::Songs),
-                views::BrowsingView::Artists => Some(View::Artists),
-                views::BrowsingView::Genres => Some(View::Genres),
-                views::BrowsingView::Similar => None,
-            };
+        match self.focused_browsing_tab() {
+            Some(tab) => tab.view(),
+            None => Some(self.current_view),
         }
-        Some(self.current_view)
+    }
+
+    /// The Similar tab's centered song. Similar has no search filter, so the
+    /// slot index is an index into the results.
+    pub(crate) fn similar_center_song(&self) -> Option<&nokkvi_data::types::song::Song> {
+        let songs = &self.similar_songs.as_ref()?.songs;
+        let center = self
+            .similar_page
+            .common
+            .slot_list
+            .get_center_item_index(songs.len())?;
+        songs.get(center)
     }
 
     /// Look up a page by explicit `View` — no pane-focus routing.
@@ -146,31 +129,19 @@ impl Nokkvi {
             ));
         }
 
-        if self.split_view_active()
-            && self.pane_focus == crate::state::PaneFocus::Browser
-            && let Some(panel) = self.browsing_panel.as_ref()
-            && panel.active_view == crate::views::BrowsingView::Similar
-            && let Some(similar) = &self.similar_songs
-        {
-            let center_idx = self
-                .similar_page
-                .common
-                .slot_list
-                .get_center_item_index(similar.songs.len());
-            if let Some(song) = center_idx.and_then(|idx| similar.songs.get(idx)) {
+        // Resolve the focused list: under browser focus this is the active tab,
+        // not `self.current_view` (the host view, e.g. PlaylistEditor during
+        // edit). `None` is the Similar tab.
+        let Some(effective_view) = self.current_target_view() else {
+            if let Some(song) = self.similar_center_song() {
                 let item = InfoModalItem::from_song(song);
                 return self.update(Message::InfoModal(
                     crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
                 ));
             }
-        }
-        // Resolve the focused list: under browser focus this is the active tab
-        // (Albums/Songs/Artists/Genres), not `self.current_view` (the host view,
-        // e.g. PlaylistEditor during edit). The Similar tab is handled by the
-        // short-circuit above; `current_target_view()` returns None for it so
-        // the `unwrap_or` falls back to the host view, which the enumerated
-        // not-available arm reports as such — correct for Genres/Playlists hosts.
-        let effective_view = self.current_target_view().unwrap_or(self.current_view);
+            self.toast_warn("No item selected");
+            return Task::none();
+        };
         match effective_view {
             View::Songs => {
                 let center_idx = self

@@ -247,6 +247,55 @@ pub(crate) fn make_genre(id: &str, name: &str) -> nokkvi_data::backend::genres::
     }
 }
 
+/// Create a `PlaylistUIViewData` with the given fields, defaulting the rest.
+pub(crate) fn make_playlist(
+    id: &str,
+    name: &str,
+) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.to_string(),
+        name: name.to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: Vec::new(),
+        uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
+        searchable_lower: name.to_lowercase(),
+        image: Default::default(),
+    }
+}
+
+/// The split view on Queue with a queue row (`q1`, "Queue Song") centered in
+/// the queue pane and Similar results (`sim1`, "Similar One") focused in the
+/// browsing pane: the keyboard steers the Similar tab.
+pub(crate) fn similar_focused_over_a_queue() -> Nokkvi {
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.library.queue_songs = vec![make_queue_song("q1", "Queue Song", "Queue Artist", "Al")];
+    app.browsing_panel = Some(crate::views::BrowsingPanel {
+        active_view: crate::views::BrowsingView::Similar,
+    });
+    app.pane_focus = crate::state::PaneFocus::Browser;
+    let song: nokkvi_data::types::song::Song =
+        serde_json::from_value(serde_json::json!({ "id": "sim1", "title": "Similar One" }))
+            .expect("minimal Song JSON should deserialize");
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![song],
+        source: crate::state::SimilarSource::SimilarTo("Seed".into()),
+        loading: false,
+    });
+    app
+}
+
 // ============================================================================
 // Bulk fixtures for the album/artist/genre/song tri-mirror tests
 // ============================================================================

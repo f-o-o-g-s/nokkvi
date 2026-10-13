@@ -58,11 +58,55 @@ pub(in crate::update) struct CenterItemInfo {
     pub kind: ItemKind,
 }
 
+/// The focused list's centered row, resolved once per view for every reader:
+/// the star and rating keys, the IPC `selection` record and the IPC
+/// `add-to-queue` reply.
+pub(in crate::update) enum CenterItem {
+    /// A song, album or artist: the star and rating keys act on it.
+    Rateable(CenterItemInfo),
+    /// A row Shift+A enqueues that nothing stars or rates: a playlist or
+    /// genre parent, a Harbour item or Random row.
+    Named(String),
+}
+
+impl CenterItem {
+    pub(in crate::update) fn into_name(self) -> String {
+        match self {
+            Self::Rateable(info) => info.name,
+            Self::Named(name) => name,
+        }
+    }
+}
+
 impl Nokkvi {
     /// Extract info about the currently centered item in the slot list.
-    /// Shared by toggle_star and rating_change hotkey handlers.
+    /// Shared by toggle_star and rating_change hotkey handlers. `None` for a
+    /// row nothing rates; [`Self::center_item`] names those too.
     pub(in crate::update) fn get_center_item_info(&self) -> Option<CenterItemInfo> {
-        match self.current_view {
+        match self.center_item()? {
+            CenterItem::Rateable(info) => Some(info),
+            CenterItem::Named(_) => None,
+        }
+    }
+
+    /// The centered row of the list the keyboard steers
+    /// ([`Self::current_target_view`]): the browsing panel's tab under
+    /// browser focus, else the current view.
+    pub(in crate::update) fn center_item(&self) -> Option<CenterItem> {
+        // `None` is the Similar tab.
+        let Some(view) = self.current_target_view() else {
+            return self.similar_center_song().map(|song| {
+                CenterItem::Rateable(CenterItemInfo {
+                    id: song.id.clone(),
+                    name: song.title.clone(),
+                    artist: song.artist.clone(),
+                    starred: song.starred,
+                    rating: song.rating.unwrap_or(0),
+                    kind: ItemKind::Song,
+                })
+            });
+        };
+        match view {
             View::Queue => {
                 let filtered = self.filter_queue_songs();
                 self.queue_page
@@ -70,36 +114,40 @@ impl Nokkvi {
                     .slot_list
                     .get_center_item_index(filtered.len())
                     .and_then(|idx| filtered.get(idx).cloned())
-                    .map(|song| CenterItemInfo {
-                        id: song.id.clone(),
-                        name: song.title.clone(),
-                        artist: song.artist.clone(),
-                        starred: song.starred,
-                        rating: song.rating.unwrap_or(0),
-                        kind: ItemKind::Song,
+                    .map(|song| {
+                        CenterItem::Rateable(CenterItemInfo {
+                            id: song.id.clone(),
+                            name: song.title.clone(),
+                            artist: song.artist.clone(),
+                            starred: song.starred,
+                            rating: song.rating.unwrap_or(0),
+                            kind: ItemKind::Song,
+                        })
                     })
             }
             View::Albums => self
                 .albums_page
                 .expansion
                 .resolve_center(&self.library.albums, &self.albums_page.common, |a| &a.id)
-                .map(|entry| match entry {
-                    SlotListEntry::Child(song, _) => CenterItemInfo {
-                        id: song.id.clone(),
-                        name: song.title.clone(),
-                        artist: song.artist.clone(),
-                        starred: song.is_starred,
-                        rating: song.rating.unwrap_or(0),
-                        kind: ItemKind::Song,
-                    },
-                    SlotListEntry::Parent(album) => CenterItemInfo {
-                        id: album.id.clone(),
-                        name: album.name.clone(),
-                        artist: album.artist.clone(),
-                        starred: album.is_starred,
-                        rating: album.rating.unwrap_or(0),
-                        kind: ItemKind::Album,
-                    },
+                .map(|entry| {
+                    CenterItem::Rateable(match entry {
+                        SlotListEntry::Child(song, _) => CenterItemInfo {
+                            id: song.id.clone(),
+                            name: song.title.clone(),
+                            artist: song.artist.clone(),
+                            starred: song.is_starred,
+                            rating: song.rating.unwrap_or(0),
+                            kind: ItemKind::Song,
+                        },
+                        SlotListEntry::Parent(album) => CenterItemInfo {
+                            id: album.id.clone(),
+                            name: album.name.clone(),
+                            artist: album.artist.clone(),
+                            starred: album.is_starred,
+                            rating: album.rating.unwrap_or(0),
+                            kind: ItemKind::Album,
+                        },
+                    })
                 }),
             View::Songs => self
                 .songs_page
@@ -107,35 +155,39 @@ impl Nokkvi {
                 .slot_list
                 .get_center_item_index(self.library.songs.len())
                 .and_then(|idx| self.library.songs.get(idx))
-                .map(|song| CenterItemInfo {
-                    id: song.id.clone(),
-                    name: song.title.clone(),
-                    artist: song.artist.clone(),
-                    starred: song.is_starred,
-                    rating: song.rating.unwrap_or(0),
-                    kind: ItemKind::Song,
+                .map(|song| {
+                    CenterItem::Rateable(CenterItemInfo {
+                        id: song.id.clone(),
+                        name: song.title.clone(),
+                        artist: song.artist.clone(),
+                        starred: song.is_starred,
+                        rating: song.rating.unwrap_or(0),
+                        kind: ItemKind::Song,
+                    })
                 }),
             View::Artists => self
                 .artists_page
                 .expansion
                 .resolve_center(&self.library.artists, &self.artists_page.common, |a| &a.id)
-                .map(|entry| match entry {
-                    SlotListEntry::Child(album, _) => CenterItemInfo {
-                        id: album.id.clone(),
-                        name: album.name.clone(),
-                        artist: album.artist.clone(),
-                        starred: album.is_starred,
-                        rating: album.rating.unwrap_or(0),
-                        kind: ItemKind::Album,
-                    },
-                    SlotListEntry::Parent(artist) => CenterItemInfo {
-                        id: artist.id.clone(),
-                        name: artist.name.clone(),
-                        artist: String::new(),
-                        starred: artist.is_starred,
-                        rating: artist.rating.unwrap_or(0),
-                        kind: ItemKind::Artist,
-                    },
+                .map(|entry| {
+                    CenterItem::Rateable(match entry {
+                        SlotListEntry::Child(album, _) => CenterItemInfo {
+                            id: album.id.clone(),
+                            name: album.name.clone(),
+                            artist: album.artist.clone(),
+                            starred: album.is_starred,
+                            rating: album.rating.unwrap_or(0),
+                            kind: ItemKind::Album,
+                        },
+                        SlotListEntry::Parent(artist) => CenterItemInfo {
+                            id: artist.id.clone(),
+                            name: artist.name.clone(),
+                            artist: String::new(),
+                            starred: artist.is_starred,
+                            rating: artist.rating.unwrap_or(0),
+                            kind: ItemKind::Artist,
+                        },
+                    })
                 }),
             View::Playlists => self
                 .playlists_page
@@ -143,8 +195,8 @@ impl Nokkvi {
                 .resolve_center(&self.library.playlists, &self.playlists_page.common, |p| {
                     &p.id
                 })
-                .and_then(|entry| match entry {
-                    SlotListEntry::Child(song, _) => Some(CenterItemInfo {
+                .map(|entry| match entry {
+                    SlotListEntry::Child(song, _) => CenterItem::Rateable(CenterItemInfo {
                         id: song.id.clone(),
                         name: song.title.clone(),
                         artist: song.artist.clone(),
@@ -152,14 +204,15 @@ impl Nokkvi {
                         rating: song.rating.unwrap_or(0),
                         kind: ItemKind::Song,
                     }),
-                    SlotListEntry::Parent(_) => None, // playlists themselves can't be starred/rated
+                    // Playlists themselves can't be starred or rated.
+                    SlotListEntry::Parent(playlist) => CenterItem::Named(playlist.name.clone()),
                 }),
             View::Genres => self
                 .genres_page
                 .expansion
                 .resolve_center(&self.library.genres, &self.genres_page.common, |g| &g.id)
-                .and_then(|entry| match entry {
-                    SlotListEntry::Child(album, _) => Some(CenterItemInfo {
+                .map(|entry| match entry {
+                    SlotListEntry::Child(album, _) => CenterItem::Rateable(CenterItemInfo {
                         id: album.id.clone(),
                         name: album.name.clone(),
                         artist: album.artist.clone(),
@@ -167,11 +220,30 @@ impl Nokkvi {
                         rating: album.rating.unwrap_or(0),
                         kind: ItemKind::Album,
                     }),
-                    SlotListEntry::Parent(_) => None, // genres themselves can't be starred/rated
+                    // Genres themselves can't be starred or rated.
+                    SlotListEntry::Parent(genre) => CenterItem::Named(genre.name.clone()),
                 }),
-            // No starrable/ratable centered item on these views — a new view
-            // must opt in to the star/rating hotkeys explicitly.
-            View::Radios | View::Harbour | View::Settings | View::PlaylistEditor => None,
+            View::Harbour => self.harbour_center_name().map(CenterItem::Named),
+            // Nothing centered here is starred, rated or enqueued — a new
+            // view must opt in explicitly.
+            View::Radios | View::Settings | View::PlaylistEditor => None,
+        }
+    }
+
+    /// The centered Harbour row's title, for the rows Shift+A enqueues (the
+    /// same rows `handle_harbour_slot_list`'s `AddCenterToQueue` arm adds).
+    fn harbour_center_name(&self) -> Option<String> {
+        use crate::views::harbour::{HarbourRow, build_harbour_rows, has_random_pick};
+
+        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
+        let center = self.harbour_page.common.get_center_item_index(rows.len())?;
+        match rows.into_iter().nth(center)? {
+            HarbourRow::Item { title, .. } => Some(title),
+            // A Random row with no pick drawn yet enqueues nothing.
+            HarbourRow::RandomPlay { kind } => {
+                has_random_pick(&self.harbour, kind).then(|| kind.title())
+            }
+            HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
         }
     }
 

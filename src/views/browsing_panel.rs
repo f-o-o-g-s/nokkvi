@@ -10,7 +10,7 @@ use iced::{
     widget::{container, mouse_area, row, space, svg, text},
 };
 
-use crate::{theme, widgets::hover_overlay::HoverOverlay};
+use crate::{View, theme, widgets::hover_overlay::HoverOverlay};
 
 /// Which library view is active in the browsing panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +40,18 @@ impl BrowsingView {
             BrowsingView::Artists => "Artists",
             BrowsingView::Genres => "Genres",
             BrowsingView::Similar => "Similar",
+        }
+    }
+
+    /// The `View` whose page this tab shows. `None` for Similar, which has
+    /// no `View` variant: callers read `None` as "Similar".
+    pub fn view(self) -> Option<View> {
+        match self {
+            BrowsingView::Albums => Some(View::Albums),
+            BrowsingView::Songs => Some(View::Songs),
+            BrowsingView::Artists => Some(View::Artists),
+            BrowsingView::Genres => Some(View::Genres),
+            BrowsingView::Similar => None,
         }
     }
 }

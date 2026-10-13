@@ -224,3 +224,64 @@ fn keyboard_steers_the_full_view_after_leaving_the_split_view() {
         "the keyboard must steer the visible Songs page, not the hidden Albums tab"
     );
 }
+
+// ============================================================================
+// The star and rating keys act on the focused Similar tab
+// ============================================================================
+
+fn last_toast(app: &crate::Nokkvi) -> String {
+    app.toast
+        .toasts
+        .back()
+        .map(|t| t.message.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_centered_item_under_similar_focus_is_the_similar_row() {
+    let app = similar_focused_over_a_queue();
+
+    let info = app
+        .get_center_item_info()
+        .expect("the Similar row is centered");
+
+    assert_eq!(info.id, "sim1", "not the queue row behind it");
+    assert_eq!(info.name, "Similar One");
+}
+
+#[test]
+fn a_rating_key_under_similar_focus_rates_the_similar_row() {
+    let mut app = similar_focused_over_a_queue();
+
+    let _ = app.handle_increase_rating();
+
+    let toast = last_toast(&app);
+    assert!(
+        toast.contains("Similar One"),
+        "rated the wrong row: {toast}"
+    );
+}
+
+#[test]
+fn the_love_key_under_similar_focus_loves_the_similar_row() {
+    let mut app = similar_focused_over_a_queue();
+
+    let _ = app.handle_toggle_star();
+
+    let toast = last_toast(&app);
+    assert!(
+        toast.contains("Similar One"),
+        "loved the wrong row: {toast}"
+    );
+}
+
+#[test]
+fn the_rating_keys_still_rate_the_queue_under_queue_focus() {
+    // Control: the same split view with the queue pane focused.
+    let mut app = similar_focused_over_a_queue();
+    app.pane_focus = PaneFocus::Queue;
+
+    let info = app.get_center_item_info().expect("a queue row is centered");
+
+    assert_eq!(info.id, "q1");
+}

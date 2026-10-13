@@ -10,6 +10,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- With Similar results focused, the rating keys and the love key now act on the centered Similar song, not the queue's.
+- With Similar results focused, `nokkvi selection` now reports the centered Similar song instead of the queue's.
+- `nokkvi selection` now reports `similar` as its view when Similar results have focus.
+- With Similar results focused, `nokkvi add-to-queue` now names the Similar song it added, not the queue's.
+- `nokkvi add-to-queue` now names an added playlist, genre or Harbour row instead of replying null.
+- Get Info on a focused but empty Similar tab no longer opens the centered queue song's details.
+
 ### Removed
 
 ## v0.25.0 — 2026-10-12

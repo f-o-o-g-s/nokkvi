@@ -385,13 +385,16 @@ fn view_name(view: View) -> &'static str {
     }
 }
 
-/// JSON snapshot of the focused view's centered item for the `selection` verb.
+/// JSON snapshot of the focused list's centered item for the `selection` verb.
 /// Reuses [`Nokkvi::get_center_item_info`] — the same resolver the rating/star
-/// hotkeys use — so it's accurate across every list view. Always returns the
-/// same key set so scripts see a stable schema; a `null` `kind` means nothing
-/// selectable is centered (empty list, Settings, the playlist editor).
+/// hotkeys use — so it's accurate across every list view and follows the
+/// keyboard into the browsing pane: `view` is the list it read (`similar` for
+/// the Similar tab, which has no `View`). Always returns the same key set so
+/// scripts see a stable schema; a `null` `kind` means nothing rateable is
+/// centered (empty list, Settings, the playlist editor, a playlist or genre
+/// parent).
 fn selection_json(app: &Nokkvi) -> serde_json::Value {
-    let view = view_name(app.current_view);
+    let view = app.current_target_view().map_or("similar", view_name);
     match app.get_center_item_info() {
         Some(info) => json!({
             "view": view,
@@ -512,9 +515,11 @@ define_commands! {
     // Add the focused item (centered song/album/artist/genre/playlist) to the
     // queue — the in-app Shift+A hotkey. `add_to_queue_message()` resolving to
     // Some is the exact condition handle_add_to_queue uses to decide there's an
-    // item to enqueue, so gate the echo on it: report the focused item's name,
-    // or null when nothing is selected (mirrors the "No item selected" toast).
-    // The actual enqueue + "Added 'X' to queue" toast run via the real handler.
+    // item to enqueue, so gate the echo on it: report the centered row's name
+    // from the same pane-aware resolver (a Similar row under browser focus, a
+    // playlist or genre parent, a Harbour row), or null when nothing is
+    // selected (mirrors the "No item selected" toast). The actual enqueue and
+    // its toast run via the real handler.
     "add-to-queue" => act      (|app: &mut Nokkvi| {
         if let Some(exited) =
             leave_theater_instead(app, HotkeyAction::AddToQueue, json!({ "added": null }))
@@ -526,7 +531,7 @@ define_commands! {
             .and_then(|page| page.add_to_queue_message())
             .is_some();
         let added = if will_add {
-            app.get_center_item_info().map(|info| info.name)
+            app.center_item().map(|item| item.into_name())
         } else {
             None
         };

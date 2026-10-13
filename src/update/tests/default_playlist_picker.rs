@@ -5,34 +5,11 @@ use crate::test_helpers::*;
 // Default-Playlist Picker (default_playlist_picker.rs)
 // ============================================================================
 
-fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
-    nokkvi_data::backend::playlists::PlaylistUIViewData {
-        id: id.to_string(),
-        name: name.to_string(),
-        comment: String::new(),
-        duration: 0.0,
-        song_count: 0,
-        owner_name: String::new(),
-        public: false,
-        updated_at: String::new(),
-        artwork_album_ids: vec![],
-        uploaded_image: None,
-        is_smart: false,
-        rules: None,
-        evaluated_at: None,
-        is_file_backed: false,
-        sync: false,
-        owner_id: String::new(),
-        searchable_lower: name.to_lowercase(),
-        image: Default::default(),
-    }
-}
-
 fn seed_playlists(app: &mut crate::Nokkvi, items: Vec<(&str, &str)>) {
     let total = items.len();
     let playlists: Vec<_> = items
         .into_iter()
-        .map(|(id, name)| make_test_playlist(id, name))
+        .map(|(id, name)| make_playlist(id, name))
         .collect();
     app.library.playlists.append_page(playlists, total);
 }
@@ -767,8 +744,8 @@ fn resync_noops_with_no_active_playlist() {
 fn picker_excludes_smart_playlists() {
     use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerState, PickerEntry};
 
-    let mut regular = make_test_playlist("p1", "Road Trip");
-    let mut smart = make_test_playlist("sp1", "Loved");
+    let mut regular = make_playlist("p1", "Road Trip");
+    let mut smart = make_playlist("sp1", "Loved");
     smart.is_smart = true;
     smart.rules = Some(serde_json::json!({ "all": [] }));
     // Order the smart row first to prove the filter isn't index-luck.

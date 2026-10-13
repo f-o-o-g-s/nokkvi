@@ -181,6 +181,93 @@ fn add_to_queue_echoes_added_item_or_null() {
     assert!(resp.error.is_none());
 }
 
+// ----------------------------------------------------------------------------
+// selection / add-to-queue read the list the keyboard steers
+// ----------------------------------------------------------------------------
+
+#[test]
+fn selection_under_similar_focus_reports_the_similar_row() {
+    let mut app = crate::test_helpers::similar_focused_over_a_queue();
+
+    let data = drive_on(&mut app, "selection").data.expect("a record");
+
+    assert_eq!(data.get("name"), Some(&json!("Similar One")), "{data}");
+    assert_eq!(data.get("view"), Some(&json!("similar")), "{data}");
+}
+
+#[test]
+fn add_to_queue_under_similar_focus_names_the_similar_row() {
+    // The add itself goes to the Similar tab (`current_view_page()`); the
+    // reply named the queue row behind it.
+    let mut app = crate::test_helpers::similar_focused_over_a_queue();
+
+    let resp = drive_on(&mut app, "add-to-queue");
+
+    assert_eq!(resp.data, Some(json!({ "added": "Similar One" })));
+}
+
+#[test]
+fn add_to_queue_names_rows_nothing_rates() {
+    // A playlist or genre parent and a Harbour row are enqueued by Shift+A
+    // but have no star or rating, and the reply used to read `null` for them.
+    use crate::test_helpers::{make_genre, make_playlist, seed_genres};
+
+    let mut app = test_app();
+    app.current_view = crate::View::Playlists;
+    app.library
+        .playlists
+        .set_from_vec(vec![make_playlist("p1", "Road Trip")]);
+    let resp = drive_on(&mut app, "add-to-queue");
+    assert_eq!(resp.data, Some(json!({ "added": "Road Trip" })), "playlist");
+
+    let mut app = test_app();
+    app.current_view = crate::View::Genres;
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    let resp = drive_on(&mut app, "add-to-queue");
+    assert_eq!(resp.data, Some(json!({ "added": "Ambient" })), "genre");
+
+    let mut app = test_app();
+    app.current_view = crate::View::Harbour;
+    app.harbour.recently_added = vec![crate::test_helpers::make_album("a1", "Added", "Artist")];
+    app.harbour_page
+        .collapsed
+        .remove(&crate::views::harbour::HarbourSectionId::RecentlyAdded);
+    let rows = crate::views::harbour::build_harbour_rows(
+        &app.harbour,
+        &app.harbour_page.collapsed,
+        &app.trawl.mix,
+    );
+    let item = rows
+        .iter()
+        .position(|r| matches!(r, crate::views::harbour::HarbourRow::Item { .. }))
+        .expect("the Recently Added item row");
+    app.harbour_page
+        .common
+        .slot_list
+        .set_selected(item, rows.len());
+    let resp = drive_on(&mut app, "add-to-queue");
+    assert_eq!(resp.data, Some(json!({ "added": "Added" })), "harbour item");
+}
+
+#[test]
+fn add_to_queue_on_a_list_that_adds_nothing_reports_null() {
+    // Radios never enqueue (Shift+A toasts "No item selected"), so `null`
+    // is the honest reply there.
+    let mut app = test_app();
+    app.current_view = crate::View::Radios;
+    app.library.radio_stations = vec![nokkvi_data::types::radio_station::RadioStation {
+        id: "r1".into(),
+        name: "Station".into(),
+        stream_url: "http://example.invalid/stream".into(),
+        home_page_url: None,
+        cover_art: None,
+    }];
+
+    let resp = drive_on(&mut app, "add-to-queue");
+
+    assert_eq!(resp.data, Some(json!({ "added": null })));
+}
+
 #[test]
 fn remove_from_queue_outside_queue_view_errors() {
     // Queue-gated: the centered item only has meaning in the queue view, so the
