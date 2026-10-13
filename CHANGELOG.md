@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - A view switch made while Settings is open (a nav tab, a view hotkey, `nokkvi switch-view`) now opens that view, not the one you came from.
 - Find Similar now stops a roulette spin running on the view it leaves.
 - Find Similar now cancels a pending jump to a clicked album, artist or genre on the view it leaves.
+- With Enter set to Append & Play and shuffle on, Enter while stopped or paused now plays every appended song instead of skipping some.
 
 ### Removed
 

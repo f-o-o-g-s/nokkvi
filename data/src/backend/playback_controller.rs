@@ -325,7 +325,7 @@ impl PlaybackController {
                 .cloned();
 
             // Persist the resolved current_index so the queue navigator and UI
-            // stay in sync (mirrors what play_song_from_queue does). Engine is
+            // stay in sync (mirrors what play_entry_from_queue does). Engine is
             // already locked above, so the next-track-reset effect is
             // discharged in-line against the held lock.
             if let Some(idx) = current_index
@@ -1040,9 +1040,10 @@ impl PlaybackController {
 
     /// Play an already-queued song addressed by its per-row `entry_id`.
     ///
-    /// Drift-immune sibling of [`Self::play_song_from_queue`]: the
-    /// `entry_id` → (queue_index, song_id) resolution happens under the
-    /// queue lock, so a stale UI snapshot cannot send a wrong raw index.
+    /// The one play-from-queue body ([`Self::play_song_from_queue`] resolves
+    /// its row to an `entry_id` and comes here). The `entry_id` →
+    /// (queue_index, song_id) resolution happens under the queue lock, so a
+    /// stale UI snapshot cannot send a wrong raw index.
     /// Duplicate-aware — two queue rows that share a `song_id` carry
     /// distinct `entry_id`s, so the user gets the exact instance they
     /// clicked.
@@ -1095,14 +1096,14 @@ impl PlaybackController {
             } else {
                 qm.reposition_to_index(Some(queue_index))
             };
-            crate::services::queue::warn_if_unsaved(qm.save_order(), "a queue click");
+            crate::services::queue::warn_if_unsaved(qm.save_order(), "playing a queued song");
             (song_id, effect)
         };
 
         // 2. Sync the reactive current_index property with queue state
         self.queue_service.refresh_from_queue().await;
 
-        // 3. Build stream URL and play (mirrors play_song_from_queue)
+        // 3. Build stream URL and play
         let stream_url = session.stream_url(&song_id);
 
         let song = {
@@ -1125,46 +1126,27 @@ impl PlaybackController {
     /// it appends songs and immediately plays the first new row at the
     /// known just-appended index, so no other mutation has had a chance
     /// to shift positions.
+    ///
+    /// Resolves the row to its `entry_id` and plays it through
+    /// [`Self::play_entry_from_queue`], so it records history and moves the
+    /// cursor exactly as a queue click does, the shuffle re-anchor of a play
+    /// that starts playback included. Fails, changing nothing, when the row
+    /// at `queue_index` no longer holds `song_id`.
     pub async fn play_song_from_queue(&self, song_id: &str, queue_index: usize) -> Result<()> {
-        // Before the cursor moves: no session, no change.
-        let session = self.require_stream_session().await?;
-
-        // 0. Record current song in history before jumping
-        let queue_manager = self.queue_service.queue_manager();
-        {
-            let queue_navigator = self.queue_navigator.lock().await;
-            let current_id = queue_navigator.get_current_song_id().await;
-            if let Some(ref cid) = current_id {
-                let mut qm = queue_manager.lock().await;
-                // Key history by the leaving row's stable entry_id,
-                // resolved from the recorded song's OWN row.
-                qm.add_to_history_by_song_id(cid);
+        let entry_id = {
+            let queue_manager = self.queue_service.queue_manager();
+            let qm = queue_manager.lock().await;
+            match qm.song_id_at(queue_index) {
+                Some(id) if id == song_id => qm.entry_id_at(queue_index),
+                _ => None,
             }
         }
-
-        // 1. Set queue current index directly (no index_of scan needed).
-        //    The reposition produces a `NextTrackResetEffect` that is
-        //    discharged below where the engine lock is held.
-        let mut qm = queue_manager.lock().await;
-        let reposition_effect = qm.reposition_to_index(Some(queue_index));
-        crate::services::queue::warn_if_unsaved(qm.save_order(), "playing a queued song");
-        drop(qm);
-
-        // 2. Sync the reactive current_index property with queue state
-        self.queue_service.refresh_from_queue().await;
-
-        // 3. Build stream URL and play
-        let stream_url = session.stream_url(song_id);
-
-        let song = {
-            let qm = queue_manager.lock().await;
-            qm.get_song(song_id).cloned()
-        };
-
-        self.load_play_and_set_current(&stream_url, song, reposition_effect, song_id.to_string())
-            .await?;
-
-        Ok(())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "play_song_from_queue: queue position {queue_index} does not hold song {song_id}"
+            )
+        })?;
+        self.play_entry_from_queue(entry_id).await
     }
 
     /// Snapshot the navigator's current song ID without holding any other lock.
@@ -1245,7 +1227,7 @@ impl PlaybackController {
     ///
     /// Called from [`super::app_service::AppService::remove_queue_entries`]
     /// after the queue has already been mutated and the plan has been decided.
-    /// Mirrors the engine-load body of [`Self::play_song_from_queue`] but skips
+    /// Mirrors the engine-load body of [`Self::play_entry_from_queue`] but skips
     /// the play-history append (the previous song is being deleted, not skipped).
     ///
     /// Lock discipline: `qm` is only held briefly to read the new current's
@@ -2630,6 +2612,51 @@ mod tests {
             "the fallback must stage the replaced queue's target, got {:?}",
             e.source()
         );
+        Ok(())
+    }
+
+    /// Append and Play under shuffle from a stopped engine re-anchors the
+    /// order on the first appended song, as a queue click from a stopped
+    /// engine does. Repositioning into the spent order instead put the
+    /// appended songs at random slots around that song, so the ones behind
+    /// it never played.
+    #[tokio::test(flavor = "current_thread")]
+    async fn enqueue_and_play_while_stopped_reanchors_the_shuffle() -> Result<()> {
+        let fx = click_fixture().await?;
+        let _ = fx
+            .queue
+            .set_queue(
+                vec![click_song("a"), click_song("b"), click_song("c")],
+                Some(0),
+            )
+            .await;
+        // Shuffle on, cursor on the LAST play-order slot: a spent shuffle.
+        {
+            let qm_arc = fx.queue.queue_manager();
+            let mut qm = qm_arc.lock().await;
+            let _ = qm.toggle_shuffle();
+            let last_row = *qm.get_queue().order.last().expect("three rows");
+            let _ = qm.reposition_to_index(Some(last_row));
+        }
+
+        // The engine never played, so it is stopped. The unreachable server
+        // makes the load fail; the queue side is what's under test.
+        let orch =
+            crate::backend::queue_orchestrator::QueueOrchestrator::new(&fx.queue, &fx.playback);
+        let _ = orch
+            .enqueue_and_play(vec![click_song("x"), click_song("y"), click_song("z")])
+            .await;
+
+        let qm_arc = fx.queue.queue_manager();
+        let qm = qm_arc.lock().await;
+        let queue = qm.get_queue();
+        assert_eq!(
+            queue.current_order,
+            Some(0),
+            "the first appended song heads a fresh shuffle, every other song ahead of it"
+        );
+        let playing = queue.current_index().and_then(|row| qm.song_id_at(row));
+        assert_eq!(playing, Some("x"));
         Ok(())
     }
 

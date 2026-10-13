@@ -469,10 +469,10 @@ impl QueueManager {
     /// position of `song_id`. Resolves the row's stable `entry_id` from the
     /// recorded song's own row so the (song, entry_id) pair always agrees,
     /// then delegates to [`Self::add_to_history`]. No-ops when `song_id` is
-    /// not in the pool. Single source of truth for the three manual-play
-    /// primitives (`play_entry_from_queue`, `play_song_from_queue`,
-    /// `play_next`); the consume and repeat-track paths that already hold a
-    /// clean index call `add_to_history` directly.
+    /// not in the pool. Single source of truth for the manual-play
+    /// primitives (`play_entry_from_queue`, which `play_song_from_queue`
+    /// goes through, and `play_next`); the consume and repeat-track paths
+    /// that already hold a clean index call `add_to_history` directly.
     pub fn add_to_history_by_song_id(&mut self, song_id: &str) {
         let Some(song) = self.get_song(song_id).cloned() else {
             return;
