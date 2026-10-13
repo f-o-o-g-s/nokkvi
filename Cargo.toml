@@ -79,6 +79,12 @@ redundant_clone = "warn"
 # fn (`Self::f(..)`), or `expect` it with the reason the receiver stays.
 unused_self = "warn"
 
+# A function that can't fail returns its value bare (code-standards.md "Error
+# Handling"): callers write `Err` arms against a `Result` that is never `Err`.
+# A wrapper the caller's shape demands (a serde `deserialize_with`, a closure
+# type) is `expect`ed with that reason.
+unnecessary_wraps = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.25.0"

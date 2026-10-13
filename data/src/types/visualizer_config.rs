@@ -23,6 +23,10 @@ use crate::utils::clamp::{finite_clamp32, finite_clamp64};
 /// stringly-typed-then-now-typed-enum fields, so existing user `config.toml`
 /// files with empty strings or typos keep parsing instead of rejecting the
 /// whole `[visualizer]` section.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "serde's `deserialize_with` requires a Result, even from a deserializer that never fails"
+)]
 fn deserialize_or_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
     T: Deserialize<'de> + Default,

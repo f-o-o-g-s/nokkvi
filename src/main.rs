@@ -1312,7 +1312,8 @@ pub fn main() -> iced::Result {
         && update::IPC_KNOWN_COMMANDS.contains(&verb.as_str())
     {
         let cmd_args = build_ipc_cli_args(verb, args.get(2).map(String::as_str));
-        return forward_ipc_command(verb, cmd_args);
+        forward_ipc_command(verb, cmd_args);
+        return Ok(());
     }
 
     for arg in args.iter().skip(1) {
@@ -1661,7 +1662,7 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
 /// Forward a single IPC verb (with optional structured args) to the running
 /// nokkvi instance, print the response, exit.
 ///
-/// Returns `Ok(())` on success. Errors print to stderr and call
+/// Returns on success. Errors print to stderr and call
 /// [`std::process::exit(1)`] — we don't return `Err(iced::Error)` because the
 /// caller would otherwise initialize iced just to surface the error.
 ///
@@ -1670,7 +1671,7 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
 ///       printed to stdout (every verb carries one — mutating verbs echo their
 ///       resulting state, others a JSON ack — so success is never silent).
 ///   1 — could not reach a running instance, or server returned an error.
-fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
+fn forward_ipc_command(verb: &str, args: serde_json::Value) {
     let Some(path) = nokkvi_ipc::find_live_socket() else {
         #[expect(clippy::print_stderr, reason = "command-line error output")]
         {
@@ -1698,7 +1699,7 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
 /// Print a server's answer to `verb` and return, or print its error to
 /// stderr and exit 1. Shared by [`forward_ipc_command`] and the bare-launch
 /// hand-off.
-fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) -> iced::Result {
+fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) {
     if let Some(err) = response.error {
         #[expect(clippy::print_stderr, reason = "command-line error output")]
         {
@@ -1724,7 +1725,6 @@ fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) -> iced::Re
         };
         println!("{payload}");
     }
-    Ok(())
 }
 
 /// What a launch that reached the single-instance probe should do.
@@ -1825,7 +1825,10 @@ fn hand_off_to_running_instance(socket: &std::path::Path) -> iced::Result {
     let request = nokkvi_ipc::IpcRequest::new(1, "show", serde_json::Value::Null);
     match nokkvi_ipc::client::send_request(socket, &request) {
         Ok(response) if running_instance_predates_show(&response) => refuse_second_launch(socket),
-        Ok(response) => print_ipc_response("show", response),
+        Ok(response) => {
+            print_ipc_response("show", response);
+            Ok(())
+        }
         Err(err) => {
             #[expect(clippy::print_stderr, reason = "command-line error output")]
             {

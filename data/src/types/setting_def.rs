@@ -718,6 +718,10 @@ mod tests {
     }
 
     impl MockMgr {
+        #[expect(
+            clippy::unnecessary_wraps,
+            reason = "mirrors the fallible SettingsManager::set_* shape a real row's setter returns"
+        )]
         pub fn set_flag(&mut self, v: bool) -> ::anyhow::Result<()> {
             self.last_flag = v;
             Ok(())

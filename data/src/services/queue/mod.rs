@@ -3461,13 +3461,12 @@ pub(crate) mod tests {
     /// single pass (one scan, one `Vec::remove`, one pool check and one
     /// durable save per row), kept as the reference the proptest below
     /// checks the single pass against.
-    fn remove_entries_by_ids_reference(qm: &mut QueueManager, entry_ids: &[u64]) -> Result<()> {
+    fn remove_entries_by_ids_reference(qm: &mut QueueManager, entry_ids: &[u64]) {
         for &eid in entry_ids {
             if let Some(idx) = qm.index_of_entry(eid) {
                 let _ = qm.remove_song(idx);
             }
         }
-        Ok(())
     }
 
     mod remove_entries_oracle {
@@ -3533,7 +3532,7 @@ pub(crate) mod tests {
                 entry_ids.extend(unknown);
 
                 let _ = fast.remove_entries_by_ids(&entry_ids);
-                remove_entries_by_ids_reference(&mut slow, &entry_ids).expect("row loop");
+                remove_entries_by_ids_reference(&mut slow, &entry_ids);
 
                 prop_assert_eq!(row_pairs(&fast), row_pairs(&slow));
                 prop_assert_eq!(fast.queue.order.as_slice(), slow.queue.order.as_slice());
@@ -3711,7 +3710,7 @@ pub(crate) mod tests {
 
         let (mut qm, doomed, _temp) = fresh_manager();
         let start = std::time::Instant::now();
-        remove_entries_by_ids_reference(&mut qm, &doomed).expect("remove");
+        remove_entries_by_ids_reference(&mut qm, &doomed);
         let reference = start.elapsed();
         assert_eq!(qm.queue.rows.len(), ROWS - doomed.len());
         eprintln!(

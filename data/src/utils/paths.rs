@@ -715,6 +715,10 @@ mod tests {
     //  edit_config_doc / edit_existing_config_doc — fail-loud RMW
     // ══════════════════════════════════════════════════════════════════
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "an edit_config_doc closure, also stored as `fn(..) -> Result<()>` beside a failing one"
+    )]
     fn set_key(doc: &mut toml_edit::DocumentMut) -> Result<()> {
         doc["added"] = toml_edit::value(true);
         Ok(())
