@@ -350,6 +350,45 @@ pub(crate) fn subsonic_token_credential(username: &str, salt: &str, token: &str)
     format!("u={username}&s={salt}&t={token}")
 }
 
+/// The fields of a `/rest` credential string, form-decoded: the salt and
+/// token of the pair [`subsonic_token_credential`] builds, or the key
+/// `ApiKey::credential` builds (`apiKey`). A field given twice keeps its last
+/// value. The username is left out on purpose: an API key credential holds
+/// none, so the session's username never comes from its credential.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CredentialParts {
+    pub(crate) salt: Option<String>,
+    pub(crate) token: Option<String>,
+    pub(crate) api_key: Option<String>,
+}
+
+impl CredentialParts {
+    pub(crate) fn parse(credential: &str) -> Self {
+        let mut parts = Self::default();
+        for (field, value) in url::form_urlencoded::parse(credential.as_bytes()) {
+            let slot = match field.as_ref() {
+                "s" => &mut parts.salt,
+                "t" => &mut parts.token,
+                "apiKey" => &mut parts.api_key,
+                _ => continue,
+            };
+            *slot = Some(value.into_owned());
+        }
+        parts
+    }
+}
+
+/// The form of a username that names one Navidrome user: Navidrome looks
+/// users up case-insensitively (`COLLATE NOCASE`), so it is lowercased.
+pub(crate) fn user_key(username: &str) -> String {
+    username.to_lowercase()
+}
+
+/// Whether two usernames name the same Navidrome user (see [`user_key`]).
+pub(crate) fn same_user(a: &str, b: &str) -> bool {
+    user_key(a) == user_key(b)
+}
+
 /// Rebuild a stored token credential with `username` encoded: sessions saved
 /// before the encoding fix stored the username raw. A credential without a
 /// salt/token pair (or with no username to rebuild from) is kept as stored.
@@ -357,17 +396,12 @@ fn reencode_stored_credential(username: &str, stored: &str) -> String {
     if username.is_empty() {
         return stored.to_string();
     }
-    let mut salt = None;
-    let mut token = None;
-    for part in stored.split('&') {
-        if let Some(value) = part.strip_prefix("s=") {
-            salt = Some(value);
-        } else if let Some(value) = part.strip_prefix("t=") {
-            token = Some(value);
-        }
-    }
-    match (salt, token) {
-        (Some(salt), Some(token)) => subsonic_token_credential(username, salt, token),
+    match CredentialParts::parse(stored) {
+        CredentialParts {
+            salt: Some(salt),
+            token: Some(token),
+            ..
+        } => subsonic_token_credential(username, &salt, &token),
         _ => stored.to_string(),
     }
 }
@@ -435,6 +469,34 @@ mod tests {
             subsonic_token_credential("foogs", "salt", "tok"),
             "u=foogs&s=salt&t=tok"
         );
+    }
+
+    /// What the two credential builders write, `CredentialParts` reads back.
+    #[test]
+    fn credential_parts_read_back_what_the_builders_write() {
+        assert_eq!(
+            CredentialParts::parse(&subsonic_token_credential("a+b&s=x@y", "5a17", "70ce")),
+            CredentialParts {
+                salt: Some("5a17".into()),
+                token: Some("70ce".into()),
+                api_key: None,
+            }
+        );
+        let key = crate::services::api_key::ApiKey::mint().expect("mint");
+        assert_eq!(
+            CredentialParts::parse(&key.credential()),
+            CredentialParts {
+                api_key: Some(key.as_str().to_owned()),
+                ..CredentialParts::default()
+            }
+        );
+    }
+
+    #[test]
+    fn same_user_ignores_case_and_user_key_lowercases() {
+        assert!(same_user("Foogs", "fOOGS"));
+        assert!(!same_user("foogs", "foogs2"));
+        assert_eq!(user_key("Foogs"), "foogs");
     }
 
     /// A session saved before the encoding fix stored the username raw;

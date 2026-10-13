@@ -32,6 +32,7 @@ use tracing::debug;
 
 use crate::services::{
     api::players::{PlayerRow, PlayerSettings},
+    auth::{CredentialParts, same_user},
     queue::slots::QueueOwner,
     state_storage::StateStorage,
 };
@@ -114,8 +115,9 @@ impl ApiKey {
 /// Whether a `/rest` credential string sends an API key (`apiKey=<key>`)
 /// rather than the token pair.
 pub fn is_api_key_credential(credential: &str) -> bool {
-    url::form_urlencoded::parse(credential.as_bytes())
-        .any(|(key, value)| key == "apiKey" && !value.is_empty())
+    CredentialParts::parse(credential)
+        .api_key
+        .is_some_and(|key| !key.is_empty())
 }
 
 // ── The lock that orders key writes ─────────────────────────────────────────
@@ -273,7 +275,6 @@ pub(crate) fn settings_template(
     user_id: &str,
     username: &str,
 ) -> PlayerSettings {
-    let username = username.to_lowercase();
     rows.iter()
         .filter(|row| {
             row.client == PLAYER_CLIENT
@@ -286,7 +287,7 @@ pub(crate) fn settings_template(
             if !user_id.is_empty() && !row.user_id.is_empty() {
                 row.user_id == user_id
             } else {
-                !username.is_empty() && row.user_name.to_lowercase() == username
+                !username.is_empty() && same_user(&row.user_name, username)
             }
         })
         .max_by_key(|row| {

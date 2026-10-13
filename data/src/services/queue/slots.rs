@@ -60,7 +60,7 @@ impl QueueOwner {
     /// usernames are case-insensitive, so the username is lowercased.
     pub fn new(server_url: &str, username: &str) -> Self {
         let server = server_key(server_url);
-        let user = username.trim().to_lowercase();
+        let user = crate::services::auth::user_key(username.trim());
         Self {
             key: format!("{server}{SEP}{user}"),
             label: format!("{user}@{server}"),

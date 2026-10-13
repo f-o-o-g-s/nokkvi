@@ -14,7 +14,7 @@ use crate::{
     services::{
         api::{client::ApiClient, players::PlayersApiService},
         api_key::{self, ApiKey},
-        auth::{self as auth_api, AuthService},
+        auth::{self as auth_api, AuthService, same_user},
         queue::slots::QueueOwner,
         state_storage::StateStorage,
     },
@@ -91,12 +91,6 @@ async fn timed<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
                 KEY_REQUEST_TIMEOUT.as_secs()
             )
         })?
-}
-
-/// Whether `username`s name the same Navidrome user. Navidrome looks users
-/// up case-insensitively (`COLLATE NOCASE`).
-fn same_user(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
 }
 
 /// Register a fresh key for `session`: `Ok(None)` when the server takes no
