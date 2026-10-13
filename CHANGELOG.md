@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Opening the playlist editor now plays the view-change sound, like other view switches.
+
 ### Fixed
 
 - With Similar results focused, the rating keys and the love key now act on the centered Similar song, not the queue's.
@@ -19,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - The `add-to-queue` and `remove-from-queue` commands now do nothing under the EQ, About or Get Info window, a picker or a dialog.
 - Loving a song now rates it five stars only after the server accepts the love.
 - Dropping songs into the playlist editor on an expired session now returns you to the login screen instead of doing nothing.
+- Opening the playlist editor now stops a roulette spin running on the Playlists view.
+- Clicking the Editing tab while Settings is open now opens the playlist editor.
 
 ### Removed
 

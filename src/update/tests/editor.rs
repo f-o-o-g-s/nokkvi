@@ -160,6 +160,87 @@ fn freshly_loaded_editor_is_not_dirty() {
     );
 }
 
+// --- Entering the editor is a view switch ------------------------------------
+
+/// The Playlists view with a roulette spin running on it.
+fn playlists_with_a_roulette_spin() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.current_view = crate::View::Playlists;
+    app.library.playlists.set_from_vec(
+        (0..4)
+            .map(|i| make_playlist(&format!("p{i}"), &format!("Playlist {i}")))
+            .collect(),
+    );
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(
+        crate::View::Playlists,
+    ));
+    assert!(app.roulette.is_some(), "the spin is running");
+    app
+}
+
+#[test]
+fn entering_edit_mode_cancels_a_roulette_spin() {
+    // The spin's list leaves the screen; left running it would keep
+    // scrolling the hidden Playlists view and play wherever it lands.
+    let mut app = playlists_with_a_roulette_spin();
+
+    enter_edit(&mut app, "p0");
+
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+    assert!(app.roulette.is_none(), "the spin stops with its list");
+}
+
+#[test]
+fn entering_create_mode_cancels_a_roulette_spin() {
+    let mut app = playlists_with_a_roulette_spin();
+
+    let _ = app.handle_enter_playlist_create_mode();
+
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+    assert!(app.roulette.is_none(), "the spin stops with its list");
+}
+
+#[test]
+fn entering_edit_mode_closes_an_open_menu() {
+    // A menu's anchor belongs to the outgoing view's layout.
+    let mut app = test_app();
+    app.current_view = crate::View::Playlists;
+    app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
+
+    enter_edit(&mut app, "p0");
+
+    assert!(app.open_menu.is_none());
+}
+
+#[test]
+fn entering_edit_mode_from_settings_shows_the_editor() {
+    // Some entries land after an async fetch, and Settings can open in the
+    // meantime: the switch out of Settings must still reach the editor
+    // rather than the view Settings was opened from.
+    let mut app = test_app();
+    app.current_view = crate::View::Settings;
+    app.pre_settings_view = crate::View::Albums;
+
+    enter_edit(&mut app, "p0");
+
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+    assert_eq!(app.editor_return_view, crate::View::Settings);
+}
+
+#[test]
+fn the_editing_pill_in_settings_opens_the_editor() {
+    // The nav bar shows the Editing pill over Settings too; its switch is
+    // explicit, unlike the Settings tab's dummy Queue target.
+    let mut app = test_app();
+    enter_edit(&mut app, "p0");
+    app.current_view = crate::View::Settings;
+    app.pre_settings_view = crate::View::Albums;
+
+    let _ = app.handle_switch_view(crate::View::PlaylistEditor);
+
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+}
+
 #[test]
 fn create_new_playlist_edit_does_not_clear_queue() {
     // Regression for bug 4: "create new playlist & edit" with a populated queue

@@ -20,7 +20,7 @@ use nokkvi_data::types::{
 use tracing::{debug, info, warn};
 
 use crate::{
-    Nokkvi, View,
+    Nokkvi,
     app_message::{Message, RulesEditorMessage, RulesEntryTarget},
     state::{
         EditingCell, FormCell, FormMode, FormRow, JsonModeState, PreviewPhase, RulesPane,
@@ -228,12 +228,7 @@ impl Nokkvi {
         self.browsing_panel = None;
         self.pane_focus = crate::state::PaneFocus::Queue;
         self.queue_page.collapse_playlist_strip();
-        self.editor_return_view = if self.current_view == View::PlaylistEditor {
-            View::Playlists
-        } else {
-            self.current_view
-        };
-        self.current_view = View::PlaylistEditor;
+        let enter = self.enter_editor_view();
 
         // Session-open data dependencies: the playlists list (sub-picker
         // rows + list-gated diagnostics — the queue lanes prove
@@ -296,6 +291,7 @@ impl Nokkvi {
             self.fetch_playlist_custom_mini_task(id, None)
         });
         Task::batch([
+            enter,
             list_fetch,
             tag_fetch,
             initial_eval,

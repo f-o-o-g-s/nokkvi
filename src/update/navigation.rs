@@ -295,6 +295,24 @@ impl Nokkvi {
         Task::batch([exit_theater, self.switch_view_inner(view)])
     }
 
+    /// Show the playlist editor for the session just installed in
+    /// `playlist_editor` (the guard in `switch_view_inner` needs it set
+    /// first). Remembers where the edit was launched from so discard/exit
+    /// returns there (mirrors `pre_settings_view`), then switches through
+    /// `switch_view_inner`, so the outgoing view gets the teardown of any
+    /// view switch: the open menu, its reveal locks, a stranded drag, and a
+    /// roulette spin or find-and-expand chain running on it.
+    pub(crate) fn enter_editor_view(&mut self) -> Task<Message> {
+        // Re-entry from the editor itself would trap the return view on the
+        // editor.
+        self.editor_return_view = if self.current_view == View::PlaylistEditor {
+            View::Playlists
+        } else {
+            self.current_view
+        };
+        self.switch_view_inner(View::PlaylistEditor)
+    }
+
     fn switch_view_inner(&mut self, view: View) -> Task<Message> {
         // Close any open overlay menu — its anchor (cursor position, trigger
         // bounds) is tied to the previous view's layout.
@@ -328,8 +346,13 @@ impl Nokkvi {
         }
         // When leaving Settings via SwitchView, redirect to the saved pre-settings view
         // unless the user explicitly picked a specific tab (not Queue, which is the
-        // default dummy emitted by the settings tab button).
-        let view = if self.current_view == View::Settings && view != View::Settings {
+        // default dummy emitted by the settings tab button). The playlist editor is
+        // never that dummy: a switch to it is an editor entry (some land after an
+        // async fetch, with Settings opened meanwhile) or the Editing pill.
+        let view = if self.current_view == View::Settings
+            && view != View::Settings
+            && view != View::PlaylistEditor
+        {
             self.pre_settings_view
         } else {
             view

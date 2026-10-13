@@ -237,17 +237,9 @@ impl Nokkvi {
         // alongside `clear_active_playlist`) so the identity re-mounts collapsed
         // rather than carrying a stale expansion onto the Queue tab.
         self.queue_page.collapse_playlist_strip();
-        // Remember where the edit was launched from so discard/exit returns
-        // there (mirrors `pre_settings_view`). Guard against re-entry from the
-        // editor itself, which would trap the return view on the editor.
-        self.editor_return_view = if self.current_view == View::PlaylistEditor {
-            View::Playlists
-        } else {
-            self.current_view
-        };
         // Navigate to the dedicated editor view. The live Queue tab is left
         // alone, so the user can always switch back to their real queue.
-        self.current_view = View::PlaylistEditor;
+        let enter = self.enter_editor_view();
 
         // Default browsing tab is Songs — trigger load if data hasn't arrived yet
         let songs_load = if self.library.songs.is_empty() {
@@ -290,7 +282,7 @@ impl Nokkvi {
         // trigger) so the within-list drag maps correctly from the first drag.
         self.resync_slot_counts();
 
-        Task::batch([editor_load, songs_load, cover_fetch])
+        Task::batch([enter, editor_load, songs_load, cover_fetch])
     }
 
     /// Enter the drop-into-editor "New Playlist" create flow: mount a BLANK
@@ -317,12 +309,7 @@ impl Nokkvi {
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
         self.queue_page.collapse_playlist_strip();
-        self.editor_return_view = if self.current_view == View::PlaylistEditor {
-            View::Playlists
-        } else {
-            self.current_view
-        };
-        self.current_view = View::PlaylistEditor;
+        let enter = self.enter_editor_view();
 
         // Load the browser's Songs tab if it hasn't arrived, so tracks can be
         // dragged in immediately.
@@ -339,7 +326,7 @@ impl Nokkvi {
         // Size the editor's stored slot_count to its actual render (see the
         // edit-mode path) so a drag in a fresh create session maps correctly.
         self.resync_slot_counts();
-        Task::batch([songs_load, focus])
+        Task::batch([enter, songs_load, focus])
     }
 
     /// A deferred-create session's first Save minted the playlist. Adopt the

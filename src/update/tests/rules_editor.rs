@@ -102,6 +102,29 @@ fn enter_create_mounts_rules_session_editing_name() {
     assert!(s.draft.is_none(), "no draft object in M4");
 }
 
+/// Mounting a rules session is a view switch: a roulette spin running on
+/// the Playlists view stops with its list instead of scrolling it hidden.
+#[test]
+fn entering_rules_mode_cancels_a_roulette_spin() {
+    let mut app = capable_app();
+    app.current_view = crate::View::Playlists;
+    app.library.playlists.append_page(
+        (0..4)
+            .map(|i| smart_row(&format!("sp{i}"), &format!("Smart {i}"), "user-9"))
+            .collect(),
+        4,
+    );
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(
+        crate::View::Playlists,
+    ));
+    assert!(app.roulette.is_some(), "the spin is running");
+
+    open_create(&mut app);
+
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+    assert!(app.roulette.is_none(), "the spin stops with its list");
+}
+
 /// EnterRulesMode(Edit): seed focus = CURSOR mode on the match row (the
 /// rules are the object of the visit), rules parsed from the row's
 /// substrate, evaluatedAt carried into the pane.
