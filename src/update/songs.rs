@@ -119,33 +119,9 @@ impl Nokkvi {
         updated_at: Option<String>,
         art: MiniArt,
     ) -> Task<Message> {
-        // Release the in-flight claim on every outcome, so a transient
-        // failure is re-attempted by the next viewport pass.
-        self.artwork.album_art_pending.remove(&album_id);
-        match art {
-            MiniArt::Loaded(h) => {
-                // Record the version in lockstep with the handle (N17) — see
-                // `handle_artwork_loaded`.
-                self.artwork.failed_art.remove(&album_id);
-                self.artwork
-                    .album_art_versions
-                    .insert(album_id.clone(), updated_at);
-                self.artwork.album_art.put(album_id, h);
-            }
-            MiniArt::Missing => {
-                // Deterministic miss → negatively cache so passive song-mini
-                // prefetch stops re-queuing it (passive surfaces feed version
-                // None, so it is keyed by None). Cleared on a later success, a
-                // Refresh Artwork, or logout. Logged once (then suppressed).
-                debug!(
-                    " Song-mini artwork not found on server for album: {}",
-                    album_id
-                );
-                self.artwork.failed_art.insert(album_id, updated_at);
-            }
-            // Transient failure → record nothing; the next revisit re-attempts.
-            MiniArt::Transient => {}
-        }
+        // The passive surfaces feed version None, so the album handler's
+        // stale-large-art check could never fire here.
+        self.record_mini_art(&album_id, &updated_at, art);
         Task::none()
     }
 

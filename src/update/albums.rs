@@ -120,39 +120,59 @@ impl Nokkvi {
         updated_at: Option<String>,
         art: MiniArt,
     ) -> Task<Message> {
-        // Quad-tile fetches gate on this in-flight set; release the slot on
-        // every outcome so a throttled tile can be retried by the next prefetch
-        // dispatch instead of staying blocked forever.
-        self.artwork.album_art_pending.remove(&id);
+        // Navidrome 0.64+: the cover changed under the cached large art. Drop
+        // it and reload the centered row's.
+        if self.record_mini_art(&id, &updated_at, art)
+            && self.large_art_is_stale(&id, updated_at.as_deref())
+        {
+            self.artwork.large_artwork.pop(&id);
+            self.artwork.large_artwork_hashes.remove(&id);
+            return self
+                .center_large_artwork_load_task(self.current_view)
+                .unwrap_or_else(Task::none);
+        }
+        Task::none()
+    }
+
+    /// Record an arrived 80px thumbnail for `id` (album or `ar-` artist id),
+    /// fetched at `version`, into the shared `album_art` cache and its gate
+    /// bookkeeping. The one body behind `handle_artwork_loaded` and
+    /// `handle_song_artwork_loaded`. Returns whether an image landed.
+    pub(crate) fn record_mini_art(
+        &mut self,
+        id: &str,
+        version: &Option<String>,
+        art: MiniArt,
+    ) -> bool {
+        // Release the in-flight claim on every outcome, so a throttled or
+        // failed fetch is re-attempted by the next prefetch pass instead of
+        // staying blocked.
+        self.artwork.album_art_pending.remove(id);
         match art {
             MiniArt::Loaded(h) => {
-                // Record the cache-buster the URL carried, in lockstep with the
+                // Record the version the URL carried, in lockstep with the
                 // handle, so a later server cover change is a version-aware miss
                 // (N17). album_art evicts at capacity; `should_refetch` guards the
                 // skew by also checking album_art membership.
-                self.artwork.failed_art.remove(&id);
+                self.artwork.failed_art.remove(id);
                 self.artwork
                     .album_art_versions
-                    .insert(id.clone(), updated_at.clone());
-                self.artwork.album_art.put(id.clone(), h);
-                // Navidrome 0.64+: the cover changed under the cached large
-                // art. Drop it and reload the centered row's.
-                if self.large_art_is_stale(&id, updated_at.as_deref()) {
-                    self.artwork.large_artwork.pop(&id);
-                    self.artwork.large_artwork_hashes.remove(&id);
-                    return self
-                        .center_large_artwork_load_task(self.current_view)
-                        .unwrap_or_else(Task::none);
-                }
+                    .insert(id.to_owned(), version.clone());
+                self.artwork.album_art.put(id.to_owned(), h);
+                true
             }
             MiniArt::Missing => {
                 // Deterministic: the server has no art for this id. Negatively
-                // cache it (keyed by the version that failed) so the membership-
-                // based prefetch gates stop re-queuing it on every scroll/resize.
-                // A bumped updated_at, a later success, a user Refresh Artwork, or
-                // logout all re-enable it. Logged once (then suppressed).
-                debug!(" Mini artwork not found on server for album: {}", id);
-                self.artwork.failed_art.insert(id, updated_at);
+                // cache it (keyed by the version that failed; the passive
+                // surfaces feed None) so the membership-based prefetch gates stop
+                // re-queuing it on every scroll/resize. A changed version, a
+                // later success, a user Refresh Artwork, or logout all re-enable
+                // it. Logged once (then suppressed).
+                debug!(" Mini artwork not found on server for: {}", id);
+                self.artwork
+                    .failed_art
+                    .insert(id.to_owned(), version.clone());
+                false
             }
             MiniArt::Transient => {
                 // Throttle/timeout/empty — record NOTHING so the next prefetch
@@ -160,9 +180,9 @@ impl Nokkvi {
                 // Negative-caching here would blank a cover that actually exists.
                 // Silent on purpose: expected under throttle and self-healing;
                 // the retry wrapper already logs a give-up for the retry surfaces.
+                false
             }
         }
-        Task::none()
     }
 
     /// The image info (Navidrome 0.64+) of an album row nokkvi holds: the
