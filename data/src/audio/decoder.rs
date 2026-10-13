@@ -37,6 +37,15 @@ fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
             .is_some_and(|v| v.to_str().unwrap_or("").to_lowercase().contains("icecast"))
 }
 
+/// Whether an answer says the server won't serve byte ranges
+/// (`Accept-Ranges: none`), as Navidrome's live transcode does.
+fn refuses_ranges(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(reqwest::header::ACCEPT_RANGES)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("none"))
+}
+
 /// The stream's length in ms from an `X-Content-Duration` header (seconds,
 /// as a float), or `None` when absent or unusable.
 fn x_content_duration_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
@@ -758,6 +767,12 @@ impl AudioDecoder {
             // HTTP server or a proxy) can't turn it into a finite file that
             // ends and never reconnects.
             let mut is_radio = self.source_kind == SourceKind::Station;
+            // Set once an answer carries no length and says the server won't
+            // serve ranges (`Accept-Ranges: none`, Navidrome's live
+            // transcode): no later probe can turn up a length, and each one
+            // is a full stream request (with the transcode cache off, its
+            // own ffmpeg run), so the open goes straight to the stream GET.
+            let mut lengthless = false;
 
             // Try HEAD request first
             let mut content_length = if is_radio {
@@ -800,7 +815,9 @@ impl AudioDecoder {
                             trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
                             None
                         } else {
-                            head_response.content_length().filter(|&len| len > 0)
+                            let length = head_response.content_length().filter(|&len| len > 0);
+                            lengthless = length.is_none() && refuses_ranges(headers);
+                            length
                         }
                     }
                     _ => None,
@@ -809,7 +826,7 @@ impl AudioDecoder {
 
             // If HEAD didn't give us content-length, try a Range request with bytes=0-0
             // to get the Content-Range header which tells us total size
-            if content_length.is_none() && !is_radio {
+            if content_length.is_none() && !is_radio && !lengthless {
                 trace!(" [DECODER] HEAD didn't return Content-Length, trying Range probe...");
                 match client
                     .get(&self.url)
@@ -853,6 +870,9 @@ impl AudioDecoder {
                                     len
                                 );
                             }
+                            lengthless = content_length.is_none()
+                                && range_response.status().is_success()
+                                && refuses_ranges(range_response.headers());
                         }
                     }
                     Err(e) => {
@@ -862,7 +882,7 @@ impl AudioDecoder {
             }
 
             // If we still don't have content-length, try a regular GET and read content-length header
-            if content_length.is_none() && !is_radio {
+            if content_length.is_none() && !is_radio && !lengthless {
                 trace!(" [DECODER] Trying regular GET to detect Content-Length...");
                 match client.get(&self.url).send().await {
                     Ok(response) if response.status().is_success() => {
@@ -2449,24 +2469,61 @@ pub(crate) mod tests {
     pub(crate) async fn spawn_live_transcode(
         duration_header: Option<&'static str>,
     ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        let (url, requests, _methods) = spawn_live_transcode_logged(duration_header).await;
+        (url, requests)
+    }
+
+    /// [`spawn_live_transcode`], also returning each request's method in the
+    /// order the server read them.
+    pub(crate) async fn spawn_live_transcode_logged(
+        duration_header: Option<&'static str>,
+    ) -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<parking_lot::Mutex<Vec<String>>>,
+    ) {
+        spawn_lengthless_stream(duration_header, true).await
+    }
+
+    /// The live-transcode server, with `Accept-Ranges: none` only when
+    /// `refuse_ranges` is set (Navidrome always sends it).
+    async fn spawn_lengthless_stream(
+        duration_header: Option<&'static str>,
+        refuse_ranges: bool,
+    ) -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<parking_lot::Mutex<Vec<String>>>,
+    ) {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
         };
 
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let methods = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let served = requests.clone();
+        let logged = methods.clone();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 served.fetch_add(1, Ordering::SeqCst);
+                let logged = logged.clone();
                 tokio::spawn(async move {
                     let mut request = [0u8; 2048];
                     let len = socket.read(&mut request).await.unwrap_or(0);
-                    let mut headers = String::from(
-                        "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nAccept-Ranges: none\r\n",
-                    );
+                    if let Some(method) = String::from_utf8_lossy(&request[..len])
+                        .split_whitespace()
+                        .next()
+                    {
+                        logged.lock().push(method.to_owned());
+                    }
+                    let mut headers =
+                        String::from("HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n");
+                    if refuse_ranges {
+                        headers.push_str("Accept-Ranges: none\r\n");
+                    }
                     if let Some(secs) = duration_header {
                         headers.push_str(&format!("X-Content-Duration: {secs}\r\n"));
                     }
@@ -2489,7 +2546,11 @@ pub(crate) mod tests {
                 });
             }
         });
-        (format!("http://{addr}/rest/stream?id=t1&f=json"), requests)
+        (
+            format!("http://{addr}/rest/stream?id=t1&f=json"),
+            requests,
+            methods,
+        )
     }
 
     /// Read `decoder` until EOF (or 10 s), as the decode loop would.
@@ -2574,6 +2635,41 @@ pub(crate) mod tests {
         decoder.init(&url).await.expect("the transcode must open");
 
         assert_eq!(decoder.duration(), 200_000);
+    }
+
+    /// A live transcode's first answer (the HEAD) already says it has no
+    /// length and serves no ranges, so the open goes straight to the stream
+    /// GET. It used to send a Range probe and a plain GET as well, each
+    /// thrown away, and with Navidrome's transcode cache off each one started
+    /// its own ffmpeg run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_opens_with_a_head_and_one_get() {
+        let (url, _requests, methods) = spawn_live_transcode_logged(Some("245.5")).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the transcode must open");
+
+        assert_eq!(*methods.lock(), ["HEAD", "GET"]);
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+        assert_eq!(
+            decoder.duration(),
+            245_500,
+            "the length still comes from the HEAD's X-Content-Duration"
+        );
+    }
+
+    /// The control: a server that sends no length but never says it refuses
+    /// ranges keeps the full sequence (HEAD, Range probe, plain GET, stream
+    /// GET), since a later answer may still carry a length.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lengthless_answer_that_allows_ranges_keeps_probing() {
+        let (url, _requests, methods) = spawn_lengthless_stream(Some("245.5"), false).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the stream must open");
+
+        assert_eq!(*methods.lock(), ["HEAD", "GET", "GET", "GET"]);
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
     }
 
     /// The header's parse: Navidrome writes seconds as a float (Go's `'G'`
