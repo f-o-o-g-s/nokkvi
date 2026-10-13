@@ -487,12 +487,21 @@ impl Nokkvi {
         &mut self,
         msg: crate::widgets::SlotListPageMessage,
     ) -> Task<Message> {
+        // Slot hover arrives on every cursor move inside a row and leaves the
+        // viewport where it was, as do the toolbar locks: neither needs the
+        // prefetch below, which plans the whole viewport and sends a LoadLarge
+        // for the centered row. ScrollSeek keeps it: the editor arms no
+        // seek-settled timer, so this pass loads a dragged-to viewport's art.
+        let hover_or_reveal = msg.is_hover_or_reveal();
         if let Some(editor) = self.playlist_editor.as_mut() {
             let total = editor.songs.len();
             // The editor has no sort/play side effects to act on — the returned
             // action is intentionally discarded (search/sort/activate variants
             // are not surfaced by the editor's row vocabulary).
             let _ = editor.common.handle(msg, total);
+        }
+        if hover_or_reveal {
+            return Task::none();
         }
         // Prefetch mini artwork for rows scrolled into view (mirrors the
         // queue's slot-list-change prefetch).

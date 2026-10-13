@@ -2470,3 +2470,36 @@ fn editor_remove_duplicates_toast_counts() {
         Some("Removed 3 duplicates".to_string())
     );
 }
+
+#[test]
+fn editor_hover_skips_the_prefetch_but_still_lands() {
+    // Hover returns before the viewport prefetch (it arrives on every cursor
+    // move), so the bookkeeping must still reach the editor's page state.
+    use crate::widgets::{HoveredSlot, SlotListPageMessage};
+
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    let hover = HoveredSlot::Item {
+        slot_index: 1,
+        item_index: 1,
+        items_len: 3,
+    };
+    let hovered = |app: &crate::Nokkvi| {
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .common
+            .slot_list
+            .hovered_slot
+    };
+
+    let _ = app.update(Message::Editor(EditorMessage::SlotList(
+        SlotListPageMessage::HoverEnterSlot(hover),
+    )));
+    assert_eq!(hovered(&app), Some(hover));
+
+    let _ = app.update(Message::Editor(EditorMessage::SlotList(
+        SlotListPageMessage::HoverExitSlot(hover),
+    )));
+    assert_eq!(hovered(&app), None);
+}
