@@ -2134,21 +2134,26 @@ impl Nokkvi {
     /// album-art cache the preview pane reads. Rules preview rows are NOT the
     /// Tracks editor's `editor.songs` (empty here) and carry no artwork_url,
     /// so the slot-list/url prefetch (`editor_artwork_prefetch_tasks`) can't
-    /// serve them — fetch by album_id instead. Deduped, skips already-cached
-    /// and empty ids; bounded by the loaded page count.
-    fn rules_preview_artwork_tasks(&self) -> Task<Message> {
-        use crate::app_message::{ArtworkMessage, MiniArt};
+    /// serve them — fetch by album_id instead. Deduped, skips empty ids and
+    /// whatever the shared 80px gate holds back (warm, still on its way from an
+    /// earlier evaluation, or known to have no art), and claims what it sends;
+    /// bounded by the loaded page count.
+    fn rules_preview_artwork_tasks(&mut self) -> Task<Message> {
+        use crate::{
+            app_message::{ArtworkMessage, MiniArt},
+            update::components::ArtworkGate,
+        };
         let (Some(shell), Some(session)) = (self.app_service.as_ref(), self.rules_session()) else {
             return Task::none();
         };
-        let mut seen = std::collections::HashSet::new();
+        // Gate at the passive surfaces' constant `None` version, the one the
+        // Loaded message below records.
+        let gate = ArtworkGate::new(&self.artwork);
+        let mut queued = std::collections::HashSet::new();
         let mut tasks = Vec::new();
         for song in session.preview.rows.iter() {
             let id = &song.album_id;
-            if id.is_empty()
-                || self.artwork.album_art.snapshot.contains_key(id)
-                || !seen.insert(id.clone())
-            {
+            if id.is_empty() || !gate.needs_fetch(id, &None) || !queued.insert(id.clone()) {
                 continue;
             }
             let albums = shell.albums().clone();
@@ -2163,6 +2168,8 @@ impl Nokkvi {
                 |(id, art)| Message::Artwork(ArtworkMessage::Loaded(id, None, art)),
             ));
         }
+        drop(gate);
+        self.artwork.album_art_pending.extend(queued);
         Task::batch(tasks)
     }
 

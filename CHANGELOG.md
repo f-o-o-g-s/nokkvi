@@ -35,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - A radio station started just as a gapless song change lands now scrobbles its songs when radio scrobbling is on.
 - Enter after a search now plays the empty-list sound only when the list really shows nothing.
 - Adding a Trawl mix to the queue now shows the new songs in an open Queue view right away, without switching views.
+- Re-evaluating the smart playlist preview no longer re-requests covers still on their way or ones the server has no art for.
 
 ### Removed
 

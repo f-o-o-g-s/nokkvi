@@ -774,6 +774,63 @@ fn preview_page_loaded_appends() {
     assert!(!s.preview.page_loading);
 }
 
+/// The preview's cover fetches share the 80px gate: a re-evaluate while the
+/// first evaluation's covers are still on their way requests none of them
+/// again, and a cover the server has no art for (code 70) is not requested
+/// again either, while a transient failure is.
+#[tokio::test]
+async fn preview_covers_in_flight_or_missing_are_not_requested_again() {
+    use super::library::test_app_with_shell;
+    use crate::app_message::MiniArt;
+
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.screen = crate::Screen::Home;
+    app.rules_editor.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
+    app.session_user_id = "user-9".into();
+    open_edit(&mut app);
+
+    let song = |id: &str, album_id: &str| nokkvi_data::types::song::Song {
+        id: id.into(),
+        title: id.into(),
+        album_id: Some(album_id.into()),
+        ..Default::default()
+    };
+    let rows = vec![song("s1", "al1"), song("s2", "al2"), song("s3", "al1")];
+    let evaluate = |app: &mut crate::Nokkvi| {
+        let generation = app.rules_editor.preview_generation.current();
+        app.handle_rules_editor(R::PreviewLoaded {
+            generation,
+            source_id: "sp1".into(),
+            rows: rows.clone(),
+            total: Some(3),
+            evaluated_at: None,
+        })
+        .units()
+    };
+
+    assert_eq!(
+        evaluate(&mut app),
+        2,
+        "a cold preview fetches each album once"
+    );
+    assert_eq!(
+        evaluate(&mut app),
+        0,
+        "a re-evaluate while they load requests nothing"
+    );
+
+    let _ = app.handle_artwork_loaded("al1".into(), None, MiniArt::Missing);
+    let _ = app.handle_artwork_loaded("al2".into(), None, MiniArt::Transient);
+    assert_eq!(
+        evaluate(&mut app),
+        1,
+        "a transient failure is requested again, a missing cover is not"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
 /// Enter-to-play runs the guarded play path: an active radio transitions
 /// back to queue mode (guard_play_action's observable side effect) before
 /// the preloaded play dispatches.
