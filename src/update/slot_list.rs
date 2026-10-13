@@ -373,10 +373,11 @@ impl Nokkvi {
 
     /// Whether the focused list shows no rows, by the rule its view renders
     /// with: the library views render their buffer as the server returned it
-    /// (their search runs on the server), while the Queue, Radios and the
-    /// playlist editor filter client-side. `None` is the Similar browser tab
-    /// (no `View` variant), so the answer follows the focused list rather than
-    /// the host view.
+    /// (their search runs on the server), the Queue and Radios filter
+    /// client-side, and the playlist editor renders its whole buffer (no
+    /// search box reaches it). `None` is the Similar browser tab (no `View`
+    /// variant), so the answer follows the focused list rather than the host
+    /// view.
     pub(crate) fn focused_list_is_empty(&self, target_view: Option<View>) -> bool {
         match target_view {
             Some(View::Queue) => self.filter_queue_songs().is_empty(),
@@ -387,7 +388,10 @@ impl Nokkvi {
             Some(View::Playlists) => self.library.playlists.is_empty(),
             Some(View::Radios) => self.filter_radio_stations().is_empty(),
             Some(View::Harbour | View::Settings) => false,
-            Some(View::PlaylistEditor) => self.filter_editor_songs().is_empty(),
+            Some(View::PlaylistEditor) => self
+                .playlist_editor
+                .as_ref()
+                .is_none_or(|e| e.songs.is_empty()),
             None => self
                 .similar_songs
                 .as_ref()
