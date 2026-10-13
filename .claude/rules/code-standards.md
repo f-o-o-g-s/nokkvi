@@ -17,7 +17,7 @@
 
 ## Error Handling
 
-- Backend services return `Result<T, E>` — propagate with `?`.
+- Backend services return `Result<T, E>` for work that can fail — propagate with `?`. Work that can't fail returns its value bare: callers write `Err` arms against a `Result` that is never `Err` (the queue mutators' once read a toggle's `Err` as "mode off").
 - UI handlers run async `AppService` work through `shell_task` / `shell_spawn` (methods on `Nokkvi` in `src/main.rs`). A `shell_task` result arrives as `Message::SessionScoped`, stamped with the session generation of dispatch time; the root drops one from an ended session (gotchas/async-state.md).
 - Log at the boundary that finally handles, not at every propagation layer.
 - User-facing errors get `toast_error()` / `toast_warn()`. Confirmations get `toast_success()` / `toast_info()`.
