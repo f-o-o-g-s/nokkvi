@@ -362,6 +362,33 @@ fn add_mix_completed_ok_toasts_the_count_and_stays_open() {
     );
 }
 
+/// A completed add reloads the queue, as the entity adds do (their toast
+/// chains `Message::LoadQueue`): an open Queue view otherwise kept its old
+/// rows and count until a view switch. A failed add has nothing to reload.
+#[tokio::test]
+async fn add_mix_completed_ok_reloads_the_queue() {
+    use super::library::test_app_with_shell;
+    let (mut app, db_path) = test_app_with_shell().await;
+    open_modal(&mut app);
+    app.trawl.mix.add(seed("al1"));
+
+    assert_eq!(
+        app.handle_trawl_modal(TrawlModalMessage::AddMixCompleted(Ok(3)))
+            .units(),
+        1,
+        "a successful add requests a queue reload"
+    );
+    assert_eq!(
+        app.handle_trawl_modal(TrawlModalMessage::AddMixCompleted(Err("boom".into())))
+            .units(),
+        0,
+        "a failed add requests nothing"
+    );
+
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
 #[test]
 fn add_mix_completed_singular_count_is_pluralized_properly() {
     let mut app = test_app();

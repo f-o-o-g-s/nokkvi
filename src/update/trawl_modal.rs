@@ -222,7 +222,10 @@ impl Nokkvi {
                 Ok(count) => {
                     let noun = if count == 1 { "song" } else { "songs" };
                     self.toast_success(format!("Added {count} {noun} to queue"));
-                    Task::none()
+                    // Reload the queue as the entity adds do (their toast
+                    // chains `LoadQueue`), or an open Queue view keeps its
+                    // old rows and count until something else reloads it.
+                    self.handle_load_queue()
                 }
                 Err(e) => {
                     if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
