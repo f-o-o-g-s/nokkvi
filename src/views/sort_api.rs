@@ -2,6 +2,10 @@
 //! mapping. The per-page `sort_mode_to_api_string` shims in
 //! `views/{albums,artists,songs,genres,playlists}.rs` delegate here so a new
 //! `SortMode` variant only needs adding once across the codebase.
+#![expect(
+    clippy::match_same_arms,
+    reason = "one explicit row per (view, sort mode) is the table's design, pinned by the tests below"
+)]
 
 use nokkvi_data::types::sort_mode::SortMode;
 

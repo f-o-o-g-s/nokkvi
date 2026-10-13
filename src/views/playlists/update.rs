@@ -289,10 +289,6 @@ impl PlaylistsPage {
                         (Task::none(), PlaylistsAction::None)
                     }
                 }
-                // Routed up to root in `handle_playlists` before this match
-                // runs; arm exists only for exhaustiveness.
-                PlaylistsMessage::SetOpenMenu(_) => (Task::none(), PlaylistsAction::None),
-                PlaylistsMessage::Roulette => (Task::none(), PlaylistsAction::None),
                 PlaylistsMessage::NavigateAndFilter(view, filter) => (
                     Task::none(),
                     PlaylistsAction::NavigateAndFilter(view, filter),
@@ -346,12 +342,12 @@ impl PlaylistsPage {
                     self.playlist_menu_action(clicked_idx, entry, playlists),
                 ),
                 // Routed up to root in `handle_playlists` before this match runs.
-                PlaylistsMessage::ArtworkColumnDrag(_)
-                | PlaylistsMessage::ArtworkColumnVerticalDrag(_) => {
-                    (Task::none(), PlaylistsAction::None)
-                }
+                PlaylistsMessage::SetOpenMenu(_)
+                | PlaylistsMessage::Roulette
+                | PlaylistsMessage::ArtworkColumnDrag(_)
+                | PlaylistsMessage::ArtworkColumnVerticalDrag(_)
                 // Handled by `impl_expansion_update!` above.
-                PlaylistsMessage::SlotList(_)
+                | PlaylistsMessage::SlotList(_)
                 | PlaylistsMessage::ExpandCenter
                 | PlaylistsMessage::CollapseExpansion
                 | PlaylistsMessage::TracksLoaded(..)

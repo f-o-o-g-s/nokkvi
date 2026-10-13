@@ -1189,11 +1189,8 @@ impl SettingsPage {
                 self.sidebar_step(false, data);
                 SettingsAction::None
             }
-            SettingsMessage::SidebarSetOffset(offset, _) => {
-                self.sidebar_set_index(offset, data);
-                SettingsAction::None
-            }
-            SettingsMessage::SidebarClickItem(offset) => {
+            SettingsMessage::SidebarSetOffset(offset, _)
+            | SettingsMessage::SidebarClickItem(offset) => {
                 self.sidebar_set_index(offset, data);
                 SettingsAction::None
             }

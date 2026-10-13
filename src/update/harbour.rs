@@ -627,8 +627,6 @@ impl Nokkvi {
         center: Option<&HarbourRow>,
     ) -> Option<(CollageTarget, String, Vec<String>)> {
         match center? {
-            // The Trawl action row previews no collection.
-            HarbourRow::Trawl { .. } => None,
             // The genre/playlist RandomPlay picks preview their own collage.
             HarbourRow::RandomPlay { kind } => match kind {
                 // Keyed by NAME — Harbour's genre-collage key everywhere (the
@@ -673,7 +671,8 @@ impl Nokkvi {
                     },
                 )
             }
-            HarbourRow::Hint(_) => None,
+            // The Trawl action row and hints preview no collection.
+            HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
         }
     }
 

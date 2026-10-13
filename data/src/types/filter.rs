@@ -20,9 +20,8 @@ impl LibraryFilter {
     /// Format for display in the search box
     pub fn display_text(&self) -> String {
         match self {
-            Self::ArtistId { name, .. } => name.clone(),
+            Self::ArtistId { name, .. } | Self::GenreId { name, .. } => name.clone(),
             Self::AlbumId { title, .. } => title.clone(),
-            Self::GenreId { name, .. } => name.clone(),
             Self::LibraryIds(ids) => match ids.as_slice() {
                 [] => String::new(),
                 [single] => format!("library {single}"),

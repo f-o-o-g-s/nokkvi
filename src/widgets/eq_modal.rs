@@ -276,8 +276,9 @@ pub(crate) fn eq_modal_overlay<'a>(
         border: iced::Border {
             color: match status {
                 pick_list::Status::Active | pick_list::Status::Disabled => theme::bg0_hard(),
-                pick_list::Status::Hovered => theme::accent_bright(),
-                pick_list::Status::Opened { .. } => theme::accent_bright(),
+                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+                    theme::accent_bright()
+                }
             },
             width: 1.0,
             radius: theme::ui_border_radius(),

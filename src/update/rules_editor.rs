@@ -670,10 +670,11 @@ impl Nokkvi {
             }
 
             // --- preview / save ------------------------------------------
-            RulesEditorMessage::Preview => self.dispatch_draft_preview(),
             // A press with unchanged rules IS the manual re-evaluate —
             // ReEvaluate stays as the observe loop's carrier.
-            RulesEditorMessage::ReEvaluate => self.dispatch_draft_preview(),
+            RulesEditorMessage::Preview | RulesEditorMessage::ReEvaluate => {
+                self.dispatch_draft_preview()
+            }
             RulesEditorMessage::Save => self.handle_rules_save(false),
             RulesEditorMessage::SaveAsNew => self.handle_rules_save(true),
             RulesEditorMessage::ConfirmOverwrite => {
@@ -1326,9 +1327,6 @@ impl Nokkvi {
                     toggle_public = true;
                 }
                 (FormRow::EditBar, FormCell::SaveAsNew) => save_as_new = true,
-                (FormRow::Match | FormRow::GroupHeader(_), FormCell::ConjunctionPill) => {
-                    // Enter cycles the pill (same as Left/Right).
-                }
                 (FormRow::Rule(path), FormCell::Field) if s.form_editable() => {
                     s.sub_picker = Some(SubPicker {
                         kind: SubPickerKind::Field { row: row.clone() },
@@ -1463,9 +1461,6 @@ impl Nokkvi {
                         revert: current,
                     });
                 }
-                (FormRow::Limit, FormCell::LimitMode) => {
-                    // Same flip as Left/Right (shared write path).
-                }
                 (FormRow::Refresh, FormCell::RefreshValue) => {
                     let current = s.rules.refresh_delay.clone().unwrap_or_default();
                     s.mode = FormMode::Editing;
@@ -1489,6 +1484,8 @@ impl Nokkvi {
                     });
                     s.mode = FormMode::Json;
                 }
+                // The conjunction pill and the limit mode cycle after this
+                // closure, through the Left/Right write path (`cycles` below).
                 _ => {}
             }
         });
@@ -2770,7 +2767,6 @@ impl RulesSessionUi {
                 RuleOperator::IsMissing | RuleOperator::IsPresent => {
                     self.registry.presence_ops_valid(&field, &self.caps)
                 }
-                RuleOperator::InPlaylist | RuleOperator::NotInPlaylist => true,
                 _ => true,
             })
             .collect()
@@ -2911,10 +2907,9 @@ fn default_value_for(shape: ValueShape) -> serde_json::Value {
     match shape {
         ValueShape::Number => serde_json::json!(0),
         ValueShape::Days => serde_json::json!(30),
-        ValueShape::Toggle => serde_json::json!(true),
+        ValueShape::Toggle | ValueShape::FieldFlag => serde_json::json!(true),
         ValueShape::Pair => serde_json::json!([0, 0]),
         ValueShape::DatePair => serde_json::json!(["", ""]),
-        ValueShape::FieldFlag => serde_json::json!(true),
         ValueShape::Text | ValueShape::Date | ValueShape::PlaylistRef => serde_json::json!(""),
     }
 }

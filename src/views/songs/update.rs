@@ -206,12 +206,10 @@ impl SongsPage {
 
             // Routed up to root in `handle_songs` before this match runs;
             // arm exists only for exhaustiveness.
-            SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),
-            SongsMessage::Roulette => (Task::none(), SongsAction::None),
-            SongsMessage::ArtworkColumnDrag(_) | SongsMessage::ArtworkColumnVerticalDrag(_) => {
-                // Intercepted at root before reaching this update; never reached.
-                (Task::none(), SongsAction::None)
-            }
+            SongsMessage::SetOpenMenu(_)
+            | SongsMessage::Roulette
+            | SongsMessage::ArtworkColumnDrag(_)
+            | SongsMessage::ArtworkColumnVerticalDrag(_) => (Task::none(), SongsAction::None),
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }

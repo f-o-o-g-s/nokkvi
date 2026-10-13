@@ -2648,7 +2648,12 @@ impl AudioRenderer {
         }
 
         let verdict = match &self.transport_fade {
-            TransportFade::Idle => return,
+            // A holding `SwitchFadeIn` is unreachable here: the pre-step above
+            // always returns (or stamps `Some` and falls through to its arm).
+            TransportFade::Idle
+            | TransportFade::SwitchFadeIn {
+                started_at: None, ..
+            } => return,
             TransportFade::FadingOut {
                 started_at,
                 duration_ms,
@@ -2710,11 +2715,6 @@ impl AudioRenderer {
                     RampTick::Running
                 }
             }
-            // Unreachable: the holding pre-step above always returns (or
-            // stamps `Some` and falls through to the arm above).
-            TransportFade::SwitchFadeIn {
-                started_at: None, ..
-            } => return,
         };
         match verdict {
             RampTick::Running => return,
@@ -5065,10 +5065,8 @@ mod tests {
     fn rewind_transport_fade(renderer: &mut AudioRenderer, ms: u64) {
         match &mut renderer.transport_fade {
             TransportFade::FadingOut { started_at, .. }
-            | TransportFade::FadingIn { started_at, .. } => {
-                *started_at = std::time::Instant::now() - std::time::Duration::from_millis(ms);
-            }
-            TransportFade::SwitchFadeIn {
+            | TransportFade::FadingIn { started_at, .. }
+            | TransportFade::SwitchFadeIn {
                 started_at: Some(started_at),
                 ..
             } => {

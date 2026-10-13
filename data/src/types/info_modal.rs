@@ -104,9 +104,9 @@ impl InfoModalItem {
     pub fn title(&self) -> &str {
         match self {
             Self::Song { title, .. } => title,
-            Self::Album { name, .. } => name,
-            Self::Artist { name, .. } => name,
-            Self::Playlist { name, .. } => name,
+            Self::Album { name, .. } | Self::Artist { name, .. } | Self::Playlist { name, .. } => {
+                name
+            }
         }
     }
 

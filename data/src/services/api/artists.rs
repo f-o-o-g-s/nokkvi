@@ -168,10 +168,10 @@ impl ArtistsApiService {
                 }
                 // `LibraryFilter::LibraryIds` is folded into
                 // `library_id_strings` by the caller via the shared helper.
-                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
+                crate::types::filter::LibraryFilter::LibraryIds(_)
                 // AlbumId / GenreId are not meaningful filters on the
                 // /api/artist endpoint — leave the request unfiltered.
-                crate::types::filter::LibraryFilter::AlbumId { .. }
+                | crate::types::filter::LibraryFilter::AlbumId { .. }
                 | crate::types::filter::LibraryFilter::GenreId { .. } => {}
             }
         } else if let Some(query) = search_query

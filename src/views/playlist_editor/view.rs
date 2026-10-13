@@ -213,7 +213,9 @@ impl PlaylistEditorState {
             |e| match e {
                 SongListRowEvent::Slot(m) => EditorMessage::SlotList(m),
                 SongListRowEvent::Drag(d) => EditorMessage::DragReorder(d),
-                SongListRowEvent::TitleClick(i) => {
+                SongListRowEvent::TitleClick(i)
+                | SongListRowEvent::SetRating(i, _)
+                | SongListRowEvent::ToggleLove(i) => {
                     EditorMessage::ContextMenuAction(i, QueueContextEntry::GetInfo)
                 }
                 // Navigation away from the editor is not offered while editing;
@@ -222,12 +224,6 @@ impl PlaylistEditorState {
                 | SongListRowEvent::NavAlbum(_)
                 | SongListRowEvent::NavGenre(_) => {
                     EditorMessage::ContextMenuAction(0, QueueContextEntry::GetInfo)
-                }
-                SongListRowEvent::SetRating(i, _) => {
-                    EditorMessage::ContextMenuAction(i, QueueContextEntry::GetInfo)
-                }
-                SongListRowEvent::ToggleLove(i) => {
-                    EditorMessage::ContextMenuAction(i, QueueContextEntry::GetInfo)
                 }
             },
             // Editor-specific context menu: Get Info, Remove from Playlist,
@@ -267,8 +263,7 @@ impl PlaylistEditorState {
                             "Remove Duplicates",
                             EditorMessage::RemoveDuplicates,
                         ),
-                        QueueContextEntry::Separator => menu_separator(),
-                        // The editor menu only uses the four entries above.
+                        // The separator; the editor menu offers no other entry.
                         _ => menu_separator(),
                     },
                     cm_open,

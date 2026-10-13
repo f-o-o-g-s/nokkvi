@@ -4657,8 +4657,8 @@ impl CustomAudioEngine {
     /// with renderer-not-Active can only mean the fade completed.
     async fn try_finalize_crossfade(&mut self, is_eof: bool, renderer_fade_active: bool) -> bool {
         let should_finalize = match (&self.crossfade.phase, is_eof) {
-            (CrossfadePhase::OutgoingFinished { .. }, _) => true,
-            (CrossfadePhase::Active { .. }, true) => true,
+            (CrossfadePhase::OutgoingFinished { .. }, _)
+            | (CrossfadePhase::Active { .. }, true) => true,
             (CrossfadePhase::Active { .. }, false) => !renderer_fade_active,
             (CrossfadePhase::Idle, _) => false,
         };

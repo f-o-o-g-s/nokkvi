@@ -183,13 +183,6 @@ impl AlbumsPage {
                         (Task::none(), AlbumsAction::None)
                     }
                 }
-                // Data loading messages (handled at root level, no action needed here)
-                AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
-                AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
-                // Routed up to root in `handle_albums` before this match runs;
-                // arm exists only for exhaustiveness.
-                AlbumsMessage::SetOpenMenu(_) => (Task::none(), AlbumsAction::None),
-                AlbumsMessage::Roulette => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::RefreshArtwork(album_id) => {
                     (Task::none(), AlbumsAction::RefreshArtwork(album_id))
                 }
@@ -274,11 +267,16 @@ impl AlbumsPage {
                         AlbumsAction::ColumnVisibilityChanged(col, new_value),
                     )
                 }
+                // Data loading messages (handled at root level, no action needed here).
+                AlbumsMessage::ArtworkLoaded(_, _)
+                | AlbumsMessage::LargeArtworkLoaded(_, _)
                 // Routed up to root in `handle_albums` before this match runs.
-                AlbumsMessage::ArtworkColumnDrag(_)
-                | AlbumsMessage::ArtworkColumnVerticalDrag(_) => (Task::none(), AlbumsAction::None),
+                | AlbumsMessage::SetOpenMenu(_)
+                | AlbumsMessage::Roulette
+                | AlbumsMessage::ArtworkColumnDrag(_)
+                | AlbumsMessage::ArtworkColumnVerticalDrag(_)
                 // Handled by `impl_expansion_update!` above.
-                AlbumsMessage::SlotList(_)
+                | AlbumsMessage::SlotList(_)
                 | AlbumsMessage::ExpandCenter
                 | AlbumsMessage::CollapseExpansion
                 | AlbumsMessage::TracksLoaded(..)

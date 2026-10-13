@@ -212,8 +212,10 @@ impl RadiosPage {
                     SlotListPageAction::CenterOnPlaying => {
                         (Task::none(), RadiosAction::CenterOnPlaying)
                     }
-                    SlotListPageAction::None => (Task::none(), RadiosAction::None),
-                    SlotListPageAction::AddCenterToQueue => (Task::none(), RadiosAction::None), // Radios doesn't queue
+                    // Radios doesn't queue.
+                    SlotListPageAction::None | SlotListPageAction::AddCenterToQueue => {
+                        (Task::none(), RadiosAction::None)
+                    }
                 }
             }
 
@@ -243,15 +245,13 @@ impl RadiosPage {
                 (Task::none(), RadiosAction::ResetStationArtwork(station))
             }
 
-            RadiosMessage::NoOp => (Task::none(), RadiosAction::None),
-
+            RadiosMessage::NoOp
             // Data loading — handled at root level
-            RadiosMessage::RadioStationsLoaded(_) => (Task::none(), RadiosAction::None),
-
+            | RadiosMessage::RadioStationsLoaded(_)
             // Routed up to root in `handle_radios` before this match runs;
             // arm exists only for exhaustiveness.
-            RadiosMessage::SetOpenMenu(_) => (Task::none(), RadiosAction::None),
-            RadiosMessage::Roulette => (Task::none(), RadiosAction::None),
+            | RadiosMessage::SetOpenMenu(_)
+            | RadiosMessage::Roulette => (Task::none(), RadiosAction::None),
         }
     }
 

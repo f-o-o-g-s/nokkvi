@@ -62,12 +62,12 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
     /// Map category label to its icon path
     fn cat_icon(cat: &str) -> &'static str {
         match cat {
-            "Views" => NAV,
             "Playback" => PLAY,
             "Navigation" => NAVIGATION,
             "Item Actions" => ITEM,
             "Sort & View" => SORT,
             "Settings Edit" => EDIT,
+            // "Views", and any category without an icon of its own.
             _ => NAV,
         }
     }

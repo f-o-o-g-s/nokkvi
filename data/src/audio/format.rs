@@ -130,8 +130,7 @@ impl AudioFormat {
             SampleFormat::U8 => 1,
             SampleFormat::S16 => 2,
             SampleFormat::S24 => 3,
-            SampleFormat::S32 => 4,
-            SampleFormat::F32 => 4,
+            SampleFormat::S32 | SampleFormat::F32 => 4,
             SampleFormat::F64 => 8,
             SampleFormat::Unknown => 0,
         }

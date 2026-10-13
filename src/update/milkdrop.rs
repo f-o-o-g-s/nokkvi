@@ -1033,14 +1033,13 @@ impl Nokkvi {
             }
             match self.milkdrop.next_switch_at {
                 None if !self.milkdrop.locked && interval.is_some() => self.milkdrop_arm_timer(),
-                None => {}
                 Some(at) if Instant::now() >= at => {
                     // Disarm first: re-firing every tick until the build lands
                     // would bump the generation each time and starve it.
                     self.milkdrop.next_switch_at = None;
                     tasks.push(self.milkdrop_advance(AdvanceReason::Timer));
                 }
-                Some(_) => {}
+                None | Some(_) => {}
             }
         }
         Task::batch(tasks)

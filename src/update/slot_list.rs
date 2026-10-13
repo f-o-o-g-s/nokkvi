@@ -335,9 +335,11 @@ impl Nokkvi {
                     Some(crate::views::harbour::HarbourRow::Section { .. }) => {
                         audio::SfxType::ExpandCollapse
                     }
-                    Some(crate::views::harbour::HarbourRow::Item { .. }) => audio::SfxType::Enter,
                     // The Trawl row always activates something (the modal).
-                    Some(crate::views::harbour::HarbourRow::Trawl { .. }) => audio::SfxType::Enter,
+                    Some(
+                        crate::views::harbour::HarbourRow::Item { .. }
+                        | crate::views::harbour::HarbourRow::Trawl { .. },
+                    ) => audio::SfxType::Enter,
                     // A RandomPlay row only activates when its draw landed: with
                     // no pick the handler just toasts, so it takes the same
                     // "activates nothing" escape cue as a Hint row. `play_random_kind`

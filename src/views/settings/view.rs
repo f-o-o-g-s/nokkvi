@@ -749,10 +749,8 @@ fn render_picker_modal<'a>(
     )
     .on_press(SettingsMessage::Escape)
     .on_scroll(|delta| {
-        let y = match delta {
-            iced::mouse::ScrollDelta::Lines { y, .. } => y,
-            iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-        };
+        let (iced::mouse::ScrollDelta::Lines { y, .. }
+        | iced::mouse::ScrollDelta::Pixels { y, .. }) = delta;
         if y > 0.0 {
             SettingsMessage::SlotListUp
         } else {

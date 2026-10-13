@@ -483,10 +483,8 @@ pub(crate) fn trawl_modal_overlay<'a>(
     // the chip strip instead (`opaque` captures presses, not scrolls).
     mouse_area(scaffold)
         .on_scroll(|delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
+            let (iced::mouse::ScrollDelta::Lines { y, .. }
+            | iced::mouse::ScrollDelta::Pixels { y, .. }) = delta;
             if y > 0.0 {
                 TrawlModalMessage::SlotListUp
             } else {

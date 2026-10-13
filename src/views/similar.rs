@@ -139,14 +139,12 @@ impl SimilarPage {
         let total_items = songs.len();
 
         match message {
-            SimilarMessage::NoOp => (Task::none(), SimilarAction::None),
+            SimilarMessage::NoOp
             // Routed up to root in `handle_similar` before this match runs;
             // arm exists only for exhaustiveness.
-            SimilarMessage::SetOpenMenu(_) => (Task::none(), SimilarAction::None),
-            SimilarMessage::ArtworkColumnDrag(_) | SimilarMessage::ArtworkColumnVerticalDrag(_) => {
-                // Intercepted at root before reaching this update; never reached.
-                (Task::none(), SimilarAction::None)
-            }
+            | SimilarMessage::SetOpenMenu(_)
+            | SimilarMessage::ArtworkColumnDrag(_)
+            | SimilarMessage::ArtworkColumnVerticalDrag(_) => (Task::none(), SimilarAction::None),
             SimilarMessage::SlotList(msg) => {
                 use crate::widgets::SlotListPageAction;
 
@@ -273,12 +271,12 @@ impl SimilarPage {
                             });
                             (Task::none(), SimilarAction::AddBatchToMix(seeds))
                         }
-                        LibraryContextEntry::Separator => (Task::none(), SimilarAction::None),
+                        LibraryContextEntry::Separator
                         // Shuffle Play is intentionally omitted from the Similar/Top Songs
                         // menu (use the batch "Replace Queue with All Found" instead).
-                        LibraryContextEntry::ShufflePlay => (Task::none(), SimilarAction::None),
+                        | LibraryContextEntry::ShufflePlay
                         // Playlist-child-only entry — never emitted by this view's menus.
-                        LibraryContextEntry::RemoveFromPlaylist => {
+                        | LibraryContextEntry::RemoveFromPlaylist => {
                             (Task::none(), SimilarAction::None)
                         }
                     }

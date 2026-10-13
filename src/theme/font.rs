@@ -106,12 +106,12 @@ fn css_to_weight(css: u16) -> Weight {
         100 => Weight::Thin,
         200 => Weight::ExtraLight,
         300 => Weight::Light,
-        400 => Weight::Normal,
         500 => Weight::Medium,
         600 => Weight::Semibold,
         700 => Weight::Bold,
         800 => Weight::ExtraBold,
         900 => Weight::Black,
+        // 400, and any weight off the CSS scale.
         _ => Weight::Normal,
     }
 }

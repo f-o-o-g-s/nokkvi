@@ -1124,10 +1124,7 @@ fn wrap_with_scroll<'a, Message: Clone + 'a>(
 
     mouse_area(inner)
         .on_scroll(move |delta| {
-            let y = match delta {
-                ScrollDelta::Lines { y, .. } => y,
-                ScrollDelta::Pixels { y, .. } => y,
-            };
+            let (ScrollDelta::Lines { y, .. } | ScrollDelta::Pixels { y, .. }) = delta;
 
             if y > 0.0 {
                 on_scroll_up.clone()

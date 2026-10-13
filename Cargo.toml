@@ -85,6 +85,12 @@ unused_self = "warn"
 # type) is `expect`ed with that reason.
 unnecessary_wraps = "warn"
 
+# Two arms with the same body are one decision written twice, and a copy-paste
+# arm that should differ hides among them. Merge the patterns (a comment can
+# sit between or-pattern alternatives to say why each is there); a deliberate
+# one-row-per-case table `expect`s it (views/sort_api.rs, api/sort.rs).
+match_same_arms = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.25.0"

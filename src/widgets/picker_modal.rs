@@ -255,10 +255,8 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
     // wheel steps the list anywhere over the modal.
     mouse_area(scaffold)
         .on_scroll(move |delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
+            let (iced::mouse::ScrollDelta::Lines { y, .. }
+            | iced::mouse::ScrollDelta::Pixels { y, .. }) = delta;
             if y > 0.0 {
                 on_up.clone()
             } else {

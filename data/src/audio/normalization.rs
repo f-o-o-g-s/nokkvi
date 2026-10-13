@@ -99,11 +99,10 @@ pub fn resolve_normalization(ctx: NormalizationContext<'_>) -> NormalizationConf
 
     if !ctx.mode.is_replay_gain() {
         return match ctx.mode {
-            Off => NormalizationConfig::off(),
             Agc => NormalizationConfig::agc(ctx.agc_target_level),
-            // `is_replay_gain` was false so this is unreachable in practice —
-            // map to Off as a safe default rather than panic.
-            ReplayGainTrack | ReplayGainAlbum => NormalizationConfig::off(),
+            // The ReplayGain modes are unreachable here (`is_replay_gain` was
+            // false); they map to Off as a safe default rather than panic.
+            Off | ReplayGainTrack | ReplayGainAlbum => NormalizationConfig::off(),
         };
     }
 

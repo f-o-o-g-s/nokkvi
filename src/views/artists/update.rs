@@ -188,10 +188,6 @@ impl ArtistsPage {
                     ArtistsAction::NavigateAndExpandAlbum(album_id),
                 ),
 
-                // Routed up to root in `handle_artists` before this match runs;
-                // arm exists only for exhaustiveness.
-                ArtistsMessage::SetOpenMenu(_) => (Task::none(), ArtistsAction::None),
-                ArtistsMessage::Roulette => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), ArtistsAction::NavigateAndFilter(view, filter))
                 }
@@ -258,13 +254,13 @@ impl ArtistsPage {
                     self.context_menu_action(clicked_idx, entry, artists),
                 ),
                 // Routed up to root in `handle_artists` before this match runs.
-                ArtistsMessage::OpenExternalUrl(_)
+                ArtistsMessage::SetOpenMenu(_)
+                | ArtistsMessage::Roulette
+                | ArtistsMessage::OpenExternalUrl(_)
                 | ArtistsMessage::ArtworkColumnDrag(_)
-                | ArtistsMessage::ArtworkColumnVerticalDrag(_) => {
-                    (Task::none(), ArtistsAction::None)
-                }
+                | ArtistsMessage::ArtworkColumnVerticalDrag(_)
                 // Handled by `impl_expansion_update!` above.
-                ArtistsMessage::SlotList(_)
+                | ArtistsMessage::SlotList(_)
                 | ArtistsMessage::ExpandCenter
                 | ArtistsMessage::CollapseExpansion
                 | ArtistsMessage::AlbumsLoaded(..)

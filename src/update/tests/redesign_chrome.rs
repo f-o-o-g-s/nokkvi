@@ -78,8 +78,8 @@ fn expected_top_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
         NavLayout::Side | NavLayout::None => 0.0,
     };
     let strip = match (tid, layout) {
-        (TrackInfoDisplay::TopBarUnder, NavLayout::Top) => STRIP_HEIGHT_WITH_SEPARATOR,
-        (
+        (TrackInfoDisplay::TopBarUnder, NavLayout::Top)
+        | (
             TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
             NavLayout::Side | NavLayout::None,
         ) => STRIP_HEIGHT_WITH_SEPARATOR,

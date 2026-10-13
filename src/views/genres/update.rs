@@ -204,10 +204,6 @@ impl GenresPage {
                         None => (Task::none(), GenresAction::None),
                     }
                 }
-                // Routed up to root in `handle_genres` before this match runs;
-                // arm exists only for exhaustiveness.
-                GenresMessage::SetOpenMenu(_) => (Task::none(), GenresAction::None),
-                GenresMessage::Roulette => (Task::none(), GenresAction::None),
                 GenresMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), GenresAction::NavigateAndFilter(view, filter))
                 }
@@ -227,10 +223,12 @@ impl GenresPage {
                     self.context_menu_action(clicked_idx, entry, genres),
                 ),
                 // Routed up to root in `handle_genres` before this match runs.
-                GenresMessage::ArtworkColumnDrag(_)
-                | GenresMessage::ArtworkColumnVerticalDrag(_) => (Task::none(), GenresAction::None),
+                GenresMessage::SetOpenMenu(_)
+                | GenresMessage::Roulette
+                | GenresMessage::ArtworkColumnDrag(_)
+                | GenresMessage::ArtworkColumnVerticalDrag(_)
                 // Handled by `impl_expansion_update!` above.
-                GenresMessage::SlotList(_)
+                | GenresMessage::SlotList(_)
                 | GenresMessage::ExpandCenter
                 | GenresMessage::CollapseExpansion
                 | GenresMessage::AlbumsLoaded(..)

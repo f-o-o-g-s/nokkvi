@@ -62,10 +62,13 @@ impl QueuePage {
                     SlotListPageAction::SortOrderChanged(b) => {
                         (Task::none(), QueueAction::SortOrderChanged(b))
                     }
-                    SlotListPageAction::None => (Task::none(), QueueAction::None),
                     // Queue has no AddCenterToQueue / RefreshViewData / CenterOnPlaying / SortModeChanged
                     // via SlotList arm (SortModeSelected stays per-view with QueueSortMode).
-                    _ => (Task::none(), QueueAction::None),
+                    SlotListPageAction::None
+                    | SlotListPageAction::AddCenterToQueue
+                    | SlotListPageAction::RefreshViewData
+                    | SlotListPageAction::CenterOnPlaying
+                    | SlotListPageAction::SortModeChanged(_) => (Task::none(), QueueAction::None),
                 }
             }
             QueueMessage::FocusCurrentPlaying(entry_id, flash) => {
@@ -105,12 +108,14 @@ impl QueuePage {
 
             // Routed up to root in `handle_queue` before this match runs;
             // arm exists only for exhaustiveness.
-            QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
-            QueueMessage::Roulette => (Task::none(), QueueAction::None),
-            QueueMessage::ArtworkColumnDrag(_) | QueueMessage::ArtworkColumnVerticalDrag(_) => {
-                // Intercepted at root before reaching this update; never reached.
-                (Task::none(), QueueAction::None)
-            }
+            QueueMessage::SetOpenMenu(_)
+            | QueueMessage::Roulette
+            | QueueMessage::ArtworkColumnDrag(_)
+            | QueueMessage::ArtworkColumnVerticalDrag(_)
+            // Intercepted by `handle_queue`'s pointer-motion fast path, which
+            // returns before the page's `update` runs — the wheel touches only
+            // the lyrics overlay, never the queue's selection or viewport.
+            | QueueMessage::LyricsWheel(_) => (Task::none(), QueueAction::None),
             QueueMessage::OpenDefaultPlaylistPicker => {
                 (Task::none(), QueueAction::OpenDefaultPlaylistPicker)
             }
@@ -389,11 +394,6 @@ impl QueuePage {
                 }
                 (Task::none(), QueueAction::None)
             }
-            // Intercepted by `handle_queue`'s pointer-motion fast path, which
-            // returns before the page's `update` runs — the wheel touches only
-            // the lyrics overlay, never the queue's selection or viewport. The
-            // arm exists so the match stays exhaustive (no `_ =>` wildcard).
-            QueueMessage::LyricsWheel(_) => (Task::none(), QueueAction::None),
         }
     }
 }

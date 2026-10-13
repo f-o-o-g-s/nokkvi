@@ -53,12 +53,12 @@ impl From<View> for Option<widgets::NavView> {
             View::Songs => Some(widgets::NavView::Songs),
             View::Playlists => Some(widgets::NavView::Playlists),
             View::Radios => Some(widgets::NavView::Radios),
-            View::Settings => None,
             // Contextual destinations with no permanent nav tab.
-            View::PlaylistEditor => None,
+            View::Settings
+            | View::PlaylistEditor
             // Harbour has a nav presence, but a *pinned* longship button (M6),
             // not a `NAV_TABS` tab — so it has no `NavView`.
-            View::Harbour => None,
+            | View::Harbour => None,
         }
     }
 }

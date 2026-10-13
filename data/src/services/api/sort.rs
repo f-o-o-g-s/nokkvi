@@ -5,6 +5,10 @@
 //! domains (e.g. `mostPlayed` maps to `"playCount"` for Songs but `"play_count"`
 //! for Albums/Artists) is documented per-arm rather than silently distributed
 //! across files.
+#![expect(
+    clippy::match_same_arms,
+    reason = "one explicit arm per sort mode per domain, so drift between domains stays visible"
+)]
 
 use rand::seq::SliceRandom;
 
