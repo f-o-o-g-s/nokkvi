@@ -278,7 +278,9 @@ impl Nokkvi {
                     }
                     None => {}
                 }
-                Task::none()
+                // A batch can bring rows from past the prefetch window into
+                // view, and the centred row may now be a different song.
+                self.editor_artwork_prefetch_tasks()
             }
         }
     }
@@ -342,7 +344,8 @@ impl Nokkvi {
         // Nothing may dangle past the shrunk buffer (mirrors
         // `handle_queue_loaded`'s selected-offset/viewport cleanup).
         editor.settle_slot_list_after_shrink();
-        Task::none()
+        // Rows below slide into view and a new row may sit at the centre.
+        self.editor_artwork_prefetch_tasks()
     }
 
     /// Remove Duplicates: drop every later copy of a song from the WHOLE
