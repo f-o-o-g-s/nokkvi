@@ -104,6 +104,75 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
     app.pending_expand.target = Some(pending);
 }
 
+// === login tail ===
+
+/// When a session's Subsonic requests move to an OpenSubsonic API key.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeySetup {
+    /// A password login: a fresh key now, before the session is handed over.
+    /// Fails the login only when the server sent no token pair and no key
+    /// could be set up.
+    Now,
+    /// A resume: a session still on the token pair moves to a key in the
+    /// background once its queue is claimed, so startup never waits on it.
+    InBackground,
+}
+
+/// Everything after a login or resume authenticated `shell`, up to the
+/// `LoginSuccess` the root takes over: the JWT-refresh persistence, the
+/// API-key step, and this session's own queue.
+async fn finish_login(
+    shell: AppService,
+    key: KeySetup,
+) -> Result<crate::app_message::LoginSuccess, String> {
+    // Persist every refreshed JWT, so the next launch resumes with it.
+    let storage = shell.storage().clone();
+    shell
+        .auth()
+        .set_token_refresh_callback(std::sync::Arc::new(move |new_token: &str| {
+            if let Err(e) = nokkvi_data::credentials::save_jwt_token(&storage, new_token) {
+                tracing::warn!("Failed to persist refreshed JWT: {e}");
+            }
+        }))
+        .await;
+
+    if key == KeySetup::Now {
+        shell
+            .establish_api_key()
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    }
+
+    // Load this session's own queue before anything reads it: a login to
+    // another server must not show the previous server's queue.
+    if let Err(e) = shell.claim_queue_for_session().await {
+        tracing::warn!("Could not load this session's queue: {e:#}");
+    }
+
+    if key == KeySetup::InBackground {
+        // Tracked, so a logout drains it before the stored session is cleared.
+        let upgrading = shell.clone();
+        shell
+            .task_manager()
+            .spawn("api_key_upgrade", move || async move {
+                upgrading.upgrade_resumed_session_to_api_key().await;
+            });
+    }
+
+    // The URL the session connected to (a login resolves the typed input to
+    // the candidate that answered; a resume holds the stored one with its
+    // scheme lowercased), so the root persists that rather than the input.
+    let resolved_url = shell.auth().get_server_url().await;
+    let username = shell.auth().username().await;
+    let user_id = shell.auth().user_id().await;
+    Ok(crate::app_message::LoginSuccess {
+        shell,
+        resolved_url,
+        username,
+        user_id,
+    })
+}
+
 impl Nokkvi {
     /// Dispatch `NavigationMessage` variants to the per-variant handlers below.
     ///
@@ -503,52 +572,7 @@ impl Nokkvi {
                                 .login(server_url, username, password)
                                 .await
                                 .map_err(|e| format!("{e:#}"))?;
-
-                            // Wire up token refresh persistence callback
-                            let storage = shell.storage().clone();
-                            shell
-                                .auth()
-                                .set_token_refresh_callback(std::sync::Arc::new(
-                                    move |new_token: &str| {
-                                        if let Err(e) = nokkvi_data::credentials::save_jwt_token(
-                                            &storage, new_token,
-                                        ) {
-                                            tracing::warn!("Failed to persist refreshed JWT: {e}");
-                                        }
-                                    },
-                                ))
-                                .await;
-
-                            // Subsonic requests send an OpenSubsonic API key
-                            // (a fresh one each login) when the server offers
-                            // keys, else the token pair. Fails the login only
-                            // when the server sent no pair and no key could
-                            // be set up.
-                            shell
-                                .establish_api_key()
-                                .await
-                                .map_err(|e| format!("{e:#}"))?;
-
-                            // Load this session's own queue before anything
-                            // reads it: a login to another server must not
-                            // show the previous server's queue.
-                            if let Err(e) = shell.claim_queue_for_session().await {
-                                tracing::warn!("Could not load this session's queue: {e:#}");
-                            }
-
-                            // The auth service resolved the typed input to the
-                            // candidate that actually connected; surface it so
-                            // the root persists the resolved URL, not the raw
-                            // input.
-                            let resolved_url = shell.auth().get_server_url().await;
-                            let username = shell.auth().username().await;
-                            let user_id = shell.auth().user_id().await;
-                            Ok(crate::app_message::LoginSuccess {
-                                shell,
-                                resolved_url,
-                                username,
-                                user_id,
-                            })
+                            finish_login(shell, KeySetup::Now).await
                         },
                         |r| Message::LoginResult(Box::new(r)),
                     ),
@@ -605,46 +629,7 @@ impl Nokkvi {
                     .resume_session(server_url, username, jwt_token, subsonic_credential)
                     .await
                     .map_err(|e| format!("{e:#}"))?;
-
-                // Wire up token refresh persistence callback
-                let storage = shell.storage().clone();
-                shell
-                    .auth()
-                    .set_token_refresh_callback(std::sync::Arc::new(move |new_token: &str| {
-                        if let Err(e) =
-                            nokkvi_data::credentials::save_jwt_token(&storage, new_token)
-                        {
-                            tracing::warn!("Failed to persist refreshed JWT: {e}");
-                        }
-                    }))
-                    .await;
-
-                // Same as a fresh login: this session's own queue first.
-                if let Err(e) = shell.claim_queue_for_session().await {
-                    tracing::warn!("Could not load this session's queue: {e:#}");
-                }
-
-                // A session resumed on the token pair moves to an API key in
-                // the background when the server offers keys, so startup
-                // never waits on it. Tracked, so a logout drains it before
-                // the stored session is cleared.
-                let upgrading = shell.clone();
-                shell
-                    .task_manager()
-                    .spawn("api_key_upgrade", move || async move {
-                        upgrading.upgrade_resumed_session_to_api_key().await;
-                    });
-
-                // The stored URL as the session holds it (scheme lowercased).
-                let resolved_url = shell.auth().get_server_url().await;
-                let username = shell.auth().username().await;
-                let user_id = shell.auth().user_id().await;
-                Ok(crate::app_message::LoginSuccess {
-                    shell,
-                    resolved_url,
-                    username,
-                    user_id,
-                })
+                finish_login(shell, KeySetup::InBackground).await
             },
             |r| Message::LoginResult(Box::new(r)),
         )
