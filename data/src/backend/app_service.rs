@@ -1228,6 +1228,7 @@ impl AppService {
             .scan(
                 &server_url,
                 &crate::services::waveform::WaveformIdentity::of(&song),
+                song.expected_duration_ms(),
                 &session.stream_url(&song.id),
                 cancel,
             )

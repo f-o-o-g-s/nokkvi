@@ -123,19 +123,21 @@ impl WaveformService {
     }
 
     /// Scan `stream_url` for `id`, caching the envelope when the whole song
-    /// came through. `cancel` stops it (the song stopped being wanted, or the
-    /// session ended).
+    /// came through. `expected_ms` is the song's length as the server reports
+    /// it (`Song::expected_duration_ms`, the value playback's decoder is
+    /// given), which a scan that ends short is judged against. `cancel` stops
+    /// it (the song stopped being wanted, or the session ended).
     pub async fn scan(
         &self,
         server_url: &str,
         id: &WaveformIdentity,
+        expected_ms: Option<u64>,
         stream_url: &str,
         cancel: CancellationToken,
     ) -> Result<ScanEnd> {
         if !self.scanning() {
             return Ok(ScanEnd::Cancelled);
         }
-        let expected_ms = (id.duration_secs > 0).then(|| u64::from(id.duration_secs) * 1000);
         let started = std::time::Instant::now();
         let end = scan::scan_stream(stream_url, expected_ms, &id.song_id, cancel).await?;
         match &end {
@@ -261,6 +263,7 @@ mod tests {
             .scan(
                 "http://server",
                 &wav_identity(),
+                Some(2_000),
                 file.to_str().unwrap(),
                 CancellationToken::new(),
             )
@@ -297,6 +300,7 @@ mod tests {
             .scan(
                 "http://server",
                 &wav_identity(),
+                Some(2_000),
                 file.to_str().unwrap(),
                 CancellationToken::new(),
             )
@@ -315,6 +319,7 @@ mod tests {
             .scan(
                 "http://server",
                 &identity(),
+                Some(60_000),
                 "http://127.0.0.1:9/rest/stream?id=s",
                 CancellationToken::new(),
             )
