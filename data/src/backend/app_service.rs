@@ -2147,13 +2147,7 @@ impl AppService {
     /// resulting `NextTrackResetEffect`. `Random` falls through to
     /// `shuffle_queue` (which doesn't persist).
     pub async fn sort_queue(&self, mode: QueueSortMode, ascending: bool) -> Result<()> {
-        let effect = {
-            let qm_arc = self.queue_service.queue_manager();
-            let mut qm = qm_arc.lock().await;
-            qm.sort_queue(mode, ascending)
-        };
-        self.queue_service.refresh_from_queue().await;
-        effect.apply_to(&self.audio_engine()).await;
+        self.reorder_queue(mode, ascending).await;
         self.settings_service.set_queue_prefs(mode, ascending).await
     }
 
@@ -2161,10 +2155,18 @@ impl AppService {
     /// [`Self::sort_queue`] but skips the prefs persistence — picking
     /// `Random` is not a deterministic preference worth saving.
     pub async fn shuffle_queue_randomly(&self) {
+        self.reorder_queue(QueueSortMode::Random, true).await;
+    }
+
+    /// The reorder behind [`Self::sort_queue`] and
+    /// [`Self::shuffle_queue_randomly`]: sort the queue rows under the queue
+    /// lock, refresh the reactive projection, then discharge the reset
+    /// against the engine.
+    async fn reorder_queue(&self, mode: QueueSortMode, ascending: bool) {
         let effect = {
             let qm_arc = self.queue_service.queue_manager();
             let mut qm = qm_arc.lock().await;
-            qm.sort_queue(QueueSortMode::Random, true)
+            qm.sort_queue(mode, ascending)
         };
         self.queue_service.refresh_from_queue().await;
         effect.apply_to(&self.audio_engine()).await;
