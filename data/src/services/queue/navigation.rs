@@ -537,7 +537,7 @@ mod tests {
             make_test_song("c"),
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(1));
-        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Track);
 
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 1);
@@ -558,7 +558,7 @@ mod tests {
     fn peek_at_end_repeat_playlist_wraps() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
         let (mut qm, _temp) = make_test_manager(songs, Some(1)); // at last song
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 0);
@@ -626,7 +626,7 @@ mod tests {
     fn get_next_at_end_repeat_playlist_wraps() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
         let (mut qm, _temp) = make_test_manager(songs, Some(1));
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         let next = qm.get_next_song().unwrap();
         assert_eq!(next.index, 0);
@@ -643,7 +643,7 @@ mod tests {
             make_test_song("c"),
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(1));
-        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Track);
 
         let next = qm.get_next_song().unwrap();
         assert_eq!(next.index, 2);
@@ -671,7 +671,7 @@ mod tests {
         let storage: StateStorage = qm.storage.clone();
 
         // Persist repeat=Track via the write guard.
-        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Track);
 
         // Manual skip once — the bypass transiently sets repeat=None and
         // save_order fires while it is None.
@@ -845,7 +845,7 @@ mod tests {
             make_test_song("c"),
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
         // No shuffle / consume / history.
 
         let result = qm.get_previous_song(Some(0));
@@ -867,7 +867,7 @@ mod tests {
             make_test_song("c"),
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
         qm.queue.consume = true;
 
         let result = qm.get_previous_song(Some(0));
@@ -1171,7 +1171,7 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
         qm.shuffle_order();
 
         // Record the initial shuffle order
@@ -1202,7 +1202,7 @@ mod tests {
         let songs = vec![make_test_song("a")];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         // Single song + shuffle + repeat-playlist — should wrap and return the same song
         let next = qm.get_next_song();
@@ -1222,10 +1222,10 @@ mod tests {
         let songs: Vec<_> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         if shuffle {
-            let _ = qm.toggle_shuffle().unwrap();
+            let _ = qm.toggle_shuffle();
         }
         qm.queue.consume = consume;
-        let _ = qm.set_repeat(repeat).unwrap();
+        let _ = qm.set_repeat(repeat);
         qm
     }
 
@@ -1431,7 +1431,7 @@ mod tests {
         let songs = vec![make_test_song("a")];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         let peeked = qm.peek_next_song();
         assert!(
@@ -1451,7 +1451,7 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         // Advance through all songs
         let mut count = 0;
@@ -1472,7 +1472,7 @@ mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.queue.consume = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         let peeked = qm.peek_next_song();
         assert!(
@@ -1493,7 +1493,7 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
-        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Track);
 
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 1, "should advance to next song, not replay");
@@ -1515,7 +1515,7 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
-        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Playlist);
 
         let next = qm.peek_next_song().unwrap();
         assert_eq!(next.song().id, "b", "should advance to next song mid-queue");
@@ -1555,10 +1555,10 @@ mod proptest_navigation {
         let start = if n > 0 { start_idx % n } else { 0 };
         let (mut qm, _temp) = make_test_manager(songs, if n > 0 { Some(start) } else { None });
         if shuffle {
-            let _ = qm.toggle_shuffle().unwrap();
+            let _ = qm.toggle_shuffle();
         }
         qm.queue.consume = consume;
-        let _ = qm.set_repeat(repeat).unwrap();
+        let _ = qm.set_repeat(repeat);
         qm
     }
 
@@ -1642,7 +1642,7 @@ mod proptest_navigation {
             let (mut qm, _temp) = make_test_manager(songs, Some(s));
             // Sequential, no consume, no repeat
             qm.queue.consume = false;
-            let _ = qm.set_repeat(RepeatMode::None).unwrap();
+            let _ = qm.set_repeat(RepeatMode::None);
 
             let remaining = n - s - 1; // songs after start
             let mut count = 0;
@@ -1684,9 +1684,9 @@ mod proptest_navigation {
         fn shuffle_visits_all_once(n in 2usize..20) {
             let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
             let (mut qm, _temp) = make_test_manager(songs, Some(0));
-            let _ = qm.toggle_shuffle().unwrap();
+            let _ = qm.toggle_shuffle();
             qm.queue.consume = false;
-            let _ = qm.set_repeat(RepeatMode::None).unwrap();
+            let _ = qm.set_repeat(RepeatMode::None);
 
             let mut visited = std::collections::HashSet::new();
             visited.insert("0".to_string()); // starting song
@@ -1718,9 +1718,9 @@ mod proptest_navigation {
         ) {
             let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
             let (mut qm, _temp) = make_test_manager(songs, Some(0));
-            let _ = qm.toggle_shuffle().unwrap();
+            let _ = qm.toggle_shuffle();
             qm.queue.consume = false;
-            let _ = qm.set_repeat(RepeatMode::None).unwrap();
+            let _ = qm.set_repeat(RepeatMode::None);
 
             // Pick a random valid current_order and re-anchor there
             // (toggle_shuffle keeps song 0 anchored at current_order=0;
@@ -1738,7 +1738,7 @@ mod proptest_navigation {
 
             // Remove the currently-playing physical row.
             let cur_phys = qm.queue.current_index().unwrap();
-            let _ = qm.remove_song(cur_phys).unwrap();
+            let _ = qm.remove_song(cur_phys);
 
             // Invariant restored after removal.
             let (post_co, post_ci) = (qm.queue.current_order, qm.queue.current_index());

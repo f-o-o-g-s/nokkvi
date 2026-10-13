@@ -74,7 +74,7 @@ impl Nokkvi {
                 // pre-buffered next-track decoder — discharge against
                 // the engine immediately so the next gapless prep
                 // picks the right song from the freshly-extended order.
-                let effect = shell.queue().add_songs(songs).await?;
+                let effect = shell.queue().add_songs(songs).await;
                 effect.apply_to(&shell.audio_engine()).await;
                 Ok(Some(count))
             },

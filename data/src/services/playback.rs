@@ -468,11 +468,11 @@ impl QueueNavigator {
             );
         }
 
-        let effect = queue_manager.remove_song(index).ok();
+        let effect = queue_manager.remove_song(index);
 
         debug!(" [CONSUME] Queue length now: {}", queue_manager.queue_len());
 
-        effect
+        Some(effect)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -824,13 +824,11 @@ impl QueueNavigator {
             // the last entry behind. The queue lock has no intervening await
             // here, so the entry_id resolves against the live queue.
             if let Some(eid) = consume_entry {
-                let consume_effect = queue_manager.remove_entry_by_id(eid).ok();
+                let consume_effect = queue_manager.remove_entry_by_id(eid);
                 let reposition_effect = queue_manager.reposition_to_index(None);
                 drop(queue_manager);
                 *self.current_song_id.lock().await = None;
-                if let Some(effect) = consume_effect {
-                    effect.apply_locked(engine).await;
-                }
+                consume_effect.apply_locked(engine).await;
                 reposition_effect.apply_locked(engine).await;
                 engine.stop().await;
                 return Ok(NextOutcome::Drained);
@@ -856,11 +854,9 @@ impl QueueNavigator {
         // blend in any case).
         if let Some(eid) = consume_entry {
             let mut qm = self.queue_manager.lock().await;
-            let effect = qm.remove_entry_by_id(eid).ok();
+            let effect = qm.remove_entry_by_id(eid);
             drop(qm);
-            if let Some(effect) = effect {
-                effect.apply_locked(engine).await;
-            }
+            effect.apply_locked(engine).await;
         }
 
         Ok(match plan {
@@ -922,11 +918,9 @@ impl QueueNavigator {
                 // the matching note in `play_next`).
                 if let Some(eid) = consume_entry {
                     let mut qm = self.queue_manager.lock().await;
-                    let effect = qm.remove_entry_by_id(eid).ok();
+                    let effect = qm.remove_entry_by_id(eid);
                     drop(qm);
-                    if let Some(effect) = effect {
-                        effect.apply_locked(engine).await;
-                    }
+                    effect.apply_locked(engine).await;
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
@@ -940,7 +934,7 @@ impl QueueNavigator {
 
                 let insert_idx = current_index.unwrap_or(0);
                 let insert_effect =
-                    queue_manager.insert_song_and_make_current(insert_idx, song.clone())?;
+                    queue_manager.insert_song_and_make_current(insert_idx, song.clone());
 
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
@@ -1149,9 +1143,7 @@ mod tests {
     async fn decide_path3_repeat_track_returns_load_fresh_with_repeat_reason() {
         let songs = vec![make_song("a")];
         let mut qm = manager_with_songs(songs, Some(0));
-        let _ = qm
-            .set_repeat(crate::types::queue::RepeatMode::Track)
-            .expect("set repeat");
+        let _ = qm.set_repeat(crate::types::queue::RepeatMode::Track);
 
         let qm = Arc::new(Mutex::new(qm));
         let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
@@ -1186,9 +1178,7 @@ mod tests {
         let songs = vec![make_song("a"), make_song("b")];
         let mut qm = manager_with_songs(songs, Some(0));
         qm.queue.consume = true;
-        let _ = qm
-            .set_repeat(crate::types::queue::RepeatMode::Track)
-            .expect("set repeat");
+        let _ = qm.set_repeat(crate::types::queue::RepeatMode::Track);
 
         let qm = Arc::new(Mutex::new(qm));
         let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
@@ -1509,7 +1499,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(0),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1537,7 +1527,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(1),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1572,9 +1562,7 @@ mod tests {
             ],
             Some(1),
         );
-        let _ = qm
-            .remove_songs_by_ids(&["b".to_string(), "d".to_string()])
-            .expect("remove batch");
+        let _ = qm.remove_songs_by_ids(&["b".to_string(), "d".to_string()]);
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1599,7 +1587,7 @@ mod tests {
     fn removal_aftermath_last_song_removed_returns_stop_empty() {
         // Queue: [only], current = 0. Remove only. After: [], current_index = None.
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
-        let _ = qm.remove_song_by_id("only").expect("remove only");
+        let _ = qm.remove_song_by_id("only");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1648,9 +1636,7 @@ mod tests {
         );
 
         // Now mutate.
-        let _ = qm
-            .remove_entry_by_id(target_entry_id)
-            .expect("remove by entry_id");
+        let _ = qm.remove_entry_by_id(target_entry_id);
         assert_eq!(qm.song_ids_snapshot(), vec!["a", "c"]);
         // After removal the entry_id is gone, so a resolution attempt would
         // return an empty Vec — proves the ordering is load-bearing.
@@ -1699,7 +1685,7 @@ mod tests {
             Some(0),
         );
         // Remove only the row at index 0 (one of the duplicates).
-        let _ = qm.remove_song(0).expect("remove duplicate row");
+        let _ = qm.remove_song(0);
         assert_eq!(qm.song_ids_snapshot(), vec!["dup", "b"]);
         assert_eq!(qm.current_index(), Some(0));
 
@@ -1723,9 +1709,7 @@ mod tests {
     fn removal_aftermath_clear_queue_returns_stop_empty() {
         // Queue: [a, b], current = a (idx 0). Remove [a, b]. After: [].
         let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
-        let _ = qm
-            .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
-            .expect("remove all");
+        let _ = qm.remove_songs_by_ids(&["a".to_string(), "b".to_string()]);
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1758,7 +1742,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(1),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan =
             decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], RemovalTransport::Idle);
@@ -1783,7 +1767,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(1),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan =
             decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], RemovalTransport::Idle);
@@ -1805,7 +1789,7 @@ mod tests {
     #[test]
     fn removal_aftermath_stopped_engine_emptied_still_stops() {
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
-        let _ = qm.remove_song_by_id("only").expect("remove only");
+        let _ = qm.remove_song_by_id("only");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1831,7 +1815,7 @@ mod tests {
             vec![make_song("dup"), make_song("dup"), make_song("b")],
             Some(0),
         );
-        let _ = qm.remove_song(0).expect("remove duplicate row");
+        let _ = qm.remove_song(0);
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1867,7 +1851,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(1),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1889,7 +1873,7 @@ mod tests {
     #[test]
     fn removal_aftermath_radio_stream_emptied_queue_does_not_stop() {
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
-        let _ = qm.remove_song_by_id("only").expect("remove only");
+        let _ = qm.remove_song_by_id("only");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1913,7 +1897,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(0),
         );
-        let _ = qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b");
 
         let plan = decide_removal_aftermath(
             &qm,
@@ -1934,7 +1918,7 @@ mod tests {
             vec![make_song("dup"), make_song("dup"), make_song("b")],
             Some(0),
         );
-        let _ = qm.remove_song(0).expect("remove duplicate row");
+        let _ = qm.remove_song(0);
 
         let plan = decide_removal_aftermath(
             &qm,

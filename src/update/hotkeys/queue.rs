@@ -1,7 +1,7 @@
 //! Queue management hotkey handlers
 
 use iced::Task;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::{Nokkvi, View, app_message::Message};
 
@@ -118,20 +118,9 @@ impl Nokkvi {
                 // set_queue empty + engine gapless prep reset.
                 shell.clear_queue(radio_stream_url.as_deref()).await
             },
-            |result| match result {
-                Ok(outcome) => {
-                    info!(" Queue cleared successfully ({outcome:?})");
-                    Message::QueueLoader(crate::app_message::QueueLoaderMessage::Cleared(outcome))
-                }
-                Err(e) => {
-                    error!(" Failed to clear queue: {}", e);
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to clear queue: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
-                }
+            |outcome| {
+                info!(" Queue cleared successfully ({outcome:?})");
+                Message::QueueLoader(crate::app_message::QueueLoaderMessage::Cleared(outcome))
             },
         )
     }
@@ -335,7 +324,8 @@ impl Nokkvi {
         // Persist to backend. `AppService::move_queue_item` bundles the
         // mutation + reactive refresh + engine gapless-prep reset.
         self.shell_spawn("queue_move_item", move |shell| async move {
-            shell.move_queue_item(from, to).await
+            shell.move_queue_item(from, to).await;
+            Ok(())
         });
 
         // Same-length in-place reorder without a reload (like drag MoveItem) —

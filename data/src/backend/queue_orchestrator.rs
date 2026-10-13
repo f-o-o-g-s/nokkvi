@@ -69,7 +69,7 @@ impl<'a> QueueOrchestrator<'a> {
     /// discharge the returned [`NextTrackResetEffect`] against the
     /// engine before returning.
     pub async fn enqueue(&self, songs: Vec<Song>) -> Result<()> {
-        let effect = self.queue.add_songs(songs).await?;
+        let effect = self.queue.add_songs(songs).await;
         effect.apply_to(&self.playback.audio_engine()).await;
         Ok(())
     }
@@ -83,7 +83,7 @@ impl<'a> QueueOrchestrator<'a> {
         }
         let first_id = songs[0].id.clone();
         let queue_index = self.queue.get_songs().len();
-        let effect = self.queue.add_songs(songs).await?;
+        let effect = self.queue.add_songs(songs).await;
         effect.apply_to(&self.playback.audio_engine()).await;
         self.playback
             .play_song_from_queue(&first_id, queue_index)
@@ -93,7 +93,7 @@ impl<'a> QueueOrchestrator<'a> {
     /// Insert at an explicit position.
     /// Mirrors today's `insert_*_at_position` family.
     pub async fn insert_at(&self, songs: Vec<Song>, position: usize) -> Result<()> {
-        let effect = self.queue.insert_songs_at(position, songs).await?;
+        let effect = self.queue.insert_songs_at(position, songs).await;
         effect.apply_to(&self.playback.audio_engine()).await;
         Ok(())
     }
@@ -113,7 +113,7 @@ impl<'a> QueueOrchestrator<'a> {
 
         // `insert_songs_at` now refreshes all three reactives atomically under
         // the same queue lock — no separate `refresh_from_queue` needed.
-        let effect = self.queue.insert_songs_at(target, songs).await?;
+        let effect = self.queue.insert_songs_at(target, songs).await;
         effect.apply_to(&self.playback.audio_engine()).await;
         debug!(
             "⏭ Inserted {} songs as play-next at position {}",
@@ -179,7 +179,7 @@ mod tests {
         let fx = fixture().await?;
         let orch = QueueOrchestrator::new(&fx.queue, &fx.playback);
 
-        let _ = fx.queue.set_queue(make_songs(&["a", "b"]), Some(0)).await?;
+        let _ = fx.queue.set_queue(make_songs(&["a", "b"]), Some(0)).await;
         let before_current = fx.queue.current_index().await;
 
         orch.enqueue(make_songs(&["c", "d"])).await?;
@@ -197,7 +197,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(make_songs(&["a", "b", "c"]), Some(0))
-            .await?;
+            .await;
         orch.insert_at(make_songs(&["x", "y"]), 1).await?;
 
         assert_eq!(queue_ids(&fx), vec!["a", "x", "y", "b", "c"]);
@@ -213,7 +213,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(make_songs(&["a", "b", "c"]), Some(1))
-            .await?;
+            .await;
         orch.play_next(make_songs(&["x"])).await?;
 
         assert_eq!(queue_ids(&fx), vec!["a", "b", "x", "c"]);
@@ -226,7 +226,7 @@ mod tests {
         let orch = QueueOrchestrator::new(&fx.queue, &fx.playback);
 
         // Empty queue → current_index = None → target = 0.
-        let _ = fx.queue.set_queue(vec![], None).await?;
+        let _ = fx.queue.set_queue(vec![], None).await;
         orch.play_next(make_songs(&["x", "y"])).await?;
 
         assert_eq!(queue_ids(&fx), vec!["x", "y"]);
@@ -238,7 +238,7 @@ mod tests {
         let fx = fixture().await?;
         let orch = QueueOrchestrator::new(&fx.queue, &fx.playback);
 
-        let _ = fx.queue.set_queue(make_songs(&["a", "b"]), Some(0)).await?;
+        let _ = fx.queue.set_queue(make_songs(&["a", "b"]), Some(0)).await;
         let before = queue_ids(&fx);
         orch.enqueue_and_play(vec![]).await?;
         assert_eq!(queue_ids(&fx), before);

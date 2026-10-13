@@ -28,12 +28,9 @@ use crate::{
 /// PlaybackController — Owns the audio engine and queue navigator.
 ///
 /// After a completion-driven transition, reproject the queue view and tell
-/// the UI the queue changed. A failed refresh is logged (the next queue
-/// reload reconciles the view); a closed channel means the UI side is gone.
+/// the UI the queue changed. A closed channel means the UI side is gone.
 async fn refresh_queue_view_and_signal(qvm: &QueueService, queue_tx: &mpsc::UnboundedSender<()>) {
-    if let Err(e) = qvm.refresh_from_queue().await {
-        warn!(" [COMPLETION] Queue view refresh failed: {e:#}");
-    }
+    qvm.refresh_from_queue().await;
     if queue_tx.send(()).is_err() {
         debug!(" [COMPLETION] Queue-changed listener is gone");
     }
@@ -347,7 +344,7 @@ impl PlaybackController {
                 let stream_url = session.stream_url(&song.id);
 
                 // Sync reactive current_index for UI highlighting
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
 
                 let staged = StagedSong::new(&song.id, &stream_url, Some(&song), StageStart::Play);
                 return self.stage_and_name(audio, staged, None).await;
@@ -408,13 +405,13 @@ impl PlaybackController {
                 drop(queue_navigator);
                 drop(engine);
                 // Sync reactive current_index for UI highlighting
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
                 Ok(false)
             }
             Ok(NextOutcome::Played(..)) => {
                 drop(queue_navigator);
                 drop(engine);
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
                 Ok(true)
             }
             Ok(NextOutcome::FadePlanned(plan)) => {
@@ -428,7 +425,7 @@ impl PlaybackController {
                 // Refresh FIRST — the queue already advanced (cursor, history,
                 // consume), so the UI reflects the skip immediately while the
                 // incoming decoder builds.
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
                 self.complete_skip_fade(plan, generation, seq).await?;
                 Ok(true)
             }
@@ -476,21 +473,21 @@ impl PlaybackController {
                 // Nothing to step back to still refreshes, as it always did;
                 // a blocked step-back changed nothing.
                 if outcome == PreviousOutcome::Stepped {
-                    self.queue_service.refresh_from_queue().await?;
+                    self.queue_service.refresh_from_queue().await;
                 }
                 Ok(outcome)
             }
             Ok(PreviousStep::Played) => {
                 drop(queue_navigator);
                 drop(engine);
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
                 Ok(PreviousOutcome::Stepped)
             }
             Ok(PreviousStep::FadePlanned(plan)) => {
                 let generation = engine.source_generation();
                 drop(queue_navigator);
                 drop(engine);
-                self.queue_service.refresh_from_queue().await?;
+                self.queue_service.refresh_from_queue().await;
                 self.complete_skip_fade(*plan, generation, seq).await?;
                 Ok(PreviousOutcome::Stepped)
             }
@@ -613,24 +610,24 @@ impl PlaybackController {
     ///
     /// Clears the engine's prepared next-track decoder because toggling shuffle
     /// reshuffles the order array, invalidating any pre-buffered gapless song.
-    pub async fn toggle_random(&self) -> Result<bool> {
+    pub async fn toggle_random(&self) -> bool {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        let effect = queue_manager.toggle_shuffle()?;
+        let effect = queue_manager.toggle_shuffle();
         let is_random = queue_manager.get_queue().shuffle;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after order change)
         effect.apply_to(&self.audio_engine).await;
 
-        Ok(is_random)
+        is_random
     }
 
     /// Cycle repeat mode: None → Track → Playlist → None
     ///
     /// Clears queued next-song and engine prep because repeat mode affects
     /// what `peek_next_song` returns (e.g. repeat-track → same song).
-    pub async fn cycle_repeat(&self) -> Result<(bool, bool)> {
+    pub async fn cycle_repeat(&self) -> (bool, bool) {
         use crate::types::queue::RepeatMode;
 
         let queue_manager_arc = self.queue_service.queue_manager();
@@ -646,7 +643,7 @@ impl PlaybackController {
         // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
         // already calls `clear_queued()` + `save_order()` under the guard.
         // Calling them again here would be redundant work.
-        let effect = queue_manager.set_repeat(next_repeat)?;
+        let effect = queue_manager.set_repeat(next_repeat);
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
@@ -654,7 +651,7 @@ impl PlaybackController {
 
         let repeat = next_repeat == RepeatMode::Track;
         let repeat_queue = next_repeat == RepeatMode::Playlist;
-        Ok((repeat, repeat_queue))
+        (repeat, repeat_queue)
     }
 
     /// Set repeat mode to a specific value (idempotent; used by MPRIS LoopStatus).
@@ -669,10 +666,7 @@ impl PlaybackController {
     /// A no-op set (current == target) still applies the engine effect, which
     /// is harmless: gapless prep is invalidated and the next `peek_next_song`
     /// re-resolves under the same mode.
-    pub async fn set_repeat_mode(
-        &self,
-        mode: crate::types::queue::RepeatMode,
-    ) -> Result<(bool, bool)> {
+    pub async fn set_repeat_mode(&self, mode: crate::types::queue::RepeatMode) -> (bool, bool) {
         use crate::types::queue::RepeatMode;
 
         let queue_manager_arc = self.queue_service.queue_manager();
@@ -680,7 +674,7 @@ impl PlaybackController {
 
         // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
         // already calls `clear_queued()` + `save_order()` under the guard.
-        let effect = queue_manager.set_repeat(mode)?;
+        let effect = queue_manager.set_repeat(mode);
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
@@ -688,24 +682,24 @@ impl PlaybackController {
 
         let repeat = mode == RepeatMode::Track;
         let repeat_queue = mode == RepeatMode::Playlist;
-        Ok((repeat, repeat_queue))
+        (repeat, repeat_queue)
     }
 
     /// Toggle consume mode
     ///
     /// Clears the engine's prepared next-track decoder because consume mode
     /// affects post-transition queue state (the finished song may be removed).
-    pub async fn toggle_consume(&self) -> Result<bool> {
+    pub async fn toggle_consume(&self) -> bool {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        let effect = queue_manager.toggle_consume()?;
+        let effect = queue_manager.toggle_consume();
         let consume = queue_manager.get_queue().consume;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
         effect.apply_to(&self.audio_engine).await;
 
-        Ok(consume)
+        consume
     }
 
     /// Get current modes (random, repeat_track, repeat_queue, consume)
@@ -956,7 +950,7 @@ impl PlaybackController {
         let effect = self
             .queue_service
             .set_queue(songs.clone(), Some(play_index))
-            .await?;
+            .await;
 
         // 2. Build stream URL for the target song
         let song = &songs[play_index];
@@ -1118,7 +1112,7 @@ impl PlaybackController {
         };
 
         // 2. Sync the reactive current_index property with queue state
-        self.queue_service.refresh_from_queue().await?;
+        self.queue_service.refresh_from_queue().await;
 
         // 3. Build stream URL and play (mirrors play_song_from_queue)
         let stream_url = session.stream_url(&song_id);
@@ -1169,7 +1163,7 @@ impl PlaybackController {
         drop(qm);
 
         // 2. Sync the reactive current_index property with queue state
-        self.queue_service.refresh_from_queue().await?;
+        self.queue_service.refresh_from_queue().await;
 
         // 3. Build stream URL and play
         let stream_url = session.stream_url(song_id);
@@ -1913,7 +1907,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(1))
-            .await?;
+            .await;
         let engine_arc = fx.playback.audio_engine();
         let mut e = engine_arc.lock().await;
         e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=a&_=1", None, None)
@@ -1973,7 +1967,7 @@ mod tests {
         let fx = click_fixture().await?;
         let (generation, seq) = skip_to_b_in_flight(&fx).await?;
         // Nothing to step back to: the queue is "b" alone.
-        let _ = fx.queue.set_queue(vec![click_song("b")], Some(0)).await?;
+        let _ = fx.queue.set_queue(vec![click_song("b")], Some(0)).await;
 
         assert_eq!(
             fx.playback.previous().await?,
@@ -2452,7 +2446,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("x"), click_song("y")], Some(0))
-            .await?;
+            .await;
 
         let result = fx
             .playback
@@ -2480,7 +2474,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(0))
-            .await?;
+            .await;
         let _keepalive = {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2522,7 +2516,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(0))
-            .await?;
+            .await;
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2559,7 +2553,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(0))
-            .await?;
+            .await;
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2583,7 +2577,7 @@ mod tests {
     async fn play_song_from_queue_crossfade_mode_takes_plan_path() -> Result<()> {
         let fx = click_fixture().await?;
         let songs = vec![click_song("a"), click_song("b")];
-        let _ = fx.queue.set_queue(songs, Some(0)).await?;
+        let _ = fx.queue.set_queue(songs, Some(0)).await;
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2620,7 +2614,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("x"), click_song("y")], Some(0))
-            .await?;
+            .await;
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2660,7 +2654,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(0))
-            .await?;
+            .await;
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
@@ -2687,7 +2681,7 @@ mod tests {
         let _ = fx
             .queue
             .set_queue(vec![click_song("a"), click_song("b")], Some(0))
-            .await?;
+            .await;
         const STATION: &str = "http://127.0.0.1:9/stream.mp3";
         {
             let engine_arc = fx.playback.audio_engine();

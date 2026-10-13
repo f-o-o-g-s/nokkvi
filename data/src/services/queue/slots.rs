@@ -271,7 +271,7 @@ mod tests {
     fn save_live_queue(storage: &StateStorage, ids: &[&str]) {
         let mut qm = QueueManager::new(storage.clone()).expect("queue manager");
         let songs = ids.iter().map(|id| make_test_song(id)).collect();
-        let _ = qm.set_queue(songs, Some(0)).expect("set queue");
+        let _ = qm.set_queue(songs, Some(0));
     }
 
     fn live_ids(storage: &StateStorage) -> Vec<String> {
@@ -468,7 +468,7 @@ mod tests {
             .iter()
             .map(|id| make_test_song(id))
             .collect();
-        let _ = qm.set_queue(songs, Some(2)).expect("set queue");
+        let _ = qm.set_queue(songs, Some(2));
 
         assert_eq!(
             legacy_sample(&storage).expect("sample"),

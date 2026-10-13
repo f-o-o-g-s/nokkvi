@@ -146,7 +146,7 @@ impl AppService {
         let settings_service = SettingsService::new(storage.clone())?;
 
         // Initialize the queue service with persisted data
-        queue_service.initialize().await?;
+        queue_service.initialize().await;
 
         // Restore the persisted multi-library selection. A read failure
         // is non-fatal — the user gets the "no filter" default for this
@@ -351,7 +351,7 @@ impl AppService {
         match slots::claim(&self.storage, &owner, current_playlist, legacy)? {
             QueueClaim::Kept => {}
             QueueClaim::Replaced { playlist, restored } => {
-                self.queue_service.reload_from_storage().await?;
+                self.queue_service.reload_from_storage().await;
                 self.playback.resync_navigator_with_queue().await;
                 self.settings_service.set_active_playlist(playlist).await?;
                 info!(
@@ -503,13 +503,13 @@ impl AppService {
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
         self.playback.set_volume(volume).await
     }
-    pub async fn toggle_random(&self) -> Result<bool> {
+    pub async fn toggle_random(&self) -> bool {
         self.playback.toggle_random().await
     }
-    pub async fn cycle_repeat(&self) -> Result<(bool, bool)> {
+    pub async fn cycle_repeat(&self) -> (bool, bool) {
         self.playback.cycle_repeat().await
     }
-    pub async fn toggle_consume(&self) -> Result<bool> {
+    pub async fn toggle_consume(&self) -> bool {
         self.playback.toggle_consume().await
     }
     pub async fn get_modes(&self) -> (bool, bool, bool, bool) {
@@ -1091,7 +1091,7 @@ impl AppService {
         // 1. Replace the queue MODEL + reactive playhead; discharge the
         //    gapless-prep reset obligation against the engine.
         before_replace();
-        let effect = self.queue_service.set_queue(pq.entry, clamped).await?;
+        let effect = self.queue_service.set_queue(pq.entry, clamped).await;
         let engine_arc = self.audio_engine();
         effect.apply_to(&engine_arc).await;
 
@@ -2033,7 +2033,7 @@ impl AppService {
                 .collect()
         };
 
-        let effect = self.queue_service.remove_entries_by_ids(entry_ids).await?;
+        let effect = self.queue_service.remove_entries_by_ids(entry_ids).await;
 
         let plan = {
             let qm_arc = self.queue_service.queue_manager();
@@ -2075,13 +2075,13 @@ impl AppService {
     /// station or reload the engine.
     /// Only the gapless prep is reset, since a dropped row may be the
     /// prepared next track.
-    pub async fn remove_queue_duplicates(&self) -> Result<Vec<u64>> {
-        let (dropped, effect) = self.queue_service.remove_duplicates().await?;
+    pub async fn remove_queue_duplicates(&self) -> Vec<u64> {
+        let (dropped, effect) = self.queue_service.remove_duplicates().await;
         // Nothing written, nothing to reset: an armed crossfade stays armed.
         if !dropped.is_empty() {
             effect.apply_to(&self.audio_engine()).await;
         }
-        Ok(dropped)
+        dropped
     }
 
     /// Move a queue item from one position to another (drag-and-drop reorder
@@ -2091,10 +2091,9 @@ impl AppService {
     /// reorder leaves the engine streaming the originally-prepared song
     /// while the UI highlights whichever row the queue's re-shuffled
     /// `order[]` now picks as next.
-    pub async fn move_queue_item(&self, from: usize, to: usize) -> Result<()> {
-        let effect = self.queue_service.move_item(from, to).await?;
+    pub async fn move_queue_item(&self, from: usize, to: usize) {
+        let effect = self.queue_service.move_item(from, to).await;
         effect.apply_to(&self.audio_engine()).await;
-        Ok(())
     }
 
     /// Multi-selection drag reorder, addressed by per-row `entry_id`.
@@ -2107,20 +2106,19 @@ impl AppService {
         &self,
         entry_ids: Vec<u64>,
         target: crate::types::queue::MoveBatchTarget,
-    ) -> Result<()> {
+    ) {
         let effect = self
             .queue_service
             .move_batch_by_entry_ids(&entry_ids, target)
-            .await?;
+            .await;
         effect.apply_to(&self.audio_engine()).await;
-        Ok(())
     }
 
     /// "Play Next" batch from the queue context menu: remove the targeted
     /// rows by `entry_id`, then re-insert their songs right after the
     /// currently-playing position. Discharges the resulting effect against
     /// the engine.
-    pub async fn play_next_in_queue(&self, entry_ids: Vec<u64>) -> Result<()> {
+    pub async fn play_next_in_queue(&self, entry_ids: Vec<u64>) {
         let effect = {
             let qm_arc = self.queue_service.queue_manager();
             let mut qm = qm_arc.lock().await;
@@ -2137,12 +2135,11 @@ impl AppService {
                 })
                 .collect();
             // One reset covers the removal and the re-insert.
-            let removed = qm.remove_entries_by_ids(&entry_ids)?;
-            removed.and(qm.insert_after_current(extracted)?)
+            let removed = qm.remove_entries_by_ids(&entry_ids);
+            removed.and(qm.insert_after_current(extracted))
         };
-        self.queue_service.refresh_from_queue().await?;
+        self.queue_service.refresh_from_queue().await;
         effect.apply_to(&self.audio_engine()).await;
-        Ok(())
     }
 
     /// Sort the queue physically by `mode` + `ascending`, persist the new
@@ -2153,9 +2150,9 @@ impl AppService {
         let effect = {
             let qm_arc = self.queue_service.queue_manager();
             let mut qm = qm_arc.lock().await;
-            qm.sort_queue(mode, ascending)?
+            qm.sort_queue(mode, ascending)
         };
-        self.queue_service.refresh_from_queue().await?;
+        self.queue_service.refresh_from_queue().await;
         effect.apply_to(&self.audio_engine()).await;
         self.settings_service.set_queue_prefs(mode, ascending).await
     }
@@ -2163,15 +2160,14 @@ impl AppService {
     /// Re-shuffle the queue (the `Random` sort-mode dispatch). Same as
     /// [`Self::sort_queue`] but skips the prefs persistence — picking
     /// `Random` is not a deterministic preference worth saving.
-    pub async fn shuffle_queue_randomly(&self) -> Result<()> {
+    pub async fn shuffle_queue_randomly(&self) {
         let effect = {
             let qm_arc = self.queue_service.queue_manager();
             let mut qm = qm_arc.lock().await;
-            qm.sort_queue(QueueSortMode::Random, true)?
+            qm.sort_queue(QueueSortMode::Random, true)
         };
-        self.queue_service.refresh_from_queue().await?;
+        self.queue_service.refresh_from_queue().await;
         effect.apply_to(&self.audio_engine()).await;
-        Ok(())
     }
 
     /// Clear the queue: empty the queue model and refresh the projection,
@@ -2195,7 +2191,7 @@ impl AppService {
     pub async fn clear_queue(
         &self,
         radio_stream_url: Option<&str>,
-    ) -> Result<crate::services::playback::ClearQueueOutcome> {
+    ) -> crate::services::playback::ClearQueueOutcome {
         use crate::services::playback::{ClearQueueOutcome, RemovalTransport};
 
         let engine_arc = self.audio_engine();
@@ -2216,13 +2212,13 @@ impl AppService {
                 ClearQueueOutcome::EngineStopped
             }
         };
-        let effect = self.queue_service.set_queue(Vec::new(), None).await?;
+        let effect = self.queue_service.set_queue(Vec::new(), None).await;
         // The cleared queue holds no song, so the navigator must not keep
         // naming the pre-clear one (it would record a phantom history entry
         // on the next play).
         self.playback.clear_current_song_id().await;
         effect.apply_to(&engine_arc).await;
-        Ok(outcome)
+        outcome
     }
 }
 
@@ -2589,11 +2585,7 @@ mod tests {
             .iter()
             .map(|id| crate::types::song::Song::test_default(id, id))
             .collect();
-        let effect = app
-            .queue()
-            .set_queue(songs, Some(1))
-            .await
-            .expect("seed queue");
+        let effect = app.queue().set_queue(songs, Some(1)).await;
         effect.apply_to(&app.audio_engine()).await;
 
         resume_as(&app, other, "demo").await;
@@ -2955,8 +2947,7 @@ mod tests {
         let seeded = app
             .queue_service
             .set_queue(dispatch_test_songs(&["a", "b", "c"]), Some(0))
-            .await
-            .expect("seed the queue");
+            .await;
         seeded.apply_to(&app.audio_engine()).await;
         let engine_arc = app.audio_engine();
         {
@@ -3003,8 +2994,7 @@ mod tests {
         let seeded = app
             .queue_service
             .set_queue(dispatch_test_songs(&["a", "b", "c"]), Some(0))
-            .await
-            .expect("seed the queue");
+            .await;
         seeded.apply_to(&app.audio_engine()).await;
         app.playback
             .apply_removal_aftermath(
@@ -3030,10 +3020,7 @@ mod tests {
     async fn clearing_the_queue_keeps_a_playing_station_streaming() {
         let (app, db_path) = app_playing_for_clear(CLEAR_STATION).await;
 
-        let outcome = app
-            .clear_queue(Some(CLEAR_STATION))
-            .await
-            .expect("clear the queue");
+        let outcome = app.clear_queue(Some(CLEAR_STATION)).await;
 
         assert_eq!(
             outcome,
@@ -3068,10 +3055,7 @@ mod tests {
         const QUEUE_SONG: &str = "http://127.0.0.1:9/rest/stream?id=a";
         let (app, db_path) = app_playing_for_clear(QUEUE_SONG).await;
 
-        let outcome = app
-            .clear_queue(Some(CLEAR_STATION))
-            .await
-            .expect("clear the queue");
+        let outcome = app.clear_queue(Some(CLEAR_STATION)).await;
 
         assert_eq!(
             outcome,

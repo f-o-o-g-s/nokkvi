@@ -12,7 +12,6 @@ use tracing::{debug, error, trace};
 
 use super::components::{
     ArtworkGate, duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
-    session_expired_message,
 };
 use crate::{
     Nokkvi, View,
@@ -40,10 +39,8 @@ impl Nokkvi {
         self.shell_task(
             |shell| async move {
                 let queue_vm = shell.queue().clone();
-                match queue_vm.refresh_from_queue().await {
-                    Ok(_) => Ok(queue_vm.get_songs()),
-                    Err(e) => Err(e.to_string()),
-                }
+                queue_vm.refresh_from_queue().await;
+                Ok(queue_vm.get_songs())
             },
             |result| Message::QueueLoader(crate::app_message::QueueLoaderMessage::Loaded(result)),
         )
@@ -439,7 +436,8 @@ impl Nokkvi {
                                 vec![source_entry_id],
                                 target_for_backend,
                             )
-                            .await
+                            .await;
+                        Ok(())
                     });
 
                     // Drag reorder mutates the local order without a reload, so
@@ -505,7 +503,8 @@ impl Nokkvi {
                 self.shell_spawn("queue_move_batch", move |shell| async move {
                     shell
                         .move_queue_batch_by_entry_ids(entry_ids, target_for_backend)
-                        .await
+                        .await;
+                    Ok(())
                 });
 
                 // Drag reorder mutates the local order without a reload, so
@@ -561,19 +560,10 @@ impl Nokkvi {
                 // it dropped (`handle_queue_duplicates_removed`).
                 return self.shell_task(
                     |shell| async move { shell.remove_queue_duplicates().await },
-                    |result| match result {
-                        Ok(dropped) => Message::QueueLoader(
+                    |dropped| {
+                        Message::QueueLoader(
                             crate::app_message::QueueLoaderMessage::DuplicatesRemoved(dropped),
-                        ),
-                        Err(e) => session_expired_message(&e).unwrap_or_else(|| {
-                            error!(" Failed to remove duplicates from the queue: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to remove duplicates: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }),
+                        )
                     },
                 );
             }
@@ -607,18 +597,7 @@ impl Nokkvi {
                 // "entry_id N not in queue" until an unrelated reload.
                 return self.shell_task(
                     move |shell| async move { shell.play_next_in_queue(entry_ids).await },
-                    |result| match result {
-                        Ok(()) => Message::LoadQueue,
-                        Err(e) => {
-                            error!(" Play Next failed: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Play Next failed: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
+                    |()| Message::LoadQueue,
                 );
             }
             QueueAction::ShowToast(msg) => {
@@ -1029,14 +1008,10 @@ impl Nokkvi {
 
         self.shell_task(
             |shell| async move {
-                shell.shuffle_queue_randomly().await?;
-                Ok::<_, anyhow::Error>(shell.queue().get_songs())
+                shell.shuffle_queue_randomly().await;
+                shell.queue().get_songs()
             },
-            |result| {
-                Message::QueueLoader(crate::app_message::QueueLoaderMessage::Loaded(
-                    result.map_err(|e| e.to_string()),
-                ))
-            },
+            |songs| Message::QueueLoader(crate::app_message::QueueLoaderMessage::Loaded(Ok(songs))),
         )
     }
 

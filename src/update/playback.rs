@@ -1681,7 +1681,7 @@ impl Nokkvi {
         };
         self.toast_info(label);
         self.shell_task(
-            |shell| async move { shell.toggle_random().await.unwrap_or(false) },
+            |shell| async move { shell.toggle_random().await },
             |r| Message::Playback(PlaybackMessage::RandomToggled(r)),
         )
     }
@@ -1720,7 +1720,7 @@ impl Nokkvi {
         };
         self.toast_info(label);
         self.shell_task(
-            |shell| async move { shell.cycle_repeat().await.unwrap_or((false, false)) },
+            |shell| async move { shell.cycle_repeat().await },
             |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
         )
     }
@@ -1755,13 +1755,7 @@ impl Nokkvi {
         self.toast_info(label);
 
         let set_task = self.shell_task(
-            move |shell| async move {
-                shell
-                    .playback()
-                    .set_repeat_mode(mode)
-                    .await
-                    .unwrap_or((false, false))
-            },
+            move |shell| async move { shell.playback().set_repeat_mode(mode).await },
             |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
         );
         Task::batch([
@@ -1803,7 +1797,7 @@ impl Nokkvi {
         };
         self.toast_info(label);
         self.shell_task(
-            |shell| async move { shell.toggle_consume().await.unwrap_or(false) },
+            |shell| async move { shell.toggle_consume().await },
             |c| Message::Playback(PlaybackMessage::ConsumeToggled(c)),
         )
     }
