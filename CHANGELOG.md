@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Get Info on a focused but empty Similar tab no longer opens the centered queue song's details.
 - The `add-to-queue` and `remove-from-queue` commands now do nothing under the EQ, About or Get Info window, a picker or a dialog.
 - Loving a song now rates it five stars only after the server accepts the love.
+- Dropping songs into the playlist editor on an expired session now returns you to the login screen instead of doing nothing.
 
 ### Removed
 

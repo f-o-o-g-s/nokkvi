@@ -1153,18 +1153,7 @@ impl Nokkvi {
             if self.playlist_editor.is_some() {
                 return self.shell_task(
                     move |shell| async move { shell.resolve_batch_for_editor(payload).await },
-                    move |result| match result {
-                        Ok(rows) => {
-                            Message::Editor(crate::app_message::EditorMessage::SongsInserted {
-                                rows,
-                                at: pos,
-                            })
-                        }
-                        Err(e) => {
-                            error!(" Failed to resolve dragged batch for editor: {}", e);
-                            Message::NoOp
-                        }
-                    },
+                    move |result| Self::editor_batch_resolved_message(result, pos),
                 );
             }
             return self.shell_fire_and_forget_task(
@@ -1178,6 +1167,24 @@ impl Nokkvi {
             format!("Added {len} items to queue"),
             "add batch to queue",
         )
+    }
+
+    /// Map a batch dropped into the playlist editor, resolved into editor
+    /// rows: splice them in at the drop slot `at`. A rejected session drops
+    /// to login; any other failure is logged here.
+    pub(crate) fn editor_batch_resolved_message(
+        result: anyhow::Result<Vec<nokkvi_data::backend::queue::QueueSongUIViewData>>,
+        at: usize,
+    ) -> Message {
+        match result {
+            Ok(rows) => {
+                Message::Editor(crate::app_message::EditorMessage::SongsInserted { rows, at })
+            }
+            Err(e) => session_expired_message(&e).unwrap_or_else(|| {
+                error!(" Failed to resolve dragged batch for editor: {}", e);
+                Message::NoOp
+            }),
+        }
     }
 
     /// Resolve the one-shot Shuffle Play directive for a plain activate

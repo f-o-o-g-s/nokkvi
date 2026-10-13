@@ -1672,6 +1672,33 @@ fn enter_edit_seeds_staleness_token_from_active_context_when_list_empty() {
     );
 }
 
+#[test]
+fn a_dropped_batch_rejected_by_the_session_goes_to_login() {
+    // Dragging a batch into the editor resolves it on the server; a dead
+    // session must reach the login screen, not fail silently.
+    let expired = crate::Nokkvi::editor_batch_resolved_message(
+        Err(nokkvi_data::types::error::NokkviError::Unauthorized.into()),
+        1,
+    );
+    assert!(
+        matches!(expired, Message::SessionExpired),
+        "got {expired:?}"
+    );
+
+    let other = crate::Nokkvi::editor_batch_resolved_message(Err(anyhow::anyhow!("boom")), 1);
+    assert!(matches!(other, Message::NoOp), "got {other:?}");
+
+    let rows = vec![make_queue_song("x", "Song X", "Artist", "Album")];
+    let inserted = crate::Nokkvi::editor_batch_resolved_message(Ok(rows), 1);
+    assert!(
+        matches!(
+            inserted,
+            Message::Editor(EditorMessage::SongsInserted { ref rows, at: 1 }) if rows.len() == 1
+        ),
+        "got {inserted:?}"
+    );
+}
+
 // --- Append-to-open-editor refresh decision (UI-not-refreshing bug) ---------
 
 #[test]
