@@ -1,5 +1,7 @@
 //! Playback state: the active playback source, player-bar fields, and modes.
 
+use nokkvi_data::types::queue::RepeatMode;
+
 /// Honest bit-perfect status for the now-playing indicator. Derived from the
 /// bit-perfect mode, the track's rate, and the REAL device clock rate (read
 /// from `/proc/asound`, not nokkvi's requested rate — which lies when PipeWire
@@ -243,4 +245,22 @@ pub struct PlaybackModes {
     pub repeat: bool,
     pub repeat_queue: bool,
     pub consume: bool,
+}
+
+impl PlaybackModes {
+    /// The repeat mode the `(repeat, repeat_queue)` pair encodes. Both set
+    /// is not a mode the backend reports and reads as Off.
+    pub fn repeat_mode(&self) -> RepeatMode {
+        match (self.repeat, self.repeat_queue) {
+            (true, false) => RepeatMode::Track,
+            (false, true) => RepeatMode::Playlist,
+            (false, false) | (true, true) => RepeatMode::None,
+        }
+    }
+
+    /// Write `mode` as the `(repeat, repeat_queue)` pair.
+    pub fn set_repeat_mode(&mut self, mode: RepeatMode) {
+        self.repeat = mode == RepeatMode::Track;
+        self.repeat_queue = mode == RepeatMode::Playlist;
+    }
 }

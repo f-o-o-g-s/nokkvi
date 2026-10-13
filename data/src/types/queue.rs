@@ -423,6 +423,31 @@ pub enum RepeatMode {
     Playlist,
 }
 
+impl RepeatMode {
+    /// The mode the repeat button cycles to: Off → One (`Track`) → Queue
+    /// (`Playlist`) → Off. The one copy of the cycle order: the backend's
+    /// `cycle_repeat` and the UI's optimistic flip both step through it.
+    pub fn next(self) -> Self {
+        match self {
+            Self::None => Self::Track,
+            Self::Track => Self::Playlist,
+            Self::Playlist => Self::None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod repeat_mode_tests {
+    use super::RepeatMode;
+
+    #[test]
+    fn next_cycles_off_one_queue_and_back() {
+        assert_eq!(RepeatMode::None.next(), RepeatMode::Track);
+        assert_eq!(RepeatMode::Track.next(), RepeatMode::Playlist);
+        assert_eq!(RepeatMode::Playlist.next(), RepeatMode::None);
+    }
+}
+
 impl Queue {
     /// The physical row index of the playing song, DERIVED from the
     /// play-order cursor: `order[current_order]`. There is no independently

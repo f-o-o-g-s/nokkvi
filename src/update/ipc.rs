@@ -172,7 +172,7 @@
 //! otherwise the queue pair replies with its null payload and theater stays.
 
 use iced::Task;
-use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction};
+use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction, queue::RepeatMode};
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
@@ -831,11 +831,10 @@ fn play_state_str(playback: &crate::state::PlaybackState) -> &'static str {
 /// The single source of truth for rendering `(repeat, repeat_queue)` on the
 /// wire, so the `repeat` and `status` verbs can never disagree.
 fn repeat_str(modes: &crate::state::PlaybackModes) -> &'static str {
-    match (modes.repeat, modes.repeat_queue) {
-        (true, false) => "one",
-        (false, true) => "queue",
-        // (false, false) is off; (true, true) is an invalid state treated as off.
-        _ => "off",
+    match modes.repeat_mode() {
+        RepeatMode::Track => "one",
+        RepeatMode::Playlist => "queue",
+        RepeatMode::None => "off",
     }
 }
 

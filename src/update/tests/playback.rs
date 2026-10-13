@@ -1465,6 +1465,21 @@ fn stale_tick_does_not_revert_optimistic_repeat() {
     assert_eq!(app.pending_mode_commits, 0);
 }
 
+/// The optimistic repeat flip steps the same cycle as the backend's
+/// `cycle_repeat` (`RepeatMode::next`), from every mode, so the button never
+/// shows a mode the commit then reverts.
+#[test]
+fn optimistic_repeat_cycle_matches_the_backend_cycle() {
+    use nokkvi_data::types::queue::RepeatMode;
+
+    for mode in [RepeatMode::None, RepeatMode::Track, RepeatMode::Playlist] {
+        let mut app = test_app();
+        app.modes.set_repeat_mode(mode);
+        let _ = app.handle_toggle_repeat();
+        assert_eq!(app.modes.repeat_mode(), mode.next(), "cycle from {mode:?}");
+    }
+}
+
 // ============================================================================
 // I26 — mode toggles are no-ops during radio playback
 // ============================================================================

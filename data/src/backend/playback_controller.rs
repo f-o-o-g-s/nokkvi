@@ -624,41 +624,16 @@ impl PlaybackController {
     }
 
     /// Cycle repeat mode: None → Track → Playlist → None
-    ///
-    /// Clears queued next-song and engine prep because repeat mode affects
-    /// what `peek_next_song` returns (e.g. repeat-track → same song).
+    /// ([`RepeatMode::next`](crate::types::queue::RepeatMode::next)).
     pub async fn cycle_repeat(&self) -> (bool, bool) {
-        use crate::types::queue::RepeatMode;
-
-        let queue_manager_arc = self.queue_service.queue_manager();
-        let mut queue_manager = queue_manager_arc.lock().await;
-        let current_repeat = queue_manager.get_queue().repeat;
-
-        let next_repeat = match current_repeat {
-            RepeatMode::None => RepeatMode::Track,
-            RepeatMode::Track => RepeatMode::Playlist,
-            RepeatMode::Playlist => RepeatMode::None,
-        };
-
-        // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
-        // already calls `clear_queued()` + `save_order()` under the guard.
-        // Calling them again here would be redundant work.
-        let effect = queue_manager.set_repeat(next_repeat);
-        drop(queue_manager);
-
-        // Invalidate engine-level gapless prep (stale after mode change)
-        effect.apply_to(&self.audio_engine).await;
-
-        let repeat = next_repeat == RepeatMode::Track;
-        let repeat_queue = next_repeat == RepeatMode::Playlist;
-        (repeat, repeat_queue)
+        self.update_repeat(crate::types::queue::RepeatMode::next)
+            .await
     }
 
     /// Set repeat mode to a specific value (idempotent; used by MPRIS LoopStatus).
     ///
-    /// Mirrors `cycle_repeat` but accepts an explicit target instead of
-    /// advancing through the cycle. MPRIS clients (`playerctl`, KDE Plasma
-    /// media controls, GNOME Shell extensions) emit
+    /// MPRIS clients (`playerctl`, KDE Plasma media controls, GNOME Shell
+    /// extensions) emit
     /// `org.mpris.MediaPlayer2.Player.LoopStatus = "Track" | "Playlist" | "None"`
     /// as a *direct* request — routing those through `cycle_repeat` would
     /// land on the wrong mode whenever the current state isn't `None`.
@@ -667,10 +642,25 @@ impl PlaybackController {
     /// is harmless: gapless prep is invalidated and the next `peek_next_song`
     /// re-resolves under the same mode.
     pub async fn set_repeat_mode(&self, mode: crate::types::queue::RepeatMode) -> (bool, bool) {
+        self.update_repeat(|_| mode).await
+    }
+
+    /// The one body behind [`Self::cycle_repeat`] and
+    /// [`Self::set_repeat_mode`]: `pick` maps the current repeat mode to the
+    /// new one, read and written under ONE queue lock, so two cycles queued
+    /// behind each other each step from the other's result. Clears the
+    /// queued next song and the engine's prep, because repeat mode decides
+    /// what `peek_next_song` returns (repeat-track → the same song).
+    /// Returns `(repeat_track, repeat_queue)`.
+    async fn update_repeat(
+        &self,
+        pick: impl FnOnce(crate::types::queue::RepeatMode) -> crate::types::queue::RepeatMode,
+    ) -> (bool, bool) {
         use crate::types::queue::RepeatMode;
 
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
+        let mode = pick(queue_manager.get_queue().repeat);
 
         // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
         // already calls `clear_queued()` + `save_order()` under the guard.
@@ -680,9 +670,7 @@ impl PlaybackController {
         // Invalidate engine-level gapless prep (stale after mode change)
         effect.apply_to(&self.audio_engine).await;
 
-        let repeat = mode == RepeatMode::Track;
-        let repeat_queue = mode == RepeatMode::Playlist;
-        (repeat, repeat_queue)
+        (mode == RepeatMode::Track, mode == RepeatMode::Playlist)
     }
 
     /// Toggle consume mode

@@ -1,6 +1,7 @@
 //! Playback control handlers
 
 use iced::Task;
+use nokkvi_data::types::queue::RepeatMode;
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -21,6 +22,16 @@ const PREV_RESTART_THRESHOLD_SECS: u32 = 5;
 /// held at a top/bottom edge (≈10 rows/sec at 1). Modest so overshoot is easy to
 /// correct; the move is bounded by the slot list's own end clamps.
 const AUTOSCROLL_ROWS_PER_TICK: usize = 1;
+
+/// The toast a repeat-mode change shows, for the button cycle and an MPRIS
+/// `SetLoopStatus` alike.
+fn repeat_toast_label(mode: RepeatMode) -> &'static str {
+    match mode {
+        RepeatMode::None => "Repeat: Off",
+        RepeatMode::Track => "Repeat: One",
+        RepeatMode::Playlist => "Repeat: Queue",
+    }
+}
 
 /// Map a backend seek result to [`PlaybackMessage::SeekApplied`].
 ///
@@ -1704,21 +1715,10 @@ impl Nokkvi {
         self.pending_mode_commits += 1;
         // Optimistic UI update: cycle through repeat modes immediately so the
         // button doesn't flicker while waiting for the async API response.
-        // Cycle: off -> repeat_one -> repeat_queue -> off
-        let (new_repeat, new_repeat_queue) = match (self.modes.repeat, self.modes.repeat_queue) {
-            (false, false) => (true, false), // off -> repeat one
-            (true, false) => (false, true),  // repeat one -> repeat queue
-            (false, true) => (false, false), // repeat queue -> off
-            _ => (false, false),             // invalid state -> off
-        };
-        self.modes.repeat = new_repeat;
-        self.modes.repeat_queue = new_repeat_queue;
-        let label = match (self.modes.repeat, self.modes.repeat_queue) {
-            (true, false) => "Repeat: One",
-            (false, true) => "Repeat: Queue",
-            _ => "Repeat: Off",
-        };
-        self.toast_info(label);
+        // The same `RepeatMode::next` the backend's `cycle_repeat` steps.
+        let mode = self.modes.repeat_mode().next();
+        self.modes.set_repeat_mode(mode);
+        self.toast_info(repeat_toast_label(mode));
         self.shell_task(
             |shell| async move { shell.cycle_repeat().await },
             |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
@@ -1731,28 +1731,15 @@ impl Nokkvi {
     /// The optimistic UI update mirrors the request so the button settles
     /// before the shell round-trip completes; the follow-up `Tick` re-reads
     /// modes from the backend as a reconciliation step.
-    pub(crate) fn handle_set_repeat_mode(
-        &mut self,
-        mode: nokkvi_data::types::queue::RepeatMode,
-    ) -> Task<Message> {
-        use nokkvi_data::types::queue::RepeatMode;
-
+    pub(crate) fn handle_set_repeat_mode(&mut self, mode: RepeatMode) -> Task<Message> {
         // Radio playback ignores repeat — no-op BEFORE the pending_mode_commits
         // bump so a radio SetLoopStatus cannot wedge tick reconciliation.
         if self.active_playback.is_radio() {
             return Task::none();
         }
         self.pending_mode_commits += 1;
-        let new_repeat = mode == RepeatMode::Track;
-        let new_repeat_queue = mode == RepeatMode::Playlist;
-        self.modes.repeat = new_repeat;
-        self.modes.repeat_queue = new_repeat_queue;
-        let label = match mode {
-            RepeatMode::Track => "Repeat: One",
-            RepeatMode::Playlist => "Repeat: Queue",
-            RepeatMode::None => "Repeat: Off",
-        };
-        self.toast_info(label);
+        self.modes.set_repeat_mode(mode);
+        self.toast_info(repeat_toast_label(mode));
 
         let set_task = self.shell_task(
             move |shell| async move { shell.playback().set_repeat_mode(mode).await },
