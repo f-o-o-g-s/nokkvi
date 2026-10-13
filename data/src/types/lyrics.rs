@@ -934,7 +934,7 @@ impl LyricsIndex {
         album: Option<&str>,
         length_ms: Option<u32>,
     ) -> Option<&IndexEntry> {
-        self.find_in(&self.user, &self.cache, artist, title, album, length_ms)
+        Self::find_in(&self.user, &self.cache, artist, title, album, length_ms)
     }
 
     /// Find the best previously-downloaded LRCLIB sheet (root `.cache/` only).
@@ -945,7 +945,7 @@ impl LyricsIndex {
         album: Option<&str>,
         length_ms: Option<u32>,
     ) -> Option<&IndexEntry> {
-        self.find_in(&self.cache, &self.user, artist, title, album, length_ms)
+        Self::find_in(&self.cache, &self.user, artist, title, album, length_ms)
     }
 
     /// Look the track up in `own`, with `other` consulted for ONE thing: does
@@ -961,7 +961,6 @@ impl LyricsIndex {
     /// held by this one commits it to Tier 1. The channel order then lets the
     /// origin that actually owns the key answer.
     fn find_in<'a>(
-        &self,
         own: &'a TierMaps,
         other: &TierMaps,
         artist: &str,

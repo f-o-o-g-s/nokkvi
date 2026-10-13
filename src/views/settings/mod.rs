@@ -900,7 +900,7 @@ impl SettingsPage {
                                     sentinel::SentinelKind::RestoreVisualizer
                                     | sentinel::SentinelKind::RestoreAllHotkeys,
                                 ) => {
-                                    return self.handle_restore_defaults(key_ref.as_ref());
+                                    return Self::handle_restore_defaults(key_ref.as_ref());
                                 }
                                 Some(sentinel::SentinelKind::SetListenBrainzToken) => {
                                     return SettingsAction::OpenListenBrainzTokenDialog;
@@ -1248,7 +1248,7 @@ impl SettingsPage {
     /// Per-color theme restores were removed — theme colors are edited directly
     /// in the theme TOML file, so there is no GUI "restore color group" path
     /// anymore. (The visualizer/hotkeys resets reset config values, not files.)
-    pub(crate) fn handle_restore_defaults(&self, restore_key: &str) -> SettingsAction {
+    pub(crate) fn handle_restore_defaults(restore_key: &str) -> SettingsAction {
         match sentinel::SentinelKind::from_key(restore_key) {
             Some(sentinel::SentinelKind::RestoreAllHotkeys) => {
                 SettingsAction::OpenResetHotkeysDialog

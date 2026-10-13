@@ -440,11 +440,10 @@ impl LoginPage {
 
     /// Branding column: logo, wordmark, tagline. `logo_px` scales the mark for
     /// the two-pane (larger) vs single-column (smaller) arrangement.
-    fn branding(
-        &self,
+    fn branding<'a>(
         logo_px: f32,
         title_px: f32,
-    ) -> iced::widget::Column<Element<'_, LoginMessage>> {
+    ) -> iced::widget::Column<Element<'a, LoginMessage>> {
         let logo_svg = crate::embedded_svg::themed_logo_svg();
         let logo_handle = iced::widget::svg::Handle::from_memory(logo_svg.into_bytes());
         let logo = iced::widget::svg(logo_handle)
@@ -578,7 +577,7 @@ impl LoginPage {
 
     /// Version label, centered (shown at the bottom of the branding pane in
     /// two-pane mode and the bottom of the card in single-column mode).
-    fn version_label(&self) -> Element<'_, LoginMessage> {
+    fn version_label<'a>() -> Element<'a, LoginMessage> {
         container(
             text(format!("v{}", env!("CARGO_PKG_VERSION")))
                 .size(12)
@@ -603,7 +602,7 @@ impl LoginPage {
             // Branding pane (left): logo / wordmark / tagline / version,
             // vertically centered against the taller form via the row's
             // align_y below.
-            let branding_pane = column![self.branding(96.0, 34.0), self.version_label()]
+            let branding_pane = column![Self::branding(96.0, 34.0), Self::version_label()]
                 .width(Length::FillPortion(4))
                 .spacing(18)
                 .align_x(Alignment::Center);
@@ -622,11 +621,15 @@ impl LoginPage {
             let card_w = (avail_width - 2.0 * LOGIN_PAGE_PAD)
                 .clamp(LOGIN_CARD_MIN_WIDTH, LOGIN_CARD_MAX_WIDTH);
             (
-                column![self.branding(80.0, 42.0), self.form(), self.version_label()]
-                    .width(Length::Fill)
-                    .spacing(24)
-                    .align_x(Alignment::Center)
-                    .boxed(),
+                column![
+                    Self::branding(80.0, 42.0),
+                    self.form(),
+                    Self::version_label()
+                ]
+                .width(Length::Fill)
+                .spacing(24)
+                .align_x(Alignment::Center)
+                .boxed(),
                 card_w,
             )
         };

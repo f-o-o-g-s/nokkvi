@@ -353,8 +353,6 @@ impl ProcessingState {
         }
     }
 
-    fn resize(&self, _bar_count: usize) {}
-
     fn clear(&mut self, _bar_count: usize) {
         self.processed_samples = 0;
     }
@@ -1751,7 +1749,6 @@ impl VisualizerState {
         self.display.lock().resize(visual_count);
         self.peaks.lock().resize(visual_count);
         self.effects.lock().resize(visual_count);
-        self.processing.lock().resize(visual_count);
 
         self.pending_bar_count.store(0, Ordering::SeqCst);
         *self.last_resize_request.lock() = None;

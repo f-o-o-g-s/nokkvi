@@ -75,7 +75,7 @@ impl SettingsPage {
         let entries: &[SettingsEntry] = &self.cached_entries;
 
         let right_pane = if let Some(sub) = &self.sub_list {
-            self.render_sub_list(sub, window_height, font)
+            Self::render_sub_list(sub, window_height, font)
         } else {
             self.render_detail_pane(entries, window_height)
         };
@@ -107,13 +107,13 @@ impl SettingsPage {
         // Theme / font picker overlays on top of either layout. Only one
         // sub-list is ever open at a time (theme takes precedence).
         if let Some(tsw) = &self.theme_sub_list {
-            let modal = self.render_theme_modal(tsw, window_height);
+            let modal = Self::render_theme_modal(tsw, window_height);
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .boxed()
         } else if let Some(fsw) = &self.font_sub_list {
-            let modal = self.render_font_modal(fsw, window_height);
+            let modal = Self::render_font_modal(fsw, window_height);
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -132,7 +132,7 @@ impl SettingsPage {
     fn render_sidebar(&self) -> Element<'_, SettingsMessage> {
         let header = self.render_sidebar_header();
         let body = self.render_sidebar_body();
-        let footer = self.render_sidebar_footer();
+        let footer = Self::render_sidebar_footer();
 
         let content = column![header, body, footer]
             .width(Length::Fill)
@@ -215,7 +215,7 @@ impl SettingsPage {
 
     /// Sidebar footer: version label on the left, decorative "Esc" pill on
     /// the right (matches the design's `.nk-sidebar-foot`).
-    fn render_sidebar_footer(&self) -> Element<'_, SettingsMessage> {
+    fn render_sidebar_footer<'a>() -> Element<'a, SettingsMessage> {
         let sep = container(Space::new())
             .width(Length::Fill)
             .height(Length::Fixed(1.0))
@@ -509,7 +509,6 @@ impl SettingsPage {
     /// chrome is shared with the theme picker via [`render_picker_modal`]; only
     /// the slot-list body (each font name drawn in its own typeface) differs.
     fn render_font_modal<'a>(
-        &'a self,
         fsw: &'a super::FontSubListState,
         window_height: f32,
     ) -> Element<'a, SettingsMessage> {
@@ -559,7 +558,6 @@ impl SettingsPage {
     /// [`render_theme_slot`]) and the hover wash is disabled so those colors
     /// stay true, so scrolling the list IS a live preview.
     fn render_theme_modal<'a>(
-        &'a self,
         tsw: &'a super::ThemeSubListState,
         window_height: f32,
     ) -> Element<'a, SettingsMessage> {

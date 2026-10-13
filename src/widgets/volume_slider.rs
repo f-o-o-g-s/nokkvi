@@ -314,9 +314,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
         let track_bg = crate::theme::bg0();
 
         if self.horizontal {
-            self.draw_horizontal(renderer, bounds, volume, accent, border, track_bg);
+            Self::draw_horizontal(renderer, bounds, volume, accent, border, track_bg);
         } else {
-            self.draw_vertical_bar(renderer, bounds, volume, accent, border, track_bg);
+            Self::draw_vertical_bar(renderer, bounds, volume, accent, border, track_bg);
         }
     }
 
@@ -344,7 +344,6 @@ impl<Message> VolumeSlider<'_, Message> {
     /// places music + sfx sliders side-by-side, giving two bars at the
     /// right edge — one per volume control, no L/R duplication.
     fn draw_vertical_bar(
-        &self,
         renderer: &mut iced::Renderer,
         bounds: Rectangle,
         volume: f32,
@@ -409,7 +408,6 @@ impl<Message> VolumeSlider<'_, Message> {
 
     /// Horizontal track + handle, matching the progress bar's flat style.
     fn draw_horizontal(
-        &self,
         renderer: &mut iced::Renderer,
         bounds: Rectangle,
         volume: f32,

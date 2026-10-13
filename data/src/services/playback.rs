@@ -431,7 +431,6 @@ impl QueueNavigator {
     /// This is the single entry point for all consume-mode cleanup.
     /// Call this after transitioning to the next song.
     fn record_and_consume(
-        &self,
         queue_manager: &mut QueueManager,
         prev_song_id: &str,
         prev_index: usize,
@@ -446,7 +445,7 @@ impl QueueNavigator {
 
         // Consume: remove the finished song from queue + pool
         if queue_manager.get_queue().consume {
-            self.consume_song_at_index(queue_manager, prev_index)
+            Self::consume_song_at_index(queue_manager, prev_index)
         } else {
             None
         }
@@ -460,7 +459,6 @@ impl QueueNavigator {
     /// removal so the caller can discharge it against the engine. `None`
     /// when the index is out of bounds.
     fn consume_song_at_index(
-        &self,
         queue_manager: &mut QueueManager,
         index: usize,
     ) -> Option<NextTrackResetEffect> {
@@ -614,7 +612,7 @@ impl QueueNavigator {
             let consume_effect = if let Some(ref pid) = prev_id
                 && let Some(idx) = queue_manager.current_index()
             {
-                self.record_and_consume(&mut queue_manager, pid, idx)
+                Self::record_and_consume(&mut queue_manager, pid, idx)
             } else {
                 None
             };
@@ -662,7 +660,7 @@ impl QueueNavigator {
         let consume_effect = if let Some(ref pid) = prev_id
             && let Some(old_idx) = transition.old_index
         {
-            self.record_and_consume(&mut queue_manager, pid, old_idx)
+            Self::record_and_consume(&mut queue_manager, pid, old_idx)
         } else {
             None
         };

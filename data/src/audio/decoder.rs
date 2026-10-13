@@ -911,7 +911,7 @@ impl AudioDecoder {
             }
 
             // We've completed our detection for Content-Length
-            let mut detected_format = self.extract_format_hint(&self.url);
+            let mut detected_format = Self::extract_format_hint(&self.url);
 
             let mss = if let Some(len) = content_length {
                 trace!(
@@ -1069,7 +1069,7 @@ impl AudioDecoder {
             self.delivery = StreamDelivery::Sized;
 
             // Try to extract format from file path
-            (mss, self.extract_format_hint(&self.url))
+            (mss, Self::extract_format_hint(&self.url))
         };
 
         // Probe for format - use detected format hint
@@ -1165,7 +1165,7 @@ impl AudioDecoder {
     }
 
     /// Extract format hint from URL (file extension or query parameter)
-    fn extract_format_hint(&self, url: &str) -> Option<String> {
+    fn extract_format_hint(url: &str) -> Option<String> {
         // Try to parse as URL first for query parameters
         if crate::utils::server_url::has_http_scheme(url)
             && let Ok(parsed_url) = url::Url::parse(url)

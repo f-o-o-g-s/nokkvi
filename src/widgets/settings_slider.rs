@@ -88,7 +88,7 @@ impl<'a, Message> SettingsSlider<'a, Message> {
     }
 
     /// Project a screen X to a fraction within the widget's drag track.
-    fn fraction_at(&self, cursor_x: f32, bounds: Rectangle) -> f32 {
+    fn fraction_at(cursor_x: f32, bounds: Rectangle) -> f32 {
         slider_drag::project_fraction(cursor_x, bounds, HANDLE_SIZE, Axis::Horizontal)
             .unwrap_or(0.0)
     }
@@ -142,7 +142,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_position) = cursor.position_over(bounds) {
-                    let frac = self.fraction_at(cursor_position.x, bounds);
+                    let frac = Self::fraction_at(cursor_position.x, bounds);
                     shell.publish((self.on_change)(state.drag.press(frac)));
                     shell.capture_event();
                     shell.request_redraw();
@@ -164,7 +164,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
                 if state.drag.is_dragging()
                     && let Some(Point { x, .. }) = cursor.position()
                 {
-                    let frac = self.fraction_at(x, bounds);
+                    let frac = Self::fraction_at(x, bounds);
                     // 0.0 threshold → publish every move (no throttle).
                     if let Some(value) = state.drag.drag(frac, 0.0) {
                         shell.publish((self.on_change)(value));

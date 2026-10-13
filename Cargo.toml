@@ -74,6 +74,11 @@ needless_pass_by_ref_mut = "warn"
 # value instead.
 redundant_clone = "warn"
 
+# A method that never reads `self` is a free function wearing a receiver: it
+# hides that its result depends only on its arguments. Make it an associated
+# fn (`Self::f(..)`), or `expect` it with the reason the receiver stays.
+unused_self = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.25.0"

@@ -478,7 +478,6 @@ impl SettingsPage {
 
     /// Render the color sub-list (gradient color editing)
     pub(super) fn render_sub_list<'a>(
-        &'a self,
         sub: &'a SubListState,
         window_height: f32,
         _font: iced::Font,

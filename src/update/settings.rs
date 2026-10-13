@@ -240,7 +240,7 @@ impl Nokkvi {
             };
             if let Some(forward) = moved {
                 self.settings_page.snap_to_non_header(forward);
-                return self.detail_pane_scroll_task();
+                return Self::detail_pane_scroll_task();
             }
         }
 
@@ -458,7 +458,7 @@ impl Nokkvi {
             && self.settings_page.font_sub_list.is_none()
             && self.settings_page.theme_sub_list.is_none()
         {
-            Task::batch([task, self.detail_pane_scroll_task()])
+            Task::batch([task, Self::detail_pane_scroll_task()])
         } else {
             task
         }
@@ -474,7 +474,7 @@ impl Nokkvi {
     /// overshooting on short ones (Theme) — and walks the focused row out of
     /// view. See [`crate::widgets::scroll_into_view`]. No-op when no row is
     /// focused (e.g. an empty list).
-    fn detail_pane_scroll_task(&self) -> Task<Message> {
+    fn detail_pane_scroll_task() -> Task<Message> {
         crate::widgets::scroll_into_view::center_in_scrollable(
             iced::widget::Id::new(crate::views::settings::DETAIL_SCROLLABLE_ID),
             iced::widget::Id::new(crate::views::settings::DETAIL_FOCUSED_ROW_ID),
@@ -496,7 +496,7 @@ impl Nokkvi {
         self.settings_page.editing_index = None;
         self.settings_page.toggle_cursor = None;
 
-        self.detail_pane_scroll_task()
+        Self::detail_pane_scroll_task()
     }
 
     /// Rebuild the settings page's cached entries when the Settings view is

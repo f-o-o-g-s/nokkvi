@@ -207,7 +207,7 @@ impl AlbumsPage {
                     let sub_index_label =
                         self.expansion
                             .child_sub_index_label(ctx.item_index, albums, |a| &a.id);
-                    let row = self.render_track_row(
+                    let row = Self::render_track_row(
                         song,
                         &ctx,
                         &sub_index_label,
@@ -586,7 +586,6 @@ impl AlbumsPage {
 
     /// Render a child track row in the slot list (indented, simpler layout)
     fn render_track_row<'a>(
-        &self,
         song: &SongUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         sub_index_label: &str,

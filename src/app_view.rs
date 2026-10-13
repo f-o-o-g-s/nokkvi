@@ -958,7 +958,7 @@ impl Nokkvi {
         let now = std::time::Instant::now();
         let menu_open = self.open_menu.is_some();
         // A hidden cover makes the whole window the backdrop.
-        let field = if self.theater_cover_hidden() {
+        let field = if Self::theater_cover_hidden() {
             crate::widgets::base_slot_list_layout::cover_backdrop()
         } else {
             artwork_outer_bg()
@@ -1058,7 +1058,7 @@ impl Nokkvi {
         };
 
         let is_radio = self.active_playback.is_radio();
-        let cover_hidden = self.theater_cover_hidden();
+        let cover_hidden = Self::theater_cover_hidden();
         let placeholder = if cover_hidden {
             ArtworkPlaceholder::Backdrop
         } else if is_radio {

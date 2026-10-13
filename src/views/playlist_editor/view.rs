@@ -106,7 +106,7 @@ impl PlaylistEditorState {
         };
 
         // --- Edit-bar header (mirrors the queue edit bar's chrome) ---
-        let edit_bar = self.edit_bar(&data);
+        let edit_bar = Self::edit_bar(&data);
         let sep = crate::theme::horizontal_separator(1.0);
         let header: Element<'a, EditorMessage> = column![edit_bar, sep].boxed();
 
@@ -325,7 +325,7 @@ impl PlaylistEditorState {
     /// eyebrow + name input + comment input (left), public toggle + remove
     /// duplicates + save + discard (right), accent stripe + faint wash, over a
     /// fixed-height band.
-    fn edit_bar<'a>(&'a self, data: &EditorViewData<'a>) -> Element<'a, EditorMessage> {
+    fn edit_bar<'a>(data: &EditorViewData<'a>) -> Element<'a, EditorMessage> {
         let accent = crate::theme::accent();
 
         // Eyebrow — adopts the dirty indicator: append a bullet when dirty so

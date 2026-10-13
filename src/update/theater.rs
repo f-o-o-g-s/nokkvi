@@ -476,7 +476,7 @@ impl Nokkvi {
 
     /// Whether Theater Mode's panel draws the black backdrop instead of the
     /// cover (the Cover Art setting).
-    pub(crate) fn theater_cover_hidden(&self) -> bool {
+    pub(crate) fn theater_cover_hidden() -> bool {
         crate::theme::artwork_cover().hides_cover(true)
     }
 
@@ -484,7 +484,7 @@ impl Nokkvi {
     /// radio, else the playing album's (frosted only while the lyrics layer
     /// shows). `None` means the placeholder.
     pub(crate) fn theater_now_playing_cover(&self) -> Option<&Handle> {
-        if self.theater_cover_hidden() {
+        if Self::theater_cover_hidden() {
             return None;
         }
         if let Some(station) = self.active_playback.radio_station() {

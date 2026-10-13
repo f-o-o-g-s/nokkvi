@@ -199,7 +199,6 @@ impl Nokkvi {
     /// Handle the result of a now-playing heartbeat. The server doesn't count
     /// these as plays, so no UI state changes — just log.
     pub(crate) fn handle_scrobble_now_playing_result(
-        &self,
         result: Result<(), ScrobbleError>,
     ) -> Task<Message> {
         match result {
@@ -660,7 +659,7 @@ impl Nokkvi {
                 self.handle_scrobble_submission_result(result)
             }
             ScrobbleMessage::NowPlayingResult(result) => {
-                self.handle_scrobble_now_playing_result(result)
+                Self::handle_scrobble_now_playing_result(result)
             }
             ScrobbleMessage::TrackLooped(song_id) => self.handle_scrobble_track_looped(song_id),
             ScrobbleMessage::NowPlayingRefresh(timer_id, song_id) => {

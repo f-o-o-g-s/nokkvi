@@ -455,7 +455,7 @@ impl PlaylistsPage {
                         .iter()
                         .find(|p| &p.id == parent_playlist_id)
                         .is_some_and(|p| p.is_smart);
-                    let row = self.render_track_row(
+                    let row = Self::render_track_row(
                         song,
                         &ctx,
                         &sub_index_label,
@@ -942,7 +942,6 @@ impl PlaylistsPage {
 
     /// Render a child track row in the slot list (indented, simpler layout)
     fn render_track_row<'a>(
-        &self,
         song: &SongUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         sub_index_label: &str,

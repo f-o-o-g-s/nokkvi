@@ -80,6 +80,10 @@ impl SourceGeneration {
 
     /// Crossfade-finalize path: intentional no-op so the existing
     /// "don't increment here" comment becomes a typed call.
+    #[expect(
+        clippy::unused_self,
+        reason = "a typed no-op: the call site names the generation it deliberately leaves alone"
+    )]
     pub fn accept_internal_swap(&self) {}
 
     pub fn current(&self) -> u64 {

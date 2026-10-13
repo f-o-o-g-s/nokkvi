@@ -968,15 +968,18 @@ mod cover_art {
         let app = seeded();
 
         crate::theme::set_artwork_cover(ArtworkCover::Show);
-        assert!(!app.theater_cover_hidden());
+        assert!(!crate::Nokkvi::theater_cover_hidden());
         assert!(app.theater_now_playing_cover().is_some());
 
         crate::theme::set_artwork_cover(ArtworkCover::HideInTheater);
-        assert!(app.theater_cover_hidden(), "theater hides the cover");
+        assert!(
+            crate::Nokkvi::theater_cover_hidden(),
+            "theater hides the cover"
+        );
         assert!(app.theater_now_playing_cover().is_none());
 
         crate::theme::set_artwork_cover(ArtworkCover::HideEverywhere);
-        assert!(app.theater_cover_hidden());
+        assert!(crate::Nokkvi::theater_cover_hidden());
 
         crate::theme::set_artwork_cover(prior);
     }
