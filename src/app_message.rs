@@ -402,15 +402,13 @@ pub enum HotkeyMessage {
     SeekStep(bool),
     CenterOnPlaying,
     ToggleStar,
-    /// The user's own star change on a song (song_id, starred): `true` is
-    /// a love, which also rates the song five stars locally and on the
-    /// server.
+    /// Set a song's starred flag locally (song_id, starred): the user's own
+    /// change, or the restore after the server refused it. The flag only; a
+    /// love's five stars wait for [`SongLoved`](Self::SongLoved).
     SongStarredStatusUpdated(String, bool),
-    /// The server refused a song's star change: put the flag back to the
-    /// given state and nothing else. A plain restore, unlike
-    /// [`SongStarredStatusUpdated`](Self::SongStarredStatusUpdated), so a
-    /// failed unstar cannot rate the song.
-    SongStarredStatusReverted(String, bool),
+    /// The server took a love on a song (song_id): rate it five stars,
+    /// locally and on the server.
+    SongLoved(String),
     /// Update starred status locally (album_id, new_starred_status)
     AlbumStarredStatusUpdated(String, bool),
     /// Update starred status locally for artist (artist_id, new_starred_status)

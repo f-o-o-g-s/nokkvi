@@ -185,99 +185,101 @@ fn a_failed_unstar_restores_the_star_and_leaves_the_rating_alone() {
     assert_eq!(app.library.queue_songs[0].rating, Some(3));
 }
 
-/// The user's own love still rates five stars (the revert path above is the
-/// only one that must not).
-#[test]
-fn a_real_love_still_rates_five_stars() {
+/// A song rated three stars, in the Songs view and the queue.
+fn app_with_a_three_star_song() -> crate::Nokkvi {
     let mut app = test_app();
+    app.screen = crate::Screen::Home;
     let mut song = make_song("s1", "Song", "Artist");
     song.rating = Some(3);
     app.library.songs.set_from_vec(vec![song]);
-    app.library.queue_songs = vec![make_queue_song("s1", "Song", "Artist", "Album")];
+    let mut queue_song = make_queue_song("s1", "Song", "Artist", "Album");
+    queue_song.rating = Some(3);
+    app.library.queue_songs = vec![queue_song];
+    app
+}
 
-    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
+/// A love rates five stars once the server has taken the star, not before.
+#[test]
+fn a_love_rates_five_stars_once_the_server_takes_it() {
+    use nokkvi_data::types::ItemKind;
 
-    assert!(app.library.songs[0].is_starred);
+    let mut app = app_with_a_three_star_song();
+
+    let _ = app.update(crate::Nokkvi::starred_flag_message(
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    ));
+    assert!(app.library.songs[0].is_starred, "the heart fills at once");
+    assert_eq!(
+        app.library.songs[0].rating,
+        Some(3),
+        "the stars wait for the server"
+    );
+
+    let _ = app.update(crate::Nokkvi::star_result_message(
+        Ok(()),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    ));
     assert_eq!(app.library.songs[0].rating, Some(5));
     assert_eq!(app.library.queue_songs[0].rating, Some(5));
 }
 
+/// A love the server refused leaves no stars behind: it used to rate five
+/// stars beside the star write, and the revert put back only the flag.
+#[test]
+fn a_failed_love_leaves_the_rating_alone() {
+    use nokkvi_data::types::ItemKind;
+
+    let mut app = app_with_a_three_star_song();
+
+    let _ = app.update(crate::Nokkvi::starred_flag_message(
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    ));
+    let _ = app.update(crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    ));
+
+    assert!(!app.library.songs[0].is_starred, "the flag is put back");
+    assert_eq!(app.library.songs[0].rating, Some(3));
+    assert_eq!(app.library.queue_songs[0].rating, Some(3));
+}
+
 // ============================================================================
-// Revert-message routing truth table
+// Star-message routing truth table
 // ============================================================================
 
 #[test]
-fn starred_revert_message_routes_album_to_album_handler() {
+fn starred_flag_message_routes_each_kind_to_its_flag_handler() {
     use nokkvi_data::types::ItemKind;
 
     use crate::app_message::{HotkeyMessage, Message};
-    let msg = crate::Nokkvi::starred_revert_message("id1".to_string(), ItemKind::Album, true);
+    let msg = crate::Nokkvi::starred_flag_message("id1".to_string(), ItemKind::Album, true);
     assert!(
         matches!(
             msg,
             Message::Hotkey(HotkeyMessage::AlbumStarredStatusUpdated(ref id, true))
             if id == "id1"
         ),
-        "Album kind must route to AlbumStarredStatusUpdated"
+        "got {msg:?}"
     );
-}
-
-#[test]
-fn starred_revert_message_routes_artist_to_artist_handler() {
-    use nokkvi_data::types::ItemKind;
-
-    use crate::app_message::{HotkeyMessage, Message};
-    let msg = crate::Nokkvi::starred_revert_message("id2".to_string(), ItemKind::Artist, false);
+    let msg = crate::Nokkvi::starred_flag_message("id2".to_string(), ItemKind::Artist, false);
     assert!(
         matches!(
             msg,
             Message::Hotkey(HotkeyMessage::ArtistStarredStatusUpdated(ref id, false))
             if id == "id2"
         ),
-        "Artist kind must route to ArtistStarredStatusUpdated"
+        "got {msg:?}"
     );
-}
-
-/// A song's revert is a plain restore of the flag, never the love path.
-#[test]
-fn starred_revert_message_routes_song_to_the_plain_restore() {
-    use nokkvi_data::types::ItemKind;
-
-    use crate::app_message::{HotkeyMessage, Message};
-    let msg = crate::Nokkvi::starred_revert_message("s1".to_string(), ItemKind::Song, true);
-    assert!(
-        matches!(
-            msg,
-            Message::Hotkey(HotkeyMessage::SongStarredStatusReverted(ref id, true))
-            if id == "s1"
-        ),
-        "Song kind must route to SongStarredStatusReverted, got {msg:?}"
-    );
-}
-
-#[test]
-fn starred_revert_message_routes_playlist_through_the_song_restore_for_now() {
-    use nokkvi_data::types::ItemKind;
-
-    use crate::app_message::{HotkeyMessage, Message};
-    let msg = crate::Nokkvi::starred_revert_message("pl1".to_string(), ItemKind::Playlist, true);
-    assert!(
-        matches!(
-            msg,
-            Message::Hotkey(HotkeyMessage::SongStarredStatusReverted(ref id, true))
-            if id == "pl1"
-        ),
-        "Playlist kind must collapse into the song restore until playlist starring ships"
-    );
-}
-
-/// The user's own change is the love path for songs: `true` rates five stars.
-#[test]
-fn starred_optimistic_message_routes_song_to_the_love_path() {
-    use nokkvi_data::types::ItemKind;
-
-    use crate::app_message::{HotkeyMessage, Message};
-    let msg = crate::Nokkvi::starred_optimistic_message("s1".to_string(), ItemKind::Song, true);
+    let msg = crate::Nokkvi::starred_flag_message("s1".to_string(), ItemKind::Song, true);
     assert!(
         matches!(
             msg,
@@ -286,15 +288,64 @@ fn starred_optimistic_message_routes_song_to_the_love_path() {
         ),
         "got {msg:?}"
     );
-    let msg = crate::Nokkvi::starred_optimistic_message("a1".to_string(), ItemKind::Album, true);
+    // Playlist starring isn't surfaced yet: it rides the song flag handler,
+    // which only touches matching ids.
+    let msg = crate::Nokkvi::starred_flag_message("pl1".to_string(), ItemKind::Playlist, true);
     assert!(
         matches!(
             msg,
-            Message::Hotkey(HotkeyMessage::AlbumStarredStatusUpdated(ref id, true))
-            if id == "a1"
+            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            if id == "pl1"
         ),
-        "albums have no love path; the optimistic and revert messages are the same, got {msg:?}"
+        "got {msg:?}"
     );
+}
+
+/// Only a song's confirmed love takes the five-star path; every other
+/// confirmed star replays its event, and a failure restores the flag.
+#[test]
+fn star_result_message_sends_only_a_songs_confirmed_love_to_the_rating() {
+    use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
+    let msg = crate::Nokkvi::star_result_message(Ok(()), "s1".into(), ItemKind::Song, true);
+    assert!(
+        matches!(msg, Message::Hotkey(HotkeyMessage::SongLoved(ref id)) if id == "s1"),
+        "got {msg:?}"
+    );
+    for (kind, star) in [
+        (ItemKind::Song, false),
+        (ItemKind::Album, true),
+        (ItemKind::Artist, true),
+        (ItemKind::Playlist, true),
+    ] {
+        let msg = crate::Nokkvi::star_result_message(Ok(()), "x".into(), kind, star);
+        assert!(
+            matches!(msg, Message::LibraryChanged(_)),
+            "{kind:?} {star}: got {msg:?}"
+        );
+    }
+    let msg = crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    );
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, false))
+            if id == "s1"
+        ),
+        "a failed love restores the flag only, got {msg:?}"
+    );
+    let msg = crate::Nokkvi::star_result_message(
+        Err(nokkvi_data::types::error::NokkviError::Unauthorized.into()),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    );
+    assert!(matches!(msg, Message::SessionExpired), "got {msg:?}");
 }
 
 #[test]
