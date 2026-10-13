@@ -73,7 +73,7 @@ impl Nokkvi {
     /// back into the live state via `SettingsReloadDataLoaded` (with a warning
     /// toast for anything config.toml couldn't apply — see
     /// [`settings_reload_message`]).
-    pub(super) fn handle_settings_config_reloaded(&mut self) -> Task<Message> {
+    pub(super) fn handle_settings_config_reloaded(&self) -> Task<Message> {
         tracing::info!(" [SETTINGS] Config file modified, reloading settings");
         self.shell_task(
             |shell| async move {

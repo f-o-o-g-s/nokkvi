@@ -129,7 +129,7 @@ impl Nokkvi {
     /// logic intercepts to enable/disable the cursored ToggleSet badge.
     /// In other views this is a no-op (arrow up/down are dedicated to MoveTrack
     /// via Shift+Arrow).
-    pub(crate) fn handle_edit_value(&mut self, up: bool) -> Task<Message> {
+    pub(crate) fn handle_edit_value(&self, up: bool) -> Task<Message> {
         if self.current_view == View::Settings {
             return if up {
                 Task::done(Message::Settings(views::SettingsMessage::SlotListUp))

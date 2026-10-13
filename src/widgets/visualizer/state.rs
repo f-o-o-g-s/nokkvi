@@ -353,7 +353,7 @@ impl ProcessingState {
         }
     }
 
-    fn resize(&mut self, _bar_count: usize) {}
+    fn resize(&self, _bar_count: usize) {}
 
     fn clear(&mut self, _bar_count: usize) {
         self.processed_samples = 0;

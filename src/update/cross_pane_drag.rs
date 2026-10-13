@@ -341,7 +341,7 @@ impl Nokkvi {
 
     /// Dispatch the browsing panel's active view's AddCenterToQueue message.
     /// This reuses the exact same code path as the Shift+A hotkey.
-    fn dispatch_browser_add_to_queue(&mut self) -> Task<Message> {
+    fn dispatch_browser_add_to_queue(&self) -> Task<Message> {
         let panel = match self.browsing_panel.as_ref() {
             Some(p) => p,
             None => return Task::none(),

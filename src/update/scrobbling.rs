@@ -55,7 +55,7 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_scrobble_now_playing(
-        &mut self,
+        &self,
         timer_id: u64,
         song_id: String,
     ) -> Task<Message> {
@@ -166,7 +166,7 @@ impl Nokkvi {
         self.arm_now_playing(song_id)
     }
 
-    pub(crate) fn handle_scrobble_submit(&mut self, song_id: String) -> Task<Message> {
+    pub(crate) fn handle_scrobble_submit(&self, song_id: String) -> Task<Message> {
         // Skip if scrobbling is disabled
         if !self.settings.scrobbling_enabled {
             return Task::none();
@@ -199,7 +199,7 @@ impl Nokkvi {
     /// Handle the result of a now-playing heartbeat. The server doesn't count
     /// these as plays, so no UI state changes — just log.
     pub(crate) fn handle_scrobble_now_playing_result(
-        &mut self,
+        &self,
         result: Result<(), ScrobbleError>,
     ) -> Task<Message> {
         match result {
@@ -341,7 +341,7 @@ impl Nokkvi {
 
     /// Submit a radio now-playing update directly to the scrobble services
     /// (ListenBrainz, Last.fm). No-ops in the backend for an unconfigured target.
-    pub(crate) fn handle_radio_now_playing(&mut self, track: ScrobbleTrack) -> Task<Message> {
+    pub(crate) fn handle_radio_now_playing(&self, track: ScrobbleTrack) -> Task<Message> {
         debug!(
             " [SCROBBLE] Radio now-playing: {} - {}",
             track.artist, track.title
@@ -356,7 +356,7 @@ impl Nokkvi {
     /// timestamped at the track's start. No-ops in the backend when no token is
     /// configured.
     pub(crate) fn handle_radio_submit(
-        &mut self,
+        &self,
         track: ScrobbleTrack,
         started_at: i64,
         targets: ScrobbleTargets,

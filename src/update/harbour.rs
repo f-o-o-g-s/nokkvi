@@ -1023,7 +1023,7 @@ impl Nokkvi {
     /// endpoint's `genre` param matches the tag VALUE, and `Genre::id` from
     /// `/api/genre` is a separate `tag.id` hash. Assumes the caller already ran
     /// the play guard + new-context reset.
-    fn play_harbour_genre(&mut self, genre_name: String) -> Task<Message> {
+    fn play_harbour_genre(&self, genre_name: String) -> Task<Message> {
         self.shell_action_task(
             move |shell| async move {
                 let songs = random_genre_songs(&shell, &genre_name).await?;
@@ -1713,7 +1713,7 @@ impl Nokkvi {
     /// (gated on `generation` == `search_generation`) which fills the side-maps
     /// `build_harbour_rows` reads. Skips ids already in a side-map so a re-search
     /// never re-resolves a known entity.
-    fn fan_out_search_collage_ids(&mut self, generation: u64) -> Task<Message> {
+    fn fan_out_search_collage_ids(&self, generation: u64) -> Task<Message> {
         let (genre_pairs, playlist_ids) = match &self.harbour.search_results {
             Some(r) => (
                 r.genres

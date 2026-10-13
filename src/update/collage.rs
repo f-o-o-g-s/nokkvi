@@ -192,7 +192,7 @@ impl Nokkvi {
     /// - `fetch_album_ids_fn`: Closure that fetches album IDs from the appropriate API service
     ///   when `cached_album_ids` is empty
     pub(crate) fn handle_load_collage_artwork<F, Fut>(
-        &mut self,
+        &self,
         target: CollageTarget,
         entity_id: String,
         server_url: String,
@@ -314,7 +314,7 @@ impl Nokkvi {
     /// a worst-case settle from ~250 to ~25 fetches and largely eliminates
     /// the burst that triggers Navidrome's `getCoverArt` throttle.
     pub(crate) fn handle_load_collage_mini_artwork<F, Fut>(
-        &mut self,
+        &self,
         target: CollageTarget,
         entity_id: String,
         server_url: String,
@@ -383,7 +383,7 @@ impl Nokkvi {
     /// that viewport-driven path, not eagerly here, so the bounded mini LRU
     /// can't be thrashed by a serial fetch over every genre/playlist.
     pub(crate) fn handle_start_collage_prefetch<F, Fut>(
-        &mut self,
+        &self,
         target: CollageTarget,
         items_needing_ids: Vec<(String, String)>,
         fetch_album_ids_fn: F,

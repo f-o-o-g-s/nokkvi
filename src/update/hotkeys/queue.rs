@@ -129,7 +129,7 @@ impl Nokkvi {
     /// engine (same as Stop; a playing station keeps them), then reload the
     /// now-empty queue.
     pub(crate) fn handle_queue_cleared(
-        &mut self,
+        &self,
         outcome: nokkvi_data::services::playback::ClearQueueOutcome,
     ) -> Task<Message> {
         use nokkvi_data::services::playback::ClearQueueOutcome;
@@ -180,7 +180,7 @@ impl Nokkvi {
     ///
     /// Used by views when song IDs are already resolved (e.g., single song).
     pub(crate) fn fetch_playlists_for_add_to_playlist(
-        &mut self,
+        &self,
         song_ids: Vec<String>,
     ) -> Task<Message> {
         self.shell_task(

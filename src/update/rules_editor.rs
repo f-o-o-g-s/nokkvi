@@ -2516,7 +2516,7 @@ impl Nokkvi {
 
     /// Kick off the banner pencil's just-in-time meta fetch for an
     /// unknown-smartness active playlist.
-    pub(crate) fn dispatch_playlist_kind_fetch(&mut self, playlist_id: String) -> Task<Message> {
+    pub(crate) fn dispatch_playlist_kind_fetch(&self, playlist_id: String) -> Task<Message> {
         let id_for_msg = playlist_id.clone();
         self.shell_task(
             move |shell| async move {

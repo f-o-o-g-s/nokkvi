@@ -272,7 +272,7 @@ impl Nokkvi {
     }
 
     /// Handle Shift+Enter: expand/collapse inline subgroup for center item.
-    pub(crate) fn handle_expand_center(&mut self) -> Task<Message> {
+    pub(crate) fn handle_expand_center(&self) -> Task<Message> {
         trace!(" ExpandCenter (Shift+Enter) hotkey pressed");
         // Settings uses drill-down navigation, not inline expand/collapse
         if self.current_view == crate::View::Settings {

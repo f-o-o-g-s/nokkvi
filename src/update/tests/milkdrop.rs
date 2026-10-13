@@ -764,7 +764,7 @@ fn milkdrop_menu_rows_carry_the_shipped_icons() {
 // ----------------------------------------------------------------------------
 
 fn set_milkdrop_config(
-    app: &mut Nokkvi,
+    app: &Nokkvi,
     f: impl FnOnce(&mut nokkvi_data::types::visualizer_config::MilkdropConfig),
 ) {
     let mut cfg = app.visualizer_config.read().clone();
@@ -776,7 +776,7 @@ fn set_milkdrop_config(
 #[test]
 fn interval_zero_never_arms() {
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    set_milkdrop_config(&app, |md| md.preset_interval_secs = 0);
     on_screen(&mut app);
     assert_eq!(app.milkdrop.next_switch_at, None);
     tick(&mut app);
@@ -786,7 +786,7 @@ fn interval_zero_never_arms() {
 #[test]
 fn show_preset_names_off_is_silent() {
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| md.show_preset_names = false);
+    set_milkdrop_config(&app, |md| md.show_preset_names = false);
     let toasts = app.toast.toasts.len();
     on_screen(&mut app);
     assert_eq!(app.toast.toasts.len(), toasts);
@@ -799,7 +799,7 @@ fn show_preset_names_off_is_silent() {
 #[test]
 fn switch_on_track_change_off_keeps_the_preset() {
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| md.switch_on_track_change = false);
+    set_milkdrop_config(&app, |md| md.switch_on_track_change = false);
     on_screen(&mut app);
     let generation = app.milkdrop.generation;
     let mut update = super::playback::make_playback_update();
@@ -815,14 +815,14 @@ fn crossfade_frames(app: &Nokkvi) -> u32 {
 #[test]
 fn crossfade_setting_reaches_the_renderer_in_frames() {
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| {
+    set_milkdrop_config(&app, |md| {
         md.preset_crossfade_secs = 1.5;
         md.preset_interval_secs = 30;
     });
     enter_milkdrop(&mut app);
     assert_eq!(crossfade_frames(&app), 90, "1.5 s at 60 advances a second");
 
-    set_milkdrop_config(&mut app, |md| md.preset_crossfade_secs = 0.0);
+    set_milkdrop_config(&app, |md| md.preset_crossfade_secs = 0.0);
     tick(&mut app);
     assert_eq!(crossfade_frames(&app), 0, "0 is a cut");
 }
@@ -830,18 +830,18 @@ fn crossfade_setting_reaches_the_renderer_in_frames() {
 #[test]
 fn crossfade_is_clamped_to_half_the_live_interval() {
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| {
+    set_milkdrop_config(&app, |md| {
         md.preset_crossfade_secs = 10.0;
         md.preset_interval_secs = 5;
     });
     enter_milkdrop(&mut app);
     assert_eq!(crossfade_frames(&app), 150, "clamped to 2.5 s");
 
-    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 1);
+    set_milkdrop_config(&app, |md| md.preset_interval_secs = 1);
     tick(&mut app);
     assert_eq!(crossfade_frames(&app), 30, "a 1 s interval allows 0.5 s");
 
-    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    set_milkdrop_config(&app, |md| md.preset_interval_secs = 0);
     tick(&mut app);
     assert_eq!(crossfade_frames(&app), 600, "interval 0 never clamps");
 }
@@ -850,7 +850,7 @@ fn crossfade_is_clamped_to_half_the_live_interval() {
 fn favorites_only_and_quality_reach_the_library_and_renderer() {
     use nokkvi_data::types::visualizer_config::{MilkdropPresetSource, MilkdropRenderQuality};
     let mut app = md_app();
-    set_milkdrop_config(&mut app, |md| {
+    set_milkdrop_config(&app, |md| {
         md.preset_source = MilkdropPresetSource::FavoritesOnly;
         md.render_quality = MilkdropRenderQuality::High;
     });
@@ -958,10 +958,10 @@ fn a_changed_interval_rearms_the_timer() {
     let mut app = md_app();
     on_screen(&mut app);
     assert!(app.milkdrop.next_switch_at.is_some());
-    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    set_milkdrop_config(&app, |md| md.preset_interval_secs = 0);
     tick(&mut app);
     assert_eq!(app.milkdrop.next_switch_at, None, "0 now means never");
-    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 10);
+    set_milkdrop_config(&app, |md| md.preset_interval_secs = 10);
     tick(&mut app);
     let at = app.milkdrop.next_switch_at.expect("re-armed");
     assert!(at <= std::time::Instant::now() + std::time::Duration::from_secs(10));
@@ -1265,7 +1265,7 @@ fn single_eligible_app() -> Nokkvi {
     on_screen(&mut app);
     let only = app.milkdrop.current.clone().expect("a preset");
     app.milkdrop.library.toggle_favorite(&only);
-    set_milkdrop_config(&mut app, |md| {
+    set_milkdrop_config(&app, |md| {
         md.preset_source = MilkdropPresetSource::FavoritesOnly;
     });
     tick(&mut app);

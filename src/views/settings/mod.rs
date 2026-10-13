@@ -1248,7 +1248,7 @@ impl SettingsPage {
     /// Per-color theme restores were removed — theme colors are edited directly
     /// in the theme TOML file, so there is no GUI "restore color group" path
     /// anymore. (The visualizer/hotkeys resets reset config values, not files.)
-    pub(crate) fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
+    pub(crate) fn handle_restore_defaults(&self, restore_key: &str) -> SettingsAction {
         match sentinel::SentinelKind::from_key(restore_key) {
             Some(sentinel::SentinelKind::RestoreAllHotkeys) => {
                 SettingsAction::OpenResetHotkeysDialog

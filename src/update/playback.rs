@@ -309,7 +309,7 @@ impl Nokkvi {
         Task::none()
     }
 
-    pub(crate) fn handle_tick(&mut self) -> Task<Message> {
+    pub(crate) fn handle_tick(&self) -> Task<Message> {
         // Pre-login: nothing to poll. Returning early avoids `shell_task`
         // logging a "called before app_service initialized" warning every
         // 100ms while session resume is in flight at boot.

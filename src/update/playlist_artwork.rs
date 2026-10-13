@@ -399,7 +399,7 @@ impl Nokkvi {
     /// `POST /api/playlist/{id}/image` — all inside one async task. The
     /// completion lands as [`ArtworkMessage::PlaylistCustomArtworkSet`].
     pub(crate) fn handle_set_playlist_artwork(
-        &mut self,
+        &self,
         playlist_id: String,
         playlist_name: String,
     ) -> Task<Message> {
@@ -425,7 +425,7 @@ impl Nokkvi {
     /// "Reset Artwork" on a playlist: `DELETE /api/playlist/{id}/image`.
     /// Completion lands as [`ArtworkMessage::PlaylistCustomArtworkReset`].
     pub(crate) fn handle_reset_playlist_artwork(
-        &mut self,
+        &self,
         playlist_id: String,
         playlist_name: String,
     ) -> Task<Message> {

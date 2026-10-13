@@ -951,7 +951,7 @@ fn queue_and_songs_dropdown_order_is_pinned() {
 fn handle_restore_defaults_all_hotkeys_opens_reset_dialog() {
     use crate::views::settings::SettingsAction;
 
-    let mut app = test_app();
+    let app = test_app();
     let action = app
         .settings_page
         .handle_restore_defaults("__restore_all_hotkeys");
@@ -967,7 +967,7 @@ fn handle_restore_defaults_visualizer_opens_reset_dialog() {
     // Non-regression: __restore_visualizer must still open its dialog.
     use crate::views::settings::SettingsAction;
 
-    let mut app = test_app();
+    let app = test_app();
     let action = app
         .settings_page
         .handle_restore_defaults("__restore_visualizer");

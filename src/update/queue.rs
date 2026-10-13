@@ -35,7 +35,7 @@ impl Nokkvi {
             .position(|s| s.entry_id == entry_id)
     }
 
-    pub(crate) fn handle_load_queue(&mut self) -> Task<Message> {
+    pub(crate) fn handle_load_queue(&self) -> Task<Message> {
         self.shell_task(
             |shell| async move {
                 let queue_vm = shell.queue().clone();
@@ -1089,7 +1089,7 @@ impl Nokkvi {
     /// Callers apply their surface's own empty-queue guard first (the header
     /// arm warns via toast; the CLI verb returns a structured error); the
     /// backend refuses an empty push regardless, as defense-in-depth.
-    pub(crate) fn push_queue_task(&mut self) -> Task<Message> {
+    pub(crate) fn push_queue_task(&self) -> Task<Message> {
         self.shell_task(
             |shell| async move { shell.push_queue().await },
             |result| match result {
@@ -1119,7 +1119,7 @@ impl Nokkvi {
     /// successful restore chains `LoadQueue` so the view picks up the fresh
     /// rows + entry_ids; an empty/absent server queue is an info toast with
     /// no local change.
-    pub(crate) fn pull_queue_task(&mut self) -> Task<Message> {
+    pub(crate) fn pull_queue_task(&self) -> Task<Message> {
         // A pulled queue replaces the local one, so a running Songs
         // progressive load must stop appending to it, but only once the
         // server has entries to replace it with. The bump hides the chain's

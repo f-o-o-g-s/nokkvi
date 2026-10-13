@@ -247,7 +247,7 @@ impl Nokkvi {
 
     /// The direct-create lane (unclaimed name, no dialog). Success rides
     /// the standard `PlaylistMutated(Created)` toast + list refresh.
-    pub(crate) fn import_create_task(&mut self, payload: NspImportPayload) -> Task<Message> {
+    pub(crate) fn import_create_task(&self, payload: NspImportPayload) -> Task<Message> {
         let NspImportPayload {
             name,
             comment,

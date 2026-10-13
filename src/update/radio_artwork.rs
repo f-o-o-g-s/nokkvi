@@ -337,7 +337,7 @@ impl Nokkvi {
     /// into the in-RAM caches at launch, so logo-less stations show their
     /// last-played thumbnail immediately without a refetch. Seeds the ICY
     /// dedup map too, so an unchanged now-playing URL isn't re-fetched.
-    pub(crate) fn hydrate_radio_art(&mut self) -> Task<Message> {
+    pub(crate) fn hydrate_radio_art(&self) -> Task<Message> {
         if self.app_service.is_none() {
             return Task::none();
         }
@@ -438,7 +438,7 @@ impl Nokkvi {
     /// completion lands as [`ArtworkMessage::RadioCustomArtworkSet`], where
     /// [`Self::handle_radio_custom_artwork_set`] invalidates + reloads.
     pub(crate) fn handle_set_radio_station_artwork(
-        &mut self,
+        &self,
         station: nokkvi_data::types::radio_station::RadioStation,
     ) -> Task<Message> {
         let station_id = station.id.clone();
@@ -463,7 +463,7 @@ impl Nokkvi {
     /// "Reset Artwork" on a radio station: `DELETE /api/radio/{id}/image`.
     /// Completion lands as [`ArtworkMessage::RadioCustomArtworkReset`].
     pub(crate) fn handle_reset_radio_station_artwork(
-        &mut self,
+        &self,
         station: nokkvi_data::types::radio_station::RadioStation,
     ) -> Task<Message> {
         let station_id = station.id.clone();

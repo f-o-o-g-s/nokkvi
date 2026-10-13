@@ -234,7 +234,7 @@ impl Nokkvi {
         Task::none()
     }
 
-    pub(crate) fn handle_play_sfx(&mut self, sfx_type: audio::SfxType) -> Task<Message> {
+    pub(crate) fn handle_play_sfx(&self, sfx_type: audio::SfxType) -> Task<Message> {
         self.sfx_engine.play(sfx_type);
         Task::none()
     }

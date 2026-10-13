@@ -170,7 +170,7 @@ impl Nokkvi {
     /// pruning: any `active_library_ids` entries no longer in the list
     /// (i.e. deleted libraries) are dropped and persisted.
     fn handle_library_loaded(
-        &mut self,
+        &self,
         libs: Vec<nokkvi_data::types::library::Library>,
     ) -> Task<Message> {
         if let Some(shell) = &self.app_service {

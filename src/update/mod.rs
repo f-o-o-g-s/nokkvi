@@ -772,7 +772,7 @@ impl Nokkvi {
     /// drag handle. `Change` only updates the live atomic; `Commit` also
     /// persists to TOML via the settings backend.
     pub(crate) fn handle_artwork_column_drag(
-        &mut self,
+        &self,
         ev: crate::widgets::artwork_split_handle::DragEvent,
     ) -> Task<Message> {
         use crate::widgets::artwork_split_handle::DragEvent;

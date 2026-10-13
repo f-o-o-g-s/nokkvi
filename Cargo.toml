@@ -65,6 +65,11 @@ let_underscore_must_use = "warn"
 # can't outlive the code it excused.
 allow_attributes_without_reason = "warn"
 
+# Honest signatures — a `&mut` that only reads tells the next reader "this
+# mutates" and keeps callers from sharing the borrow. Take `&` unless the
+# body writes through it.
+needless_pass_by_ref_mut = "warn"
+
 [package]
 name = "nokkvi"
 version = "0.25.0"

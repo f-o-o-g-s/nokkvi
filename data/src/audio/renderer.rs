@@ -2051,7 +2051,7 @@ impl AudioRenderer {
     /// still empty (a stalled/failed incoming decoder) so the caller can
     /// restore the outgoing track and skip the bad one instead of fading into
     /// silence.
-    pub(crate) fn tick_crossfade(&mut self) -> CrossfadeTick {
+    pub(crate) fn tick_crossfade(&self) -> CrossfadeTick {
         // Compute fade coefficients first (immutable borrow), then apply them
         // to both streams in a separate pass so the variant's stream and the
         // primary stream can be touched without overlapping borrows.
@@ -3147,7 +3147,7 @@ impl AudioRenderer {
     /// Uses `tokio::spawn` instead of `std::thread::spawn` + `block_on` to
     /// avoid deadlocking when the engine lock is already held in the same
     /// call chain (e.g. render_tick → finalize → engine lock).
-    fn on_renderer_finished(&mut self) {
+    fn on_renderer_finished(&self) {
         let generation = self.source_generation.current();
         trace!("🏁 [RENDERER] Track finished (generation={})", generation);
 

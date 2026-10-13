@@ -10,7 +10,7 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_radio_stations(&mut self) -> Task<Message> {
+    pub(crate) fn handle_load_radio_stations(&self) -> Task<Message> {
         debug!(" LoadRadioStations message received, loading stations...");
 
         self.shell_task(

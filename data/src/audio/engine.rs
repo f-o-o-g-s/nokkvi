@@ -2120,7 +2120,7 @@ impl CustomAudioEngine {
     }
 
     /// Start the decoding loop in a background task
-    fn start_decoding_loop(&mut self) {
+    fn start_decoding_loop(&self) {
         let decoder = self.decoder.clone();
         let renderer = self.renderer.clone();
         // Same-identity clone of the decode-loop channels (never a fresh Arc).
@@ -2471,7 +2471,7 @@ impl CustomAudioEngine {
     /// is the (clamped ≤ 500 ms) ramp length + a 250 ms margin, so a stuck
     /// ramp can only delay — never wedge — teardown (the logout/redb-relock
     /// path runs through here).
-    async fn run_stop_fade(&mut self) {
+    async fn run_stop_fade(&self) {
         if !self.fade.fade_on_stop || self.paused || !self.playing {
             return;
         }
@@ -2485,7 +2485,7 @@ impl CustomAudioEngine {
     /// this returns immediately) and poll `transport_fade_idle()` at 10 ms
     /// until it completes or the deadline (`dur_ms` + 250 ms margin) trips.
     /// Callers gate on their own enable + playing/paused state.
-    async fn run_bounded_out_fade(&mut self, dur_ms: u64) {
+    async fn run_bounded_out_fade(&self, dur_ms: u64) {
         let engaged = { self.renderer.lock().begin_stop_fade(dur_ms) };
         if !engaged {
             return;
@@ -4151,7 +4151,7 @@ impl CustomAudioEngine {
     /// becomes `None` (which `cancel_crossfade` / `finalize_crossfade_engine`
     /// trigger by clearing or taking the decoder respectively).
     fn start_crossfade_decode_loop(
-        &mut self,
+        &self,
         decoder_arc: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
     ) {
         let decoder = decoder_arc;
@@ -4361,7 +4361,7 @@ impl CustomAudioEngine {
     /// Test-only: report PipeWire-native volume, so a selected bit-perfect
     /// mode is ACTIVE (it is a no-op without it) in controller-level tests.
     #[cfg(test)]
-    pub(crate) fn force_pw_volume_active_for_test(&mut self) {
+    pub(crate) fn force_pw_volume_active_for_test(&self) {
         self.renderer.lock().force_pw_volume_active_for_test();
     }
 
@@ -7906,7 +7906,7 @@ mod tests {
     /// immediately; the install is synchronous and must land regardless.
     #[tokio::test]
     async fn start_crossfade_decode_loop_installs_liveness_on_renderer() {
-        let mut engine = CustomAudioEngine::new();
+        let engine = CustomAudioEngine::new();
         assert!(!engine.renderer.lock().has_incoming_liveness_for_test());
 
         engine.start_crossfade_decode_loop(Arc::new(tokio::sync::Mutex::new(None)));

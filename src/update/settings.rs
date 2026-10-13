@@ -679,7 +679,7 @@ impl Nokkvi {
     }
 
     fn handle_settings_write_hotkey(
-        &mut self,
+        &self,
         action: nokkvi_data::types::hotkey_config::HotkeyAction,
         combo: nokkvi_data::types::hotkey_config::KeyCombo,
     ) -> Task<Message> {
@@ -696,7 +696,7 @@ impl Nokkvi {
     }
 
     fn handle_settings_steal_hotkey(
-        &mut self,
+        &self,
         action: nokkvi_data::types::hotkey_config::HotkeyAction,
         combo: nokkvi_data::types::hotkey_config::KeyCombo,
         conflicting_action: nokkvi_data::types::hotkey_config::HotkeyAction,
@@ -723,7 +723,7 @@ impl Nokkvi {
     }
 
     fn handle_settings_reset_hotkey(
-        &mut self,
+        &self,
         action: nokkvi_data::types::hotkey_config::HotkeyAction,
     ) -> Task<Message> {
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);

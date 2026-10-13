@@ -243,7 +243,7 @@ impl Nokkvi {
         }
     }
 
-    fn handle_slot_list_navigate_up(&mut self) -> Task<Message> {
+    fn handle_slot_list_navigate_up(&self) -> Task<Message> {
         debug!(
             " [SLOT_LIST] SlotListNavigateUp triggered on {:?}",
             self.current_target_view()
@@ -302,7 +302,7 @@ impl Nokkvi {
         Task::batch([unfocus_task, nav_task])
     }
 
-    fn handle_slot_list_set_offset(&mut self, offset: usize) -> Task<Message> {
+    fn handle_slot_list_set_offset(&self, offset: usize) -> Task<Message> {
         if self.current_target_view() == Some(View::Settings) {
             return Task::done(Message::Settings(
                 views::SettingsMessage::SlotListSetOffset(
@@ -321,7 +321,7 @@ impl Nokkvi {
         })
     }
 
-    fn handle_slot_list_activate_center(&mut self, shuffled: bool) -> Task<Message> {
+    fn handle_slot_list_activate_center(&self, shuffled: bool) -> Task<Message> {
         let target_view = self.current_target_view();
         // Play enter/activate sound (settings handles its own SFX)
         if target_view != Some(View::Settings) {

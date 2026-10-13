@@ -680,7 +680,7 @@ fn starting_a_queue_pull_keeps_the_songs_load_running() {
     // A pull with no saved queue, or a failed one, replaces nothing; the
     // pull stops the load inside AppService::pull_queue, right before it
     // replaces the queue, and only then.
-    let (mut app, chain) = app_with_running_songs_load();
+    let (app, chain) = app_with_running_songs_load();
 
     let _ = app.pull_queue_task();
 

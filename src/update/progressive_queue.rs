@@ -17,7 +17,7 @@ impl Nokkvi {
         reason = "mirrors the ProgressiveQueueAppendPage message fields 1:1 for this single-caller handler"
     )]
     pub(crate) fn handle_progressive_queue_append_page(
-        &mut self,
+        &self,
         sort_mode: String,
         sort_order: String,
         search_query: Option<String>,
