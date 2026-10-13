@@ -137,49 +137,41 @@ impl PlaybackController {
                         let nav_guard = nav.lock().await;
                         nav_guard.decide_transition(&mut engine, &session).await
                     };
-                    match QueueNavigator::execute_transition(plan, &mut engine).await {
+                    let outcome = QueueNavigator::execute_transition(plan, &mut engine).await;
+                    // Every outcome releases the engine before the refresh
+                    // await, then tells the UI the queue changed: the
+                    // advanced (or consumed) queue, or after a failure the
+                    // view reconciled with the now-stopped engine.
+                    drop(engine);
+                    refresh_queue_view_and_signal(&qvm, &queue_tx).await;
+                    match outcome {
                         Ok(Some((song, reason))) => {
                             debug!(
                                 " [COMPLETION] Auto-advanced to: {} - {} ({})",
                                 song.title, song.artist, reason
                             );
-                            let song_id = song.id.clone();
-                            drop(engine);
-                            // Signal the UI that queue state has changed (post-consume)
-                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
-
                             // Notify repeat-one loop so the UI can scrobble correctly
                             if is_loop {
                                 debug!(
                                     " [COMPLETION] Track looped (repeat-one), notifying scrobble layer: {}",
-                                    song_id
+                                    song.id
                                 );
-                                if tx.send(song_id).is_err() {
+                                if tx.send(song.id).is_err() {
                                     debug!(" [COMPLETION] Loop listener is gone");
                                 }
                             }
                         }
-                        Ok(None) => {
-                            debug!(" [COMPLETION] No next track, playback stopped");
-                            drop(engine);
-                            // Refresh queue view so UI shows the consumed state
-                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
-                        }
+                        Ok(None) => debug!(" [COMPLETION] No next track, playback stopped"),
                         Err(e) => {
                             // Surface rather than swallow. A failed transition
                             // leaves the engine stopped while the UI still shows
                             // "playing", and a debug-only log gave the user no
                             // signal whatsoever — silence is the worst possible
                             // response to playback simply stopping mid-queue.
-                            //
-                            // Drop the engine lock BEFORE the refresh await, as
-                            // both sibling arms do. Then return Err so
-                            // TaskManager reports `TaskStatus::Failed` and the
-                            // UI toasts it (`handle_task_status_changed`).
+                            // Return Err so TaskManager reports
+                            // `TaskStatus::Failed` and the UI toasts it
+                            // (`handle_task_status_changed`).
                             warn!(" [COMPLETION] Auto-advance failed: {}", e);
-                            drop(engine);
-                            // Reconcile the view with the now-stopped engine.
-                            refresh_queue_view_and_signal(&qvm, &queue_tx).await;
                             return Err(e);
                         }
                     }
