@@ -522,7 +522,7 @@ define_commands! {
     // its toast run via the real handler.
     "add-to-queue" => act      (|app: &mut Nokkvi| {
         if let Some(exited) =
-            leave_theater_instead(app, HotkeyAction::AddToQueue, json!({ "added": null }))
+            key_gate_instead(app, HotkeyAction::AddToQueue, json!({ "added": null }))
         {
             return Ok(exited);
         }
@@ -545,9 +545,10 @@ define_commands! {
     // filtered-center song handle_remove_from_queue removes, so the echo is
     // exact; null when the queue is empty (no song centered).
     "remove-from-queue" => act (|app: &mut Nokkvi| {
-        // Theater first, like its key: Ctrl+D leaves theater in any view.
+        // The key gate first, like its key: a modal swallows Ctrl+D, and
+        // in theater it leaves theater in any view.
         if let Some(exited) =
-            leave_theater_instead(app, HotkeyAction::RemoveFromQueue, json!({ "removed": null }))
+            key_gate_instead(app, HotkeyAction::RemoveFromQueue, json!({ "removed": null }))
         {
             return Ok(exited);
         }
@@ -695,31 +696,30 @@ define_commands! {
     });
 }
 
-/// Theater Mode's key policy, applied to a verb whose keyboard twin is `twin`.
+/// The key gate of `handle_raw_key_event`, applied to a verb whose keyboard
+/// twin is `twin`. Returns the task and payload the verb answers with instead
+/// of acting (`idle` is its "nothing done" payload), or `None` when the verb
+/// should run as usual.
 ///
-/// Mirrors `handle_raw_key_event`: while theater is active and no modal is on
-/// top, an `ExitOnly` twin leaves theater and the verb does not act. Returns
-/// the exit task and `idle` (the verb's "nothing done" payload) with
-/// `"theater":"exited"` added, or `None` when the verb should run as usual.
+/// The modal on top owns the keyboard, in Theater Mode or not. The navigation
+/// verbs then run, because their `SlotList` route hands them to the modal (or
+/// drops them) exactly as the keys; Shift+A under Trawl adds the mix, which
+/// `handle_add_to_queue` routes. Any other queue verb gets `idle`, as the
+/// modal gate swallows its key, and theater stays.
 ///
-/// A modal open over theater keeps owning its keys and theater stays. The
-/// navigation verbs then run, because their `SlotList` route hands them to the
-/// modal (or drops them) exactly as the keys; Shift+A under Trawl adds the
-/// mix, which `handle_add_to_queue` routes. Any other queue verb gets `idle`
-/// with no exit, as the modal gate swallows its key.
+/// With no modal, Theater Mode's key policy applies: while theater is active
+/// an `ExitOnly` twin leaves theater and the verb does not act; the reply is
+/// `idle` with `"theater":"exited"` added.
 ///
 /// Every twin routed here (the five list verbs) is `ExitOnly`, which
 /// `list_verb_twins_are_exit_only` pins. A twin reclassified to
 /// `ExitThenPerform` would need the verb to run after the exit; revisit this
 /// helper before relying on that class.
-fn leave_theater_instead(
+fn key_gate_instead(
     app: &mut Nokkvi,
     twin: HotkeyAction,
     mut idle: serde_json::Value,
 ) -> Option<(Task<Message>, serde_json::Value)> {
-    if !app.theater.active {
-        return None;
-    }
     if let Some(modal) = app.top_modal() {
         let routed_to_modal = matches!(
             twin,
@@ -727,6 +727,9 @@ fn leave_theater_instead(
         ) || (twin == HotkeyAction::AddToQueue
             && modal == ActiveModal::Trawl);
         return (!routed_to_modal).then(|| (Task::none(), idle));
+    }
+    if !app.theater.active {
+        return None;
     }
     match app.theater_key_policy_here(twin) {
         TheaterKeyPolicy::ExitOnly => {
@@ -737,15 +740,15 @@ fn leave_theater_instead(
     }
 }
 
-/// The three navigation verbs: Theater Mode's key policy first, then the
-/// slot-list message the key would send, through the normal update loop
+/// The three navigation verbs: the key gate first, then the slot-list
+/// message the key would send, through the normal update loop
 /// (async, so the reply is the content-free `{"ok":true}`).
 fn list_verb(
     app: &mut Nokkvi,
     twin: HotkeyAction,
     msg: SlotListMessage,
 ) -> (Task<Message>, serde_json::Value) {
-    leave_theater_instead(app, twin, json!({ "ok": true }))
+    key_gate_instead(app, twin, json!({ "ok": true }))
         .unwrap_or_else(|| (Task::done(Message::SlotList(msg)), json!({ "ok": true })))
 }
 

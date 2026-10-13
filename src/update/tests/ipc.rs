@@ -520,8 +520,64 @@ fn queue_verbs_under_a_modal_over_theater_do_nothing() {
 }
 
 #[test]
+fn queue_verbs_under_a_modal_outside_theater_do_nothing() {
+    // The modal gate swallows Shift+A and Ctrl+D under every modal but Trawl
+    // whether or not theater is up, so the verbs must not reach the list
+    // under the modal either.
+    let open_eq = |app: &mut Nokkvi| app.eq_modal.open = true;
+    let open_info = |app: &mut Nokkvi| app.info_modal.visible = true;
+    for (modal, open) in [
+        ("eq", &open_eq as &dyn Fn(&mut Nokkvi)),
+        ("info", &open_info),
+    ] {
+        // A Songs view with a song centered: without the modal the verb
+        // names it (control below).
+        let mut app = home_app();
+        app.current_view = crate::View::Songs;
+        crate::test_helpers::seed_songs(
+            &mut app,
+            vec![crate::test_helpers::make_song("s1", "Song", "A")],
+        );
+        open(&mut app);
+        let resp = drive_on(&mut app, "add-to-queue");
+        assert_eq!(resp.data, Some(json!({ "added": null })), "{modal}");
+
+        let mut app = queue_app_with_songs();
+        open(&mut app);
+        let queue_len = app.library.queue_songs.len();
+        let toasts_before = app.toast.toasts.len();
+        let resp = drive_on(&mut app, "remove-from-queue");
+        assert_eq!(resp.data, Some(json!({ "removed": null })), "{modal}");
+        assert_eq!(app.library.queue_songs.len(), queue_len, "{modal}");
+        assert_eq!(app.toast.toasts.len(), toasts_before, "{modal}");
+    }
+}
+
+#[test]
+fn add_to_queue_without_a_modal_names_the_centered_song() {
+    // Control for the modal test above.
+    let mut app = home_app();
+    app.current_view = crate::View::Songs;
+    crate::test_helpers::seed_songs(
+        &mut app,
+        vec![crate::test_helpers::make_song("s1", "Song", "A")],
+    );
+    let resp = drive_on(&mut app, "add-to-queue");
+    assert_eq!(resp.data, Some(json!({ "added": "Song" })));
+}
+
+#[test]
+fn remove_from_queue_under_trawl_outside_theater_does_nothing() {
+    // Trawl takes Shift+A (it adds the mix) but not Ctrl+D.
+    let mut app = queue_app_with_songs();
+    app.trawl.modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
+    let resp = drive_on(&mut app, "remove-from-queue");
+    assert_eq!(resp.data, Some(json!({ "removed": null })));
+}
+
+#[test]
 fn list_verb_twins_are_exit_only() {
-    // `leave_theater_instead` handles only the ExitOnly class; a twin moved to
+    // `key_gate_instead` handles only the ExitOnly class; a twin moved to
     // ExitThenPerform would need the verb to run after the exit.
     use nokkvi_data::types::hotkey_config::HotkeyAction as A;
 

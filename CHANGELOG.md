@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - With Similar results focused, `nokkvi add-to-queue` now names the Similar song it added, not the queue's.
 - `nokkvi add-to-queue` now names an added playlist, genre or Harbour row instead of replying null.
 - Get Info on a focused but empty Similar tab no longer opens the centered queue song's details.
+- The `add-to-queue` and `remove-from-queue` commands now do nothing under the EQ, About or Get Info window, a picker or a dialog.
 
 ### Removed
 
