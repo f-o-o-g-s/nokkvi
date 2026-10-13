@@ -1189,7 +1189,12 @@ impl Nokkvi {
                 (FormRow::SortKey(i), FormCell::SortField) => {
                     let mut keys = s.rules.effective_sort_keys();
                     if let Some(key) = keys.get_mut(*i) {
-                        key.field = cycle_slice(SORT_QUICK_FIELDS, &key.field, forward).to_owned();
+                        key.field = cycle_slice(
+                            nokkvi_data::types::smart_criteria::SORT_QUICK_FIELDS,
+                            &key.field,
+                            forward,
+                        )
+                        .to_owned();
                         s.rules.edit_sort(keys);
                         s.dirty = true;
                         s.rebuild_rows();
@@ -2732,21 +2737,6 @@ fn cycle_items(
         }
     })
 }
-
-/// Quick-cycle sort fields (the corpus's sort favorites).
-const SORT_QUICK_FIELDS: &[&str] = &[
-    "playcount",
-    "dateadded",
-    "dateloved",
-    "lastplayed",
-    "rating",
-    "daterated",
-    "title",
-    "album",
-    "year",
-    "duration",
-    "random",
-];
 
 // =========================================================================
 // RulesSessionUi mutation helpers used by the handler (kept here so the

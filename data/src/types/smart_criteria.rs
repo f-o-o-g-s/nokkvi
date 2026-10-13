@@ -515,6 +515,23 @@ pub const PICKER_FIELDS: &[&str] = &[
     "releasetype",
 ];
 
+/// The sort fields the rules editor's sort cell cycles through (the corpus's
+/// sort favorites). Each is a registry field or the sort-only `random`; a
+/// name the server does not know would leave the sort skipped.
+pub const SORT_QUICK_FIELDS: &[&str] = &[
+    "playcount",
+    "dateadded",
+    "dateloved",
+    "lastplayed",
+    "rating",
+    "daterated",
+    "title",
+    "album",
+    "year",
+    "duration",
+    "random",
+];
+
 /// How a field name resolved against the registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
@@ -3016,6 +3033,13 @@ mod tests {
             assert!(
                 registry.lookup(name).is_some(),
                 "picker field {name} must resolve"
+            );
+        }
+        // So does every sort quick-field, except the sort-only `random`.
+        for name in SORT_QUICK_FIELDS {
+            assert!(
+                *name == "random" || registry.lookup(name).is_some(),
+                "sort field {name} must resolve"
             );
         }
     }
