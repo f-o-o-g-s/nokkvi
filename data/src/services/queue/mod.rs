@@ -31,6 +31,7 @@ use crate::{
         song::Song,
         song_pool::SongPool,
     },
+    utils::reorder::move_block_before,
 };
 
 /// For a caller with no one to hand a failed queue save to (an auto-advance,
@@ -949,22 +950,21 @@ impl QueueManager {
         entry_ids: &[u64],
         target: MoveBatchTarget,
     ) -> NextTrackResetEffect {
-        // Resolve entry_ids → (index, row) pairs, dropping unknown ids
-        // silently. Sort + dedup by index so a single entry_id passed
-        // twice still moves one row.
-        let mut to_move: Vec<(usize, QueueRow)> = entry_ids
+        // Resolve the entry_ids to their live positions in ONE pass
+        // (ascending, each row once: an unknown id matches no row, a
+        // repeated id collapses in the set).
+        let picked: HashSet<u64> = entry_ids.iter().copied().collect();
+        let indices: Vec<usize> = self
+            .queue
+            .rows
             .iter()
-            .filter_map(|&eid| {
-                let idx = self.index_of_entry(eid)?;
-                let row = self.queue.rows.get(idx)?.clone();
-                Some((idx, row))
-            })
+            .enumerate()
+            .filter(|(_, row)| picked.contains(&row.entry_id))
+            .map(|(i, _)| i)
             .collect();
-        if to_move.is_empty() {
+        if indices.is_empty() {
             return NextTrackResetEffect::new();
         }
-        to_move.sort_unstable_by_key(|&(i, _)| i);
-        to_move.dedup_by_key(|&mut (i, _)| i);
 
         // Resolve target → raw position BEFORE any removal. `End` and an
         // unknown `AboveEntry` both fall through to "append".
@@ -995,25 +995,11 @@ impl QueueManager {
             None
         };
 
-        // Remove rows in descending order so surviving indices stay valid.
-        let mut descending: Vec<usize> = to_move.iter().map(|&(i, _)| i).collect();
-        descending.sort_unstable_by(|a, b| b.cmp(a));
-        for &i in &descending {
-            tx.queue.rows.remove(i);
-        }
-
-        // Post-removal insert position: shift the original target back by
-        // the count of removed rows that sat before it, then clamp.
-        let removed_before_target = descending.iter().filter(|&&i| i < target_idx).count();
-        let insert_at = target_idx
-            .saturating_sub(removed_before_target)
-            .min(tx.queue.rows.len());
-
-        // Insert in original ascending order so the moved block preserves
-        // the user's selection ordering.
-        for (offset, (_, row)) in to_move.iter().enumerate() {
-            tx.queue.rows.insert(insert_at + offset, row.clone());
-        }
+        // Move the rows as one block above the target row, keeping the
+        // selection's top-to-bottom order: the shared pass the UI's
+        // optimistic batch drop runs too (proptest-pinned against the
+        // remove/insert loop this used to run).
+        move_block_before(&mut tx.queue.rows, &indices, target_idx);
 
         // Locate the playing row by entry_id identity (duplicate-aware) so
         // the cursor re-anchors onto it after the order rebuild.
@@ -1029,9 +1015,9 @@ impl QueueManager {
         }
 
         debug!(
-            "📦 [QUEUE] Moved batch of {} rows to position {} (target {:?})",
-            to_move.len(),
-            insert_at,
+            "📦 [QUEUE] Moved batch of {} rows above position {} (target {:?})",
+            indices.len(),
+            target_idx,
             target,
         );
         tx.commit_save_order()
