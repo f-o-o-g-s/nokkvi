@@ -1,6 +1,7 @@
 //! Scrobbling handlers
 
 use iced::Task;
+use nokkvi_data::services::api::scrobble::ScrobbleError;
 use tracing::{debug, warn};
 
 use crate::{
@@ -89,7 +90,7 @@ impl Nokkvi {
                     )
                     .await
                 } else {
-                    Err("No API client".to_string())
+                    Err(ScrobbleError::Failed("No API client".to_string()))
                 };
 
                 if send_result.is_ok() {
@@ -105,9 +106,32 @@ impl Nokkvi {
                 Ok(()) => {
                     Message::Scrobble(ScrobbleMessage::NowPlayingRefresh(timer_id, refresh_id))
                 }
-                Err(e) => Message::Scrobble(ScrobbleMessage::NowPlayingResult(Err(e))),
+                Err(e) => Self::now_playing_error_message(e),
             },
         )
+    }
+
+    /// Map a scrobble submission's outcome to its message. A rejected session
+    /// goes to login; its in-flight guard stays up, so the dead session is
+    /// not asked again (`reset_session_state` clears it for the next login).
+    pub(crate) fn scrobble_submission_message(
+        result: Result<ScrobbledSong, ScrobbleError>,
+    ) -> Message {
+        match result {
+            Err(ScrobbleError::SessionRejected) => Message::SessionExpired,
+            result => Message::Scrobble(ScrobbleMessage::SubmissionResult(result)),
+        }
+    }
+
+    /// Map a failed now-playing heartbeat to its message: a rejected session
+    /// goes to login, anything else is only logged.
+    pub(crate) fn now_playing_error_message(e: ScrobbleError) -> Message {
+        match e {
+            ScrobbleError::SessionRejected => Message::SessionExpired,
+            e @ (ScrobbleError::Refused(_) | ScrobbleError::Failed(_)) => {
+                Message::Scrobble(ScrobbleMessage::NowPlayingResult(Err(e)))
+            }
+        }
     }
 
     /// Periodic now-playing heartbeat. Re-arms a now-playing emit for the same
@@ -165,10 +189,10 @@ impl Nokkvi {
                     .await
                     .map(|()| scrobbled)
                 } else {
-                    Err("No API client".to_string())
+                    Err(ScrobbleError::Failed("No API client".to_string()))
                 }
             },
-            |result| Message::Scrobble(ScrobbleMessage::SubmissionResult(result)),
+            Self::scrobble_submission_message,
         )
     }
 
@@ -176,7 +200,7 @@ impl Nokkvi {
     /// these as plays, so no UI state changes — just log.
     pub(crate) fn handle_scrobble_now_playing_result(
         &mut self,
-        result: Result<(), String>,
+        result: Result<(), ScrobbleError>,
     ) -> Task<Message> {
         match result {
             Ok(()) => debug!(" [SCROBBLE] ✅ Now-playing accepted"),
@@ -212,7 +236,7 @@ impl Nokkvi {
     /// play-count increment so the UI tracks Navidrome without needing a refetch.
     pub(crate) fn handle_scrobble_submission_result(
         &mut self,
-        result: Result<ScrobbledSong, String>,
+        result: Result<ScrobbledSong, ScrobbleError>,
     ) -> Task<Message> {
         match result {
             Ok(scrobbled) => {
@@ -247,12 +271,24 @@ impl Nokkvi {
                     refresh,
                 ])
             }
-            Err(e) => {
+            Err(ScrobbleError::Failed(e)) => {
                 // Leave `submitted` false so the next tick retries this song's
                 // scrobble; clear the in-flight guard so the retry can fire.
                 // Transient blips (offline, 5xx) thus survive within the song.
                 warn!(" [SCROBBLE] Submission failed (will retry): {}", e);
                 self.scrobble.submission_in_flight = false;
+                Task::none()
+            }
+            // The server answered no: asking again gets the same answer, so
+            // the in-flight guard stays up until the next song resets it.
+            // `submitted` stays false, since no play was counted. A rejected
+            // session reaches login through `scrobble_submission_message`
+            // and lands here only if dispatched directly.
+            Err(e @ (ScrobbleError::Refused(_) | ScrobbleError::SessionRejected)) => {
+                warn!(
+                    " [SCROBBLE] Submission refused (not retried for this play): {}",
+                    e
+                );
                 Task::none()
             }
         }

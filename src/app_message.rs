@@ -11,7 +11,7 @@
 //! - Component Bubbling
 
 use iced::widget::image;
-use nokkvi_data::backend::app_service::AppService;
+use nokkvi_data::{backend::app_service::AppService, services::api::scrobble::ScrobbleError};
 
 use crate::{View, services, views, widgets};
 
@@ -342,9 +342,9 @@ pub enum ScrobbleMessage {
     Submit(String),
     /// Submission result — `Ok` carries the scrobbled song so the UI can bump
     /// its local play count and refresh the lists the play changed.
-    SubmissionResult(Result<ScrobbledSong, String>),
+    SubmissionResult(Result<ScrobbledSong, ScrobbleError>),
     /// Now-playing heartbeat result — does not affect server play counts.
-    NowPlayingResult(Result<(), String>),
+    NowPlayingResult(Result<(), ScrobbleError>),
     /// song_id — the same track looped in repeat-one mode.
     /// Triggers scrobble submission for the completed loop and resets state.
     TrackLooped(String),

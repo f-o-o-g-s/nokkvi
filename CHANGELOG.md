@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
 - Dropping songs into the playlist editor on an expired session now returns you to the login screen instead of doing nothing.
 - Opening the playlist editor now stops a roulette spin running on the Playlists view.
 - Clicking the Editing tab while Settings is open now opens the playlist editor.
+- A scrobble the server rejects no longer bumps the song's play count in nokkvi.
+- A scrobble or now-playing update rejected by an expired login now returns you to the login screen.
 
 ### Removed
 

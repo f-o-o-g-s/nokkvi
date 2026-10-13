@@ -1,5 +1,7 @@
 //! Tests for scrobble submission latching, retry, and now-playing heartbeat.
 
+use nokkvi_data::services::api::scrobble::ScrobbleError;
+
 use crate::{app_message::PlaybackStateUpdate, test_helpers::*};
 
 fn threshold_crossing_update(song_id: &str, pos: u32, dur: u32) -> PlaybackStateUpdate {
@@ -89,7 +91,7 @@ fn failed_submission_leaves_retryable() {
     app.scrobble.submitted = false;
     app.scrobble.submission_in_flight = true;
 
-    let _ = app.handle_scrobble_submission_result(Err("boom".to_string()));
+    let _ = app.handle_scrobble_submission_result(Err(ScrobbleError::Failed("boom".to_string())));
 
     assert!(
         !app.scrobble.submitted,
@@ -99,6 +101,45 @@ fn failed_submission_leaves_retryable() {
         !app.scrobble.submission_in_flight,
         "a failed submission must clear the in-flight guard so the next tick retries"
     );
+}
+
+/// Navidrome answers a dead credential with a failed envelope; the scrobble
+/// used to read that as success. A rejected session now drops to login, and
+/// the in-flight latch stays up so the dead session is not asked again
+/// (`reset_session_state` clears it for the next login).
+#[test]
+fn a_scrobble_rejected_by_the_session_goes_to_login() {
+    let msg = crate::Nokkvi::scrobble_submission_message(Err(ScrobbleError::SessionRejected));
+    assert!(
+        matches!(msg, crate::app_message::Message::SessionExpired),
+        "got {msg:?}"
+    );
+    let msg = crate::Nokkvi::now_playing_error_message(ScrobbleError::SessionRejected);
+    assert!(
+        matches!(msg, crate::app_message::Message::SessionExpired),
+        "the now-playing heartbeat too, got {msg:?}"
+    );
+}
+
+/// A scrobble the server refused (a failed envelope that is not a dead
+/// session) gets the same answer every time: it is not sent again for this
+/// play, where a retryable failure is.
+#[test]
+fn a_refused_scrobble_is_not_sent_again_for_this_play() {
+    let mut app = test_app();
+    app.scrobble.submitted = false;
+    app.scrobble.submission_in_flight = true;
+
+    let _ = app.handle_scrobble_submission_result(Err(ScrobbleError::Refused(
+        "scrobble: Song not found".into(),
+    )));
+
+    assert!(!app.scrobble.submitted, "a refusal is not a confirmed play");
+    assert!(
+        app.scrobble.submission_in_flight,
+        "the latch stays up, so the next tick does not ask again"
+    );
+    assert!(!app.scrobble.should_scrobble(200, 0.0));
 }
 
 #[test]
@@ -405,7 +446,7 @@ fn failed_scrobble_refreshes_nothing() {
     seed_songs(&mut app, vec![make_song("s0", "Song 0", "Artist")]);
     app.scrobble.submission_in_flight = true;
 
-    let _ = app.handle_scrobble_submission_result(Err("HTTP 500".into()));
+    let _ = app.handle_scrobble_submission_result(Err(ScrobbleError::Failed("HTTP 500".into())));
 
     assert!(!app.library.albums.is_loading());
     assert!(!app.library.songs.is_loading());

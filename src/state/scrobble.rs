@@ -15,8 +15,11 @@ pub struct ScrobbleState {
     pub submitted: bool,
     /// Whether a scrobble submission is currently in flight (a GET has been
     /// dispatched but no result has landed yet). Gates re-dispatch so ticks do
-    /// not spam duplicate submissions, and is cleared on every result (Ok or
-    /// Err) and on song change so a dropped task can never wedge scrobbling.
+    /// not spam duplicate submissions. Cleared by a success and by a
+    /// retryable failure; a refusal or a rejected session leaves it up, so
+    /// the server is not asked again for this play. Song change and
+    /// `reset_session_state` clear it too, so a dropped task can never wedge
+    /// scrobbling.
     pub submission_in_flight: bool,
     /// Timer ID for debounced "now playing" notification
     pub now_playing_timer_id: u64,
