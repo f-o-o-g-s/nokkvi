@@ -772,6 +772,10 @@ impl AudioDecoder {
             // transcode): no later probe can turn up a length, and each one
             // is a full stream request (with the transcode cache off, its
             // own ffmpeg run), so the open goes straight to the stream GET.
+            // A HEAD's length can't be read here (reqwest's `content_length`
+            // is the body's size, which a HEAD answer never has), so on the
+            // HEAD this is the refusal alone; Navidrome sends it only on the
+            // uncached-transcode path, never for a file it serves in ranges.
             let mut lengthless = false;
 
             // Try HEAD request first
