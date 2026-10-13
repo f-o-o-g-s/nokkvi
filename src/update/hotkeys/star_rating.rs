@@ -2,7 +2,7 @@
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
 
@@ -305,9 +305,7 @@ impl Nokkvi {
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                if let Err(e) = qm.update_song_starred(&song_id, starred) {
-                    warn!(" Saving the queue's love flag failed: {e:#}");
-                }
+                qm.update_song_starred(&song_id, starred);
             },
             |_| Message::NoOp,
         )
@@ -500,9 +498,7 @@ impl Nokkvi {
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                if let Err(e) = qm.update_song_rating(&sid, rating_opt) {
-                    warn!(" Saving the queue's rating failed: {e:#}");
-                }
+                qm.update_song_rating(&sid, rating_opt);
             },
             |_| Message::NoOp,
         )
@@ -523,9 +519,7 @@ impl Nokkvi {
             move |shell| async move {
                 let queue_manager = shell.queue().queue_manager();
                 let mut qm = queue_manager.lock().await;
-                if let Err(e) = qm.increment_song_play_count(&sid) {
-                    warn!(" Saving the queue's play count failed: {e:#}");
-                }
+                qm.increment_song_play_count(&sid);
             },
             |_| Message::NoOp,
         )

@@ -1131,33 +1131,33 @@ impl QueueManager {
         tx.commit_save_all()
     }
 
+    // The song-field writers save the pool like every other queue write: the
+    // field changed in memory either way, so a failed save is only logged.
+
     /// Update the rating for a song in the persisted queue by song ID (O(1)).
-    pub fn update_song_rating(&mut self, song_id: &str, rating: Option<u32>) -> Result<()> {
+    pub fn update_song_rating(&mut self, song_id: &str, rating: Option<u32>) {
         if let Some(song) = self.pool.get_mut(song_id) {
             song.rating = rating;
-            self.save_songs()?;
+            warn_if_unsaved(self.save_songs(), "a rating change");
         }
-        Ok(())
     }
 
     /// Update the starred status for a song in the persisted queue by song ID (O(1)).
-    pub fn update_song_starred(&mut self, song_id: &str, starred: bool) -> Result<()> {
+    pub fn update_song_starred(&mut self, song_id: &str, starred: bool) {
         if let Some(song) = self.pool.get_mut(song_id) {
             song.starred = starred;
-            self.save_songs()?;
+            warn_if_unsaved(self.save_songs(), "a love change");
         }
-        Ok(())
     }
 
     /// Bump the play count for a song in the persisted queue by 1 (O(1)).
     /// `None` becomes `Some(1)`.
-    pub fn increment_song_play_count(&mut self, song_id: &str) -> Result<()> {
+    pub fn increment_song_play_count(&mut self, song_id: &str) {
         if let Some(song) = self.pool.get_mut(song_id) {
             let next = song.play_count.unwrap_or(0).saturating_add(1);
             song.play_count = Some(next);
-            self.save_songs()?;
+            warn_if_unsaved(self.save_songs(), "a play-count bump");
         }
-        Ok(())
     }
 }
 
@@ -3255,7 +3255,7 @@ pub(crate) mod tests {
         song.play_count = Some(3);
         let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
-        qm.increment_song_play_count("a").unwrap();
+        qm.increment_song_play_count("a");
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(4));
     }
 
@@ -3265,7 +3265,7 @@ pub(crate) mod tests {
         song.play_count = None;
         let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
-        qm.increment_song_play_count("a").unwrap();
+        qm.increment_song_play_count("a");
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(1));
     }
 
@@ -3275,8 +3275,25 @@ pub(crate) mod tests {
         song.play_count = Some(2);
         let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
-        qm.increment_song_play_count("nonexistent").unwrap();
+        qm.increment_song_play_count("nonexistent");
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(2));
+    }
+
+    /// The song-field writers follow the queue's one save rule: a failed save
+    /// is logged and the field keeps its new value in memory.
+    #[test]
+    fn a_failed_annotation_save_keeps_the_field_in_memory() {
+        let (mut qm, _temp) = make_test_manager(vec![make_test_song("a")], Some(0));
+        qm.storage.fail_writes_for_test(true);
+
+        qm.update_song_rating("a", Some(4));
+        qm.update_song_starred("a", true);
+        qm.increment_song_play_count("a");
+
+        let song = qm.pool.get("a").unwrap();
+        assert_eq!(song.rating, Some(4));
+        assert!(song.starred);
+        assert_eq!(song.play_count, Some(1));
     }
 
     // ══════════════════════════════════════════════════════════════════════
