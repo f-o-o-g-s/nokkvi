@@ -92,7 +92,7 @@ define_settings! {
                     "Action when pressing Enter on items (all views except Queue)",
                 ),
                 default: "Play All",
-                options: &["Play All", "Play Single", "Append & Play"],
+                options: EnterBehavior::LABELS,
                 read_field: |d| d.enter_behavior.as_ref(),
             },
         },
@@ -148,12 +148,7 @@ define_settings! {
                     "Items fetched per API request · larger = fewer loads, more memory",
                 ),
                 default: "Default (500)",
-                options: &[
-                    "Small (100)",
-                    "Default (500)",
-                    "Large (1,000)",
-                    "Massive (5,000)",
-                ],
+                options: LibraryPageSize::LABELS,
                 read_field: |d| d.library_page_size.as_ref(),
             },
         },
@@ -307,12 +302,7 @@ define_settings! {
                     "Panel image quality · higher = sharper on HiDPI, larger cache",
                 ),
                 default: "Default (1000px)",
-                options: &[
-                    "Default (1000px)",
-                    "High (1500px)",
-                    "Ultra (2000px)",
-                    "Original (Full Size)",
-                ],
+                options: ArtworkResolution::LABELS,
                 read_field: |d| d.artwork_resolution.as_ref(),
             },
         },
@@ -339,11 +329,8 @@ define_settings! {
                      Clean: only changed settings, no comments",
                 ),
                 default: "Clean",
-                // Ordered as a verbosity gradient (most → least output), NOT
-                // default-first — the badge row reads On | Off | Clean to
-                // mirror the user's mental model. Intentional; leave as-is
-                // through convention syncs.
-                options: &["On", "Off", "Clean"],
+                // A verbosity gradient, not default-first: see the enum.
+                options: VerboseConfig::LABELS,
                 read_field: |d| d.verbose_config.as_ref(),
             },
         },

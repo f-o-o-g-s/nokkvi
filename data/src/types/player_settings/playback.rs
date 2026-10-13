@@ -130,12 +130,12 @@ define_labeled_enum! {
         /// No normalization. Decoded audio passes through unchanged.
         #[default]
         Off { label: "Off", wire: "off" },
-        /// Real-time automatic gain control.
-        Agc { label: "AGC", wire: "agc" },
         /// Static gain from per-track ReplayGain tag.
         ReplayGainTrack { label: "ReplayGain (Track)", wire: "replay_gain_track" },
         /// Static gain from per-album ReplayGain tag (preserves within-album dynamics).
         ReplayGainAlbum { label: "ReplayGain (Album)", wire: "replay_gain_album" },
+        /// Real-time automatic gain control.
+        Agc { label: "AGC", wire: "agc" },
     }
 }
 

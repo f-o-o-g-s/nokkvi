@@ -22,6 +22,11 @@ define_labeled_enum! {
     /// (sparse *with* comments), preserving that explicit pre-enum choice;
     /// only a store with no value at all picks up the new `Clean` default.
     ///
+    /// Declared as a verbosity gradient (most → least output), NOT
+    /// default-first: the Settings row cycles in declaration order (`LABELS`)
+    /// and reads On | Off | Clean to mirror the user's mental model.
+    /// Intentional; leave as-is through convention syncs.
+    ///
     /// Serializes to snake_case strings in `config.toml` and the redb-backed
     /// `PersistedPlayerSettings`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

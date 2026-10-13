@@ -274,7 +274,7 @@ impl<'a, Message> ProgressBar<'a, Message> {
     /// `HANDLE_SIZE` so the handle center tracks the cursor; the handle-less
     /// styles map the full width.
     fn fraction_at(&self, cursor_x: f32, track: Rectangle) -> f32 {
-        let (effective_width, offset) = if self.style == SeekbarStyle::Classic {
+        let (effective_width, offset) = if self.style.has_grab_handle() {
             (track.width - HANDLE_SIZE, HANDLE_SIZE / 2.0)
         } else {
             (track.width, 0.0)
@@ -551,7 +551,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
                     // Classic: did the press land on the handle itself? The
                     // handle-less styles always take a track press.
-                    let clicked_on_handle = self.style == SeekbarStyle::Classic && {
+                    let clicked_on_handle = self.style.has_grab_handle() && {
                         let handle_x = track.x + current_progress * (track.width - HANDLE_SIZE);
                         cursor_position.x >= handle_x && cursor_position.x <= handle_x + HANDLE_SIZE
                     };
@@ -569,7 +569,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                         // The handle-less styles have nothing to grab, so a
                         // track press also begins a drag — click-and-drag
                         // scrub from anywhere along the bar.
-                        if self.style != SeekbarStyle::Classic {
+                        if !self.style.has_grab_handle() {
                             state.is_dragging = true;
                         }
                         shell.publish((self.on_seek)(seek_pos));
@@ -602,7 +602,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 }
                 // The handle-less styles preview the hovered time. Redraw only
                 // when the hovered point changes.
-                if self.style != SeekbarStyle::Classic {
+                if !self.style.has_grab_handle() {
                     let hover = cursor
                         .position_over(track)
                         .map(|p| self.fraction_at(p.x, track));
@@ -726,7 +726,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         // handle-less styles.
         let shown = if state.is_dragging {
             Some(state.drag_progress)
-        } else if self.interactive && self.style != SeekbarStyle::Classic {
+        } else if self.interactive && !self.style.has_grab_handle() {
             state.hover
         } else {
             None
@@ -737,7 +737,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
         let bounds = layout.bounds();
         let track = self.track(&state.caps, bounds);
-        let center_x = if self.style == SeekbarStyle::Classic {
+        let center_x = if self.style.has_grab_handle() {
             track.x + fraction * (track.width - HANDLE_SIZE) + HANDLE_SIZE / 2.0
         } else {
             track.x + fraction * track.width

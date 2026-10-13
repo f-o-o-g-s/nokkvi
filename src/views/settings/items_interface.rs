@@ -29,7 +29,7 @@
 pub(crate) use nokkvi_data::types::settings_data::InterfaceSettingsData;
 use nokkvi_data::{
     services::settings_tables::interface::build_interface_tab_settings_items,
-    types::player_settings::{ArtworkColumnMode, TrackInfoDisplay},
+    types::player_settings::{ArtworkColumnMode, ArtworkStretchFit, TrackInfoDisplay},
 };
 
 use super::items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry};
@@ -254,7 +254,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.artwork_column_stretch_fit.as_ref(),
             "Cover",
-            vec!["Cover", "Fill"],
+            ArtworkStretchFit::LABELS.to_vec(),
         ));
     }
 

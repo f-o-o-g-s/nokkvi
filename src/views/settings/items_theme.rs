@@ -51,11 +51,7 @@ pub(crate) fn build_theme_items(
             .with_subtitle("Apply rounded borders to UI elements"),
         rounded_mode.as_label(),
         RoundedMode::default().as_label(),
-        vec![
-            RoundedMode::Off.as_label(),
-            RoundedMode::On.as_label(),
-            RoundedMode::PlayerOnly.as_label(),
-        ],
+        RoundedMode::LABELS.to_vec(),
     ));
     e.push(SettingItem::bool_val(
         SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Display")

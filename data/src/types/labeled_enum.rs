@@ -36,6 +36,10 @@
 //!   over variants emitting the `label` literal.
 //! - `impl std::fmt::Display for Example` — total match emitting the `wire`
 //!   literal.
+//! - `impl Example { pub const LABELS: &[&str] }` — every `label` literal in
+//!   declaration order. A Settings `Enum` row takes it as its options, so the
+//!   declaration order is the order the row cycles through and a new variant
+//!   reaches the row without a second list to keep.
 //!
 //! # Notes
 //!
@@ -70,6 +74,10 @@ macro_rules! define_labeled_enum {
         }
 
         impl $name {
+            /// Every variant's settings GUI label, in declaration order: the
+            /// options of the variant's Settings row, cycled in this order.
+            pub const LABELS: &'static [&'static str] = &[$($label),*];
+
             /// Parse from the human-readable settings GUI label. Unknown
             /// labels fall back to `Self::default()` (the variant marked
             /// `#[default]`).
@@ -133,6 +141,17 @@ mod tests {
         assert_eq!(TestEnum::Alpha.as_label(), "Alpha Label");
         assert_eq!(TestEnum::Beta.as_label(), "Beta Label");
         assert_eq!(TestEnum::GammaDelta.as_label(), "Gamma Delta");
+    }
+
+    #[test]
+    fn labels_list_every_variant_in_declaration_order() {
+        assert_eq!(
+            TestEnum::LABELS,
+            ["Alpha Label", "Beta Label", "Gamma Delta"]
+        );
+        for label in TestEnum::LABELS {
+            assert_eq!(TestEnum::from_label(label).as_label(), *label);
+        }
     }
 
     #[test]

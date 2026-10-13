@@ -27,8 +27,8 @@ use crate::{
 };
 
 /// The two Seekbar Style rows (normal bar, mini player) share their choices
-/// and copy, so the row reads the same whichever bar it is editing.
-const SEEKBAR_STYLE_OPTIONS: &[&str] = &["Classic", "Line", "Capsule", "Cells", "Waveform"];
+/// (`SeekbarStyle::LABELS`) and copy, so the row reads the same whichever bar
+/// it is editing.
 const SEEKBAR_STYLE_SUBTITLE: &str = "Classic: a track with a drag handle · Line: a thin track \
      that shows its handle under the cursor · Capsule: a solid block with the times inside · \
      Cells: a row of blocks · Waveform: the song's shape, worked out once per song";
@@ -58,7 +58,7 @@ define_settings! {
                 category: "Layout",
                 subtitle: Some("Top bar tabs, vertical sidebar, or no navigation chrome"),
                 default: "Top",
-                options: &["Top", "Side", "None"],
+                options: NavLayout::LABELS,
                 read_field: |d| d.nav_layout.as_ref(),
             },
         },
@@ -74,7 +74,7 @@ define_settings! {
                 category: "Layout",
                 subtitle: Some("Show text, icons, or both in navigation tabs"),
                 default: "Text Only",
-                options: &["Text Only", "Text + Icons", "Icons Only"],
+                options: NavDisplayMode::LABELS,
                 read_field: |d| d.nav_display_mode.as_ref(),
             },
         },
@@ -90,14 +90,7 @@ define_settings! {
                 category: "Layout",
                 subtitle: Some("Where to show the now-playing metadata strip"),
                 default: "Player Bar Above",
-                options: &[
-                    "Off",
-                    "Player Bar",
-                    "Player Bar Above",
-                    "Top Bar",
-                    "Top Bar Under",
-                    "Mini Player",
-                ],
+                options: TrackInfoDisplay::LABELS,
                 read_field: |d| d.track_info_display.as_ref(),
             },
         },
@@ -115,7 +108,7 @@ define_settings! {
                     "Controls how many rows are visible · fewer rows = larger artwork & text",
                 ),
                 default: "Default",
-                options: &["Compact", "Default", "Comfortable", "Spacious"],
+                options: SlotRowHeight::LABELS,
                 read_field: |d| d.slot_row_height.as_ref(),
             },
         },
@@ -201,7 +194,7 @@ define_settings! {
                 category: "Slot List",
                 subtitle: Some("What stays on screen while the bar is hidden"),
                 default: "Count strip",
-                options: &["Hairline", "Hidden", "Count strip"],
+                options: CollapsedAppearance::LABELS,
                 read_field: |d| d.autohide_collapsed_appearance.as_ref(),
             },
         },
@@ -223,7 +216,7 @@ define_settings! {
                      Hidden: no scrollbar at all",
                 ),
                 default: "Always",
-                options: &["On hover", "Always", "Hidden"],
+                options: ScrollbarVisibility::LABELS,
                 read_field: |d| d.scrollbar_visibility.as_ref(),
             },
         },
@@ -242,7 +235,7 @@ define_settings! {
                      Lucide: the original thin-outline alternate",
                 ),
                 default: "Phosphor",
-                options: &["Phosphor", "Lucide"],
+                options: IconSet::LABELS,
                 read_field: |d| d.icon_set.as_ref(),
             },
         },
@@ -284,7 +277,7 @@ define_settings! {
                 category: "Player Bar",
                 subtitle: Some(SEEKBAR_STYLE_SUBTITLE),
                 default: "Classic",
-                options: SEEKBAR_STYLE_OPTIONS,
+                options: SeekbarStyle::LABELS,
                 read_field: |d| d.seekbar_style.as_ref(),
             },
         },
@@ -302,7 +295,7 @@ define_settings! {
                 category: "Player Bar",
                 subtitle: Some(SEEKBAR_STYLE_SUBTITLE),
                 default: "Capsule",
-                options: SEEKBAR_STYLE_OPTIONS,
+                options: SeekbarStyle::LABELS,
                 read_field: |d| d.mini_player_seekbar_style.as_ref(),
             },
         },
@@ -436,14 +429,7 @@ define_settings! {
                 category: "Metadata Strip",
                 subtitle: Some("Character used to join fields in merged mode"),
                 default: "Slash /",
-                options: &[
-                    "Dot ·",
-                    "Bullet •",
-                    "Pipe |",
-                    "Em dash —",
-                    "Slash /",
-                    "Bar │",
-                ],
+                options: StripSeparator::LABELS,
                 read_field: |d| d.strip_separator.as_ref(),
             },
         },
@@ -459,13 +445,7 @@ define_settings! {
                 category: "Metadata Strip",
                 subtitle: Some("What happens when you click the track info strip"),
                 default: "Go to Queue",
-                options: &[
-                    "Go to Queue",
-                    "Go to Album",
-                    "Go to Artist",
-                    "Copy Track Info",
-                    "Do Nothing",
-                ],
+                options: StripClickAction::LABELS,
                 read_field: |d| d.strip_click_action.as_ref(),
             },
         },
@@ -486,14 +466,7 @@ define_settings! {
                      Never: hidden everywhere",
                 ),
                 default: "Auto",
-                options: &[
-                    "Auto",
-                    "Always (Native)",
-                    "Always (Stretched)",
-                    "Always (Vertical Native)",
-                    "Always (Vertical Stretched)",
-                    "Never",
-                ],
+                options: ArtworkColumnMode::LABELS,
                 read_field: |d| d.artwork_column_mode.as_ref(),
             },
         },
@@ -527,7 +500,7 @@ define_settings! {
                      in Theater Mode keeps covers in the Queue and Radios columns",
                 ),
                 default: "Show",
-                options: &["Show", "Hide in Theater Mode", "Hide everywhere"],
+                options: ArtworkCover::LABELS,
                 read_field: |d| d.artwork_cover.as_ref(),
             },
         },
@@ -547,7 +520,7 @@ define_settings! {
                      screen. Always hidden keeps it away; hotkeys still work",
                 ),
                 default: "Auto-hide",
-                options: &["Auto-hide", "Always shown", "Always hidden"],
+                options: TheaterControls::LABELS,
                 read_field: |d| d.theater_controls.as_ref(),
             },
         },
@@ -1037,49 +1010,12 @@ mod tests {
         let mut live = crate::types::player_settings::LivePlayerSettings::default();
         dump_interface_tab_player_settings(&p, &mut live);
 
-        // Mirrors the `InterfaceSettingsData` construction in the UI crate's
-        // `build_settings_view_data` (src/update/settings.rs), sourced from
-        // `live`. `font_family` has no macro row (it routes through
+        // The rows the UI builds from the theme atomics, which the load
+        // handler fills from `live` (held to this by the UI crate's
+        // `every_interface_field_is_applied_on_settings_load`).
+        // `font_family` has no macro row (it routes through
         // `Message::ApplyFont`) — its value is never visited by the loop.
-        let data = InterfaceSettingsData {
-            nav_layout: live.nav_layout.as_label().into(),
-            nav_display_mode: live.nav_display_mode.as_label().into(),
-            track_info_display: live.track_info_display.as_label().into(),
-            slot_row_height: live.slot_row_height.as_label().into(),
-            horizontal_volume: live.horizontal_volume,
-            autohide_toolbar: live.autohide_toolbar,
-            autohide_toolbar_height: i64::from(live.autohide_toolbar_height),
-            autohide_toolbar_grip: live.autohide_toolbar_grip,
-            autohide_collapsed_appearance: live.autohide_collapsed_appearance.as_label().into(),
-            mini_player_show_volume: live.mini_player_show_volume,
-            mini_player_show_modes: live.mini_player_show_modes,
-            mini_player_show_artwork: live.mini_player_show_artwork,
-            seekbar_style: live.seekbar_style.as_label().into(),
-            mini_player_seekbar_style: live.mini_player_seekbar_style.as_label().into(),
-            slot_text_links: live.slot_text_links,
-            scrollbar_visibility: live.scrollbar_visibility.as_label().into(),
-            icon_set: live.icon_set.as_label().into(),
-            font_family: live.font_family.clone().into(),
-            strip_show_title: live.strip_show_title,
-            strip_show_artist: live.strip_show_artist,
-            strip_show_album: live.strip_show_album,
-            strip_show_format_info: live.strip_show_format_info,
-            strip_merged_mode: live.strip_merged_mode,
-            strip_show_labels: live.strip_show_labels,
-            strip_separator: live.strip_separator.as_label().into(),
-            strip_click_action: live.strip_click_action.as_label().into(),
-            albums_artwork_overlay: live.albums_artwork_overlay,
-            artists_artwork_overlay: live.artists_artwork_overlay,
-            songs_artwork_overlay: live.songs_artwork_overlay,
-            playlists_artwork_overlay: live.playlists_artwork_overlay,
-            artwork_column_mode: live.artwork_column_mode.as_label().into(),
-            artwork_column_stretch_fit: live.artwork_column_stretch_fit.as_label().into(),
-            artwork_cover: live.artwork_cover.as_label().into(),
-            theater_controls: live.theater_controls.as_label().into(),
-            theater_window_fullscreen: live.theater_window_fullscreen,
-            artwork_auto_max_pct: f64::from(live.artwork_auto_max_pct),
-            artwork_vertical_height_pct: f64::from(live.artwork_vertical_height_pct),
-        };
+        let data = InterfaceSettingsData::from_live(&live);
 
         for e in build_interface_tab_settings_items(&data) {
             if let SettingsEntry::Item(item) = e {

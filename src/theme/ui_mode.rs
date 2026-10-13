@@ -515,8 +515,8 @@ use nokkvi_data::types::player_settings::IconSet;
 
 atomic_u8_enum! {
     IconSet {
-        Lucide,
         Phosphor,
+        Lucide,
     } default Phosphor
 }
 

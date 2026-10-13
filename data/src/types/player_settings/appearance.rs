@@ -43,13 +43,13 @@ define_labeled_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum IconSet {
-        /// The original thin-outline alternate. The icons that ship under
-        /// `assets/icons/`.
-        Lucide { label: "Lucide", wire: "lucide" },
         /// Default. Phosphor glyphs (`assets/icons-phosphor/`), Regular weight +
         /// forced Fill for the filled transport/rating glyphs.
         #[default]
         Phosphor { label: "Phosphor", wire: "phosphor" },
+        /// The original thin-outline alternate. The icons that ship under
+        /// `assets/icons/`.
+        Lucide { label: "Lucide", wire: "lucide" },
     }
 }
 
@@ -85,6 +85,14 @@ define_labeled_enum! {
 impl SeekbarStyle {
     /// The mini player's starting style: the capsule it has always drawn.
     pub const MINI_PLAYER_DEFAULT: Self = Self::Capsule;
+
+    /// Whether the bar has a handle to grab (Classic): a press on the handle
+    /// drags it, and the track maps inset by half a handle so the handle's
+    /// centre follows the cursor. Every other style seeks from anywhere on the
+    /// track, maps its full width and previews the hovered time.
+    pub fn has_grab_handle(self) -> bool {
+        matches!(self, Self::Classic)
+    }
 
     /// Whether the elapsed / duration times are drawn inside the bar rather
     /// than beside it.
@@ -208,6 +216,13 @@ mod tests {
         assert_eq!(SeekbarStyle::MINI_PLAYER_DEFAULT, SeekbarStyle::Capsule);
         assert!(SeekbarStyle::Capsule.times_inside());
         assert!(!SeekbarStyle::Waveform.times_inside());
+        assert_eq!(
+            SeekbarStyle::LABELS
+                .iter()
+                .filter(|l| SeekbarStyle::from_label(l).has_grab_handle())
+                .collect::<Vec<_>>(),
+            [&"Classic"]
+        );
     }
 
     #[test]

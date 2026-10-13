@@ -300,3 +300,119 @@ fn live_controls_start_at_their_persisted_defaults() {
     assert_eq!(app.settings.seek_step_secs, persisted.seek_step_secs);
     assert_eq!(app.settings.lyrics_enabled, persisted.lyrics_enabled);
 }
+
+/// The Interface rows read their values back from the theme atomics, and only
+/// `handle_player_settings_loaded` fills those on a load: a field it forgets
+/// to apply leaves its row (and the look it controls) on the old value while
+/// the setting itself changed. Loads two settings that differ in every
+/// Interface field, and checks the rows against each.
+#[test]
+fn every_interface_field_is_applied_on_settings_load() {
+    use nokkvi_data::{
+        services::settings_tables::{
+            dump_columns_tab_player_settings, dump_general_tab_player_settings,
+            dump_interface_tab_player_settings, dump_playback_tab_player_settings,
+        },
+        types::{
+            player_settings::{
+                ArtworkColumnMode, ArtworkCover, ArtworkStretchFit, CollapsedAppearance, IconSet,
+                NavDisplayMode, NavLayout, ScrollbarVisibility, SeekbarStyle, SlotRowHeight,
+                StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay,
+            },
+            settings_data::InterfaceSettingsData,
+        },
+    };
+
+    // `font_family` is set on its own path (`Message::ApplyFont`) and is a
+    // process-wide font other tests draw with, so both loads leave it alone.
+    const SAME_IN_BOTH: &[&str] = &["font_family"];
+
+    // The shipped defaults, as a fresh install loads them.
+    let persisted = PersistedPlayerSettings::default();
+    let mut shipped = LivePlayerSettings::default();
+    dump_general_tab_player_settings(&persisted, &mut shipped);
+    dump_interface_tab_player_settings(&persisted, &mut shipped);
+    dump_playback_tab_player_settings(&persisted, &mut shipped);
+    dump_columns_tab_player_settings(&persisted, &mut shipped);
+
+    let changed = LivePlayerSettings {
+        nav_layout: NavLayout::Side,
+        nav_display_mode: NavDisplayMode::IconsOnly,
+        track_info_display: TrackInfoDisplay::MiniPlayer,
+        slot_row_height: SlotRowHeight::Spacious,
+        horizontal_volume: !shipped.horizontal_volume,
+        autohide_toolbar: !shipped.autohide_toolbar,
+        autohide_toolbar_height: 12,
+        autohide_toolbar_grip: !shipped.autohide_toolbar_grip,
+        autohide_collapsed_appearance: CollapsedAppearance::Hairline,
+        mini_player_show_volume: !shipped.mini_player_show_volume,
+        mini_player_show_modes: !shipped.mini_player_show_modes,
+        mini_player_show_artwork: !shipped.mini_player_show_artwork,
+        seekbar_style: SeekbarStyle::Waveform,
+        mini_player_seekbar_style: SeekbarStyle::Cells,
+        slot_text_links: !shipped.slot_text_links,
+        scrollbar_visibility: ScrollbarVisibility::Hidden,
+        icon_set: IconSet::Lucide,
+        strip_show_title: !shipped.strip_show_title,
+        strip_show_artist: !shipped.strip_show_artist,
+        strip_show_album: !shipped.strip_show_album,
+        strip_show_format_info: !shipped.strip_show_format_info,
+        strip_merged_mode: !shipped.strip_merged_mode,
+        strip_show_labels: !shipped.strip_show_labels,
+        strip_separator: StripSeparator::Dot,
+        strip_click_action: StripClickAction::DoNothing,
+        albums_artwork_overlay: !shipped.albums_artwork_overlay,
+        artists_artwork_overlay: !shipped.artists_artwork_overlay,
+        songs_artwork_overlay: !shipped.songs_artwork_overlay,
+        playlists_artwork_overlay: !shipped.playlists_artwork_overlay,
+        artwork_column_mode: ArtworkColumnMode::Never,
+        artwork_column_stretch_fit: ArtworkStretchFit::Fill,
+        artwork_cover: ArtworkCover::HideEverywhere,
+        theater_controls: TheaterControls::AlwaysHidden,
+        theater_window_fullscreen: !shipped.theater_window_fullscreen,
+        artwork_auto_max_pct: 0.5,
+        artwork_vertical_height_pct: 0.25,
+        ..shipped.clone()
+    };
+
+    // Two loads only expose a forgotten field when the two settings differ
+    // there, so a new field fails here until `changed` sets it.
+    let rows = |live: &LivePlayerSettings| {
+        debug_fields(&format!("{:#?}", InterfaceSettingsData::from_live(live)))
+    };
+    let unchanged: Vec<String> = rows(&shipped)
+        .into_iter()
+        .zip(rows(&changed))
+        .filter(|((field, a), (_, b))| a == b && !SAME_IN_BOTH.contains(&field.as_str()))
+        .map(|((field, _), _)| field)
+        .collect();
+    assert!(
+        unchanged.is_empty(),
+        "`changed` must differ from the shipped settings in every field: {unchanged:?}"
+    );
+
+    // The handler mirrors every process-global theme atomic, so serialize
+    // with the other theme-mutating tests.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    for live in [&changed, &shipped] {
+        let _ = app.handle_player_settings_loaded(live.clone());
+        let built = debug_fields(&format!("{:#?}", app.build_settings_view_data().interface));
+        let stale: Vec<String> = built
+            .into_iter()
+            .zip(rows(live))
+            .filter(|((_, got), (_, want))| got != want)
+            .map(|((field, _), _)| field)
+            .collect();
+        assert!(stale.is_empty(), "not applied on settings load: {stale:?}");
+    }
+}
+
+/// `(field, value)` for each line of a struct's `{:#?}` output.
+fn debug_fields(pretty: &str) -> Vec<(String, String)> {
+    pretty
+        .lines()
+        .filter_map(|line| line.trim().split_once(": "))
+        .map(|(field, value)| (field.to_owned(), value.to_owned()))
+        .collect()
+}

@@ -22,7 +22,7 @@ use nokkvi_data::{
         radio_scrobble::source::CredSource,
         settings_tables::playback::build_playback_tab_settings_items,
     },
-    types::player_settings::{REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN},
+    types::player_settings::{NormalizationLevel, REPLAY_GAIN_DB_MAX, REPLAY_GAIN_DB_MIN},
 };
 
 use super::{
@@ -137,7 +137,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             .with_subtitle("Quiet (headroom) · Normal · Loud (boost)"),
             data.normalization_level.as_ref(),
             "Normal",
-            vec!["Quiet", "Normal", "Loud"],
+            NormalizationLevel::LABELS.to_vec(),
         ));
     }
 

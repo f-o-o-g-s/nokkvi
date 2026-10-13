@@ -67,7 +67,7 @@ impl Default for GeneralSettingsData {
 }
 
 /// Data needed by the Interface tab builder.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InterfaceSettingsData {
     pub nav_layout: Cow<'static, str>,
     pub nav_display_mode: Cow<'static, str>,
@@ -117,6 +117,54 @@ pub struct InterfaceSettingsData {
     pub artwork_auto_max_pct: f64,
     /// Always-Vertical artwork height as a fraction of window height (0.10..=0.80).
     pub artwork_vertical_height_pct: f64,
+}
+
+impl InterfaceSettingsData {
+    /// The rows' values for `live`, read straight off the settings. The app
+    /// builds its own from the theme atomics instead (they are what the UI
+    /// draws with), and those are only as current as the load handler that
+    /// fills them, so tests hold the two equal.
+    pub fn from_live(live: &crate::types::player_settings::LivePlayerSettings) -> Self {
+        Self {
+            nav_layout: live.nav_layout.as_label().into(),
+            nav_display_mode: live.nav_display_mode.as_label().into(),
+            track_info_display: live.track_info_display.as_label().into(),
+            slot_row_height: live.slot_row_height.as_label().into(),
+            horizontal_volume: live.horizontal_volume,
+            autohide_toolbar: live.autohide_toolbar,
+            autohide_toolbar_height: i64::from(live.autohide_toolbar_height),
+            autohide_toolbar_grip: live.autohide_toolbar_grip,
+            autohide_collapsed_appearance: live.autohide_collapsed_appearance.as_label().into(),
+            mini_player_show_volume: live.mini_player_show_volume,
+            mini_player_show_modes: live.mini_player_show_modes,
+            mini_player_show_artwork: live.mini_player_show_artwork,
+            seekbar_style: live.seekbar_style.as_label().into(),
+            mini_player_seekbar_style: live.mini_player_seekbar_style.as_label().into(),
+            slot_text_links: live.slot_text_links,
+            scrollbar_visibility: live.scrollbar_visibility.as_label().into(),
+            icon_set: live.icon_set.as_label().into(),
+            font_family: live.font_family.clone().into(),
+            strip_show_title: live.strip_show_title,
+            strip_show_artist: live.strip_show_artist,
+            strip_show_album: live.strip_show_album,
+            strip_show_format_info: live.strip_show_format_info,
+            strip_merged_mode: live.strip_merged_mode,
+            strip_show_labels: live.strip_show_labels,
+            strip_separator: live.strip_separator.as_label().into(),
+            strip_click_action: live.strip_click_action.as_label().into(),
+            albums_artwork_overlay: live.albums_artwork_overlay,
+            artists_artwork_overlay: live.artists_artwork_overlay,
+            songs_artwork_overlay: live.songs_artwork_overlay,
+            playlists_artwork_overlay: live.playlists_artwork_overlay,
+            artwork_column_mode: live.artwork_column_mode.as_label().into(),
+            artwork_column_stretch_fit: live.artwork_column_stretch_fit.as_label().into(),
+            artwork_cover: live.artwork_cover.as_label().into(),
+            theater_controls: live.theater_controls.as_label().into(),
+            theater_window_fullscreen: live.theater_window_fullscreen,
+            artwork_auto_max_pct: f64::from(live.artwork_auto_max_pct),
+            artwork_vertical_height_pct: f64::from(live.artwork_vertical_height_pct),
+        }
+    }
 }
 
 impl Default for InterfaceSettingsData {
