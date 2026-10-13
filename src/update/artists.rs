@@ -232,7 +232,11 @@ impl Nokkvi {
             .artist_image(&artist_id)
             .and_then(|image| nokkvi_data::types::image_info::artwork_version(image, None));
         // Already on its way at this version (same gate as the Albums helper).
-        if self.artwork.large_artwork_pending.get(&artist_id) == Some(&version) {
+        if self
+            .artwork
+            .large_artwork_pending
+            .holds(&artist_id, &version)
+        {
             return Task::none();
         }
         self.record_large_art_hash(&artist_id, version.as_deref());
@@ -243,7 +247,7 @@ impl Nokkvi {
         let vm = shell.albums().clone();
         self.artwork
             .large_artwork_pending
-            .insert(artist_id.clone(), version.clone());
+            .claim(artist_id.clone(), version.clone());
 
         let id = artist_id;
         Task::perform(

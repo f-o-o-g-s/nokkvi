@@ -377,7 +377,7 @@ fn custom_mini_decision_skips_in_flight_ids() {
         let mut app = playlist_app(true);
         app.artwork
             .playlist_custom_art_pending
-            .insert("p1".to_string());
+            .claim("p1".to_string(), ());
         app
     };
     assert!(
@@ -449,7 +449,7 @@ fn custom_mini_loaded_releases_pending_and_records_version() {
     let mut app = test_app();
     app.artwork
         .playlist_custom_art_pending
-        .insert("p1".to_string());
+        .claim("p1".to_string(), ());
 
     let _ = app.handle_playlist_custom_mini_loaded(
         "p1".into(),
@@ -473,7 +473,7 @@ fn custom_mini_missing_negative_caches_and_releases_pending() {
     let mut app = test_app();
     app.artwork
         .playlist_custom_art_pending
-        .insert("p1".to_string());
+        .claim("p1".to_string(), ());
 
     let _ =
         app.handle_playlist_custom_mini_loaded("p1".into(), Some("v2".into()), MiniArt::Missing);
@@ -494,7 +494,7 @@ fn custom_mini_transient_releases_pending_and_records_nothing() {
     let mut app = test_app();
     app.artwork
         .playlist_custom_art_pending
-        .insert("p1".to_string());
+        .claim("p1".to_string(), ());
 
     let _ =
         app.handle_playlist_custom_mini_loaded("p1".into(), Some("v2".into()), MiniArt::Transient);
@@ -605,6 +605,46 @@ fn playlist_custom_reset_applied_clears_version_records() {
 
     assert!(!app.artwork.playlist_custom_art_versions.contains_key("p1"));
     assert!(!app.artwork.playlist_custom_art_failed.contains_key("p1"));
+}
+
+/// A fetch still in flight when the cover is replaced or reset is for the old
+/// cover, so both completions forget its claims with the caches
+/// (gotchas/artwork.md: a cache cleared for a re-warm drops its claim).
+#[test]
+fn playlist_custom_set_and_reset_forget_in_flight_claims() {
+    let claim_old = |app: &mut crate::Nokkvi| {
+        app.artwork
+            .playlist_custom_art_pending
+            .claim("p1".into(), ());
+        app.artwork
+            .playlist_custom_large_art_pending
+            .claim("p1".into(), "old".into());
+    };
+
+    let mut app = playlist_app(true);
+    claim_old(&mut app);
+    let _ = app.handle_playlist_custom_artwork_reset(
+        "p1".into(),
+        "Road Trip".into(),
+        CustomArtworkOutcome::Applied,
+    );
+    assert!(!app.artwork.playlist_custom_art_pending.contains("p1"));
+    assert!(!app.artwork.playlist_custom_large_art_pending.contains("p1"));
+
+    // Set re-claims for its own refetch; the old large claim is gone either
+    // way (here there is no session, so the large refetch is never built).
+    let mut app = playlist_app(true);
+    claim_old(&mut app);
+    let _ = app.handle_playlist_custom_artwork_set(
+        "p1".into(),
+        "Road Trip".into(),
+        CustomArtworkOutcome::Applied,
+    );
+    assert!(
+        !app.artwork
+            .playlist_custom_large_art_pending
+            .holds("p1", &"old".to_string())
+    );
 }
 
 /// On Navidrome 0.64 a custom cover's version is its image hash: a new

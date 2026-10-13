@@ -170,7 +170,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.artwork
             .playlist_custom_art_pending
-            .insert(playlist_id.clone());
+            .claim(playlist_id.clone(), ());
         self.fetch_playlist_custom_mini_task(playlist_id, cache_buster)
     }
 
@@ -224,7 +224,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.artwork
             .playlist_custom_art_pending
-            .remove(&playlist_id);
+            .release(&playlist_id);
         match art {
             MiniArt::Loaded(h) => {
                 self.artwork.playlist_custom_art.put(playlist_id.clone(), h);
@@ -309,8 +309,7 @@ impl Nokkvi {
         if self
             .artwork
             .playlist_custom_large_art_pending
-            .get(&playlist_id)
-            == Some(&cache_buster)
+            .holds(&playlist_id, &cache_buster)
         {
             return Task::none();
         }
@@ -357,7 +356,7 @@ impl Nokkvi {
         let artwork_size = self.settings.artwork_resolution.to_size();
         self.artwork
             .playlist_custom_large_art_pending
-            .insert(playlist_id.clone(), cache_buster.clone());
+            .claim(playlist_id.clone(), cache_buster.clone());
         Task::perform(
             async move {
                 let bytes = albums_vm
@@ -388,7 +387,7 @@ impl Nokkvi {
         // Release on every outcome so a failed fetch can be retried.
         self.artwork
             .playlist_custom_large_art_pending
-            .remove(&playlist_id);
+            .release(&playlist_id);
         if let Some(h) = handle {
             self.artwork.playlist_custom_large_art.put(playlist_id, h);
         }
@@ -453,6 +452,21 @@ impl Nokkvi {
         )
     }
 
+    /// Drop everything cached about a playlist's custom cover: both handles,
+    /// the warming version, the negative-cache entry, and both in-flight
+    /// claims (a fetch still on its way is for the old cover). The Set and
+    /// Reset completions run it; the radio twin is
+    /// [`Self::clear_radio_station_art_handles`].
+    fn clear_playlist_custom_art(&mut self, playlist_id: &str) {
+        let key = playlist_id.to_string();
+        self.artwork.playlist_custom_art.pop(&key);
+        self.artwork.playlist_custom_large_art.pop(&key);
+        self.artwork.playlist_custom_art_versions.remove(&key);
+        self.artwork.playlist_custom_art_failed.remove(&key);
+        self.artwork.playlist_custom_art_pending.forget(&key);
+        self.artwork.playlist_custom_large_art_pending.forget(&key);
+    }
+
     /// Completion of the playlist "Set Custom Artwork…" upload. On success:
     /// drop any stale cached custom art, optimistically mark the library row
     /// (`uploaded_image = Some(marker)`) so display/menu gating flips without
@@ -477,12 +491,7 @@ impl Nokkvi {
             }
             CustomArtworkOutcome::Applied => {
                 self.toast_success(format!("Custom artwork set for '{playlist_name}'"));
-                self.artwork.playlist_custom_art.pop(&playlist_id);
-                self.artwork.playlist_custom_large_art.pop(&playlist_id);
-                self.artwork
-                    .playlist_custom_art_versions
-                    .remove(&playlist_id);
-                self.artwork.playlist_custom_art_failed.remove(&playlist_id);
+                self.clear_playlist_custom_art(&playlist_id);
                 // ONE fresh timestamp: bumped onto the row's updated_at (so
                 // every LATER refetch — viewport prefetch, post-eviction
                 // large load — derives a fresh `_u=` buster instead of
@@ -535,12 +544,7 @@ impl Nokkvi {
                 self.toast_success(format!(
                     "Artwork reset for '{playlist_name}' — the collage returns"
                 ));
-                self.artwork.playlist_custom_art.pop(&playlist_id);
-                self.artwork.playlist_custom_large_art.pop(&playlist_id);
-                self.artwork
-                    .playlist_custom_art_versions
-                    .remove(&playlist_id);
-                self.artwork.playlist_custom_art_failed.remove(&playlist_id);
+                self.clear_playlist_custom_art(&playlist_id);
                 self.library
                     .playlists
                     .update_by(|p| p.id == playlist_id, |p| p.uploaded_image = None);

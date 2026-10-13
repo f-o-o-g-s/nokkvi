@@ -58,6 +58,72 @@ const PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
 const RADIO_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(512).expect("capacity must be > 0");
 
+/// In-flight artwork fetches for one cache: id -> the version the request
+/// carries (`()` for the thumbnail gates, which hold any fetch of an id).
+///
+/// The artwork paths re-dispatch on every scroll step, re-entry or centering,
+/// and a held arrow key re-centers one row ~25x/s, so without a gate a slow
+/// server stacks one request per pass (gotchas/artwork.md). Every gated path
+/// does the same four things:
+/// - gate: [`Self::holds`] (an exact repeat sends nothing; a changed version
+///   goes out, so the gate never pins a replaced cover) or [`Self::contains`];
+/// - [`Self::claim`] once the fetch task is built, after the `app_service`
+///   check (artwork state resets at logout, not login);
+/// - [`Self::release`] in the loaded handler on every outcome, so a failed
+///   fetch is re-attempted by the next pass;
+/// - [`Self::forget`] wherever the cover's cache is cleared for a re-warm.
+#[derive(Debug, Clone)]
+pub struct InFlight<V> {
+    claims: HashMap<String, V>,
+}
+
+impl<V> Default for InFlight<V> {
+    fn default() -> Self {
+        Self {
+            claims: HashMap::new(),
+        }
+    }
+}
+
+impl<V> InFlight<V> {
+    /// Whether any fetch of `id` is on its way, whatever its version.
+    pub fn contains(&self, id: &str) -> bool {
+        self.claims.contains_key(id)
+    }
+
+    /// Whether a fetch of `id` at exactly `version` is on its way.
+    pub fn holds(&self, id: &str, version: &V) -> bool
+    where
+        V: PartialEq,
+    {
+        self.claims.get(id) == Some(version)
+    }
+
+    /// Record the fetch the caller has just built, replacing any older claim
+    /// for `id`.
+    pub fn claim(&mut self, id: String, version: V) {
+        self.claims.insert(id, version);
+    }
+
+    /// The loaded handler's release, on every outcome.
+    pub fn release(&mut self, id: &str) {
+        self.claims.remove(id);
+    }
+
+    /// Drop the claim where `id`'s cached cover is cleared: the fetch still in
+    /// flight is for the old cover, and the re-warm must go out rather than
+    /// wait on it (a Refresh keeps the same version, so [`Self::holds`] alone
+    /// would hold it back). Its completion still lands and releases.
+    pub fn forget(&mut self, id: &str) {
+        self.claims.remove(id);
+    }
+
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.claims.is_empty()
+    }
+}
+
 /// Per-target collage artwork cache (genre or playlist).
 ///
 /// Each LRU is wrapped in `SnapshottedLru` so the view-layer-borrowable
@@ -153,18 +219,13 @@ pub struct ArtworkState {
     /// write `None` into `album_art_versions`. Unbounded like the version
     /// map; reset on logout via `Default`.
     pub large_artwork_hashes: HashMap<String, String>,
-    /// In-flight large-art fetches: album/artist id (the id space of
-    /// [`Self::large_artwork`]) -> the version the request carries (image
-    /// hash on Navidrome 0.64+, else `updated_at`). Every centering
+    /// In-flight large-art fetches ([`InFlight`]): album/artist id (the id
+    /// space of [`Self::large_artwork`]) -> the version the request carries
+    /// (image hash on Navidrome 0.64+, else `updated_at`). Every centering
     /// re-dispatches the load, and a held arrow key at the end of a list
-    /// re-centers the same row on every repeat, so without this gate a slow
-    /// server stacks one full-size request per repeat. A centering at the
-    /// in-flight version sends nothing; a changed version (a cover replaced
-    /// mid-fetch) goes out, so the gate can't pin the old image. Inserted
-    /// only when the fetch task is built (never without a session, so a
-    /// claim can't outlive a logout into the next session), removed by the
-    /// `LargeLoaded` / `LargeArtistLoaded` handlers on success AND failure.
-    pub large_artwork_pending: HashMap<String, Option<String>>,
+    /// re-centers the same row on every repeat. Released by
+    /// `handle_large_artwork_loaded` (albums and artists).
+    pub large_artwork_pending: InFlight<Option<String>>,
     /// Mini radio-station artwork (`station_id -> Handle`) for the Radios slot
     /// list. Holds either an admin-uploaded station logo (fetched via
     /// `getCoverArt?id=ra-…` when [`RadioStation::logo_cover_art`] is present)
@@ -175,9 +236,9 @@ pub struct ArtworkState {
     /// [`RadioStation::logo_cover_art`]: nokkvi_data::types::radio_station::RadioStation::logo_cover_art
     /// [`RadioArtStore`]: nokkvi_data::services::radio_art_store::RadioArtStore
     pub radio_art: SnapshottedLru<String, image::Handle>,
-    /// Station ids with an in-flight 80px logo fetch. Same contract as
-    /// [`Self::album_art_pending`], released by `handle_radio_art_loaded`.
-    pub radio_art_pending: HashSet<String>,
+    /// Station ids with an in-flight 80px logo fetch ([`InFlight`]),
+    /// released by `handle_radio_art_loaded`.
+    pub radio_art_pending: InFlight<()>,
     /// Large radio-station artwork (`station_id -> Handle`) for the artwork
     /// panel: a resolution-sized station logo (logo stations) or the
     /// remembered/now-playing stream (ICY) image (logo-less stations). A logo
@@ -185,10 +246,9 @@ pub struct ArtworkState {
     /// in-app identity. Falls back to [`Self::radio_art`] then the radio-tower
     /// glyph at the view layer.
     pub radio_large_art: SnapshottedLru<String, image::Handle>,
-    /// In-flight large-logo fetches: station id -> the logo token it
-    /// requests. Same contract as [`Self::large_artwork_pending`], released
-    /// by `RadioLargeLoaded`.
-    pub radio_large_art_pending: HashMap<String, String>,
+    /// In-flight large-logo fetches ([`InFlight`]): station id -> the logo
+    /// token it requests, released by `RadioLargeLoaded`.
+    pub radio_large_art_pending: InFlight<String>,
     /// Per-station dedup of the last ICY `StreamUrl` we fetched now-playing art
     /// from (`station_id -> url`). The playback tick re-parses ICY metadata
     /// every ~100ms, so this gates the external fetch to fire only when the
@@ -215,16 +275,14 @@ pub struct ArtworkState {
     /// [`Self::playlist_custom_art`] at the view layer while loading.
     /// Mirrors [`Self::radio_large_art`]'s shape.
     pub playlist_custom_large_art: SnapshottedLru<String, image::Handle>,
-    /// In-flight large custom-cover fetches: playlist id -> the cache-buster
-    /// version it carries. Same contract as [`Self::large_artwork_pending`],
-    /// released by `PlaylistCustomLargeLoaded`.
-    pub playlist_custom_large_art_pending: HashMap<String, String>,
-    /// Playlist ids with an in-flight custom-cover mini fetch. The viewport
-    /// prefetch re-dispatches on every scroll step; without this gate a cold
-    /// viewport duplicates every still-loading request per step. Inserted
-    /// when a fetch task is built, released by the loaded-handler on success
-    /// AND failure. Mirrors [`Self::album_art_pending`].
-    pub playlist_custom_art_pending: HashSet<String>,
+    /// In-flight large custom-cover fetches ([`InFlight`]): playlist id -> the
+    /// cache-buster version it carries, released by
+    /// `PlaylistCustomLargeLoaded`.
+    pub playlist_custom_large_art_pending: InFlight<String>,
+    /// Playlist ids with an in-flight custom-cover mini fetch ([`InFlight`]):
+    /// the viewport prefetch re-dispatches on every scroll step. Released by
+    /// `handle_playlist_custom_mini_loaded`.
+    pub playlist_custom_art_pending: InFlight<()>,
     /// `playlist_id -> the version that warmed its custom mini` (the image
     /// hash on Navidrome 0.64+, else the `updated_at` cache-buster). A cover
     /// replaced in the web UI changes it, so the version-aware prefetch gate
@@ -276,11 +334,11 @@ impl Default for ArtworkState {
             failed_art: HashMap::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             large_artwork_hashes: HashMap::new(),
-            large_artwork_pending: HashMap::new(),
+            large_artwork_pending: InFlight::default(),
             radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
-            radio_art_pending: HashSet::new(),
+            radio_art_pending: InFlight::default(),
             radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
-            radio_large_art_pending: HashMap::new(),
+            radio_large_art_pending: InFlight::default(),
             radio_icy_captured: HashMap::new(),
             radio_art_hydrated: false,
             genre: CollageArtworkCache::new(),
@@ -289,8 +347,8 @@ impl Default for ArtworkState {
             playlist_custom_large_art: SnapshottedLru::new(
                 PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY,
             ),
-            playlist_custom_art_pending: HashSet::new(),
-            playlist_custom_large_art_pending: HashMap::new(),
+            playlist_custom_art_pending: InFlight::default(),
+            playlist_custom_large_art_pending: InFlight::default(),
             playlist_custom_art_versions: HashMap::new(),
             playlist_custom_art_failed: HashMap::new(),
             loading_large_artwork: None,
@@ -314,5 +372,31 @@ impl std::fmt::Debug for ArtworkState {
             .field("playlist_custom_large_art", &self.playlist_custom_large_art)
             .field("loading_large_artwork", &self.loading_large_artwork)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InFlight;
+
+    #[test]
+    fn in_flight_holds_only_the_claimed_version() {
+        let mut gate = InFlight::<String>::default();
+        gate.claim("a".into(), "v1".into());
+        assert!(gate.holds("a", &"v1".to_string()), "an exact repeat waits");
+        assert!(
+            !gate.holds("a", &"v2".to_string()),
+            "a replaced cover goes out, so the gate never pins the old one"
+        );
+        assert!(gate.contains("a"));
+
+        gate.claim("a".into(), "v2".into());
+        assert!(gate.holds("a", &"v2".to_string()), "the newer claim wins");
+
+        gate.release("a");
+        assert!(!gate.contains("a"));
+        gate.claim("b".into(), "v1".into());
+        gate.forget("b");
+        assert!(gate.is_empty());
     }
 }

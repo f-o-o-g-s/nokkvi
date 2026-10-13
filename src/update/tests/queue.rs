@@ -355,7 +355,7 @@ fn strip_fetch_skips_warm_in_flight_and_upload_free_playlists() {
     app.library.playlists.set_from_vec(vec![uploaded_row()]);
     app.artwork
         .playlist_custom_art_pending
-        .insert("pl-1".to_string());
+        .claim("pl-1".to_string(), ());
     assert!(app.active_playlist_custom_cover_to_fetch().is_none());
 
     // No upload at all (context flag unknown, row says none).
