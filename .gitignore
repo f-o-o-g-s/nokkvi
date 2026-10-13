@@ -33,6 +33,8 @@ reference-*/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+# Live-test skill: drives the owner's own desktop and server, so it stays local
+.claude/skills/live-test/
 
 # Logs and debugging
 *.log
