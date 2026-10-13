@@ -470,9 +470,8 @@ pub struct GaplessTransitionInfo {
     /// `consume_gapless_transition` for the next rebuild of the track.
     pub replay_gain: Option<crate::types::song::ReplayGain>,
     /// The source generation the swap moved to (`bump_for_gapless`). A taker
-    /// drops the info once the generation has moved on since: a source change
-    /// or a planned skip took over, and promoting it would name a track the
-    /// engine is leaving or has left.
+    /// drops the info when it is older than the last source change, whose
+    /// new decoder replaced the one it describes.
     pub generation: u64,
 }
 
@@ -1133,11 +1132,12 @@ enum GaplessSwapOutcome {
     /// `prepared` flag was cleared.
     DecoderMissing,
     /// This decode loop was superseded (a source change, seek, finalize or
-    /// resume) during the awaits before the swap could land: whatever
-    /// superseded it owns the decoder, so nothing was installed, bumped or
-    /// reported. Caught before the take, the track stays in the slot; caught
-    /// after it (while waiting for the decoder), the track is dropped, since
-    /// a stop may already have cleared the slot it came from.
+    /// resume), or a user action moved the source generation (a skip plan),
+    /// during the awaits before the swap could land: whatever did owns the
+    /// decoder, so nothing was installed, bumped or reported. Caught before
+    /// the take, the track stays in the slot; caught after it (while waiting
+    /// for the decoder), the track is dropped, since a stop or the skip
+    /// plan's reset may already have cleared the slot it came from.
     Superseded,
 }
 
@@ -1152,17 +1152,21 @@ enum GaplessSwapOutcome {
 /// holding it, briefly takes the sync `renderer` lock (INNER) for the swap-allow
 /// / crossfade-state read — slot-outer / renderer-inner nesting. On the success
 /// path it drops the slot lock BEFORE locking the primary `decoder`, then bumps
-/// `source_generation` (the SOLE decode-loop bump, AFTER the decoder install and
-/// BEFORE the renderer position reset), resets the renderer, stores the
+/// `source_generation` (the SOLE decode-loop bump, made with the decoder install
+/// under the decoder lock and BEFORE the renderer position reset), resets the
+/// renderer, stores the
 /// transition info stamped with that generation, and fires the completion
 /// callback. The `renderer` lock is a `parking_lot` (sync) mutex and is always
 /// scoped + dropped before any `.await`.
 ///
 /// The swap lands only from the live decode loop (`decode_gen` still at
-/// `my_gen`), checked under the slot lock and again under the decoder lock
-/// right before the install: a loop superseded during the awaits since its
-/// last check would otherwise write into a decoder a newer path owns and move
-/// the live generation.
+/// `my_gen`, checked under the slot lock and again under the decoder lock
+/// right before the install) and only while the source generation is where it
+/// read it under the slot lock (the bump is a compare-and-swap from there,
+/// made with the install under the decoder lock): a loop superseded during
+/// the awaits since its last check would otherwise write into a decoder a
+/// newer path owns, and a bump past a skip plan's generation would close the
+/// plan's window and leave its fire stale.
 #[expect(
     clippy::too_many_arguments,
     reason = "called from the decode-loop task, which holds clones of these engine fields rather than the engine"
@@ -1188,6 +1192,10 @@ async fn try_gapless_swap(
         tracing::debug!("🔀 [DECODE LOOP] Superseded before the gapless swap — standing down");
         return GaplessSwapOutcome::Superseded;
     }
+    // The source generation this swap acts on: the skip-window check below
+    // reads it, and the bump only moves it from here (a user action that
+    // moves it first wins).
+    let seen = source_generation.current();
     if !slot.is_prepared() {
         drop(slot);
         GaplessSwapOutcome::NotPrepared
@@ -1218,7 +1226,7 @@ async fn try_gapless_swap(
         // Stand down; the skip's fire (or its hard fallback) owns the
         // transition. Checked FIRST so the put-back happens before any
         // side effects.
-        if skip_fade_pending.load(Ordering::Acquire) == source_generation.current() {
+        if skip_fade_pending.load(Ordering::Acquire) == seen {
             tracing::debug!(
                 "🔀 [DECODE LOOP] Skip-fade plan pending — standing down (the skip owns the transition)"
             );
@@ -1247,23 +1255,29 @@ async fn try_gapless_swap(
             let next_delivery = next_dec.delivery();
 
             // Swap into primary decoder, unless the loop was superseded while
-            // waiting for it (a seek holds it). The track is dropped there,
-            // not put back: a stop may have cleared the slot meanwhile.
-            {
+            // waiting for it (a seek holds it) or a user action moved the
+            // source generation since `seen` (a skip plan supersedes no
+            // loop). The bump (stale-callback detection; the transition info
+            // carries it) and the install happen together under the decoder
+            // lock. The track is dropped on a stand-down, not put back: a stop
+            // or the skip plan's reset may have cleared the slot meanwhile.
+            let swap_generation = {
                 let mut primary = decoder.lock().await;
-                if decode_gen.current() != my_gen {
+                let bumped = if decode_gen.current() == my_gen {
+                    source_generation.bump_for_gapless(seen)
+                } else {
+                    None
+                };
+                let Some(swap_generation) = bumped else {
                     drop(primary);
                     tracing::debug!(
                         "🔀 [DECODE LOOP] Superseded during the gapless swap — dropping the prepared track"
                     );
                     return GaplessSwapOutcome::Superseded;
-                }
+                };
                 *primary = next_dec;
-            }
-
-            // Increment source generation for stale callback detection; the
-            // transition info carries it so a taker can tell a stale one.
-            let swap_generation = source_generation.bump_for_gapless();
+                swap_generation
+            };
 
             // Reset renderer position for the new track (from its first
             // sample, the next one written: the outgoing's tail still in
@@ -1586,6 +1600,10 @@ pub struct CustomAudioEngine {
     // ---- Gapless transition state ----
     /// Transition info written by the decode loop, consumed by the engine.
     gapless_transition_info: Arc<tokio::sync::Mutex<Option<GaplessTransitionInfo>>>,
+    /// The source generation the last `set_source` moved to. A gapless
+    /// transition stamped below it describes a decoder that source change
+    /// replaced (its info reached the slot after `set_source` retired it).
+    source_change_generation: u64,
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: LiveStringSlot,
@@ -1628,6 +1646,7 @@ impl CustomAudioEngine {
             fade: FadeCoordinator::new(),
             last_transition_was_crossfade: false,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
+            source_change_generation: 0,
             live_icy_metadata,
             live_codec_name: LiveStringSlot::new(),
         }
@@ -1714,7 +1733,7 @@ impl CustomAudioEngine {
         self.delivery = StreamDelivery::Sized;
 
         self.source = source;
-        self.channels.source_generation.bump_for_user_action();
+        self.source_change_generation = self.channels.source_generation.bump_for_user_action();
         trace!(" AudioEngine: source set successfully");
     }
 
@@ -3141,19 +3160,20 @@ impl CustomAudioEngine {
     /// Updates the engine's metadata (source, duration, format) to reflect
     /// the track that the decode loop has already swapped to.
     ///
-    /// Drops the info instead when the source generation moved since the
-    /// swap: a source change or a planned skip got the engine lock before
-    /// the swap's completion did, and promoting the swapped-in track would
-    /// name it over what the engine plays now.
+    /// Drops the info instead when it is older than the last source change:
+    /// the decoder it describes was replaced (`set_source` retires a pending
+    /// info itself; this catches one the decode loop wrote just after). A
+    /// planned skip moves the generation too, but replaces no decoder, so
+    /// the swapped-in track it leaves playing is still promoted.
     pub async fn consume_gapless_transition(&mut self) {
         let info = self.gapless_transition_info.lock().await.take();
         if let Some(info) = info {
-            let generation = self.channels.source_generation.current();
-            if info.generation != generation {
+            if info.generation < self.source_change_generation {
                 debug!(
-                    "🎵 [GAPLESS] Dropping a stale transition to {} (swap generation {}, now {generation})",
+                    "🎵 [GAPLESS] Dropping a stale transition to {} (swap generation {}, source changed at {})",
                     redact_subsonic_url(&info.source),
-                    info.generation
+                    info.generation,
+                    self.source_change_generation
                 );
                 return;
             }
@@ -8704,6 +8724,37 @@ mod tests {
         engine
     }
 
+    /// Run `try_gapless_swap` from the engine's live decode loop on its own
+    /// task, as the loop does, over clones of the fields it shares.
+    fn spawn_swap_from_live_loop(
+        engine: &CustomAudioEngine,
+    ) -> tokio::task::JoinHandle<GaplessSwapOutcome> {
+        let decoder = engine.decoder.clone();
+        let renderer = engine.renderer.clone();
+        let gapless = engine.gapless.clone();
+        let info = engine.gapless_transition_info.clone();
+        let source_generation = engine.channels.source_generation.clone();
+        let callback = engine.completion_callback.clone();
+        let skip_fade_pending = engine.channels.skip_fade_pending.clone();
+        let decode_loop = engine.decode_loop.clone();
+        let my_gen = decode_loop.current();
+        tokio::spawn(async move {
+            try_gapless_swap(
+                &decoder,
+                &renderer,
+                &gapless,
+                &info,
+                &source_generation,
+                &callback,
+                &matching_format(),
+                &skip_fade_pending,
+                &decode_loop,
+                my_gen,
+            )
+            .await
+        })
+    }
+
     /// A station started before the swap's completion task got the engine
     /// lock keeps the engine: the completion must not promote the queue song
     /// the swap took in over it. It did, and the station then read as not
@@ -8750,27 +8801,82 @@ mod tests {
         );
     }
 
-    /// A planned skip moves the source generation without a new source; a
-    /// swap's completion that runs after it finds the info stale and drops
-    /// it (consumed, so no later taker promotes it either). With the
-    /// generation where the swap left it, the completion promotes as before.
+    /// A swap's info that reaches the slot after a source change already ran
+    /// (the loop wrote it after `set_source` retired the slot) describes a
+    /// decoder that change replaced: the taker drops it, consumed, so no
+    /// later taker promotes it either.
     #[tokio::test]
-    async fn a_gapless_transition_older_than_the_generation_is_dropped() {
-        let mut superseded = engine_after_a_gapless_swap().await;
-        superseded.plan_skip_fade().await;
-        superseded.consume_gapless_transition().await;
+    async fn a_transition_older_than_the_last_source_change_is_dropped() {
+        const CLICKED_URL: &str = "http://example.test/clicked";
+        let mut engine = engine_after_a_gapless_swap().await;
+        let late = engine.gapless_transition_info.lock().await.take();
+
+        engine.load_track_with_rg(CLICKED_URL, None, None).await;
+        *engine.gapless_transition_info.lock().await = late;
+        engine.consume_gapless_transition().await;
+
         assert_eq!(
-            superseded.source, OUTGOING_URL,
-            "a transition from before the skip plan was promoted"
+            engine.source, CLICKED_URL,
+            "a transition from before the source change was promoted"
         );
         assert!(
-            superseded.gapless_transition_info.lock().await.is_none(),
+            engine.gapless_transition_info.lock().await.is_none(),
             "the stale transition was left for a later taker"
         );
+    }
 
-        let mut current = engine_after_a_gapless_swap().await;
-        current.consume_gapless_transition().await;
-        assert_eq!(current.source, SWAPPED_URL, "the control must promote");
+    /// A planned skip moves the source generation but replaces no decoder:
+    /// the swapped-in track is what plays until the skip's blend lands, so
+    /// its completion still promotes it (the skip blend's clamps read its
+    /// duration, not the track before it).
+    #[tokio::test]
+    async fn a_skip_plan_keeps_the_transition_of_the_playing_decoder() {
+        let mut engine = engine_after_a_gapless_swap().await;
+        engine.plan_skip_fade().await;
+        engine.consume_gapless_transition().await;
+
+        assert_eq!(engine.source, SWAPPED_URL);
+        assert_eq!(engine.duration, 222_000);
+    }
+
+    /// A user action that moves the source generation while the swap waits
+    /// for the primary decoder (a skip plan: it supersedes no decode loop)
+    /// stands the swap down. Landing it would bump past the plan's
+    /// generation, close the plan's window early and make the skip's own
+    /// fire find its generation stale, so the Next was dropped.
+    #[tokio::test]
+    async fn a_skip_planned_while_a_swap_waits_for_the_decoder_stands_it_down() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+        stage_swap_target(&engine).await;
+
+        let held = engine.decoder.clone().lock_owned().await;
+        let swap = spawn_swap_from_live_loop(&engine);
+        while engine.gapless.lock().await.is_prepared() {
+            tokio::task::yield_now().await;
+        }
+        engine.plan_skip_fade().await;
+        let plan_generation = engine.source_generation();
+        drop(held);
+        let outcome = swap.await.expect("the swap task");
+
+        assert_eq!(outcome, GaplessSwapOutcome::Superseded);
+        assert_eq!(
+            engine.source_generation(),
+            plan_generation,
+            "the swap bumped past the skip plan's generation"
+        );
+        assert!(
+            engine.skip_fade_window_pending(),
+            "the skip plan's window closed early"
+        );
+        assert_eq!(cb_count.load(Ordering::SeqCst), 0, "no completion callback");
+        assert!(engine.gapless_transition_info.lock().await.is_none());
+        assert_eq!(
+            engine.decoder.lock().await.duration(),
+            0,
+            "the primary decoder was replaced"
+        );
     }
 
     /// A decode loop superseded during the awaits before its swap (a seek, a
@@ -8830,34 +8936,8 @@ mod tests {
         stage_swap_target(&engine).await;
         let gen_before = engine.source_generation();
 
-        let held = engine.decoder.clone();
-        let held = held.lock_owned().await;
-        let swap = {
-            let decoder = engine.decoder.clone();
-            let renderer = engine.renderer.clone();
-            let gapless = engine.gapless.clone();
-            let info = engine.gapless_transition_info.clone();
-            let source_generation = engine.channels.source_generation.clone();
-            let callback = engine.completion_callback.clone();
-            let skip_fade_pending = engine.channels.skip_fade_pending.clone();
-            let decode_loop = engine.decode_loop.clone();
-            let my_gen = decode_loop.current();
-            tokio::spawn(async move {
-                try_gapless_swap(
-                    &decoder,
-                    &renderer,
-                    &gapless,
-                    &info,
-                    &source_generation,
-                    &callback,
-                    &matching_format(),
-                    &skip_fade_pending,
-                    &decode_loop,
-                    my_gen,
-                )
-                .await
-            })
-        };
+        let held = engine.decoder.clone().lock_owned().await;
+        let swap = spawn_swap_from_live_loop(&engine);
         // Wait for the swap to take the track and block on the decoder.
         while engine.gapless.lock().await.is_prepared() {
             tokio::task::yield_now().await;

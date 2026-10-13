@@ -66,9 +66,16 @@ impl SourceGeneration {
         self.counter.fetch_add(1, Ordering::Release) + 1
     }
 
-    /// Decode-loop gapless inline-swap — source URL changed.
-    pub fn bump_for_gapless(&self) -> u64 {
-        self.counter.fetch_add(1, Ordering::Release) + 1
+    /// Decode-loop gapless inline-swap — source URL changed. Bumps only from
+    /// `seen`, the generation the swap read before it took the prepared
+    /// track, and returns the new one; `None` when a user action moved the
+    /// generation meanwhile (a skip plan, a source change), and the swap
+    /// stands down instead of bumping past it.
+    pub fn bump_for_gapless(&self, seen: u64) -> Option<u64> {
+        self.counter
+            .compare_exchange(seen, seen + 1, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| seen + 1)
     }
 
     /// Crossfade-finalize path: intentional no-op so the existing
@@ -101,7 +108,7 @@ mod tests {
         // Seed a distinctive, non-default generation so the assertion is a
         // relative delta rather than a "0 -> 1" tautology.
         src_gen.bump_for_user_action();
-        src_gen.bump_for_gapless();
+        let _ = src_gen.bump_for_gapless(src_gen.current());
         let before = src_gen.current();
 
         let returned = src_gen.bump_for_user_action();
@@ -124,12 +131,12 @@ mod tests {
     fn bump_for_gapless_advances_current_by_one() {
         let src_gen = SourceGeneration::new();
         // Seed a distinctive, non-default generation.
-        src_gen.bump_for_gapless();
+        let _ = src_gen.bump_for_gapless(src_gen.current());
         src_gen.bump_for_user_action();
-        src_gen.bump_for_gapless();
+        let _ = src_gen.bump_for_gapless(src_gen.current());
         let before = src_gen.current();
 
-        let returned = src_gen.bump_for_gapless();
+        let returned = src_gen.bump_for_gapless(before);
 
         assert_eq!(
             src_gen.current(),
@@ -138,8 +145,25 @@ mod tests {
         );
         assert_eq!(
             returned,
-            before + 1,
+            Some(before + 1),
             "bump_for_gapless must return the new generation"
+        );
+    }
+
+    /// A user action that moved the generation since the swap read it wins:
+    /// the gapless bump refuses and leaves the generation where that action
+    /// put it.
+    #[test]
+    fn bump_for_gapless_refuses_a_generation_that_moved() {
+        let src_gen = SourceGeneration::new();
+        let seen = src_gen.current();
+        let user = src_gen.bump_for_user_action();
+
+        assert_eq!(src_gen.bump_for_gapless(seen), None);
+        assert_eq!(
+            src_gen.current(),
+            user,
+            "the refused bump moved the counter"
         );
     }
 
@@ -152,7 +176,7 @@ mod tests {
         // Seed a distinctive, non-default generation so "unchanged" is a real
         // observation, not the initial 0.
         src_gen.bump_for_user_action();
-        src_gen.bump_for_gapless();
+        let _ = src_gen.bump_for_gapless(src_gen.current());
         src_gen.bump_for_user_action();
         let before = src_gen.current();
 
@@ -182,12 +206,12 @@ mod tests {
             "accept_internal_swap must not move the shared counter for any clone"
         );
 
-        let returned = clone.bump_for_gapless();
+        let returned = clone.bump_for_gapless(before);
         assert_eq!(
             src_gen.current(),
             before + 1,
             "a bump on one clone is visible through another"
         );
-        assert_eq!(returned, before + 1);
+        assert_eq!(returned, Some(before + 1));
     }
 }
