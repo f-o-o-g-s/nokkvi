@@ -80,7 +80,7 @@ impl Nokkvi {
     /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
     /// enter-Queue, enter-theater, index-ready, extensions-probe-landed.
     pub(crate) fn lyrics_kick_if_unresolved(&mut self) -> Task<Message> {
-        if self.settings.lyrics_enabled
+        if self.settings.lyrics_mode.is_active()
             && self.lyrics_surface_visible()
             && self.active_playback.is_queue()
             && let Some(current) = self.scrobble.current_song_id.clone()
@@ -92,14 +92,14 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Drive the lyrics surface after `settings.lyrics_enabled` flipped, for
+    /// Drive the lyrics surface after `settings.lyrics_mode` changed, for
     /// every writer: the player-bar toggle, the Settings row and a config.toml
-    /// reload (both through `handle_player_settings_loaded`). On resolves the
-    /// current track at once; off clears the sheet and its clock, because with
-    /// lyrics off a song change clears nothing, so the old sheet would come
-    /// back over the next song.
-    pub(crate) fn lyrics_enabled_changed(&mut self) -> Task<Message> {
-        if self.settings.lyrics_enabled {
+    /// reload (both through `handle_player_settings_loaded`). A mode that looks
+    /// lyrics up resolves the current track at once; Off clears the sheet and
+    /// its clock, because with lyrics off a song change clears nothing, so the
+    /// old sheet would come back over the next song.
+    pub(crate) fn lyrics_mode_changed(&mut self) -> Task<Message> {
+        if self.settings.lyrics_mode.is_active() {
             return self.lyrics_kick_if_unresolved();
         }
         self.lyrics.clear();
@@ -185,7 +185,7 @@ impl Nokkvi {
     /// (`peek_next_song` → `transition`) is off-limits to side channels; the
     /// debounced cold path covers those transitions instead.
     pub(crate) fn lyrics_prefetch_next_task(&self) -> Task<Message> {
-        if !self.settings.lyrics_enabled
+        if !self.settings.lyrics_mode.is_active()
             || !self.lyrics_surface_visible()
             || self.modes.random
             || self.lyrics.pending_next.is_some()
@@ -268,7 +268,7 @@ impl Nokkvi {
     pub(crate) fn handle_lyrics_loader(&mut self, msg: LyricsLoaderMessage) -> Task<Message> {
         match msg {
             LyricsLoaderMessage::DebounceElapsed { song_id, epoch } => {
-                if self.settings.lyrics_enabled
+                if self.settings.lyrics_mode.is_active()
                     && self.lyrics.load_epoch.accepts(epoch)
                     && self.scrobble.current_song_id.as_deref() == Some(song_id.as_str())
                 {
@@ -367,7 +367,7 @@ impl Nokkvi {
     pub(crate) fn lyrics_blur_task(&mut self) -> Option<Task<Message>> {
         let level = self.settings.lyrics_backdrop_blur;
         let sigma = level.sigma()?;
-        if !self.settings.lyrics_enabled || !self.lyrics_surface_visible() {
+        if !self.settings.lyrics_mode.is_active() || !self.lyrics_surface_visible() {
             return None;
         }
         let album_id = self.current_queue_song_album_id()?.to_string();

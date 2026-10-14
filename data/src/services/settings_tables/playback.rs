@@ -25,7 +25,7 @@ use crate::{
             BitPerfectMode, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
             CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS,
             CROSSFADE_OFFSET_MIN_SECS, CrossfadeCurve, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
-            FadeOnSkip, LyricsBackdropBlur, LyricsWordHighlight, NormalizationLevel,
+            FadeOnSkip, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NormalizationLevel,
             RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN, RatingReminderTrigger,
             RoundedMode, SCROBBLE_THRESHOLD_PCT_MAX, SCROBBLE_THRESHOLD_PCT_MIN,
             TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN, VolumeNormalizationMode,
@@ -66,13 +66,13 @@ define_settings! {
                 read_field: |d| d.crossfade_enabled,
             },
         },
-        LyricsEnabled {
-            key: "general.lyrics_enabled",
-            value_type: Bool,
-            setter: |mgr, v: bool| mgr.set_lyrics_enabled(v),
-            toml_apply: |ts, p| p.lyrics_enabled = ts.lyrics_enabled,
-            read: |src, out| out.lyrics_enabled = src.lyrics_enabled,
-            write: |ps, ts| ts.lyrics_enabled = ps.lyrics_enabled,
+        LyricsModeKey {
+            key: "general.lyrics_mode",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_lyrics_mode(LyricsMode::from_label(&v)),
+            toml_apply: |ts, p| p.lyrics_mode = ts.lyrics_mode,
+            read: |src, out| out.lyrics_mode = src.lyrics_mode,
+            write: |ps, ts| ts.lyrics_mode = ps.lyrics_mode,
             ui_meta: {
                 label: "Lyrics",
                 category: "Playback",
@@ -81,8 +81,9 @@ define_settings! {
                      by line; plain lyrics drift with playback and scroll with the mouse wheel. \
                      Off leaves the cover (and any over-cover visualizer) untouched.",
                 ),
-                default: false,
-                read_field: |d| d.lyrics_enabled,
+                default: "Off",
+                options: LyricsMode::LABELS,
+                read_field: |d| d.lyrics_mode.as_ref(),
             },
         },
         LyricsFetchOnline {
@@ -952,7 +953,7 @@ mod tests {
     fn default_playback_data() -> PlaybackSettingsData {
         PlaybackSettingsData {
             crossfade_enabled: false,
-            lyrics_enabled: false,
+            lyrics_mode: "Off".into(),
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: "Off".into(),
             lyrics_word_highlight: "Sweep".into(),
@@ -1865,7 +1866,7 @@ mod tests {
 
         let data = PlaybackSettingsData {
             crossfade_enabled: live.crossfade_enabled,
-            lyrics_enabled: live.lyrics_enabled,
+            lyrics_mode: live.lyrics_mode.as_label().into(),
             lyrics_fetch_online: live.lyrics_fetch_online,
             lyrics_backdrop_blur: live.lyrics_backdrop_blur.as_label().into(),
             lyrics_word_highlight: live.lyrics_word_highlight.as_label().into(),

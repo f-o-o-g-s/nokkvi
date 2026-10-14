@@ -7,8 +7,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            LibraryPageSize, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
             SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator, TheaterControls,
             TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
             deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
@@ -126,9 +126,11 @@ crate::player_settings_schema! {
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     same crossfade_enabled: bool = true,
-    /// Synced-lyrics overlay on the Queue now-playing cover (default: off).
-    #[serde(default)]
-    same lyrics_enabled: bool = false,
+    /// Lyrics over the Queue cover and in Theater Mode (default: Off). On-disk
+    /// key is `lyrics_enabled`, the bool this replaced: `LyricsMode`'s serde
+    /// keeps Off and On as `false` / `true`.
+    #[serde(default, rename = "lyrics_enabled")]
+    same lyrics_mode: LyricsMode = LyricsMode::Off,
     /// Whether the lyrics resolve chain may fetch missing lyrics from LRCLIB
     /// over the internet (default: on — the local store + the server channel
     /// alone cover only what they already hold).

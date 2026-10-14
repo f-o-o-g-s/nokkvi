@@ -11,8 +11,8 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            EnterBehavior, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
+            EnterBehavior, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
             StripClickAction, TheaterControls, TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
@@ -471,8 +471,8 @@ impl SettingsManager {
         self.save()
     }
 
-    pub fn set_lyrics_enabled(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.lyrics_enabled = enabled;
+    pub fn set_lyrics_mode(&mut self, mode: LyricsMode) -> Result<()> {
+        self.settings.player.lyrics_mode = mode;
         self.save()
     }
 
@@ -1543,7 +1543,7 @@ mod sentinel_roundtrip_tests {
 
             // Playback / crossfade
             crossfade_enabled: true,                          // default false
-            lyrics_enabled: true,                             // default false
+            lyrics_mode: LyricsMode::On,                      // default Off
             lyrics_fetch_online: false,                       // default true
             lyrics_backdrop_blur: LyricsBackdropBlur::Light,  // default Off
             lyrics_word_highlight: LyricsWordHighlight::Word, // default Sweep
@@ -2761,6 +2761,7 @@ name = "sentinel preset"
             "rounded_mode": true,
             "bit_perfect": true,
             "verbose_config": true,
+            "lyrics_enabled": true,
             "queue_show_genre": true
         }"#;
         let parsed: PersistedPlayerSettings =
@@ -2777,6 +2778,8 @@ name = "sentinel preset"
             parsed.verbose_config,
             crate::types::player_settings::VerboseConfig::On
         );
+        // The Lyrics bool reads as the mode it meant.
+        assert_eq!(parsed.lyrics_mode, LyricsMode::On);
         // Flattened view-column key lands on the flattened struct.
         assert!(parsed.view_columns.queue_show_genre);
         // Missing fields fill from Default.
@@ -2785,6 +2788,29 @@ name = "sentinel preset"
         assert_eq!(parsed.font_family, d.font_family);
         assert_eq!(parsed.eq_gains, d.eq_gains);
         assert!(!parsed.light_mode);
+    }
+
+    /// A config.toml written while Lyrics was a bool loads as the mode it
+    /// meant, and this version writes Off and On back as that same bool, so
+    /// the file reads the same in an older nokkvi.
+    #[test]
+    fn config_toml_lyrics_bool_loads_and_writes_as_before() {
+        for (line, mode) in [
+            ("lyrics_enabled = true", LyricsMode::On),
+            ("lyrics_enabled = false", LyricsMode::Off),
+        ] {
+            let ts: TomlSettings = toml::from_str(line).expect("parse [settings]");
+            assert_eq!(ts.lyrics_mode, mode, "{line}");
+            let mut internal = PersistedPlayerSettings::default();
+            apply_toml_settings_to_internal(&ts, &mut internal);
+            assert_eq!(internal.lyrics_mode, mode, "{line} applied");
+
+            let written = toml::to_string(&ts).expect("serialize [settings]");
+            assert!(
+                written.lines().any(|l| l == line),
+                "{mode:?} writes `{line}`"
+            );
+        }
     }
 
     /// M4: both twins emit from the ONE `player_settings_schema!` table with

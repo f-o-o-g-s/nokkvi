@@ -31,7 +31,7 @@ pub(crate) fn handle_frame_tick(app: &mut Nokkvi, now: Instant) -> Task<Message>
 /// for a lagging tick (see `lyric_clock_ms`). Gated like the center: only a
 /// matched sheet has a clock worth running.
 fn step_lyrics_clock(app: &mut Nokkvi, now: Instant) {
-    if !app.settings.lyrics_enabled || app.lyrics.matched_song_id.is_none() {
+    if !app.settings.lyrics_mode.is_active() || app.lyrics.matched_song_id.is_none() {
         return;
     }
     app.lyrics.clock_ms = crate::state::lyric_clock_ms(
@@ -67,7 +67,7 @@ fn step_now_playing_glow(app: &Nokkvi, now: Instant) {
 /// line count and the user's wheel offset — so it holds still while paused and
 /// jumps whole on a seek or a wheel notch.
 fn publish_lyrics_center(app: &Nokkvi, now: Instant) {
-    if !app.settings.lyrics_enabled || app.lyrics.matched_song_id.is_none() {
+    if !app.settings.lyrics_mode.is_active() || app.lyrics.matched_song_id.is_none() {
         return;
     }
     let pos = if app.lyrics.doc.synced {

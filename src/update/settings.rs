@@ -120,7 +120,7 @@ impl Nokkvi {
         let playback = PlaybackSettingsData {
             crossfade_enabled: self.settings.crossfade_enabled,
             // Flipped synchronously by the player-bar toggle.
-            lyrics_enabled: self.settings.lyrics_enabled,
+            lyrics_mode: self.settings.lyrics_mode.as_label().into(),
             lyrics_fetch_online: self.settings.lyrics_fetch_online,
             lyrics_backdrop_blur: self.settings.lyrics_backdrop_blur.as_label().into(),
             lyrics_word_highlight: self.settings.lyrics_word_highlight.as_label().into(),

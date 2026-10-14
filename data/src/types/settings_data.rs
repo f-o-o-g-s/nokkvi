@@ -215,7 +215,8 @@ impl Default for InterfaceSettingsData {
 #[derive(Debug, Clone)]
 pub struct PlaybackSettingsData {
     pub crossfade_enabled: bool,
-    pub lyrics_enabled: bool,
+    /// Lyrics mode label ("Off" / "On").
+    pub lyrics_mode: Cow<'static, str>,
     pub lyrics_fetch_online: bool,
     /// Cover-blur label ("Off" / "Light" / "Medium" / "Heavy").
     pub lyrics_backdrop_blur: Cow<'static, str>,
@@ -303,7 +304,7 @@ impl Default for PlaybackSettingsData {
     fn default() -> Self {
         Self {
             crossfade_enabled: false,
-            lyrics_enabled: false,
+            lyrics_mode: Cow::Borrowed("test-default"),
             lyrics_fetch_online: false,
             lyrics_backdrop_blur: Cow::Borrowed("test-default"),
             lyrics_word_highlight: Cow::Borrowed("test-default"),

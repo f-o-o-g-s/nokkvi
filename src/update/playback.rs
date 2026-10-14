@@ -858,7 +858,7 @@ impl Nokkvi {
                 // showing (no off-surface network) — schedule the debounced
                 // resolve. A skip storm re-clears per skip, so only the track
                 // still current when a window elapses actually dispatches.
-                if self.settings.lyrics_enabled {
+                if self.settings.lyrics_mode.is_active() {
                     // Crossfade-coupled dissolve: while the audio blends the
                     // outgoing track into the next, the old sheet fades out in
                     // place over the same duration as the new one resolves in.
@@ -907,7 +907,7 @@ impl Nokkvi {
                 tasks.push(task);
             }
 
-            if self.settings.lyrics_enabled
+            if self.settings.lyrics_mode.is_active()
                 && self.lyrics.matched_song_id == song_id
                 && !self.lyrics.doc.lines.is_empty()
             {
@@ -2478,17 +2478,17 @@ impl Nokkvi {
         // `LivePlayerSettings`. Local `settings` binding remains available
         // for the subsequent column-visibility / theme-atomic / engine-push
         // steps that read individual fields.
-        let lyrics_were_enabled = self.settings.lyrics_enabled;
+        let previous_lyrics_mode = self.settings.lyrics_mode;
         self.settings = settings.clone();
         // Lyrics switched from the Settings row or config.toml take the
         // player-bar toggle's edges (clear on off, resolve on on). The first
         // load after login only arms them: the restored track's lyrics
         // resolve when the store index and the extensions probe land, and an
         // earlier resolve could settle on a lower-ranked channel.
-        let lyrics_task = if lyrics_were_enabled != self.settings.lyrics_enabled
-            && (self.start_view_applied || !self.settings.lyrics_enabled)
+        let lyrics_task = if previous_lyrics_mode != self.settings.lyrics_mode
+            && (self.start_view_applied || !self.settings.lyrics_mode.is_active())
         {
-            self.lyrics_enabled_changed()
+            self.lyrics_mode_changed()
         } else {
             Task::none()
         };

@@ -445,24 +445,23 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 shown_inline: true,
             }
         }
-        ModeId::Lyrics => ModeDescriptor {
-            face: ModeFace::Icon("assets/icons/captions.svg"),
-            tooltip: if data.lyrics_enabled {
-                "Lyrics: On"
-            } else {
-                "Lyrics: Off"
-            },
-            kebab_label: if data.lyrics_enabled {
-                "Lyrics: On"
-            } else {
-                "Lyrics: Off"
-            },
-            message: PlayerBarMessage::ToggleLyrics,
-            active: data.lyrics_enabled,
-            // Lyrics follow the queue's now-playing track.
-            enabled: queue_modes_enabled,
-            shown_inline: true,
-        },
+        ModeId::Lyrics => {
+            use nokkvi_data::types::player_settings::LyricsMode;
+            let (label, active) = match data.lyrics_mode {
+                LyricsMode::Off => ("Lyrics: Off", false),
+                LyricsMode::On => ("Lyrics: On", true),
+            };
+            ModeDescriptor {
+                face: ModeFace::Icon("assets/icons/captions.svg"),
+                tooltip: label,
+                kebab_label: label,
+                message: PlayerBarMessage::ToggleLyrics,
+                active,
+                // Lyrics follow the queue's now-playing track.
+                enabled: queue_modes_enabled,
+                shown_inline: true,
+            }
+        }
         ModeId::Visualizer => ModeDescriptor {
             face: ModeFace::Icon(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
@@ -756,9 +755,9 @@ pub(crate) struct PlayerBarViewData {
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
-    /// Synced-lyrics overlay toggle (`general.lyrics_enabled`). Drives the
-    /// Lyrics mode button's active state.
-    pub lyrics_enabled: bool,
+    /// The Lyrics setting (`general.lyrics_mode`). Drives the Lyrics mode
+    /// button's label and active state.
+    pub lyrics_mode: nokkvi_data::types::player_settings::LyricsMode,
     /// Bit-perfect output mode (the setting: Off / Strict / Relaxed). Drives the
     /// Bit-Perfect mode toggle's icon + active state. Distinct from
     /// `bit_perfect_status` (the honest device-rate badge).
@@ -2562,7 +2561,7 @@ mod mode_descriptor_tests {
             sound_effects_enabled: false,
             sfx_volume: 1.0,
             crossfade_enabled: false,
-            lyrics_enabled: false,
+            lyrics_mode: nokkvi_data::types::player_settings::LyricsMode::Off,
             bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode::Off,
             visualization_mode: VisualizationMode::Off,
             window_width: 1200.0,

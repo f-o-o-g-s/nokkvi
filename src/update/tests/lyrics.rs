@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use nokkvi_data::types::lyrics::{LrcDocument, LrcLine, LyricsIndex};
+use nokkvi_data::types::{
+    lyrics::{LrcDocument, LrcLine, LyricsIndex},
+    player_settings::LyricsMode,
+};
 
 use crate::{
     app_message::{LyricsLoaderMessage, PlaybackStateUpdate},
@@ -76,7 +79,7 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
 
 /// Seed a resolved doc for `song_id` as the currently-matched track.
 fn seed_matched(app: &mut crate::Nokkvi, song_id: &str, doc: LrcDocument) {
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.lyrics.doc = doc;
     app.lyrics.matched_song_id = Some(song_id.to_string());
     app.scrobble.current_song_id = Some(song_id.to_string());
@@ -144,7 +147,7 @@ fn song_change_promotes_pending_next() {
 #[test]
 fn loaded_applies_for_current() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.lyrics.position_ms = 6_000;
 
@@ -162,7 +165,7 @@ fn loaded_applies_for_current() {
 #[test]
 fn stale_load_rejected_wrong_song() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_2".to_string());
 
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
@@ -177,7 +180,7 @@ fn stale_load_rejected_wrong_song() {
 #[test]
 fn stale_load_rejected_wrong_epoch() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
 
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
@@ -192,7 +195,7 @@ fn stale_load_rejected_wrong_epoch() {
 #[test]
 fn plain_doc_is_kept_with_no_active_line() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.lyrics.position_ms = 50_000;
 
@@ -212,7 +215,7 @@ fn plain_doc_is_kept_with_no_active_line() {
 #[test]
 fn empty_doc_is_still_the_no_match() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
 
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
@@ -249,7 +252,7 @@ fn a_plain_sheet_never_gains_an_active_line_on_a_tick() {
 #[test]
 fn prefetch_parks_any_non_current_sheet() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
 
     // A prefetch for the CURRENT track is useless — dropped.
@@ -331,7 +334,7 @@ fn over_cover_viz_coexists_with_lyrics() {
 #[test]
 fn dispatch_bumps_epoch_so_concurrent_resolves_cant_co_win() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     let before = app.lyrics.load_epoch.current();
 
@@ -361,7 +364,7 @@ fn dispatch_bumps_epoch_so_concurrent_resolves_cant_co_win() {
 #[test]
 fn index_ready_redrives_a_pre_index_no_match() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     // A no-match landed before the index existed: matched == current, doc empty.
     app.lyrics.matched_song_id = Some("song_1".to_string());
@@ -379,7 +382,7 @@ fn index_ready_redrives_a_pre_index_no_match() {
 
     // With a rendered doc already present, the index landing does NOT re-drive.
     let mut app2 = test_app();
-    app2.settings.lyrics_enabled = true;
+    app2.settings.lyrics_mode = LyricsMode::On;
     app2.scrobble.current_song_id = Some("song_1".to_string());
     app2.lyrics.matched_song_id = Some("song_1".to_string());
     app2.lyrics.doc = timed_doc(&[1_000]);
@@ -412,7 +415,7 @@ fn library_change_redrives_an_unresolved_track() {
     // look, so lyrics embedded by the rescan appear without a restart.
     let mut app = test_app();
     app.screen = crate::Screen::Home;
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.current_view = crate::View::Queue;
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.lyrics.matched_song_id = Some("song_1".to_string());
@@ -432,7 +435,7 @@ fn library_change_redrives_an_unresolved_track() {
     // point and every rating keypress for the track being watched.
     let mut annotated = test_app();
     annotated.screen = crate::Screen::Home;
-    annotated.settings.lyrics_enabled = true;
+    annotated.settings.lyrics_mode = LyricsMode::On;
     annotated.current_view = crate::View::Queue;
     annotated.scrobble.current_song_id = Some("song_1".to_string());
     annotated.lyrics.matched_song_id = Some("song_1".to_string());
@@ -452,7 +455,7 @@ fn library_change_redrives_an_unresolved_track() {
     // A sheet already showing is left alone — no flicker, no refetch.
     let mut app2 = test_app();
     app2.screen = crate::Screen::Home;
-    app2.settings.lyrics_enabled = true;
+    app2.settings.lyrics_mode = LyricsMode::On;
     app2.current_view = crate::View::Queue;
     app2.scrobble.current_song_id = Some("song_1".to_string());
     app2.lyrics.matched_song_id = Some("song_1".to_string());
@@ -470,7 +473,7 @@ fn library_change_redrives_an_unresolved_track() {
 fn extensions_probe_landing_redrives_an_unresolved_track() {
     use crate::app_message::Message;
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     // A no-match landed while the probe was pending (server channel skipped;
     // the incomplete miss was deliberately not cached backend-side).
@@ -491,7 +494,7 @@ fn extensions_probe_landing_redrives_an_unresolved_track() {
 
     // A FAILED probe (None) stores nothing and re-drives nothing.
     let mut app2 = test_app();
-    app2.settings.lyrics_enabled = true;
+    app2.settings.lyrics_mode = LyricsMode::On;
     app2.scrobble.current_song_id = Some("song_1".to_string());
     let before2 = app2.lyrics.load_epoch.current();
     let _ = app2.update(Message::OpenSubsonicExtensionsFetched(None));
@@ -529,7 +532,7 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     // scrim must not paint over browsing artwork. This holds even with a
     // current_song_id, which login seeds from the restored queue and a
     // CLI/MPRIS stop retains (the queue cursor survives stop()).
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     assert!(
         app.queue_lyrics_panel_data().is_none(),
         "no loaded track → no lyrics layer"
@@ -630,13 +633,13 @@ fn paused_cover_stays_on_the_playing_track_under_the_lyrics_layer() {
         "paused under the lyrics layer keeps the playing track's cover"
     );
 
-    app.settings.lyrics_enabled = false;
+    app.settings.lyrics_mode = LyricsMode::Off;
     assert!(
         !locked(&app),
         "paused without lyrics follows the centered row"
     );
 
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.playback.playing = false;
     app.playback.paused = false;
     assert!(!locked(&app), "stopped follows the centered row");
@@ -648,17 +651,18 @@ fn toggle_lyrics_flips_live_mirror() {
     // inert in test_app (app_service is None), so asserting the persisted
     // setting here would be unreachable by design.
     let mut app = test_app();
-    assert!(!app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
 
     let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
-    assert!(app.settings.lyrics_enabled);
-    assert!(
-        app.settings.lyrics_enabled,
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::On);
+    assert_eq!(
+        app.settings.lyrics_mode,
+        LyricsMode::On,
         "live settings union mirrors the flip"
     );
 
     let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
-    assert!(!app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
 }
 
 #[test]
@@ -669,7 +673,7 @@ fn toggle_lyrics_off_clears_doc() {
 
     // enabled=true (from seed) → toggling turns lyrics OFF and clears.
     let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
-    assert!(!app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
     assert!(app.lyrics.doc.lines.is_empty());
     assert_eq!(app.lyrics.matched_song_id, None);
 }
@@ -677,9 +681,9 @@ fn toggle_lyrics_off_clears_doc() {
 /// Lyrics switched by a settings load (the Settings view's row writes
 /// through `handle_player_settings_loaded`, and so does a config.toml hot
 /// reload): the same edges as the player-bar toggle.
-fn load_lyrics_setting(app: &mut crate::Nokkvi, enabled: bool) {
+fn load_lyrics_setting(app: &mut crate::Nokkvi, mode: LyricsMode) {
     let mut settings = app.settings.clone();
-    settings.lyrics_enabled = enabled;
+    settings.lyrics_mode = mode;
     let _ = app.handle_player_settings_loaded(settings);
 }
 
@@ -692,9 +696,9 @@ fn lyrics_off_from_a_settings_load_clears_the_sheet() {
     let _ = app.handle_playback_state_updated(update_for("song_1", 1_500));
     assert!(app.lyrics.clock_ms > 0, "the sheet's clock runs");
 
-    load_lyrics_setting(&mut app, false);
+    load_lyrics_setting(&mut app, LyricsMode::Off);
 
-    assert!(!app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
     assert!(app.lyrics.doc.lines.is_empty(), "the sheet is cleared");
     assert_eq!(app.lyrics.matched_song_id, None);
     assert_eq!(app.lyrics.clock_ms, 0, "and its clock");
@@ -710,11 +714,11 @@ fn lyrics_back_on_after_a_song_change_shows_no_stale_sheet() {
     seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
     let _ = app.handle_playback_state_updated(update_for("song_1", 1_500));
 
-    load_lyrics_setting(&mut app, false);
+    load_lyrics_setting(&mut app, LyricsMode::Off);
     let _ = app.handle_playback_state_updated(update_for("song_2", 500));
-    load_lyrics_setting(&mut app, true);
+    load_lyrics_setting(&mut app, LyricsMode::On);
 
-    assert!(app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::On);
     assert!(app.lyrics.doc.lines.is_empty(), "no stale sheet");
     assert_ne!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
 }
@@ -727,7 +731,7 @@ fn a_settings_load_that_keeps_lyrics_on_keeps_the_sheet() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
 
-    load_lyrics_setting(&mut app, true);
+    load_lyrics_setting(&mut app, LyricsMode::On);
 
     assert_eq!(app.lyrics.doc.lines.len(), 2);
     assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
@@ -1087,7 +1091,7 @@ fn a_sheet_resolved_mid_track_renders_in_place_on_its_first_frame() {
     // a seed the plain sheet draws at line 0 for a few frames, then jumps.
     let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.playback.position = 100;
     app.playback.duration = 200;
@@ -1121,7 +1125,7 @@ fn toggling_lyrics_off_drops_a_dissolve_in_flight() {
     // Otherwise toggling back on inside the crossfade window re-renders the
     // PREVIOUS track's sheet fading out over the current one.
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.lyrics.outgoing = Some(crate::state::OutgoingLyrics {
         doc: timed_doc(&[1_000]),
         synced: true,
@@ -1131,7 +1135,7 @@ fn toggling_lyrics_off_drops_a_dissolve_in_flight() {
     });
 
     let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
-    assert!(!app.settings.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
     assert!(
         app.lyrics.outgoing.is_none(),
         "switching lyrics off takes the dissolve with it"
@@ -1194,7 +1198,7 @@ fn no_dissolve_when_crossfade_off() {
 #[test]
 fn finished_dissolve_expires_on_tick() {
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.lyrics.outgoing = Some(crate::state::OutgoingLyrics {
         doc: timed_doc(&[1_000]),
         synced: true,
@@ -1239,7 +1243,7 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
     // Playing track s1 resolves to album_s1 (make_queue_song derives it).
     app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
     app.scrobble.current_song_id = Some("s1".to_string());
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
     // The sharp source lives in the large LRU; the cache references ITS id
     // (the resolver's staleness check compares against the live handle).
@@ -1298,7 +1302,7 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
     app.settings.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Bars;
 
     // Lyrics toggled off: the cover goes back to sharp.
-    app.settings.lyrics_enabled = false;
+    app.settings.lyrics_mode = LyricsMode::Off;
     assert!(app.lyrics_blurred_cover_for_view().is_none());
 }
 
@@ -1423,7 +1427,7 @@ fn a_sheet_landing_mid_track_starts_its_clock_at_the_transport() {
     // transport (see `Loaded`); the first frame reads the clock from there
     // rather than from zero, so the first word lit is the right one.
     let mut app = test_app();
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.scrobble.current_song_id = Some("song_1".to_string());
     app.playback.position = 61;
     let epoch = app.lyrics.load_epoch.current();

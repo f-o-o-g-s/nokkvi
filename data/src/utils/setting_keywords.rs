@@ -282,7 +282,7 @@ keyword_table! {
 
         // ── Playback · Transitions ───────────────────────────────────────────
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
-        "general.lyrics_enabled" => &[
+        "general.lyrics_mode" => &[
             "lyrics",
             "karaoke",
             "synced",

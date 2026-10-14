@@ -8,7 +8,7 @@ use iced::{
     keyboard::{Key, Modifiers, key::Named},
     widget::image::Handle,
 };
-use nokkvi_data::types::hotkey_config::HotkeyAction;
+use nokkvi_data::types::{hotkey_config::HotkeyAction, player_settings::LyricsMode};
 
 use crate::{
     Screen, View,
@@ -424,7 +424,7 @@ fn blur_gate_admits_theater() {
     app.current_view = View::Albums;
     app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
     app.scrobble.current_song_id = Some("s1".to_string());
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
     app.artwork
         .large_artwork
@@ -473,7 +473,7 @@ fn stopped_queue_shows_sharp_cursor_cover_without_blur() {
     let mut app = home_app();
     app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
     app.scrobble.current_song_id = Some("s1".to_string());
-    app.settings.lyrics_enabled = true;
+    app.settings.lyrics_mode = LyricsMode::On;
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
     let sharp = byte_handle(1);
     let sharp_id = sharp.id();

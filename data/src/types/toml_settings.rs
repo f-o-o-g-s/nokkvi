@@ -12,8 +12,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, LyricsBackdropBlur, LyricsWordHighlight, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            LibraryPageSize, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
             SeekbarStyle, SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay,
             VerboseConfig, VisualizationMode, VolumeNormalizationMode,
             deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
@@ -158,7 +158,10 @@ pub struct TomlSettings {
 
     // -- Playback --
     pub crossfade_enabled: bool,
-    pub lyrics_enabled: bool,
+    /// Lyrics: Off / On. On-disk key `lyrics_enabled`, the bool this replaced;
+    /// Off and On stay `false` / `true`, so older files load unchanged.
+    #[serde(rename = "lyrics_enabled")]
+    pub lyrics_mode: LyricsMode,
     pub lyrics_fetch_online: bool,
     pub lyrics_backdrop_blur: LyricsBackdropBlur,
     pub lyrics_word_highlight: LyricsWordHighlight,
@@ -386,7 +389,7 @@ impl Default for TomlSettings {
             strip_show_labels: true,
             strip_separator: crate::types::player_settings::StripSeparator::Slash,
             crossfade_enabled: true,
-            lyrics_enabled: false,
+            lyrics_mode: LyricsMode::Off,
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: LyricsBackdropBlur::default(),
             lyrics_word_highlight: LyricsWordHighlight::default(),

@@ -298,7 +298,7 @@ fn live_controls_start_at_their_persisted_defaults() {
         persisted.sound_effects_enabled
     );
     assert_eq!(app.settings.seek_step_secs, persisted.seek_step_secs);
-    assert_eq!(app.settings.lyrics_enabled, persisted.lyrics_enabled);
+    assert_eq!(app.settings.lyrics_mode, persisted.lyrics_mode);
 }
 
 /// The Interface rows read their values back from the theme atomics, and only

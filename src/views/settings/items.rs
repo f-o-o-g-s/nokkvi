@@ -697,7 +697,7 @@ mod tests {
             extract_keys(&entries),
             vec![
                 "general.crossfade_enabled",
-                "general.lyrics_enabled",
+                "general.lyrics_mode",
                 "general.lyrics_fetch_online",
                 "general.lyrics_backdrop_blur",
                 "general.lyrics_word_highlight",

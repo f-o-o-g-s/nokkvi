@@ -71,7 +71,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             icon: TRANSITIONS,
         },
         macro_rows.take("general.crossfade_enabled"),
-        macro_rows.take("general.lyrics_enabled"),
+        macro_rows.take("general.lyrics_mode"),
         macro_rows.take("general.lyrics_fetch_online"),
         macro_rows.take("general.lyrics_backdrop_blur"),
         macro_rows.take("general.lyrics_word_highlight"),

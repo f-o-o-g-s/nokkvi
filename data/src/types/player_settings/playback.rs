@@ -388,9 +388,141 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// The Lyrics setting: whether lyrics show over the Queue cover and in
+    /// Theater Mode.
+    ///
+    /// On disk it keeps the key and the values of the bool it replaced
+    /// (`lyrics_enabled = false` / `true`), so a config.toml or redb store
+    /// written before the mode existed loads unchanged and an older nokkvi
+    /// still reads what this one writes. The hand-written serde impls below
+    /// own that wire; the `wire` strings are what `Display` prints, and they
+    /// load too.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum LyricsMode {
+        /// No lyrics, and none looked up.
+        #[default]
+        Off { label: "Off", wire: "off" },
+        /// Lyrics over the cover for every song (a note when a song has none).
+        On { label: "On", wire: "on" },
+    }
+}
+
+impl LyricsMode {
+    /// Whether the playing song's lyrics are looked up and kept: every mode
+    /// but Off.
+    pub fn is_active(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+impl Serialize for LyricsMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Off => serializer.serialize_bool(false),
+            Self::On => serializer.serialize_bool(true),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LyricsMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ModeVisitor;
+
+        impl serde::de::Visitor<'_> for ModeVisitor {
+            type Value = LyricsMode;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(r#"true, false, "off" or "on""#)
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<LyricsMode, E> {
+                Ok(if v { LyricsMode::On } else { LyricsMode::Off })
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<LyricsMode, E> {
+                match v {
+                    "off" => Ok(LyricsMode::Off),
+                    "on" => Ok(LyricsMode::On),
+                    other => Err(E::unknown_variant(other, &["off", "on"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ModeVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LYRICS_MODES: [LyricsMode; 2] = [LyricsMode::Off, LyricsMode::On];
+
+    #[derive(Serialize, Deserialize)]
+    struct LyricsWrapper {
+        lyrics_enabled: LyricsMode,
+    }
+
+    #[test]
+    fn lyrics_mode_keeps_the_bool_wire_for_off_and_on() {
+        for (mode, json, toml_line) in [
+            (
+                LyricsMode::Off,
+                r#"{"lyrics_enabled":false}"#,
+                "lyrics_enabled = false",
+            ),
+            (
+                LyricsMode::On,
+                r#"{"lyrics_enabled":true}"#,
+                "lyrics_enabled = true",
+            ),
+        ] {
+            let w = LyricsWrapper {
+                lyrics_enabled: mode,
+            };
+            assert_eq!(serde_json::to_string(&w).unwrap(), json, "{mode:?}");
+            assert_eq!(toml::to_string(&w).unwrap().trim(), toml_line, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn lyrics_mode_loads_the_legacy_bools_and_its_wire_strings() {
+        for (raw, want) in [
+            ("true", LyricsMode::On),
+            ("false", LyricsMode::Off),
+            (r#""on""#, LyricsMode::On),
+            (r#""off""#, LyricsMode::Off),
+        ] {
+            let json = format!(r#"{{"lyrics_enabled":{raw}}}"#);
+            let w: LyricsWrapper = serde_json::from_str(&json).unwrap();
+            assert_eq!(w.lyrics_enabled, want, "json {raw}");
+            let w: LyricsWrapper = toml::from_str(&format!("lyrics_enabled = {raw}")).unwrap();
+            assert_eq!(w.lyrics_enabled, want, "toml {raw}");
+        }
+        // Every mode's Display string is one the reader takes back.
+        for mode in LYRICS_MODES {
+            let json = format!(r#"{{"lyrics_enabled":"{mode}"}}"#);
+            let w: LyricsWrapper = serde_json::from_str(&json).unwrap();
+            assert_eq!(w.lyrics_enabled, mode);
+        }
+    }
+
+    #[test]
+    fn lyrics_mode_rejects_an_unknown_value() {
+        assert!(
+            serde_json::from_str::<LyricsWrapper>(r#"{"lyrics_enabled":"sometimes"}"#).is_err()
+        );
+        assert!(serde_json::from_str::<LyricsWrapper>(r#"{"lyrics_enabled":1}"#).is_err());
+    }
+
+    #[test]
+    fn lyrics_mode_labels_round_trip() {
+        for mode in LYRICS_MODES {
+            assert_eq!(LyricsMode::from_label(mode.as_label()), mode);
+        }
+        assert_eq!(LyricsMode::LABELS, ["Off", "On"]);
+    }
 
     #[test]
     fn volume_normalization_mode_default_is_off() {
