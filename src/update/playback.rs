@@ -819,7 +819,7 @@ impl Nokkvi {
                     && let Some(shell) = &self.app_service
                 {
                     let vm = shell.albums().clone();
-                    self.artwork.album_art_pending.insert(album_id.clone());
+                    self.claim_minis([album_id.clone()]);
                     tasks.push(Task::perform(
                         async move {
                             let art = crate::app_message::MiniArt::from_fetch(

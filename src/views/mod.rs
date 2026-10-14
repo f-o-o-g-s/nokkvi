@@ -800,6 +800,106 @@ pub(crate) fn auto_show_on_sort<M: PartialEq>(
     user_visible || triggers.contains(&sort_mode)
 }
 
+/// The caches a row reads its thumbnail from: the 80px covers and their
+/// blurred stand-ins ([`mini_or_placeholder`]).
+#[derive(Clone, Copy)]
+pub(crate) struct RowCovers<'a> {
+    pub minis: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    pub placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
+}
+
+impl<'a> RowCovers<'a> {
+    /// The picture `id`'s thumbnail slot draws.
+    pub(crate) fn get(self, id: &str) -> Option<&'a iced::widget::image::Handle> {
+        mini_or_placeholder(self.minis, self.placeholders, id)
+    }
+}
+
+/// The picture a thumbnail slot draws for `id` (an album or artist id): its
+/// 80px cover, else the blurred stand-in decoded when that cover was sent
+/// for (Navidrome 0.64+, `Nokkvi::claim_minis`).
+pub(crate) fn mini_or_placeholder<'a>(
+    album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
+    id: &str,
+) -> Option<&'a iced::widget::image::Handle> {
+    album_art
+        .get(id)
+        .or_else(|| placeholders.get(id).map(|placeholder| &placeholder.handle))
+}
+
+/// The picture the big panel draws for `id`: the full-size cover, else the
+/// 80px cover scaled up, else the blurred stand-in.
+pub(crate) fn panel_cover<'a>(
+    large_artwork: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
+    id: &str,
+) -> Option<&'a iced::widget::image::Handle> {
+    large_artwork
+        .get(id)
+        .or_else(|| mini_or_placeholder(album_art, placeholders, id))
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use std::collections::HashMap;
+
+    use iced::widget::image::Handle;
+
+    use super::{mini_or_placeholder, panel_cover};
+    use crate::state::Placeholder;
+
+    fn handle() -> Handle {
+        Handle::from_rgba(1, 1, vec![0, 0, 0, 255])
+    }
+
+    #[test]
+    fn the_panel_prefers_the_cover_then_the_mini_then_the_placeholder() {
+        let (large, mini, blur) = (handle(), handle(), handle());
+        let mut large_artwork = HashMap::new();
+        let mut album_art = HashMap::new();
+        let mut placeholders = HashMap::new();
+        placeholders.insert(
+            "a".to_string(),
+            Placeholder {
+                thumb_hash: "h".into(),
+                handle: blur.clone(),
+            },
+        );
+        let id = |h: Option<&Handle>| h.map(Handle::id);
+
+        assert_eq!(
+            id(panel_cover(&large_artwork, &album_art, &placeholders, "a")),
+            Some(blur.id())
+        );
+        assert_eq!(
+            id(mini_or_placeholder(&album_art, &placeholders, "a")),
+            Some(blur.id())
+        );
+
+        album_art.insert("a".to_string(), mini.clone());
+        assert_eq!(
+            id(panel_cover(&large_artwork, &album_art, &placeholders, "a")),
+            Some(mini.id())
+        );
+        assert_eq!(
+            id(mini_or_placeholder(&album_art, &placeholders, "a")),
+            Some(mini.id())
+        );
+
+        large_artwork.insert("a".to_string(), large.clone());
+        assert_eq!(
+            id(panel_cover(&large_artwork, &album_art, &placeholders, "a")),
+            Some(large.id())
+        );
+        assert_eq!(
+            id(panel_cover(&large_artwork, &album_art, &placeholders, "b")),
+            None
+        );
+    }
+}
+
 #[cfg(test)]
 #[expect(
     unreachable_pub,

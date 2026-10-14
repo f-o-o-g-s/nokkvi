@@ -64,6 +64,9 @@ super::define_view_columns! {
 pub struct SongsViewData<'a> {
     pub songs: &'a [SongUIViewData],
     pub album_art: &'a HashMap<String, image::Handle>, // album_id -> artwork
+    /// Blurred stand-ins for album covers on their way, wherever nokkvi holds
+    /// the album's row (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,

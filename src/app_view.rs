@@ -1605,6 +1605,7 @@ impl Nokkvi {
         views::AlbumsViewData {
             albums: &self.library.albums,
             album_art: &self.artwork.album_art.snapshot,
+            placeholders: &self.artwork.placeholders.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
             window_width: chrome.pane_width,
             window_height: chrome.pane_height,
@@ -1640,6 +1641,7 @@ impl Nokkvi {
             // Reuse album art cache for artist images.
             artist_art: &self.artwork.album_art.snapshot,
             album_art: &self.artwork.album_art.snapshot,
+            placeholders: &self.artwork.placeholders.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
             artist_info: &self.artist_info.cache.snapshot,
             window_width: chrome.pane_width,
@@ -1674,6 +1676,7 @@ impl Nokkvi {
         views::SongsViewData {
             songs: &self.library.songs,
             album_art: &self.artwork.album_art.snapshot,
+            placeholders: &self.artwork.placeholders.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
             window_width: chrome.pane_width,
             window_height: chrome.pane_height,
@@ -1709,6 +1712,7 @@ impl Nokkvi {
             genre_artwork: &self.artwork.genre.mini.snapshot,
             genre_collage_artwork: &self.artwork.genre.collage.snapshot,
             album_art: &self.artwork.album_art.snapshot,
+            placeholders: &self.artwork.placeholders.snapshot,
             window_width: chrome.pane_width,
             window_height: chrome.pane_height,
             chrome,
@@ -2060,6 +2064,7 @@ impl Nokkvi {
         views::QueueViewData {
             queue_songs: self.filter_queue_songs(),
             album_art: &self.artwork.album_art.snapshot,
+            placeholders: &self.artwork.placeholders.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
             window_width: chrome.pane_width,
             window_height: chrome.window_height,
@@ -2362,6 +2367,7 @@ impl Nokkvi {
                     let editor_data = views::EditorViewData {
                         songs: std::borrow::Cow::Borrowed(&editor.songs),
                         album_art: &self.artwork.album_art.snapshot,
+                        placeholders: &self.artwork.placeholders.snapshot,
                         large_artwork,
                         window_width: self.content_pane_width() * QUEUE_PANE_FRACTION,
                         window_height: self.window.height,

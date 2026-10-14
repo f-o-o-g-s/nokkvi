@@ -625,7 +625,7 @@ impl Nokkvi {
         let (queued, prefetch) =
             expansion_album_artwork_tasks(&gate, shell.albums().clone(), album_ids);
         drop(gate);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
         if prefetch.is_empty() {
             cmd_task
         } else {

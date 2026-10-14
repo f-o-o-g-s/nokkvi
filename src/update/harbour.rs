@@ -1455,7 +1455,7 @@ impl Nokkvi {
             let (queued, fetches) =
                 super::components::expansion_album_artwork_tasks(&gate, albums_vm.clone(), triples);
             drop(gate);
-            self.artwork.album_art_pending.extend(queued);
+            self.claim_minis(queued);
             tasks.extend(fetches);
         }
 
@@ -1554,7 +1554,7 @@ impl Nokkvi {
         );
         drop(cached);
         for id in queued_ids {
-            self.artwork.album_art_pending.insert(id);
+            self.claim_minis([id]);
         }
         tasks
     }
@@ -1643,7 +1643,7 @@ impl Nokkvi {
         planned
             .into_iter()
             .map(|(id, version)| {
-                self.artwork.album_art_pending.insert(id.clone());
+                self.claim_minis([id.clone()]);
                 super::components::artist_mini_task(albums_vm.clone(), id, version)
             })
             .collect()

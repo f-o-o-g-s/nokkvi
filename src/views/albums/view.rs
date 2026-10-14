@@ -6,11 +6,9 @@
 //!
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
-use std::collections::HashMap;
-
 use iced::{
     Alignment, Element, Length, Widget as _,
-    widget::{Row, container, image},
+    widget::{Row, container},
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
@@ -169,6 +167,7 @@ impl AlbumsPage {
         let _scale_factor = data.scale_factor;
         let albums = data.albums; // Borrow slice to extend lifetime
         let album_art = data.album_art;
+        let placeholders = data.placeholders;
         let current_sort_mode = self.common.current_sort_mode;
 
         // Build flattened list (albums + injected tracks when expanded)
@@ -191,7 +190,10 @@ impl AlbumsPage {
                     let row = self.render_album_row(
                         album,
                         &ctx,
-                        album_art,
+                        crate::views::RowCovers {
+                            minis: album_art,
+                            placeholders,
+                        },
                         current_sort_mode,
                         data.stable_viewport,
                         data.overlay.open_menu,
@@ -242,11 +244,15 @@ impl AlbumsPage {
         // (cruise phase of a roulette spin scrolls through items faster
         // than LoadLarge can roundtrip). The mini is upscaled by Iced's
         // image widget — blurry but instantly available, so the panel
-        // tracks the centered slot instead of going blank.
+        // tracks the centered slot instead of going blank. Before the mini
+        // lands, the blurred placeholder stands in.
         let artwork_handle = centered_album.and_then(|album| {
-            data.large_artwork
-                .get(&album.id)
-                .or_else(|| data.album_art.get(&album.id))
+            crate::views::panel_cover(
+                data.large_artwork,
+                data.album_art,
+                data.placeholders,
+                &album.id,
+            )
         });
 
         let panel_menu_entries: Vec<_> = centered_album
@@ -371,7 +377,7 @@ impl AlbumsPage {
         &self,
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
-        album_art: &'a HashMap<String, image::Handle>,
+        covers: crate::views::RowCovers<'a>,
         current_sort_mode: SortMode,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
@@ -446,7 +452,7 @@ impl AlbumsPage {
         if vis.thumbnail {
             use crate::widgets::slot_list::slot_list_artwork_column_filled;
             content_row = content_row.push(slot_list_artwork_column_filled(
-                album_art.get(&album_id),
+                covers.get(&album_id),
                 artwork_size,
                 ctx.is_center,
                 false,

@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 - The Lyrics setting gains Auto, which shows lyrics over the Queue cover and in Theater Mode only for songs that have them.
 - A new Playback setting, Lyrics: Alignment, sets lyric lines against the left edge, centered, or against the right edge.
+- While covers load on Navidrome 0.64 or newer, album and artist rows show a blurred preview of each cover instead of a flat colored square.
+- Song rows show the same blurred preview when nokkvi has already loaded the song's album, such as in the Albums view.
+- The big cover panel shows the blurred preview, instead of staying blank, until a thumbnail or the full cover arrives.
 
 ### Changed
 

@@ -2172,7 +2172,7 @@ impl Nokkvi {
             ));
         }
         drop(gate);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
         Task::batch(tasks)
     }
 

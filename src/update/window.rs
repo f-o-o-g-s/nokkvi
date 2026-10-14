@@ -131,7 +131,7 @@ impl Nokkvi {
                     crate::update::components::album_prefetch_entry,
                 );
                 drop(gate);
-                self.artwork.album_art_pending.extend(queued);
+                self.claim_minis(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Albums) {
                     tasks.push(task);
                 }
@@ -156,7 +156,7 @@ impl Nokkvi {
                 );
                 drop(items);
                 drop(gate);
-                self.artwork.album_art_pending.extend(queued);
+                self.claim_minis(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Queue) {
                     tasks.push(task);
                 }
@@ -177,7 +177,7 @@ impl Nokkvi {
                     },
                 );
                 drop(gate);
-                self.artwork.album_art_pending.extend(queued);
+                self.claim_minis(queued);
                 if let Some(task) = self.center_large_artwork_load_task(View::Songs) {
                     tasks.push(task);
                 }

@@ -58,6 +58,9 @@ pub struct GenresViewData<'a> {
     /// rows in the genre→album expansion when `column_visibility.thumbnail`
     /// is enabled.
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Blurred stand-ins for those child albums' covers while they load
+    /// (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub window_width: f32,
     pub window_height: f32,
     /// Slot-list chrome inputs (header collapse, select-all bar, pane size),

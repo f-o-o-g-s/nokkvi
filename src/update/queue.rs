@@ -100,7 +100,7 @@ impl Nokkvi {
                             },
                         );
                         drop(gate);
-                        self.artwork.album_art_pending.extend(queued);
+                        self.claim_minis(queued);
                         tasks.extend(prefetch);
 
                         // Load large artwork for center song
@@ -871,7 +871,7 @@ impl Nokkvi {
             .as_deref()
             .unwrap_or(&self.library.queue_songs);
         let (queued, tasks) = self.queue_viewport_artwork_tasks(rows);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
 
         // Execute artwork loading tasks in parallel with the command
         if !tasks.is_empty() {
@@ -914,7 +914,7 @@ impl Nokkvi {
             .as_deref()
             .unwrap_or(&self.library.queue_songs);
         let (queued, tasks) = self.queue_viewport_artwork_tasks(rows);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
         Task::batch(tasks)
     }
 
@@ -988,7 +988,7 @@ impl Nokkvi {
         let rows = self.filter_queue_songs();
         let (queued, tasks) = self.queue_viewport_artwork_tasks(&rows);
         drop(rows);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
         if tasks.is_empty() {
             Task::none()
         } else {

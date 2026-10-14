@@ -849,6 +849,7 @@ impl QueuePage {
         // sort is in effect (not merely the remembered mode).
         let applied_sort_mode = self.queue_sorted.then_some(self.queue_sort_mode);
         let album_art = data.album_art; // Move artwork maps
+        let placeholders = data.placeholders;
         let large_artwork = data.large_artwork;
         let queue_songs = data.queue_songs; // Move ownership to extend lifetime
         let column_visibility = self.column_visibility;
@@ -868,6 +869,7 @@ impl QueuePage {
                 columns: column_visibility,
                 sort_mode: applied_sort_mode,
                 album_art,
+                placeholders,
                 current_playing_song_id: current_playing_song_id.clone(),
                 current_playing_entry_id,
                 stable_viewport: data.stable_viewport,
@@ -1033,9 +1035,7 @@ impl QueuePage {
         };
         let playing_handle = playing_song.and_then(|song| {
             data.lyrics_blurred_cover.or_else(|| {
-                large_artwork
-                    .get(&song.album_id)
-                    .or_else(|| album_art.get(&song.album_id))
+                crate::views::panel_cover(large_artwork, album_art, placeholders, &song.album_id)
             })
         });
         let centered_song = self
@@ -1046,9 +1046,12 @@ impl QueuePage {
         let center_artwork_handle: Option<&iced::widget::image::Handle> =
             playing_handle.or_else(|| {
                 centered_song.and_then(|song| {
-                    large_artwork
-                        .get(&song.album_id)
-                        .or_else(|| album_art.get(&song.album_id))
+                    crate::views::panel_cover(
+                        large_artwork,
+                        album_art,
+                        placeholders,
+                        &song.album_id,
+                    )
                 })
             });
 

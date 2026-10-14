@@ -201,7 +201,10 @@ impl GenresPage {
                         album,
                         &ctx,
                         &sub_index_label,
-                        data.album_art,
+                        crate::views::RowCovers {
+                            minis: data.album_art,
+                            placeholders: data.placeholders,
+                        },
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -408,7 +411,7 @@ impl GenresPage {
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         sub_index_label: &str,
-        album_art: &'a HashMap<String, image::Handle>,
+        covers: crate::views::RowCovers<'a>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
@@ -417,7 +420,7 @@ impl GenresPage {
             album,
             ctx,
             sub_index_label,
-            album_art.get(&album.id),
+            covers.get(&album.id),
             GenresMessage::SlotList,
             super::super::expansion::ChildAlbumRowOptions {
                 show_artwork: self.column_visibility.thumbnail,

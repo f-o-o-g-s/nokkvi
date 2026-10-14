@@ -183,6 +183,7 @@ impl PlaylistEditorState {
 
         let songs = data.songs.as_ref();
         let album_art = data.album_art;
+        let placeholders = data.placeholders;
         let large_artwork = data.large_artwork;
         let open_menu = data.open_menu;
         let columns = self.columns;
@@ -200,6 +201,7 @@ impl PlaylistEditorState {
                 columns,
                 sort_mode: None,
                 album_art,
+                placeholders,
                 current_playing_song_id: None,
                 current_playing_entry_id: None,
                 stable_viewport: true,
@@ -292,9 +294,7 @@ impl PlaylistEditorState {
             .get_center_item_index(songs.len())
             .and_then(|idx| songs.get(idx))
             .and_then(|song| {
-                large_artwork
-                    .get(&song.album_id)
-                    .or_else(|| album_art.get(&song.album_id))
+                crate::views::panel_cover(large_artwork, album_art, placeholders, &song.album_id)
             });
         let artwork_content = Some(single_artwork_panel_with_menu::<EditorMessage>(
             center_handle,

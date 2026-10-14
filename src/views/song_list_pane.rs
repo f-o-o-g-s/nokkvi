@@ -127,6 +127,9 @@ pub(crate) struct SongListPaneParams<'a, 'b> {
     /// plays/genre auto-show columns only when a real sort is in effect.
     pub sort_mode: Option<QueueSortMode>,
     pub album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Blurred stand-ins for album covers on their way, same lifetime
+    /// contract as `album_art` (`ArtworkState::placeholders`).
+    pub placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
     pub current_playing_song_id: Option<String>,
     pub current_playing_entry_id: Option<u64>,
     pub stable_viewport: bool,
@@ -163,6 +166,7 @@ where
         columns,
         sort_mode,
         album_art,
+        placeholders,
         current_playing_song_id,
         current_playing_entry_id,
         stable_viewport,
@@ -267,7 +271,7 @@ where
             if column_visibility.thumbnail {
                 use crate::widgets::slot_list::slot_list_artwork_column;
                 content_row = content_row.push(slot_list_artwork_column(
-                    album_art.get(&album_id),
+                    crate::views::mini_or_placeholder(album_art, placeholders, &album_id),
                     artwork_size,
                     ctx.is_center,
                     is_current,

@@ -544,17 +544,17 @@ impl Nokkvi {
             },
         );
         drop(gate);
-        self.artwork.album_art_pending.extend(queued);
-
         // Large artwork for the centered row, so the artwork panel fills too.
-        if let Some(center_idx) = editor
+        let center_album = editor
             .common
             .slot_list
             .get_center_item_index(editor.songs.len())
-            && let Some(song) = editor.songs.get(center_idx)
-        {
+            .and_then(|center_idx| editor.songs.get(center_idx))
+            .map(|song| song.album_id.clone());
+        self.claim_minis(queued);
+        if let Some(album_id) = center_album {
             tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                song.album_id.clone(),
+                album_id,
             ))));
         }
 

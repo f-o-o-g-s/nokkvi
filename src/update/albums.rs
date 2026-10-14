@@ -185,6 +185,63 @@ impl Nokkvi {
         }
     }
 
+    /// Claim the 80px fetches a planner just queued: `album_art_pending`
+    /// holds them until the loaded handlers release them on every outcome.
+    /// Each one's ThumbHash (Navidrome 0.64+) is decoded into
+    /// `placeholders` on the way, so the row, and the big panel over it, draw
+    /// a blurred stand-in until the cover lands. Every 80px path claims
+    /// through here (`every_mini_claim_goes_through_claim_minis`).
+    pub(crate) fn claim_minis(&mut self, ids: impl IntoIterator<Item = String>) {
+        let ids: Vec<String> = ids.into_iter().collect();
+        for id in &ids {
+            self.warm_placeholder(id);
+        }
+        self.artwork.album_art_pending.extend(ids);
+    }
+
+    /// Decode `id`'s placeholder, unless the one cached came from the
+    /// ThumbHash the rows give it now. A decode is a 32 px picture, tens of
+    /// microseconds, and only for a cover that is about to be fetched.
+    fn warm_placeholder(&mut self, id: &str) {
+        let Some(hash) = self.thumb_hash_of(id) else {
+            return;
+        };
+        if self
+            .artwork
+            .placeholders
+            .peek(&id.to_owned())
+            .is_some_and(|cached| cached.thumb_hash == hash)
+        {
+            return;
+        }
+        let thumb_hash = hash.to_owned();
+        if let Some(picture) = nokkvi_data::utils::thumbhash::decode_thumb_hash(&thumb_hash) {
+            let handle = image::Handle::from_rgba(picture.width, picture.height, picture.rgba);
+            self.artwork.placeholders.put(
+                id.to_owned(),
+                crate::state::Placeholder { thumb_hash, handle },
+            );
+        }
+    }
+
+    /// The ThumbHash the rows nokkvi holds give `id`: an album or an artist,
+    /// the albums an expanded artist or genre lists included. `None` on
+    /// servers older than 0.64 and for art the server marked absent.
+    fn thumb_hash_of(&self, id: &str) -> Option<&str> {
+        self.album_image(id)
+            .or_else(|| self.artist_image(id))
+            .or_else(|| {
+                self.artists_page
+                    .expansion
+                    .children
+                    .iter()
+                    .chain(self.genres_page.expansion.children.iter())
+                    .find(|album| album.id == id)
+                    .map(|album| &album.image)
+            })
+            .and_then(|image| image.thumb_hash.as_deref())
+    }
+
     /// The image info (Navidrome 0.64+) of an album row nokkvi holds: the
     /// Albums view or Harbour's shelves. `None` for an unknown id; the
     /// default on older servers.

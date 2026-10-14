@@ -147,6 +147,7 @@ impl SongsPage {
         // Capture values needed in closure
         let songs = data.songs;
         let song_artwork = data.album_art;
+        let placeholders = data.placeholders;
         let current_sort_mode = self.common.current_sort_mode;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
         let open_menu_for_rows = data.overlay.open_menu;
@@ -257,7 +258,9 @@ impl SongsPage {
                 }
                 if vis.thumbnail {
                     use crate::widgets::slot_list::slot_list_artwork_column;
-                    let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
+                    let artwork_handle = album_id.as_ref().and_then(|id| {
+                        crate::views::mini_or_placeholder(song_artwork, placeholders, id)
+                    });
                     content_row = content_row.push(slot_list_artwork_column(
                         artwork_handle,
                         artwork_size,
@@ -478,9 +481,12 @@ impl SongsPage {
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
             .and_then(|album_id| {
-                data.large_artwork
-                    .get(album_id)
-                    .or_else(|| data.album_art.get(album_id))
+                crate::views::panel_cover(
+                    data.large_artwork,
+                    data.album_art,
+                    data.placeholders,
+                    album_id,
+                )
             });
 
         let panel_menu_entries: Vec<_> = centered_song

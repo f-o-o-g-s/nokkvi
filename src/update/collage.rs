@@ -109,7 +109,7 @@ impl Nokkvi {
         };
         drop(cached);
         for id in queued_ids {
-            self.artwork.album_art_pending.insert(id);
+            self.claim_minis([id]);
         }
         tasks
     }
@@ -178,7 +178,7 @@ impl Nokkvi {
         let gate = crate::update::components::ArtworkGate::new(&self.artwork);
         let (queued, tasks) = expansion_album_artwork_tasks(&gate, albums_vm, triples);
         drop(gate);
-        self.artwork.album_art_pending.extend(queued);
+        self.claim_minis(queued);
         tasks
     }
 

@@ -67,6 +67,8 @@ super::define_view_columns! {
 pub struct AlbumsViewData<'a> {
     pub albums: &'a [AlbumUIViewData],
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Blurred stand-ins for covers on their way (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,

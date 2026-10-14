@@ -71,7 +71,7 @@ impl Nokkvi {
                                 },
                             );
                         drop(gate);
-                        self.artwork.album_art_pending.extend(queued);
+                        self.claim_minis(queued);
                         tasks.extend(prefetch_tasks);
                     }
                 }
@@ -272,7 +272,7 @@ impl Nokkvi {
                                 },
                             );
                         drop(gate);
-                        self.artwork.album_art_pending.extend(queued);
+                        self.claim_minis(queued);
                         tasks.extend(prefetch_tasks);
                     }
                 }

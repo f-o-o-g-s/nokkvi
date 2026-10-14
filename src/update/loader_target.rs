@@ -186,7 +186,7 @@ impl LoaderTarget for AlbumsTarget {
             album_prefetch_entry,
         );
         drop(gate);
-        app.artwork.album_art_pending.extend(queued);
+        app.claim_minis(queued);
         tasks
     }
 
@@ -321,7 +321,7 @@ impl LoaderTarget for SongsTarget {
             },
         );
         drop(gate);
-        app.artwork.album_art_pending.extend(queued);
+        app.claim_minis(queued);
         tasks
     }
 

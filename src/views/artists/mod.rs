@@ -66,6 +66,9 @@ pub struct ArtistsViewData<'a> {
     /// rows in the artist→album expansion when `column_visibility.thumbnail`
     /// is enabled.
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Blurred stand-ins for covers on their way, artists' and albums' alike
+    /// (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
     /// `getArtistInfo2` answers by artist id; the pill's biography and link
     /// prefer them over the native row's fields.

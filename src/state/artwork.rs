@@ -57,6 +57,11 @@ const PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
 /// now-playing station's large art out from under the locked panel / MiniPlayer.
 const RADIO_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(512).expect("capacity must be > 0");
+/// Capacity for the cover placeholder LRU (`id -> Placeholder`). Each is a
+/// picture of at most 32 x 32 (4 KB), decoded only for a cover on its way, so
+/// half the mini cache's cap covers every slot a long scroll leaves loading.
+const PLACEHOLDER_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(512).expect("capacity must be > 0");
 
 /// In-flight artwork fetches for one cache: id -> the version the request
 /// carries (`()` for the thumbnail gates, which hold any fetch of an id).
@@ -122,6 +127,14 @@ impl<V> InFlight<V> {
     pub fn is_empty(&self) -> bool {
         self.claims.is_empty()
     }
+}
+
+/// A cover's blurred stand-in: the ThumbHash (Navidrome 0.64+) it was
+/// decoded from, and the picture. See [`ArtworkState::placeholders`].
+#[derive(Debug, Clone)]
+pub struct Placeholder {
+    pub thumb_hash: String,
+    pub handle: image::Handle,
 }
 
 /// Per-target collage artwork cache (genre or playlist).
@@ -209,6 +222,15 @@ pub struct ArtworkState {
     /// failures never suppress server-B art). Unbounded like `album_art_versions`,
     /// but populated only by the narrow stale-id case and reset on logout.
     pub failed_art: HashMap<String, Option<String>>,
+    /// Blurred stand-ins for covers on their way, in [`Self::album_art`]'s id
+    /// space (album or artist id). Navidrome 0.64+ sends each album's and
+    /// artist's `thumbHash`; the 80px claim (`Nokkvi::claim_minis`) decodes
+    /// it, so a row waiting on its mini, and the big panel waiting on both
+    /// covers, draw the blur instead of an empty square
+    /// (`views::mini_or_placeholder`, `views::panel_cover`). A cover whose
+    /// ThumbHash changed is decoded again at its next claim. Reset on logout
+    /// via `Default`.
+    pub placeholders: SnapshottedLru<String, Placeholder>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
     /// The Navidrome 0.64 image hash each large-art request carried
@@ -345,6 +367,7 @@ impl Default for ArtworkState {
             album_art_versions: HashMap::new(),
             album_art_pending: HashSet::new(),
             failed_art: HashMap::new(),
+            placeholders: SnapshottedLru::new(PLACEHOLDER_CACHE_CAPACITY),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             large_artwork_hashes: HashMap::new(),
             large_artwork_pending: InFlight::default(),

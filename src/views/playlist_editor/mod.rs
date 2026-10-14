@@ -26,6 +26,9 @@ pub(crate) struct EditorViewData<'a> {
     pub songs: Cow<'a, [QueueSongUIViewData]>,
     /// Album-art thumbnail cache (80px), keyed by album_id.
     pub album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Blurred stand-ins for album covers on their way
+    /// (`ArtworkState::placeholders`).
+    pub placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
     /// Large-artwork cache for the artwork column fallback.
     pub large_artwork: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     pub window_width: f32,

@@ -112,6 +112,9 @@ super::define_view_columns! {
 pub struct QueueViewData<'a> {
     pub queue_songs: std::borrow::Cow<'a, [QueueSongUIViewData]>,
     pub album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Blurred stand-ins for album covers on their way, wherever nokkvi holds
+    /// the album's row (`ArtworkState::placeholders`).
+    pub placeholders: &'a std::collections::HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     /// Frosted variant of the playing track's cover for the lyrics backdrop
     /// (`None` = blur off / not ready / not this track — the view falls back

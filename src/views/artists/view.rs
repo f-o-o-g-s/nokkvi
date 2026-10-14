@@ -5,11 +5,9 @@
 //!
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
-use std::collections::HashMap;
-
 use iced::{
     Alignment, Element, Length, Widget as _,
-    widget::{Row, container, image},
+    widget::{Row, container},
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 
@@ -159,6 +157,7 @@ impl ArtistsPage {
                 .with_modifiers(data.modifiers);
         let artists = data.artists; // Borrow slice to extend lifetime
         let artist_art = data.artist_art;
+        let placeholders = data.placeholders;
         let open_menu_for_rows = data.overlay.open_menu;
 
         // Build flattened list (artists + injected albums when expanded)
@@ -181,7 +180,10 @@ impl ArtistsPage {
                     let row = self.render_artist_row(
                         artist,
                         &ctx,
-                        artist_art,
+                        crate::views::RowCovers {
+                            minis: artist_art,
+                            placeholders,
+                        },
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -200,7 +202,10 @@ impl ArtistsPage {
                         album,
                         &ctx,
                         &sub_index_label,
-                        data.album_art,
+                        crate::views::RowCovers {
+                            minis: data.album_art,
+                            placeholders,
+                        },
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -232,9 +237,12 @@ impl ArtistsPage {
         // Fall back to the slot-list mini when the large isn't loaded yet —
         // see Albums view for rationale.
         let artwork_handle = centered_artist.and_then(|artist| {
-            data.large_artwork
-                .get(&artist.id)
-                .or_else(|| data.album_art.get(&artist.id))
+            crate::views::panel_cover(
+                data.large_artwork,
+                data.album_art,
+                data.placeholders,
+                &artist.id,
+            )
         });
 
         let pill_content = centered_artist
@@ -378,7 +386,7 @@ impl ArtistsPage {
         &self,
         artist: &ArtistUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
-        artist_art: &'a HashMap<String, image::Handle>,
+        covers: crate::views::RowCovers<'a>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
@@ -450,7 +458,7 @@ impl ArtistsPage {
         if vis.thumbnail {
             use crate::widgets::slot_list::slot_list_artwork_column_filled;
             content_row = content_row.push(slot_list_artwork_column_filled(
-                artist_art.get(&artist_id),
+                covers.get(&artist_id),
                 artwork_size,
                 ctx.is_center,
                 false,
@@ -613,7 +621,7 @@ impl ArtistsPage {
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         sub_index_label: &str,
-        album_art: &'a HashMap<String, image::Handle>,
+        covers: crate::views::RowCovers<'a>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
@@ -622,7 +630,7 @@ impl ArtistsPage {
             album,
             ctx,
             sub_index_label,
-            album_art.get(&album.id),
+            covers.get(&album.id),
             ArtistsMessage::SlotList,
             super::super::expansion::ChildAlbumRowOptions {
                 show_artwork: self.column_visibility.thumbnail,
