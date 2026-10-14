@@ -396,7 +396,7 @@ impl Default for TomlSettings {
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: LyricsBackdropBlur::default(),
             lyrics_word_highlight: LyricsWordHighlight::default(),
-            lyrics_alignment: LyricsAlignment::Left,
+            lyrics_alignment: LyricsAlignment::Center,
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: 7,
             crossfade_curve: CrossfadeCurve::default(),

@@ -166,9 +166,9 @@ define_settings! {
                 subtitle: Some(
                     "Where lyric lines sit on the Queue cover and in Theater Mode. Left starts \
                      every line at the left edge, Center centers each line, Right ends every \
-                     line at the right edge. A line that wraps keeps the same edge on each row.",
+                     line at the right edge. Each row of a wrapped line follows the setting.",
                 ),
-                default: "Left",
+                default: "Center",
                 options: LyricsAlignment::LABELS,
                 read_field: |d| d.lyrics_alignment.as_ref(),
             },
@@ -980,7 +980,7 @@ mod tests {
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: "Off".into(),
             lyrics_word_highlight: "Sweep".into(),
-            lyrics_alignment: "Left".into(),
+            lyrics_alignment: "Center".into(),
             bit_perfect: "Off".into(),
             crossfade_duration_secs: 5,
             crossfade_curve: "Equal Power".into(),

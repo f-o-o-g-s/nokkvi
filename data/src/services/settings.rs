@@ -1553,7 +1553,7 @@ mod sentinel_roundtrip_tests {
             lyrics_fetch_online: false,                       // default true
             lyrics_backdrop_blur: LyricsBackdropBlur::Light,  // default Off
             lyrics_word_highlight: LyricsWordHighlight::Word, // default Sweep
-            lyrics_alignment: LyricsAlignment::Right,         // default Left
+            lyrics_alignment: LyricsAlignment::Right,         // default Center
             bit_perfect: BitPerfectMode::Strict,              // default Off
             seek_step_secs: 17,                               // default 5
             crossfade_duration_secs: 9,                       // default 5

@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
 - Find Similar from another view now plays the view-change sound.
 - A song the server transcodes on the fly now opens with two requests to the server instead of four.
 - A song the server serves as a file now opens with one request fewer to the server.
-- A lyric line that wraps now starts its second row at the same edge as its first, instead of centering it.
+- Lyrics are now centered on the Queue cover and in Theater Mode instead of starting at the left edge.
 
 ### Fixed
 

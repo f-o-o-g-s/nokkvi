@@ -143,9 +143,9 @@ crate::player_settings_schema! {
     /// timing (default: sweep).
     #[serde(default)]
     same lyrics_word_highlight: LyricsWordHighlight = LyricsWordHighlight::default(),
-    /// Where lyric lines sit across the lyrics panel (default: Left).
+    /// Where lyric lines sit across the lyrics panel (default: Center).
     #[serde(default)]
-    same lyrics_alignment: LyricsAlignment = LyricsAlignment::Left,
+    same lyrics_alignment: LyricsAlignment = LyricsAlignment::Center,
     /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
     /// play at each track's native sample rate with the DSP chain (EQ / software
     /// volume / limiter) bypassed, letting PipeWire switch the device clock.

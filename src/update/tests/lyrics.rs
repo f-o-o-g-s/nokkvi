@@ -1693,14 +1693,14 @@ fn a_settings_load_sets_the_alignment_the_lyrics_layer_draws_with() {
     app.playback.playing = true;
     assert_eq!(
         app.queue_lyrics_panel_data().expect("layer up").align,
-        LyricsAlignment::Left,
-        "Left until the setting says otherwise"
+        LyricsAlignment::Center,
+        "Center until the setting says otherwise"
     );
 
     for align in [
-        LyricsAlignment::Center,
-        LyricsAlignment::Right,
         LyricsAlignment::Left,
+        LyricsAlignment::Right,
+        LyricsAlignment::Center,
     ] {
         let mut settings = app.settings.clone();
         settings.lyrics_alignment = align;
