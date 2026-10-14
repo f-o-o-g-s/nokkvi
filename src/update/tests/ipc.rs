@@ -250,6 +250,47 @@ fn add_to_queue_names_rows_nothing_rates() {
 }
 
 #[test]
+fn add_to_queue_under_trawl_names_the_mix_not_the_row_behind_it() {
+    // Under the Trawl modal Shift+A adds the mix (`handle_add_to_queue`
+    // routes it there), but the reply named the obscured view's centered
+    // row, or null where that view adds nothing.
+    use nokkvi_data::types::{batch::BatchItem, trawl::TrawlSeed};
+    let mut app = home_app();
+    app.current_view = crate::View::Songs;
+    crate::test_helpers::seed_songs(
+        &mut app,
+        vec![crate::test_helpers::make_song("s1", "Song", "A")],
+    );
+    let _ = app.handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+    app.trawl.mix.add(TrawlSeed::new(
+        BatchItem::Album("a1".to_string()),
+        "Seed Album",
+        "Artist",
+    ));
+
+    let resp = drive_on(&mut app, "add-to-queue");
+
+    assert_eq!(resp.data, Some(json!({ "added": "Trawl mix" })));
+}
+
+#[test]
+fn add_to_queue_under_trawl_with_an_empty_crate_reports_null() {
+    // An empty crate adds nothing (Shift+A only warns), whatever row the
+    // view behind the modal has centered.
+    let mut app = home_app();
+    app.current_view = crate::View::Songs;
+    crate::test_helpers::seed_songs(
+        &mut app,
+        vec![crate::test_helpers::make_song("s1", "Song", "A")],
+    );
+    let _ = app.handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+
+    let resp = drive_on(&mut app, "add-to-queue");
+
+    assert_eq!(resp.data, Some(json!({ "added": null })));
+}
+
+#[test]
 fn add_to_queue_on_a_list_that_adds_nothing_reports_null() {
     // Radios never enqueue (Shift+A toasts "No item selected"), so `null`
     // is the honest reply there.

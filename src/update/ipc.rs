@@ -119,7 +119,8 @@
 //! | `clear-queue` | act       | `{"ok":true}`; `clear_queue_action()` (gate-free).|
 //! |               |           | Acts in Theater Mode too (whole queue, no row). |
 //! | `add-to-queue`| act       | `{"added":name\|null}`; enqueue the focused item|
-//! |               |           | (Shift+A); null when nothing is selected. ‡     |
+//! |               |           | (Shift+A); `"Trawl mix"` under the Trawl modal; |
+//! |               |           | null when nothing is added. ‡                  |
 //! | `remove-from-queue` | act | `{"removed":name\|null}`; remove the centered    |
 //! |               |           | queue song (Ctrl+D); `not_in_queue_view` error |
 //! |               |           | outside the queue view. ‡                      |
@@ -513,28 +514,20 @@ define_commands! {
     // and aims at no row, so there is nothing hidden for it to hit by mistake.
     "clear-queue" => act      (|app: &mut Nokkvi| Ok((app.clear_queue_action(), json!({ "ok": true }))));
     // Add the focused item (centered song/album/artist/genre/playlist) to the
-    // queue — the in-app Shift+A hotkey. `add_to_queue_message()` resolving to
-    // Some is the exact condition handle_add_to_queue uses to decide there's an
-    // item to enqueue, so gate the echo on it: report the centered row's name
-    // from the same pane-aware resolver (a Similar row under browser focus, a
-    // playlist or genre parent, a Harbour row), or null when nothing is
-    // selected (mirrors the "No item selected" toast). The actual enqueue and
-    // its toast run via the real handler.
+    // queue — the in-app Shift+A hotkey. The echo is `add_to_queue_name()`,
+    // which follows handle_add_to_queue's own routing: the Trawl mix under its
+    // modal, else the centered row's name from the same pane-aware resolver
+    // (a Similar row under browser focus, a playlist or genre parent, a
+    // Harbour row), or null when nothing is added (an empty crate, or the
+    // "No item selected" toast). The actual enqueue and its toast run via
+    // the real handler.
     "add-to-queue" => act      (|app: &mut Nokkvi| {
         if let Some(exited) =
             key_gate_instead(app, HotkeyAction::AddToQueue, json!({ "added": null }))
         {
             return Ok(exited);
         }
-        let will_add = app
-            .current_view_page()
-            .and_then(|page| page.add_to_queue_message())
-            .is_some();
-        let added = if will_add {
-            app.center_item().map(|item| item.into_name())
-        } else {
-            None
-        };
+        let added = app.add_to_queue_name();
         let task = app.handle_add_to_queue();
         Ok((task, json!({ "added": added })))
     });

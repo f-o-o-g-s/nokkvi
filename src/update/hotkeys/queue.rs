@@ -5,6 +5,10 @@ use tracing::{debug, info};
 
 use crate::{Nokkvi, View, app_message::Message};
 
+/// The name the IPC `add-to-queue` reply gives a Trawl mix added from the
+/// modal: a mix has no title of its own.
+pub(crate) const TRAWL_MIX_NAME: &str = "Trawl mix";
+
 impl Nokkvi {
     /// Shift+P — Trawl-only: save the mix as an ordinary playlist. The
     /// binding exists for the mix builder; with the modal closed (or covered
@@ -35,6 +39,19 @@ impl Nokkvi {
         }
         self.toast_warn("No item selected");
         Task::none()
+    }
+
+    /// What [`Self::handle_add_to_queue`] adds here, by name, for the IPC
+    /// `add-to-queue` reply. Follows the handler's routing: under Trawl the
+    /// mix ([`TRAWL_MIX_NAME`], `None` while the crate is empty, which only
+    /// warns), else the centered row when the page has one to enqueue.
+    pub(crate) fn add_to_queue_name(&self) -> Option<String> {
+        if self.modal_is_top(crate::update::modals::ActiveModal::Trawl) {
+            return (!self.trawl.mix.is_empty()).then(|| TRAWL_MIX_NAME.to_string());
+        }
+        self.current_view_page()
+            .and_then(|p| p.add_to_queue_message())?;
+        self.center_item().map(|item| item.into_name())
     }
 
     pub(crate) fn handle_remove_from_queue(&mut self) -> Task<Message> {
