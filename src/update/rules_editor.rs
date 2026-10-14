@@ -1252,26 +1252,29 @@ impl Nokkvi {
     /// an editable so keyboard-only authoring never needs a priming click.
     /// `Task::none()` in Cursor mode — the form owns keys via the intercept.
     fn rules_focus_task(&self) -> Task<Message> {
-        use iced::widget::operation::focus;
-
-        use crate::views::playlist_editor::rules_view::{
-            RULES_COMMENT_INPUT_ID, RULES_JSON_EDITOR_ID, RULES_NAME_INPUT_ID,
-            RULES_SUB_PICKER_INPUT_ID, RULES_VALUE_INPUT_ID,
+        use crate::{
+            views::playlist_editor::rules_view::{
+                RULES_COMMENT_INPUT_ID, RULES_JSON_EDITOR_ID, RULES_NAME_INPUT_ID,
+                RULES_SUB_PICKER_INPUT_ID, RULES_VALUE_INPUT_ID,
+            },
+            widgets::focus_text_input,
         };
         let Some(s) = self.rules_session() else {
             return Task::none();
         };
         if s.json.is_some() {
-            return focus(RULES_JSON_EDITOR_ID);
+            // A `text_editor`: its caret lives in the app's `Content`, so a
+            // rebuild keeps it where the user left it.
+            return iced::widget::operation::focus(RULES_JSON_EDITOR_ID);
         }
         if s.sub_picker.is_some() {
-            return focus(RULES_SUB_PICKER_INPUT_ID);
+            return focus_text_input(RULES_SUB_PICKER_INPUT_ID);
         }
         if s.mode == FormMode::Editing {
             return match s.editing.as_ref().map(|e| e.cell) {
-                Some(FormCell::Name) => focus(RULES_NAME_INPUT_ID),
-                Some(FormCell::Comment) => focus(RULES_COMMENT_INPUT_ID),
-                _ => focus(RULES_VALUE_INPUT_ID),
+                Some(FormCell::Name) => focus_text_input(RULES_NAME_INPUT_ID),
+                Some(FormCell::Comment) => focus_text_input(RULES_COMMENT_INPUT_ID),
+                _ => focus_text_input(RULES_VALUE_INPUT_ID),
             };
         }
         Task::none()

@@ -16,12 +16,13 @@ use iced::{
     event::Event,
     keyboard,
     keyboard::key,
-    widget::{
-        column, container, mouse_area, operation, responsive, row, scrollable, text, text_input,
-    },
+    widget::{column, container, mouse_area, responsive, row, scrollable, text, text_input},
 };
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::{focus_adjacent_text_input, focus_text_input},
+};
 
 // ============================================================================
 // Layout constants
@@ -252,7 +253,7 @@ impl LoginPage {
                 (Task::none(), LoginAction::None)
             }
             LoginMessage::FocusFirstField => {
-                (operation::focus(self.first_focus_id()), LoginAction::None)
+                (focus_text_input(self.first_focus_id()), LoginAction::None)
             }
             LoginMessage::LoginPressed => {
                 // Guard against double-submit: a second Enter/click while the
@@ -269,21 +270,21 @@ impl LoginPage {
                         "Server URL is required",
                         LoginField::ServerUrl,
                     ));
-                    return (operation::focus(LOGIN_SERVER_INPUT_ID), LoginAction::None);
+                    return (focus_text_input(LOGIN_SERVER_INPUT_ID), LoginAction::None);
                 }
                 if self.username.trim().is_empty() {
                     self.error = Some(LoginError::field(
                         "Username is required",
                         LoginField::Username,
                     ));
-                    return (operation::focus(LOGIN_USERNAME_INPUT_ID), LoginAction::None);
+                    return (focus_text_input(LOGIN_USERNAME_INPUT_ID), LoginAction::None);
                 }
                 if self.password.is_empty() {
                     self.error = Some(LoginError::field(
                         "Password is required",
                         LoginField::Password,
                     ));
-                    return (operation::focus(LOGIN_PASSWORD_INPUT_ID), LoginAction::None);
+                    return (focus_text_input(LOGIN_PASSWORD_INPUT_ID), LoginAction::None);
                 }
 
                 self.login_in_progress = true;
@@ -301,17 +302,10 @@ impl LoginPage {
                 key: keyboard::Key::Named(key::Named::Tab),
                 modifiers,
                 ..
-            })) => {
-                let shift = modifiers.shift();
-                (
-                    if shift {
-                        operation::focus_previous()
-                    } else {
-                        operation::focus_next()
-                    },
-                    LoginAction::None,
-                )
-            }
+            })) => (
+                focus_adjacent_text_input(!modifiers.shift()),
+                LoginAction::None,
+            ),
             LoginMessage::Event(_) => (Task::none(), LoginAction::None),
         }
     }

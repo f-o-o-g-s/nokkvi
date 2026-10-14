@@ -47,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - A love or rating the server refuses now shows an error toast instead of leaving only the "Starred" or "Rated" toast.
 - Turning lyrics off and back on from Settings or `config.toml` no longer brings back the previous song's lyrics.
 - A song without lyrics now shows the "No lyrics for this track" note over the cover instead of a blank overlay.
+- Focusing a text box from the keyboard (`/`, or Tab on the login screen) now puts the cursor after its text instead of before it.
 
 ### Removed
 

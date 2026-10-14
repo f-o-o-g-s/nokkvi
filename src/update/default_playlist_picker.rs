@@ -74,7 +74,7 @@ impl Nokkvi {
         self.default_playlist_picker =
             Some(DefaultPlaylistPickerState::new(&self.library.playlists));
 
-        let mut tasks = vec![iced::widget::operation::focus(PICKER_SEARCH_INPUT_ID)];
+        let mut tasks = vec![crate::widgets::focus_text_input(PICKER_SEARCH_INPUT_ID)];
 
         // Playlists are loaded lazily on first navigation to the Playlists
         // view. If the user opens the picker from elsewhere (e.g. the queue

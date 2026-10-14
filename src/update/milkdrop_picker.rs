@@ -244,5 +244,5 @@ impl Nokkvi {
 /// Keep typing in the search field: a click on a row's heart / eye or the
 /// Favorites chip takes focus off it, and Backspace would then step the list.
 fn refocus_search() -> Task<Message> {
-    iced::widget::operation::focus(MILKDROP_PICKER_SEARCH_INPUT_ID)
+    crate::widgets::focus_text_input(MILKDROP_PICKER_SEARCH_INPUT_ID)
 }

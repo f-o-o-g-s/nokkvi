@@ -1380,3 +1380,59 @@ fn queue_add_toasts_count_songs_with_the_right_plural() {
     assert_eq!(songs_inserted_text(1, 0), "Inserted 1 song at position 1");
     assert_eq!(songs_inserted_text(7, 4), "Inserted 7 songs at position 5");
 }
+
+// Text-input focus (widgets::focus_text_input)
+// ============================================================================
+
+/// iced 0.15 focuses a text input without moving its caret, and a field the
+/// view rebuilt with text in it (a view switch, a reopened login screen)
+/// starts with the caret at the front, so `/` and then typing landed before
+/// the query. Focus reaches a text input only through the `widgets` helpers,
+/// which also move the caret to the end. Two bare focus calls stay:
+/// `unfocus_all`'s sentinel (no input to put a caret in) and the rules
+/// editor's JSON `text_editor`, whose caret lives in app state and survives a
+/// rebuild.
+#[test]
+fn text_inputs_take_focus_with_the_caret_at_the_end() {
+    const NEEDLE: &str = concat!("operation::", "focus");
+    const ALLOWED: [&str; 2] = [
+        "operation::focus(\"__unfocus_all__\")",
+        "operation::focus(RULES_JSON_EDITOR_ID)",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = root.join("src");
+    // The helpers' home, and this file, whose allow-list quotes the calls.
+    let skipped = [src.join("widgets").join("mod.rs"), root.join(file!())];
+    let mut stray = Vec::new();
+    let mut dirs = vec![src];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") || skipped.contains(&path) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//")
+                    || !code.contains(NEEDLE)
+                    || ALLOWED.iter().any(|allowed| code.contains(allowed))
+                {
+                    continue;
+                }
+                stray.push(format!("{}:{}: {code}", path.display(), i + 1));
+            }
+        }
+    }
+    stray.sort();
+    assert!(
+        stray.is_empty(),
+        "focus text inputs through widgets::focus_text_input / \
+         focus_adjacent_text_input:\n{}",
+        stray.join("\n")
+    );
+}

@@ -42,7 +42,7 @@ impl Nokkvi {
                     search_input_focused: true,
                     ..TrawlModalState::default()
                 });
-                iced::widget::operation::focus(TRAWL_SEARCH_INPUT_ID)
+                crate::widgets::focus_text_input(TRAWL_SEARCH_INPUT_ID)
             }
             TrawlModalMessage::Close => {
                 self.trawl.modal = None;

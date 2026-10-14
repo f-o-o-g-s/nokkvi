@@ -320,7 +320,7 @@ impl Nokkvi {
         };
         // Focus the edit-bar name input so the user types the name at once —
         // no priming click (mirrors the smart-create focus seed).
-        let focus = iced::widget::operation::focus(
+        let focus = crate::widgets::focus_text_input(
             crate::views::playlist_editor::view::EDITOR_NAME_INPUT_ID,
         );
         // Size the editor's stored slot_count to its actual render (see the

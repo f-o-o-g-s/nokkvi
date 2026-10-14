@@ -72,6 +72,37 @@ pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageMessage, SlotLis
 pub(crate) use slot_list_view::{HoveredSlot, SlotListView};
 pub(crate) use volume_slider::{SliderVariant, volume_slider};
 
+/// Focus the text input `id` with its caret at the end of its text.
+///
+/// iced 0.15's `operation::focus` only focuses: the caret stays where the
+/// input's state has it, and an input the view rebuilt with text in it (after
+/// a view switch, on a fresh login screen) has it at the front, so `/` and
+/// then typing landed before the query. iced 0.13's focus moved the caret to
+/// the end. Every text-input focus goes through here or
+/// [`focus_adjacent_text_input`] (`text_inputs_take_focus_with_the_caret_at_the_end`
+/// scans for strays).
+pub(crate) fn focus_text_input<M: Send + 'static>(id: &'static str) -> iced::Task<M> {
+    iced::widget::operation::focus(id)
+        .chain(iced::widget::operation::text_input::move_cursor_to_end(id))
+}
+
+/// Tab (`forward`) or Shift+Tab to the next or previous focusable widget, with
+/// the caret at the end of its text (see [`focus_text_input`]). The landing
+/// input is found after the move, so it needs an id to get its caret moved.
+pub(crate) fn focus_adjacent_text_input<M: Send + 'static>(forward: bool) -> iced::Task<M> {
+    let step = if forward {
+        iced::widget::operation::focus_next()
+    } else {
+        iced::widget::operation::focus_previous()
+    };
+    step.chain(
+        iced::advanced::widget::operate(
+            iced::advanced::widget::operation::focusable::find_focused(),
+        )
+        .then(iced::widget::operation::text_input::move_cursor_to_end),
+    )
+}
+
 /// Format an integer with comma thousands separators ("13627" → "13,627").
 ///
 /// Used by the library selector popover for the dim right-column song

@@ -456,7 +456,7 @@ impl Nokkvi {
         {
             state.search_input_focused = true;
             state.tray_cursor = None;
-            return iced::widget::operation::focus(
+            return crate::widgets::focus_text_input(
                 crate::widgets::trawl_modal::TRAWL_SEARCH_INPUT_ID,
             );
         }
@@ -472,23 +472,23 @@ impl Nokkvi {
 
         if self.current_view == View::Settings && self.settings_page.theme_sub_list.is_some() {
             // Theme picker is open — focus its search field
-            return iced::widget::operation::focus(crate::views::settings::THEME_SEARCH_INPUT_ID);
+            return crate::widgets::focus_text_input(crate::views::settings::THEME_SEARCH_INPUT_ID);
         } else if self.current_view == View::Settings && self.settings_page.font_sub_list.is_some()
         {
             // Font picker is open — focus its search field
-            return iced::widget::operation::focus(crate::views::settings::FONT_SEARCH_INPUT_ID);
+            return crate::widgets::focus_text_input(crate::views::settings::FONT_SEARCH_INPUT_ID);
         } else if self.current_view == View::Settings {
             // Toggle search overlay and focus the input
             let toggle = Task::done(Message::Settings(views::SettingsMessage::ToggleSearch));
             let focus =
-                iced::widget::operation::focus(crate::views::settings::SETTINGS_SEARCH_INPUT_ID);
+                crate::widgets::focus_text_input(crate::views::settings::SETTINGS_SEARCH_INPUT_ID);
             return Task::batch([toggle, focus]);
         }
 
         if let Some(page) = self.current_view_page_mut() {
             let search_id = page.search_input_id();
             page.common_mut().search_input_focused = true;
-            iced::widget::operation::focus(search_id)
+            crate::widgets::focus_text_input(search_id)
         } else {
             Task::none()
         }

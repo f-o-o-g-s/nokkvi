@@ -260,10 +260,10 @@ impl Nokkvi {
             crate::views::SettingsAction::None => Task::none(),
             crate::views::SettingsAction::ExitSettings => self.handle_close_settings(),
             crate::views::SettingsAction::FocusHexInput => {
-                iced::widget::operation::focus(crate::views::settings::HEX_EDITOR_INPUT_ID)
+                crate::widgets::focus_text_input(crate::views::settings::HEX_EDITOR_INPUT_ID)
             }
             crate::views::SettingsAction::FocusSearch => {
-                iced::widget::operation::focus(crate::views::settings::SETTINGS_SEARCH_INPUT_ID)
+                crate::widgets::focus_text_input(crate::views::settings::SETTINGS_SEARCH_INPUT_ID)
             }
             // Config writes (theme/visualizer TOML values)
             crate::views::SettingsAction::WriteConfig {
