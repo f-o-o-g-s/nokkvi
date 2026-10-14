@@ -37,6 +37,7 @@ All notable changes to this project will be documented in this file.
 - Adding a Trawl mix to the queue now shows the new songs in an open Queue view right away, without switching views.
 - Re-evaluating the smart playlist preview no longer re-requests covers still on their way or ones the server has no art for.
 - Under the Trawl window, `nokkvi add-to-queue` now replies `Trawl mix` instead of naming the row behind the window.
+- `nokkvi selection` now names a centered playlist or genre row instead of replying null.
 
 ### Removed
 

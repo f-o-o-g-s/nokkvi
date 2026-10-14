@@ -11,6 +11,7 @@ mod star_rating;
 
 use iced::Task;
 use nokkvi_data::types::info_modal::InfoModalItem;
+pub(in crate::update) use star_rating::CenterItem;
 use tracing::{debug, trace};
 
 use crate::{

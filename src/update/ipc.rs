@@ -131,7 +131,9 @@
 //! | `nav-down`    | act       | `{"ok":true}`; move focused list down (async).‡|
 //! | `enter`       | act       | `{"ok":true}`; activate centered item. ‡       |
 //! | `selection`   | act       | `{view,kind,name,artist,rating,starred}` of    |
-//! |               |           | the centered item; `kind:null` if none. Read.  |
+//! |               |           | the centered item; `kind:null` if nothing      |
+//! |               |           | rateable (a playlist or genre parent keeps its |
+//! |               |           | `name`). Read.                                 |
 //! | `love`        | act       | `{"loved":bool}`; toggle star on playing track.|
 //! |               |           | `no_playing_track` error if nothing playing.   |
 //! | `rate`        | act_str   | `{"rating":0..5}`; arg `delta` `"+N"`/`"-N"`    |
@@ -387,23 +389,34 @@ fn view_name(view: View) -> &'static str {
 }
 
 /// JSON snapshot of the focused list's centered item for the `selection` verb.
-/// Reuses [`Nokkvi::get_center_item_info`] — the same resolver the rating/star
-/// hotkeys use — so it's accurate across every list view and follows the
-/// keyboard into the browsing pane: `view` is the list it read (`similar` for
-/// the Similar tab, which has no `View`). Always returns the same key set so
-/// scripts see a stable schema; a `null` `kind` means nothing rateable is
-/// centered (empty list, Settings, the playlist editor, a playlist or genre
-/// parent).
+/// Reuses [`Nokkvi::center_item`] — the same resolver the rating/star
+/// hotkeys and the `add-to-queue` reply use — so it's accurate across every
+/// list view and follows the keyboard into the browsing pane: `view` is the
+/// list it read (`similar` for the Similar tab, which has no `View`). Always
+/// returns the same key set so scripts see a stable schema; a `null` `kind`
+/// means nothing rateable is centered. A row nothing rates (a playlist or
+/// genre parent, a Harbour row) still carries its `name`; with nothing
+/// centered at all (empty list, Settings, the playlist editor) every value
+/// but `view` is null.
 fn selection_json(app: &Nokkvi) -> serde_json::Value {
+    use crate::update::hotkeys::CenterItem;
     let view = app.current_target_view().map_or("similar", view_name);
-    match app.get_center_item_info() {
-        Some(info) => json!({
+    match app.center_item() {
+        Some(CenterItem::Rateable(info)) => json!({
             "view": view,
             "kind": info.kind.to_string(),
             "name": info.name,
             "artist": info.artist,
             "rating": info.rating,
             "starred": info.starred,
+        }),
+        Some(CenterItem::Named(name)) => json!({
+            "view": view,
+            "kind": null,
+            "name": name,
+            "artist": null,
+            "rating": null,
+            "starred": null,
         }),
         None => json!({
             "view": view,

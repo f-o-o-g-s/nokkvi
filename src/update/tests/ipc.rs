@@ -291,6 +291,39 @@ fn add_to_queue_under_trawl_with_an_empty_crate_reports_null() {
 }
 
 #[test]
+fn selection_names_rows_nothing_rates_with_a_null_kind() {
+    // A playlist or genre parent has no star or rating, so `kind` stays
+    // null, but the row still has a name (add-to-queue names it too).
+    use crate::test_helpers::{make_genre, make_playlist, seed_genres};
+
+    let mut app = test_app();
+    app.current_view = crate::View::Playlists;
+    app.library
+        .playlists
+        .set_from_vec(vec![make_playlist("p1", "Road Trip")]);
+    let data = drive_on(&mut app, "selection").data.expect("a record");
+    assert_eq!(
+        data,
+        json!({
+            "view": "playlists",
+            "kind": null,
+            "name": "Road Trip",
+            "artist": null,
+            "rating": null,
+            "starred": null,
+        }),
+        "playlist"
+    );
+
+    let mut app = test_app();
+    app.current_view = crate::View::Genres;
+    seed_genres(&mut app, vec![make_genre("g1", "Ambient")]);
+    let data = drive_on(&mut app, "selection").data.expect("a record");
+    assert_eq!(data.get("kind"), Some(&json!(null)), "genre: {data}");
+    assert_eq!(data.get("name"), Some(&json!("Ambient")), "genre: {data}");
+}
+
+#[test]
 fn add_to_queue_on_a_list_that_adds_nothing_reports_null() {
     // Radios never enqueue (Shift+A toasts "No item selected"), so `null`
     // is the honest reply there.
