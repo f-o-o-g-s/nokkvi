@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use nokkvi_data::types::{
     lyrics::{LrcDocument, LrcLine, LyricsIndex},
-    player_settings::LyricsMode,
+    player_settings::{LyricsAlignment, LyricsMode},
 };
 
 use crate::{
@@ -1680,4 +1680,34 @@ fn auto_never_dissolves_a_sheet_toggle_lyrics_hid() {
         app.lyrics.outgoing.is_none(),
         "the hidden sheet must not fade back in over song 2"
     );
+}
+
+/// The Lyrics: Alignment row and a config.toml edit both land through a
+/// settings load; the layer the Queue cover and Theater Mode draw carries the
+/// new alignment from the next frame.
+#[test]
+fn a_settings_load_sets_the_alignment_the_lyrics_layer_draws_with() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000]));
+    app.playback.playing = true;
+    assert_eq!(
+        app.queue_lyrics_panel_data().expect("layer up").align,
+        LyricsAlignment::Left,
+        "Left until the setting says otherwise"
+    );
+
+    for align in [
+        LyricsAlignment::Center,
+        LyricsAlignment::Right,
+        LyricsAlignment::Left,
+    ] {
+        let mut settings = app.settings.clone();
+        settings.lyrics_alignment = align;
+        let _ = app.handle_player_settings_loaded(settings);
+        assert_eq!(
+            app.queue_lyrics_panel_data().expect("layer up").align,
+            align
+        );
+    }
 }

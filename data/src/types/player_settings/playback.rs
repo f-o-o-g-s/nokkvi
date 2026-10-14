@@ -458,6 +458,25 @@ impl<'de> Deserialize<'de> for LyricsMode {
     }
 }
 
+define_labeled_enum! {
+    /// Where lyric lines sit across the lyrics panel (the Queue cover and
+    /// Theater Mode): against the left edge, centered, or against the right
+    /// edge. A line that wraps keeps the same edge on every row.
+    ///
+    /// Serializes to lowercase strings for redb storage and config.toml.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum LyricsAlignment {
+        /// Every line starts at the left inset (how lyrics always drew).
+        #[default]
+        Left { label: "Left", wire: "left" },
+        /// Every line is centered across the panel.
+        Center { label: "Center", wire: "center" },
+        /// Every line ends at the right inset.
+        Right { label: "Right", wire: "right" },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,5 +785,22 @@ mod tests {
         assert_eq!(w.bit_perfect, BitPerfectMode::Strict);
         let w: BitPerfectWrapper = toml::from_str(r#"bit_perfect = "relaxed""#).unwrap();
         assert_eq!(w.bit_perfect, BitPerfectMode::Relaxed);
+    }
+
+    #[test]
+    fn lyrics_alignment_wire_and_labels() {
+        for (mode, wire, label) in [
+            (LyricsAlignment::Left, "left", "Left"),
+            (LyricsAlignment::Center, "center", "Center"),
+            (LyricsAlignment::Right, "right", "Right"),
+        ] {
+            assert_eq!(serde_json::to_string(&mode).unwrap(), format!("\"{wire}\""));
+            assert_eq!(mode.to_string(), wire, "Display is the wire string");
+            assert_eq!(LyricsAlignment::from_label(label), mode);
+            let back: LyricsAlignment = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+            assert_eq!(back, mode);
+        }
+        assert_eq!(LyricsAlignment::LABELS, ["Left", "Center", "Right"]);
+        assert_eq!(LyricsAlignment::default(), LyricsAlignment::Left);
     }
 }

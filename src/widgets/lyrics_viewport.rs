@@ -35,7 +35,7 @@ use iced::{
 };
 use nokkvi_data::types::{
     lyrics::{LrcLine, WordCursor, WordSpan},
-    player_settings::LyricsWordHighlight,
+    player_settings::{LyricsAlignment, LyricsWordHighlight},
 };
 
 use crate::theme;
@@ -247,6 +247,8 @@ pub(crate) struct LyricsPanelData<'a> {
     pub clock_ms: u32,
     /// How the active line lights its words when it carries word timing.
     pub word_highlight: LyricsWordHighlight,
+    /// Where each line sits across the panel (the Lyrics: Alignment setting).
+    pub align: LyricsAlignment,
 }
 
 /// The lyric text scale for a panel of `width` × `height`: 1.0 up to a
@@ -277,14 +279,13 @@ pub(crate) struct DissolveView<'a> {
 #[derive(Default)]
 struct State {
     paragraphs: Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>,
-    /// `(content identity, shaped width, text scale × 100)` the cache was
-    /// built for.
-    cache_key: (u64, u32, u32),
+    /// The doc, width, scale and alignment the cache was shaped for.
+    cache_key: ShapeKey,
     /// Uniform slot height for this document (max wrapped rows, clamped).
     slot_height: f32,
     /// Second cache for the dissolving outgoing sheet (empty when idle).
     out_paragraphs: Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>,
-    out_cache_key: (u64, u32, u32),
+    out_cache_key: ShapeKey,
     out_slot_height: f32,
     /// The active line's measured words for the word-level highlight; `None`
     /// while the highlight is off or the active line has no word timing.
@@ -293,6 +294,32 @@ struct State {
     /// the renderer holds only a weak reference to a paragraph until the
     /// frame draws, so one built inside `draw` is dropped before it paints.
     empty_paragraph: Plain<<iced::Renderer as TextRenderer>::Paragraph>,
+}
+
+/// What a column's shaping depends on: `(content identity, shaped width,
+/// text scale × 100, alignment)`. The alignment is part of it because a
+/// wrapped line's rows take it inside the paragraph.
+type ShapeKey = (u64, u32, u32, LyricsAlignment);
+
+/// Where a shaped line of `width` starts across `bounds`, kept `h_pad` in from
+/// the edge it is aligned to (pure). The renderer draws a paragraph from the
+/// top-left it is given and aligns only the rows of a wrapped line within
+/// their widest row, so the line itself is placed here.
+fn line_x(bounds: Rectangle, h_pad: f32, width: f32, align: LyricsAlignment) -> f32 {
+    match align {
+        LyricsAlignment::Left => bounds.x + h_pad,
+        LyricsAlignment::Center => bounds.x + (bounds.width - width) / 2.0,
+        LyricsAlignment::Right => bounds.x + bounds.width - h_pad - width,
+    }
+}
+
+/// The paragraph alignment that lines a wrapped line's rows up like the line.
+fn text_alignment(align: LyricsAlignment) -> advanced_text::Alignment {
+    match align {
+        LyricsAlignment::Left => advanced_text::Alignment::Left,
+        LyricsAlignment::Center => advanced_text::Alignment::Center,
+        LyricsAlignment::Right => advanced_text::Alignment::Right,
+    }
 }
 
 /// One word's footprint on one wrapped row of its line, in logical px from the
@@ -324,7 +351,7 @@ struct MeasuredWords {
 struct ActiveWordLayout {
     line: usize,
     /// The shaping cache key the boxes were measured against.
-    key: (u64, u32, u32),
+    key: ShapeKey,
     /// [`words_hash`] of the line's word timing the boxes were cut for.
     words_key: u64,
     measured: MeasuredWords,
@@ -554,6 +581,7 @@ fn shape_lines(
     text_width: f32,
     scale_factor: Option<f32>,
     text_scale: f32,
+    align: LyricsAlignment,
 ) -> (Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>, f32) {
     let line_height = LINE_HEIGHT * text_scale;
     let mut paragraphs = Vec::with_capacity(lines.len());
@@ -565,7 +593,7 @@ fn shape_lines(
             size: Pixels(LYRIC_FONT_SIZE * text_scale),
             line_height: advanced_text::LineHeight::Absolute(Pixels(line_height)),
             font: theme::ui_font(),
-            align_x: advanced_text::Alignment::Center,
+            align_x: text_alignment(align),
             align_y: iced::alignment::Vertical::Top,
             shaping: advanced_text::Shaping::Advanced,
             wrapping: Wrapping::Word,
@@ -671,6 +699,7 @@ fn draw_column(
     accent: Color,
     base: Color,
     text_scale: f32,
+    align: LyricsAlignment,
     words: Option<&WordHighlightFrame<'_>>,
 ) {
     let center_y = bounds.y + bounds.height / 2.0;
@@ -718,7 +747,12 @@ fn draw_column(
             continue;
         };
         let pos = iced::Point::new(
-            bounds.x + H_PAD * text_scale,
+            line_x(
+                bounds,
+                H_PAD * text_scale,
+                paragraph.min_bounds().width,
+                align,
+            ),
             slot_top + SLOT_PAD * text_scale,
         );
         renderer.with_translation(Vector::new(0.0, 0.0), |renderer| {
@@ -858,11 +892,17 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         let text_width = (bounds.width - 2.0 * H_PAD * text_scale).max(1.0);
         let scale = renderer.hint_factor();
         let scale_key = (text_scale * 100.0).round() as u32;
-        let key = (doc_hash(self.data.lines), text_width as u32, scale_key);
+        let align = self.data.align;
+        let key = (
+            doc_hash(self.data.lines),
+            text_width as u32,
+            scale_key,
+            align,
+        );
         if state.cache_key != key {
             state.cache_key = key;
             let (paragraphs, slot_height) =
-                shape_lines(self.data.lines, text_width, scale, text_scale);
+                shape_lines(self.data.lines, text_width, scale, text_scale, align);
             state.paragraphs = paragraphs;
             state.slot_height = slot_height;
         }
@@ -908,7 +948,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 size: Pixels((LYRIC_FONT_SIZE - 2.0) * text_scale),
                 line_height: advanced_text::LineHeight::Absolute(Pixels(LINE_HEIGHT * text_scale)),
                 font: theme::ui_font(),
-                align_x: advanced_text::Alignment::Center,
+                align_x: text_alignment(align),
                 align_y: iced::alignment::Vertical::Top,
                 shaping: advanced_text::Shaping::Advanced,
                 wrapping: Wrapping::Word,
@@ -920,17 +960,22 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // Dissolving outgoing sheet (second cache; cleared when idle so a long
         // doc doesn't linger in memory after its fade).
         if let Some(dissolve) = &self.data.dissolve {
-            let out_key = (doc_hash(dissolve.lines), text_width as u32, scale_key);
+            let out_key = (
+                doc_hash(dissolve.lines),
+                text_width as u32,
+                scale_key,
+                align,
+            );
             if state.out_cache_key != out_key {
                 state.out_cache_key = out_key;
                 let (paragraphs, slot_height) =
-                    shape_lines(dissolve.lines, text_width, scale, text_scale);
+                    shape_lines(dissolve.lines, text_width, scale, text_scale, align);
                 state.out_paragraphs = paragraphs;
                 state.out_slot_height = slot_height;
             }
         } else if !state.out_paragraphs.is_empty() {
             state.out_paragraphs = Vec::new();
-            state.out_cache_key = (0, 0, 0);
+            state.out_cache_key = ShapeKey::default();
         }
 
         tree.size = bounds;
@@ -959,9 +1004,11 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
             // from the paragraph `layout` shaped and kept.
             if self.data.empty_message.is_some() {
                 let paragraph = state.empty_paragraph.raw();
-                let text_h = paragraph.min_bounds().height;
-                let pos =
-                    iced::Point::new(bounds.x + h_pad, bounds.y + (bounds.height - text_h) / 2.0);
+                let size = paragraph.min_bounds();
+                let pos = iced::Point::new(
+                    line_x(bounds, h_pad, size.width, self.data.align),
+                    bounds.y + (bounds.height - size.height) / 2.0,
+                );
                 let color = Color {
                     a: 0.45,
                     ..theme::fg0()
@@ -1030,6 +1077,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                     accent,
                     base,
                     text_scale,
+                    self.data.align,
                     None,
                 );
             }
@@ -1047,6 +1095,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 accent,
                 base,
                 text_scale,
+                self.data.align,
                 word_frame.as_ref(),
             );
         });
@@ -1175,6 +1224,29 @@ pub(crate) fn lyrics_text_layer<'a, Message: 'a + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_x_puts_a_line_against_its_edge_or_in_the_middle() {
+        let bounds = Rectangle {
+            x: 100.0,
+            y: 0.0,
+            width: 400.0,
+            height: 300.0,
+        };
+        let pad = 18.0;
+        assert_eq!(line_x(bounds, pad, 120.0, LyricsAlignment::Left), 118.0);
+        assert_eq!(line_x(bounds, pad, 120.0, LyricsAlignment::Center), 240.0);
+        assert_eq!(line_x(bounds, pad, 120.0, LyricsAlignment::Right), 362.0);
+        // A centered line sits mid-panel whatever its width, and the left and
+        // right lines mirror each other across the panel.
+        for width in [10.0, 200.0, 364.0] {
+            let center = line_x(bounds, pad, width, LyricsAlignment::Center);
+            assert_eq!(center + width / 2.0, bounds.center_x(), "width {width}");
+            let left = line_x(bounds, pad, width, LyricsAlignment::Left);
+            let right = line_x(bounds, pad, width, LyricsAlignment::Right);
+            assert_eq!(left - bounds.x, bounds.x + bounds.width - (right + width));
+        }
+    }
 
     #[test]
     fn panel_fit_scale_grows_with_the_shorter_side_and_caps() {

@@ -12,10 +12,10 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SeekbarStyle, SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay,
-            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            LibraryPageSize, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
+            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StripClickAction, TheaterControls,
+            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
             deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
             deserialize_verbose_config_with_bool_compat,
         },
@@ -166,6 +166,8 @@ pub struct TomlSettings {
     pub lyrics_fetch_online: bool,
     pub lyrics_backdrop_blur: LyricsBackdropBlur,
     pub lyrics_word_highlight: LyricsWordHighlight,
+    /// Where lyric lines sit across the lyrics panel (left / center / right).
+    pub lyrics_alignment: LyricsAlignment,
     #[serde(deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
     pub bit_perfect: BitPerfectMode,
     pub crossfade_duration_secs: u32,
@@ -394,6 +396,7 @@ impl Default for TomlSettings {
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: LyricsBackdropBlur::default(),
             lyrics_word_highlight: LyricsWordHighlight::default(),
+            lyrics_alignment: LyricsAlignment::Left,
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: 7,
             crossfade_curve: CrossfadeCurve::default(),

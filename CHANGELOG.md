@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - The Lyrics setting gains Auto, which shows lyrics over the Queue cover and in Theater Mode only for songs that have them.
+- A new Playback setting, Lyrics: Alignment, sets lyric lines against the left edge, centered, or against the right edge.
 
 ### Changed
 
@@ -14,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Find Similar from another view now plays the view-change sound.
 - A song the server transcodes on the fly now opens with two requests to the server instead of four.
 - A song the server serves as a file now opens with one request fewer to the server.
+- A lyric line that wraps now starts its second row at the same edge as its first, instead of centering it.
 
 ### Fixed
 

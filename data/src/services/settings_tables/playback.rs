@@ -25,10 +25,11 @@ use crate::{
             BitPerfectMode, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
             CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS,
             CROSSFADE_OFFSET_MIN_SECS, CrossfadeCurve, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
-            FadeOnSkip, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NormalizationLevel,
-            RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN, RatingReminderTrigger,
-            RoundedMode, SCROBBLE_THRESHOLD_PCT_MAX, SCROBBLE_THRESHOLD_PCT_MIN,
-            TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN, VolumeNormalizationMode,
+            FadeOnSkip, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
+            NormalizationLevel, RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN,
+            RatingReminderTrigger, RoundedMode, SCROBBLE_THRESHOLD_PCT_MAX,
+            SCROBBLE_THRESHOLD_PCT_MIN, TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN,
+            VolumeNormalizationMode,
         },
         settings_data::PlaybackSettingsData,
     },
@@ -150,6 +151,26 @@ define_settings! {
                 default: "Sweep",
                 options: LyricsWordHighlight::LABELS,
                 read_field: |d| d.lyrics_word_highlight.as_ref(),
+            },
+        },
+        LyricsAlignmentKey {
+            key: "general.lyrics_alignment",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_lyrics_alignment(LyricsAlignment::from_label(&v)),
+            toml_apply: |ts, p| p.lyrics_alignment = ts.lyrics_alignment,
+            read: |src, out| out.lyrics_alignment = src.lyrics_alignment,
+            write: |ps, ts| ts.lyrics_alignment = ps.lyrics_alignment,
+            ui_meta: {
+                label: "Lyrics: Alignment",
+                category: "Playback",
+                subtitle: Some(
+                    "Where lyric lines sit on the Queue cover and in Theater Mode. Left starts \
+                     every line at the left edge, Center centers each line, Right ends every \
+                     line at the right edge. A line that wraps keeps the same edge on each row.",
+                ),
+                default: "Left",
+                options: LyricsAlignment::LABELS,
+                read_field: |d| d.lyrics_alignment.as_ref(),
             },
         },
         BitPerfect {
@@ -959,6 +980,7 @@ mod tests {
             lyrics_fetch_online: true,
             lyrics_backdrop_blur: "Off".into(),
             lyrics_word_highlight: "Sweep".into(),
+            lyrics_alignment: "Left".into(),
             bit_perfect: "Off".into(),
             crossfade_duration_secs: 5,
             crossfade_curve: "Equal Power".into(),
@@ -1001,10 +1023,11 @@ mod tests {
         }
     }
 
-    /// 30 entries get ui_meta: 8 unconditional Playback rows (crossfade
+    /// 36 entries get ui_meta: 8 unconditional Playback rows (crossfade
     /// enable, bit-perfect, crossfade duration, crossfade curve, minimum
     /// track length, keep-gapless-albums, rewind-on-previous, volume
-    /// normalization), 11 Fading rows (smooth starts, fade-on-pause + its
+    /// normalization), 5 Lyrics rows (mode, online fetch, cover blur, word
+    /// highlight, alignment), 11 Fading rows (smooth starts, fade-on-pause + its
     /// duration, fade-on-stop + its duration, fade-on-skip + its duration —
     /// the duration rows are emitted here unconditionally but the UI builder
     /// only splices each in when its enable/mode is on — plus
@@ -1023,7 +1046,7 @@ mod tests {
     fn build_playback_tab_settings_items_emits_the_pinned_row_count() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 35);
+        assert_eq!(entries.len(), 36);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -1872,6 +1895,7 @@ mod tests {
             lyrics_fetch_online: live.lyrics_fetch_online,
             lyrics_backdrop_blur: live.lyrics_backdrop_blur.as_label().into(),
             lyrics_word_highlight: live.lyrics_word_highlight.as_label().into(),
+            lyrics_alignment: live.lyrics_alignment.as_label().into(),
             bit_perfect: live.bit_perfect.as_label().into(),
             crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
             crossfade_curve: live.crossfade_curve.as_label().into(),

@@ -7,12 +7,12 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator, TheaterControls,
-            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
-            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
-            deserialize_verbose_config_with_bool_compat,
+            LibraryPageSize, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
+            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator,
+            TheaterControls, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -143,6 +143,9 @@ crate::player_settings_schema! {
     /// timing (default: sweep).
     #[serde(default)]
     same lyrics_word_highlight: LyricsWordHighlight = LyricsWordHighlight::default(),
+    /// Where lyric lines sit across the lyrics panel (default: Left).
+    #[serde(default)]
+    same lyrics_alignment: LyricsAlignment = LyricsAlignment::Left,
     /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
     /// play at each track's native sample rate with the DSP chain (EQ / software
     /// volume / limiter) bypassed, letting PipeWire switch the device clock.

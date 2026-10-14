@@ -124,6 +124,7 @@ impl Nokkvi {
             lyrics_fetch_online: self.settings.lyrics_fetch_online,
             lyrics_backdrop_blur: self.settings.lyrics_backdrop_blur.as_label().into(),
             lyrics_word_highlight: self.settings.lyrics_word_highlight.as_label().into(),
+            lyrics_alignment: self.settings.lyrics_alignment.as_label().into(),
             bit_perfect: self.settings.bit_perfect.as_label().into(),
             crossfade_duration_secs: i64::from(self.settings.crossfade_duration_secs),
             crossfade_curve: self.settings.crossfade_curve.as_label().into(),

@@ -75,6 +75,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         macro_rows.take("general.lyrics_fetch_online"),
         macro_rows.take("general.lyrics_backdrop_blur"),
         macro_rows.take("general.lyrics_word_highlight"),
+        macro_rows.take("general.lyrics_alignment"),
         macro_rows.take("general.crossfade_duration"),
         macro_rows.take("general.crossfade_curve"),
         macro_rows.take("general.crossfade_min_track"),

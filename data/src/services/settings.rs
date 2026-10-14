@@ -11,9 +11,10 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            EnterBehavior, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
-            StripClickAction, TheaterControls, TrackInfoDisplay, VolumeNormalizationMode,
+            EnterBehavior, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
+            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay,
+            VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -1234,6 +1235,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_lyrics_alignment(&mut self, align: LyricsAlignment) -> Result<()> {
+        self.settings.player.lyrics_alignment = align;
+        self.save()
+    }
+
     /// Whether the TOML section writers should emit every key (including
     /// unchanged defaults) rather than pruning to the non-default set. True
     /// only for `VerboseConfig::On`; both `Off` and `Clean` write sparse.
@@ -1547,6 +1553,7 @@ mod sentinel_roundtrip_tests {
             lyrics_fetch_online: false,                       // default true
             lyrics_backdrop_blur: LyricsBackdropBlur::Light,  // default Off
             lyrics_word_highlight: LyricsWordHighlight::Word, // default Sweep
+            lyrics_alignment: LyricsAlignment::Right,         // default Left
             bit_perfect: BitPerfectMode::Strict,              // default Off
             seek_step_secs: 17,                               // default 5
             crossfade_duration_secs: 9,                       // default 5

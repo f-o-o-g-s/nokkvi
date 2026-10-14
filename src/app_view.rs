@@ -2163,6 +2163,7 @@ impl Nokkvi {
                 dissolve,
                 clock_ms: self.lyrics.clock_ms,
                 word_highlight: self.settings.lyrics_word_highlight,
+                align: self.settings.lyrics_alignment,
             }
         })
     }
