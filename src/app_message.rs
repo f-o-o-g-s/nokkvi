@@ -552,6 +552,15 @@ pub enum ArtworkMessage {
         iced::advanced::image::Id,
         Option<image::Handle>,
     ),
+    /// The renderer's answer to keeping one of the lyrics backdrop's covers on
+    /// the GPU: `cover` is the frosted cover itself or its sharp source, and
+    /// `frosted` names the cached blur it was asked for. `answer` is `None`
+    /// when no window could take the request.
+    LyricsCoverHeld {
+        frosted: iced::advanced::image::Id,
+        cover: iced::advanced::image::Id,
+        answer: Option<Result<image::Allocation, image::Error>>,
+    },
 
     /// Result of the cover-color job for the playing `owner` (album id, or
     /// `radio:<station id>`): the palette read from artwork handle `source`,

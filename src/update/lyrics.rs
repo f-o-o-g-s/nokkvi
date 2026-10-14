@@ -478,7 +478,8 @@ impl Nokkvi {
     /// pending job nor the current track — is dropped rather than stored, so
     /// a slow job from a skipped-past track can't overwrite a fresher cache
     /// entry (the view resolver additionally re-checks `(album, source,
-    /// level)` on read).
+    /// level)` on read). A stored frost goes on screen only once the renderer
+    /// has answered `hold_lyrics_covers` for it.
     pub(crate) fn handle_lyrics_blur_ready(
         &mut self,
         album_id: String,
@@ -491,13 +492,101 @@ impl Nokkvi {
         if matches_pending {
             self.artwork.lyrics_blur_pending = None;
         }
-        if matches_pending || self.current_queue_song_album_id() == Some(album_id.as_str()) {
-            self.artwork.lyrics_blurred = Some(crate::state::LyricsBlurredCover {
-                album_id,
-                source_id,
-                level,
-                handle,
-            });
+        if !matches_pending && self.current_queue_song_album_id() != Some(album_id.as_str()) {
+            return Task::none();
+        }
+        let hold = handle.as_ref().map_or_else(Task::none, |frosted| {
+            self.hold_lyrics_covers(&album_id, source_id, frosted)
+        });
+        self.artwork.lyrics_blurred = Some(crate::state::LyricsBlurredCover {
+            album_id,
+            source_id,
+            level,
+            handle,
+            frosted_ready: false,
+            allocations: Vec::new(),
+        });
+        hold
+    }
+
+    /// The covers a lyrics backdrop swaps between: the frost, and the sharp
+    /// cover it was blurred from while that is still the album's cached large
+    /// art (a refreshed cover is not the one the frost stands in for).
+    pub(crate) fn lyrics_covers_to_hold(
+        &self,
+        album_id: &str,
+        source_id: iced::advanced::image::Id,
+        frosted: &iced::widget::image::Handle,
+    ) -> Vec<iced::widget::image::Handle> {
+        let sharp = self
+            .artwork
+            .large_artwork
+            .snapshot
+            .get(album_id)
+            .filter(|sharp| sharp.id() == source_id);
+        std::iter::once(frosted).chain(sharp).cloned().collect()
+    }
+
+    /// Ask the renderer to keep the frost and its sharp source on the GPU
+    /// (see `LyricsBlurredCover::frosted_ready` and `allocations`), one
+    /// request per cover so the frost never waits on the sharp one. Each
+    /// answer always arrives: `collect` yields when the request ends, empty
+    /// when no window could take it.
+    fn hold_lyrics_covers(
+        &self,
+        album_id: &str,
+        source_id: iced::advanced::image::Id,
+        frosted: &iced::widget::image::Handle,
+    ) -> Task<Message> {
+        let frosted_id = frosted.id();
+        Task::batch(
+            self.lyrics_covers_to_hold(album_id, source_id, frosted)
+                .into_iter()
+                .map(|cover| {
+                    let cover_id = cover.id();
+                    iced::widget::image::allocate(cover)
+                        .collect()
+                        .map(move |answers| {
+                            Message::Artwork(crate::app_message::ArtworkMessage::LyricsCoverHeld {
+                                frosted: frosted_id,
+                                cover: cover_id,
+                                answer: answers.into_iter().next(),
+                            })
+                        })
+                }),
+        )
+    }
+
+    /// Store the renderer's answer to `hold_lyrics_covers` on the cached blur
+    /// it was asked for: keep what it granted, and let the frost on screen
+    /// once its own answer is in. An answer for a blur that has since been
+    /// replaced is dropped, and its allocation with it.
+    pub(crate) fn handle_lyrics_cover_held(
+        &mut self,
+        frosted: iced::advanced::image::Id,
+        cover: iced::advanced::image::Id,
+        answer: Option<Result<iced::widget::image::Allocation, iced::widget::image::Error>>,
+    ) -> Task<Message> {
+        let Some(cached) = self.artwork.lyrics_blurred.as_mut().filter(|cached| {
+            cached
+                .handle
+                .as_ref()
+                .is_some_and(|handle| handle.id() == frosted)
+        }) else {
+            return Task::none();
+        };
+        match answer {
+            Some(Ok(allocation)) => cached.allocations.push(allocation),
+            Some(Err(error)) => {
+                tracing::debug!(
+                    ?error,
+                    "lyrics backdrop: the renderer could not hold a cover"
+                );
+            }
+            None => {}
+        }
+        if cover == frosted {
+            cached.frosted_ready = true;
         }
         Task::none()
     }

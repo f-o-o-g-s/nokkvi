@@ -48,6 +48,7 @@ All notable changes to this project will be documented in this file.
 - Turning lyrics off and back on from Settings or `config.toml` no longer brings back the previous song's lyrics.
 - A song without lyrics now shows the "No lyrics for this track" note over the cover instead of a blank overlay.
 - Focusing a text box from the keyboard (`/`, or Tab on the login screen) now puts the cursor after its text instead of before it.
+- With Cover Blur on, the cover no longer blinks blank for a frame when lyrics show or hide.
 
 ### Removed
 

@@ -323,6 +323,19 @@ pub struct LyricsBlurredCover {
     pub level: LyricsBackdropBlur,
     /// `None` = the source failed to decode; negative-cached.
     pub handle: Option<image::Handle>,
+    /// Whether the renderer has answered the request to keep `handle` on the
+    /// GPU (`hold_lyrics_covers`). The view swaps to the frosted cover only
+    /// from then on, so it draws on the very next frame: iced 0.15 decodes and
+    /// uploads a picture off-thread the first time it is drawn and draws
+    /// nothing until then, which blanked the cover for a frame at each swap.
+    /// Also set when no window could take the request, so the frost still
+    /// shows.
+    pub frosted_ready: bool,
+    /// What the renderer granted for the frosted cover and its sharp source:
+    /// held, they stay on the GPU while this entry lives (iced frees a
+    /// picture that is neither drawn nor allocated), so swapping between them
+    /// either way never waits on a fresh decode.
+    pub allocations: Vec<image::Allocation>,
 }
 
 impl Default for ArtworkState {

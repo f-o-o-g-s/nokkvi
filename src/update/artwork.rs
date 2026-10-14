@@ -63,6 +63,11 @@ impl Nokkvi {
             ArtworkMessage::LyricsBlurReady(album_id, level, source_id, handle) => {
                 self.handle_lyrics_blur_ready(album_id, level, source_id, handle)
             }
+            ArtworkMessage::LyricsCoverHeld {
+                frosted,
+                cover,
+                answer,
+            } => self.handle_lyrics_cover_held(frosted, cover, answer),
             ArtworkMessage::AccentExtracted {
                 owner,
                 source,

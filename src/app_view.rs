@@ -1731,7 +1731,9 @@ impl Nokkvi {
     /// sharp playing-track art: lyrics showing, a non-`Off` blur level, and a
     /// cached blur matching the live `(album, source handle, level)` — the
     /// source-id check keeps a stale blur of a refreshed cover from
-    /// displaying (sharp fallback until the fresh blur lands). The view
+    /// displaying (sharp fallback until the fresh blur lands) — that the
+    /// renderer has answered for (`frosted_ready`), so the swap draws on the
+    /// next frame instead of leaving the cover empty for one. The view
     /// applies it only while the panel locks to the playing track (the blur is
     /// keyed to the PLAYING track's cover; a centered-row panel stays sharp).
     pub(crate) fn lyrics_blurred_cover_for_view(&self) -> Option<&iced::widget::image::Handle> {
@@ -1747,7 +1749,10 @@ impl Nokkvi {
         let album_id = self.current_queue_song_album_id()?;
         let source = self.artwork.large_artwork.snapshot.get(album_id)?;
         let cached = self.artwork.lyrics_blurred.as_ref()?;
-        (cached.album_id == album_id && cached.source_id == source.id() && cached.level == level)
+        (cached.album_id == album_id
+            && cached.source_id == source.id()
+            && cached.level == level
+            && cached.frosted_ready)
             .then_some(cached.handle.as_ref())
             .flatten()
     }

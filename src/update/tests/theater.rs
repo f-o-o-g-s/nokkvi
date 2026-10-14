@@ -483,6 +483,8 @@ fn stopped_queue_shows_sharp_cursor_cover_without_blur() {
         source_id: sharp_id,
         level: LyricsBackdropBlur::Medium,
         handle: Some(byte_handle(9)),
+        frosted_ready: true,
+        allocations: Vec::new(),
     });
     // Stopped: the lyrics layer is transport-gated off, so the frost must not
     // show even though a matching blur is cached.

@@ -1258,6 +1258,8 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
         source_id,
         level: LyricsBackdropBlur::Medium,
         handle: Some(blurred),
+        frosted_ready: true,
+        allocations: Vec::new(),
     });
 
     assert!(
@@ -1304,6 +1306,107 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
     // Lyrics toggled off: the cover goes back to sharp.
     app.settings.lyrics_mode = LyricsMode::Off;
     assert!(app.lyrics_blurred_cover_for_view().is_none());
+}
+
+/// A playing track (`s1` on `album_s1`) with lyrics up and Medium cover blur,
+/// its sharp large cover cached. Returns the app and that sharp cover.
+fn frost_app() -> (crate::Nokkvi, iced::widget::image::Handle) {
+    use nokkvi_data::types::player_settings::LyricsBackdropBlur;
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.settings.lyrics_mode = LyricsMode::On;
+    app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
+    let sharp = iced::widget::image::Handle::from_rgba(1, 1, vec![9, 9, 9, 255]);
+    app.artwork
+        .large_artwork
+        .put("album_s1".to_string(), sharp.clone());
+    (app, sharp)
+}
+
+fn frost_id(app: &crate::Nokkvi) -> Option<iced::advanced::image::Id> {
+    app.lyrics_blurred_cover_for_view()
+        .map(iced::widget::image::Handle::id)
+}
+
+/// iced 0.15 draws nothing for a picture it has not uploaded yet, so a fresh
+/// frost stays off screen (the sharp cover shows) until the renderer has
+/// answered the request to hold it; the sharp cover's answer alone does not
+/// bring it in, and an answer from no window at all still does.
+#[test]
+fn the_frost_shows_once_the_renderer_has_answered_for_it() {
+    use nokkvi_data::types::player_settings::LyricsBackdropBlur;
+    let (mut app, sharp) = frost_app();
+    let frosted = iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+    let _ = app.handle_lyrics_blur_ready(
+        "album_s1".to_string(),
+        LyricsBackdropBlur::Medium,
+        sharp.id(),
+        Some(frosted.clone()),
+    );
+    assert_eq!(frost_id(&app), None, "sharp until the frost is held");
+
+    let _ = app.handle_lyrics_cover_held(frosted.id(), sharp.id(), None);
+    assert_eq!(
+        frost_id(&app),
+        None,
+        "the sharp cover's answer is not the frost's"
+    );
+
+    let _ = app.handle_lyrics_cover_held(frosted.id(), frosted.id(), None);
+    assert_eq!(frost_id(&app), Some(frosted.id()));
+}
+
+/// An answer that lands after its blur was replaced is dropped: it must not
+/// bring in a frost the renderer was never asked to hold.
+#[test]
+fn a_hold_answer_for_a_replaced_frost_is_dropped() {
+    use nokkvi_data::types::player_settings::LyricsBackdropBlur;
+    let (mut app, sharp) = frost_app();
+    let old = iced::widget::image::Handle::from_rgba(1, 1, vec![1, 1, 1, 255]);
+    let new = iced::widget::image::Handle::from_rgba(1, 1, vec![2, 2, 2, 255]);
+    for frosted in [&old, &new] {
+        let _ = app.handle_lyrics_blur_ready(
+            "album_s1".to_string(),
+            LyricsBackdropBlur::Medium,
+            sharp.id(),
+            Some(frosted.clone()),
+        );
+    }
+
+    let _ = app.handle_lyrics_cover_held(old.id(), old.id(), None);
+    assert_eq!(frost_id(&app), None, "the old frost's answer");
+    let _ = app.handle_lyrics_cover_held(new.id(), new.id(), None);
+    assert_eq!(frost_id(&app), Some(new.id()));
+}
+
+/// The hold covers both pictures the backdrop swaps between: the frost, and
+/// the sharp cover it was blurred from while that is still the cached large
+/// art (after a refresh the cached cover is not the one the frost stands in
+/// for).
+#[test]
+fn the_hold_covers_the_frost_and_its_sharp_source() {
+    let (mut app, sharp) = frost_app();
+    let frosted = iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+    let ids = |handles: Vec<iced::widget::image::Handle>| {
+        handles
+            .iter()
+            .map(iced::widget::image::Handle::id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids(app.lyrics_covers_to_hold("album_s1", sharp.id(), &frosted)),
+        vec![frosted.id(), sharp.id()]
+    );
+
+    let refreshed = iced::widget::image::Handle::from_rgba(1, 1, vec![7, 7, 7, 255]);
+    app.artwork
+        .large_artwork
+        .put("album_s1".to_string(), refreshed);
+    assert_eq!(
+        ids(app.lyrics_covers_to_hold("album_s1", sharp.id(), &frosted)),
+        vec![frosted.id()]
+    );
 }
 
 #[test]
