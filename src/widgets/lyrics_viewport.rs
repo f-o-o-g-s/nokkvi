@@ -289,6 +289,10 @@ struct State {
     /// The active line's measured words for the word-level highlight; `None`
     /// while the highlight is off or the active line has no word timing.
     active_words: Option<ActiveWordLayout>,
+    /// The no-match note, shaped in `layout` and kept here like the lines:
+    /// the renderer holds only a weak reference to a paragraph until the
+    /// frame draws, so one built inside `draw` is dropped before it paints.
+    empty_paragraph: Plain<<iced::Renderer as TextRenderer>::Paragraph>,
 }
 
 /// One word's footprint on one wrapped row of its line, in logical px from the
@@ -894,6 +898,25 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
             None => state.active_words = None,
         }
 
+        // The no-match note (`Plain::update` reshapes only on a change).
+        if self.data.lines.is_empty()
+            && let Some(message) = self.data.empty_message
+        {
+            state.empty_paragraph.update(Text {
+                content: message,
+                bounds: Size::new(text_width, f32::INFINITY),
+                size: Pixels((LYRIC_FONT_SIZE - 2.0) * text_scale),
+                line_height: advanced_text::LineHeight::Absolute(Pixels(LINE_HEIGHT * text_scale)),
+                font: theme::ui_font(),
+                align_x: advanced_text::Alignment::Center,
+                align_y: iced::alignment::Vertical::Top,
+                shaping: advanced_text::Shaping::Advanced,
+                wrapping: Wrapping::Word,
+                ellipsis: advanced_text::Ellipsis::None,
+                hint_factor: scale,
+            });
+        }
+
         // Dissolving outgoing sheet (second cache; cleared when idle so a long
         // doc doesn't linger in memory after its fade).
         if let Some(dissolve) = &self.data.dissolve {
@@ -932,22 +955,10 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // Empty state — but NOT during a cold-path dissolve, where the
         // previous sheet must keep fading below while the resolve runs.
         if self.data.lines.is_empty() && self.data.dissolve.is_none() {
-            // Empty state: the faded no-match message (nothing else to draw).
-            if let Some(message) = self.data.empty_message {
-                let text = Text {
-                    content: message,
-                    bounds: Size::new((bounds.width - 2.0 * h_pad).max(1.0), f32::INFINITY),
-                    size: Pixels((LYRIC_FONT_SIZE - 2.0) * text_scale),
-                    line_height: advanced_text::LineHeight::Absolute(Pixels(line_height)),
-                    font: theme::ui_font(),
-                    align_x: advanced_text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Top,
-                    shaping: advanced_text::Shaping::Advanced,
-                    wrapping: Wrapping::Word,
-                    ellipsis: advanced_text::Ellipsis::None,
-                    hint_factor: renderer.hint_factor(),
-                };
-                let paragraph = <iced::Renderer as TextRenderer>::Paragraph::with_text(text);
+            // Empty state: the faded no-match message (nothing else to draw),
+            // from the paragraph `layout` shaped and kept.
+            if self.data.empty_message.is_some() {
+                let paragraph = state.empty_paragraph.raw();
                 let text_h = paragraph.min_bounds().height;
                 let pos =
                     iced::Point::new(bounds.x + h_pad, bounds.y + (bounds.height - text_h) / 2.0);
@@ -956,7 +967,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                     ..theme::fg0()
                 };
                 renderer.with_layer(bounds, |renderer| {
-                    fill_haloed_paragraph(renderer, &paragraph, pos, color, bounds, text_scale);
+                    fill_haloed_paragraph(renderer, paragraph, pos, color, bounds, text_scale);
                 });
             }
             return;
