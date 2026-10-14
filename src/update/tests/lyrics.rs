@@ -674,6 +674,65 @@ fn toggle_lyrics_off_clears_doc() {
     assert_eq!(app.lyrics.matched_song_id, None);
 }
 
+/// Lyrics switched by a settings load (the Settings view's row writes
+/// through `handle_player_settings_loaded`, and so does a config.toml hot
+/// reload): the same edges as the player-bar toggle.
+fn load_lyrics_setting(app: &mut crate::Nokkvi, enabled: bool) {
+    let mut settings = app.settings.clone();
+    settings.lyrics_enabled = enabled;
+    let _ = app.handle_player_settings_loaded(settings);
+}
+
+#[test]
+fn lyrics_off_from_a_settings_load_clears_the_sheet() {
+    // The handler mirrors the process-global theme atomics.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 1_500));
+    assert!(app.lyrics.clock_ms > 0, "the sheet's clock runs");
+
+    load_lyrics_setting(&mut app, false);
+
+    assert!(!app.settings.lyrics_enabled);
+    assert!(app.lyrics.doc.lines.is_empty(), "the sheet is cleared");
+    assert_eq!(app.lyrics.matched_song_id, None);
+    assert_eq!(app.lyrics.clock_ms, 0, "and its clock");
+}
+
+#[test]
+fn lyrics_back_on_after_a_song_change_shows_no_stale_sheet() {
+    // Off from Settings or config.toml, the song changes (with lyrics off
+    // nothing clears on the change), on again: the old song's sheet and
+    // clock used to come back over the new song.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_1", 1_500));
+
+    load_lyrics_setting(&mut app, false);
+    let _ = app.handle_playback_state_updated(update_for("song_2", 500));
+    load_lyrics_setting(&mut app, true);
+
+    assert!(app.settings.lyrics_enabled);
+    assert!(app.lyrics.doc.lines.is_empty(), "no stale sheet");
+    assert_ne!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
+}
+
+#[test]
+fn a_settings_load_that_keeps_lyrics_on_keeps_the_sheet() {
+    // Every settings write reloads the whole set: an unrelated row must not
+    // wipe the sheet on screen.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+
+    load_lyrics_setting(&mut app, true);
+
+    assert_eq!(app.lyrics.doc.lines.len(), 2);
+    assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
+}
+
 // ---------------------------------------------------------------------------
 // Motion (C2): the frame tick publishes the eased center to a process-global
 // atomic, so these tests serialize on a local lock and reset it in setup —

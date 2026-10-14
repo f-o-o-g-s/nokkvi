@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - `nokkvi selection` now names a centered playlist or genre row instead of replying null.
 - Adding or dropping a whole playlist or album into the queue now toasts how many songs it added, not "1 items".
 - A love or rating the server refuses now shows an error toast instead of leaving only the "Starred" or "Rated" toast.
+- Turning lyrics off and back on from Settings or `config.toml` no longer brings back the previous song's lyrics.
 
 ### Removed
 

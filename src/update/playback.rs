@@ -2478,7 +2478,20 @@ impl Nokkvi {
         // `LivePlayerSettings`. Local `settings` binding remains available
         // for the subsequent column-visibility / theme-atomic / engine-push
         // steps that read individual fields.
+        let lyrics_were_enabled = self.settings.lyrics_enabled;
         self.settings = settings.clone();
+        // Lyrics switched from the Settings row or config.toml take the
+        // player-bar toggle's edges (clear on off, resolve on on). The first
+        // load after login only arms them: the restored track's lyrics
+        // resolve when the store index and the extensions probe land, and an
+        // earlier resolve could settle on a lower-ranked channel.
+        let lyrics_task = if lyrics_were_enabled != self.settings.lyrics_enabled
+            && (self.start_view_applied || !self.settings.lyrics_enabled)
+        {
+            self.lyrics_enabled_changed()
+        } else {
+            Task::none()
+        };
 
         // Push the visualizer behavior config onto the shared render-path
         // state — gated on an actual change so unrelated settings writes
@@ -2685,7 +2698,12 @@ impl Nokkvi {
         self.settings_page.config_dirty = true;
         self.refresh_settings_entries_if_dirty();
 
-        Task::batch([start_view_task, crossfade_task, active_playlist_cover_task])
+        Task::batch([
+            start_view_task,
+            crossfade_task,
+            active_playlist_cover_task,
+            lyrics_task,
+        ])
     }
 
     pub(crate) fn handle_initialize_scrobble_state(

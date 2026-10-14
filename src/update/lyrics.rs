@@ -92,6 +92,25 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Drive the lyrics surface after `settings.lyrics_enabled` flipped, for
+    /// every writer: the player-bar toggle, the Settings row and a config.toml
+    /// reload (both through `handle_player_settings_loaded`). On resolves the
+    /// current track at once; off clears the sheet and its clock, because with
+    /// lyrics off a song change clears nothing, so the old sheet would come
+    /// back over the next song.
+    pub(crate) fn lyrics_enabled_changed(&mut self) -> Task<Message> {
+        if self.settings.lyrics_enabled {
+            return self.lyrics_kick_if_unresolved();
+        }
+        self.lyrics.clear();
+        // A dissolve in flight belongs to the sheet just switched off.
+        // `clear()` cannot drop it — every song change calls `park_outgoing`
+        // and then `clear()`, so clearing there would kill the crossfade
+        // dissolve it just parked.
+        self.lyrics.outgoing = None;
+        Task::none()
+    }
+
     /// Timer for the post-song-change debounce window. Pure delay; the
     /// receiving handler re-validates identity + epoch before any dispatch.
     pub(crate) fn lyrics_debounce_task(song_id: String, epoch: u64) -> Task<Message> {

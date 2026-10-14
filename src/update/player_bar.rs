@@ -74,18 +74,7 @@ impl Nokkvi {
                     },
                     |()| Message::NoOp,
                 );
-                let drive = if enabled {
-                    // Resolve the current track immediately (user-initiated).
-                    self.lyrics_kick_if_unresolved()
-                } else {
-                    self.lyrics.clear();
-                    // A dissolve in flight belongs to the sheet just switched
-                    // off. `clear()` cannot drop it — every song change calls
-                    // `park_outgoing` and then `clear()`, so clearing there
-                    // would kill the crossfade dissolve it just parked.
-                    self.lyrics.outgoing = None;
-                    Task::none()
-                };
+                let drive = self.lyrics_enabled_changed();
                 self.settings_page.config_dirty = true;
                 self.refresh_settings_entries_if_dirty();
                 Task::batch([persist, drive])
