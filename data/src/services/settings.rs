@@ -2751,8 +2751,8 @@ name = "sentinel preset"
     }
 
     /// A legacy partial redb JSON (old app version: few keys, legacy bool
-    /// forms for the three shimmed enums) fills every missing field from
-    /// Default and maps the legacy bools through their compat shims.
+    /// forms for the three shimmed enums and the Lyrics mode) fills every
+    /// missing field from Default and maps the legacy bools to their modes.
     #[test]
     fn legacy_partial_redb_json_fills_defaults() {
         let legacy = r#"{

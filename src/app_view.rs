@@ -2111,9 +2111,11 @@ impl Nokkvi {
     }
 
     /// Lyrics layer data for the Queue now-playing cover: `Some` whenever the
-    /// lyrics toggle is on and queue playback is active (including the empty
-    /// no-match state — the scrim + message still render, with the visualizer
-    /// co-rendering beneath the text), `None` otherwise. Borrows the resolved
+    /// layer is wanted for the playing song (`lyrics_layer_wanted`: always in
+    /// On, in Auto only once the song has lyrics or Toggle Lyrics showed it)
+    /// and queue playback is active (including the empty no-match state — the
+    /// scrim + message still render, with the visualizer co-rendering beneath
+    /// the text), `None` otherwise. Borrows the resolved
     /// doc; an unmatched track shows the faded no-match message. `synced`
     /// carries whether the sheet is timed, which picks the falloff and decides
     /// whether any line is accented.
