@@ -215,7 +215,7 @@ impl Default for InterfaceSettingsData {
 #[derive(Debug, Clone)]
 pub struct PlaybackSettingsData {
     pub crossfade_enabled: bool,
-    /// Lyrics mode label ("Off" / "On").
+    /// Lyrics mode label ("Off" / "On" / "Auto").
     pub lyrics_mode: Cow<'static, str>,
     pub lyrics_fetch_online: bool,
     /// Cover-blur label ("Off" / "Light" / "Medium" / "Heavy").

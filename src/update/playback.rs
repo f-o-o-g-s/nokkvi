@@ -864,8 +864,9 @@ impl Nokkvi {
                     // place over the same duration as the new one resolves in.
                     // UI-timed off the crossfade duration (the engine's blend
                     // phase isn't surfaced to the UI); a hard swap when
-                    // crossfade is off.
-                    if self.settings.crossfade_enabled {
+                    // crossfade is off. Only a sheet on screen dissolves: in
+                    // Auto one hidden by Toggle Lyrics stays hidden.
+                    if self.settings.crossfade_enabled && self.lyrics_sheet_on_screen() {
                         let center = crate::widgets::lyrics_viewport::lyrics_center_pos();
                         let duration_ms =
                             self.settings.crossfade_duration_secs.saturating_mul(1000);
@@ -884,6 +885,12 @@ impl Nokkvi {
                             }
                         }
                         None => self.lyrics.clear(),
+                    }
+                    // Auto keeps the next song's cover plain until its lyrics
+                    // are known; a sheet parked to dissolve would surface
+                    // mid-fade once they land.
+                    if !self.lyrics_layer_wanted() {
+                        self.lyrics.outgoing = None;
                     }
                 }
             }

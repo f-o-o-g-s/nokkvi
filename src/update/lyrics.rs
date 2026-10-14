@@ -14,7 +14,10 @@
 use std::sync::Arc;
 
 use iced::Task;
-use nokkvi_data::{services::lyrics_source::ResolveOpts, types::lyrics::LyricsIndex};
+use nokkvi_data::{
+    services::lyrics_source::ResolveOpts,
+    types::{lyrics::LyricsIndex, player_settings::LyricsMode},
+};
 
 use crate::{
     Nokkvi, View,
@@ -71,6 +74,65 @@ impl Nokkvi {
         self.current_view == View::Queue || self.theater.active
     }
 
+    /// Whether the lyrics layer belongs on the now-playing cover for the
+    /// current song: never in Off, always in On, and in Auto once the song's
+    /// lyrics are known to exist (or Toggle Lyrics said so for this song).
+    /// Also the player-bar button's lit state.
+    pub(crate) fn lyrics_layer_wanted(&self) -> bool {
+        self.lyrics_shown_for(self.scrobble.current_song_id.as_deref())
+    }
+
+    /// The layer verdict for `song_id` under the current mode. Mid song change
+    /// `current_song_id` already names the next song, so the outgoing sheet
+    /// is judged by the song it was matched to.
+    fn lyrics_shown_for(&self, song_id: Option<&str>) -> bool {
+        match self.settings.lyrics_mode {
+            LyricsMode::Off => false,
+            LyricsMode::On => true,
+            LyricsMode::Auto => self.lyrics.auto_shows(song_id),
+        }
+    }
+
+    /// Whether the sheet held right now is on screen, judged for its own song.
+    pub(crate) fn lyrics_sheet_on_screen(&self) -> bool {
+        self.lyrics_shown_for(self.lyrics.matched_song_id.as_deref())
+    }
+
+    /// Toggle Lyrics (the player-bar button and its hotkey). Off and On flip
+    /// the setting. Auto stays the setting: the press shows or hides the
+    /// layer for the playing song only, and the next song is Auto's again.
+    pub(crate) fn toggle_lyrics(&mut self) -> Task<Message> {
+        let mode = match self.settings.lyrics_mode {
+            LyricsMode::Auto => {
+                if let Some(song_id) = self.scrobble.current_song_id.clone() {
+                    let show = !self.lyrics_layer_wanted();
+                    self.lyrics.auto_override = Some(crate::state::AutoOverride { song_id, show });
+                }
+                return Task::none();
+            }
+            LyricsMode::Off => LyricsMode::On,
+            LyricsMode::On => LyricsMode::Off,
+        };
+        // Flip the setting synchronously (the value the render reads —
+        // observable in tests, where the async persist below never runs),
+        // then persist + drive the surface.
+        self.settings.lyrics_mode = mode;
+        let persist = self.shell_task(
+            move |shell| async move {
+                let mgr = shell.settings().settings_manager();
+                let mut mgr = mgr.lock().await;
+                if let Err(e) = mgr.set_lyrics_mode(mode) {
+                    tracing::warn!(error = %e, "failed to persist lyrics_mode");
+                }
+            },
+            |()| Message::NoOp,
+        );
+        let drive = self.lyrics_mode_changed();
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        Task::batch([persist, drive])
+    }
+
     /// Dispatch a resolve for the current song when lyrics are enabled, a
     /// lyrics surface is showing (`lyrics_surface_visible`), and the track has
     /// NO rendered lyrics — either never resolved (`matched_song_id` differs)
@@ -99,6 +161,8 @@ impl Nokkvi {
     /// its clock, because with lyrics off a song change clears nothing, so the
     /// old sheet would come back over the next song.
     pub(crate) fn lyrics_mode_changed(&mut self) -> Task<Message> {
+        // A Toggle Lyrics override belongs to the Auto it was made in.
+        self.lyrics.auto_override = None;
         if self.settings.lyrics_mode.is_active() {
             return self.lyrics_kick_if_unresolved();
         }

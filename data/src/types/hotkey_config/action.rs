@@ -313,7 +313,7 @@ define_hotkey_actions! {
         },
         ToggleLyrics {
             display: "Toggle Lyrics",
-            description: "Show or hide lyrics over the Queue cover art",
+            description: "Show or hide lyrics over the Queue cover (in Auto, for the playing song only)",
             category: "Playback",
             toml_key: "toggle_lyrics",
             settings_key: "hotkey.toggle_lyrics",

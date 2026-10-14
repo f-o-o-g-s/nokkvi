@@ -77,9 +77,11 @@ define_settings! {
                 label: "Lyrics",
                 category: "Playback",
                 subtitle: Some(
-                    "Show lyrics over the Queue cover art. Synced lyrics follow the track line \
-                     by line; plain lyrics drift with playback and scroll with the mouse wheel. \
-                     Off leaves the cover (and any over-cover visualizer) untouched.",
+                    "Lyrics over the Queue cover and in Theater Mode. On: for every song, or a \
+                     \"No lyrics for this track\" note. Auto: only for songs that have lyrics, \
+                     looking up each song played while the Queue or Theater Mode is open; \
+                     Toggle Lyrics hides or shows them for the playing song. Off: no lyrics, \
+                     nothing looked up.",
                 ),
                 default: "Off",
                 options: LyricsMode::LABELS,

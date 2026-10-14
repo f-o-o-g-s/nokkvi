@@ -284,6 +284,8 @@ keyword_table! {
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
         "general.lyrics_mode" => &[
             "lyrics",
+            "auto",
+            "automatic",
             "karaoke",
             "synced",
             "plain",

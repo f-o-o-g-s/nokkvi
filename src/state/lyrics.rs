@@ -92,6 +92,19 @@ pub struct LyricsState {
     pub clock_anchor: Option<std::time::Instant>,
     /// Whether the transport was running at that write: a paused clock holds.
     pub clock_running: bool,
+    /// Toggle Lyrics in Auto: shows or hides the layer for one song, whatever
+    /// Auto decided for it. Dropped at every song change (`clear()` /
+    /// `promote_next()`) and every Lyrics mode change, so the next song is
+    /// Auto's again.
+    pub auto_override: Option<AutoOverride>,
+}
+
+/// Toggle Lyrics' verdict for one song in Auto (`LyricsState::auto_override`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoOverride {
+    pub song_id: String,
+    /// Show the layer (an empty one for a song without lyrics) or hide it.
+    pub show: bool,
 }
 
 /// How far the position tick may fall behind the published clock before the
@@ -138,9 +151,25 @@ impl LyricsState {
         // a match lands, so a stale value would snap-highlight the wrong line).
         self.position_ms = 0;
         self.drift_offset = 0.0;
+        self.auto_override = None;
         self.reset_clock();
         self.reset_scroll();
         self.load_epoch.bump();
+    }
+
+    /// Whether Auto shows the layer for `song_id`: Toggle Lyrics' verdict
+    /// when it overrode this song, else whether the song's resolved sheet has
+    /// lines (synced or plain). An unresolved song, or a sheet matched to
+    /// another song, shows nothing, so a song is never covered before its
+    /// lyrics are known to exist.
+    pub fn auto_shows(&self, song_id: Option<&str>) -> bool {
+        let Some(song_id) = song_id else {
+            return false;
+        };
+        match &self.auto_override {
+            Some(o) if o.song_id == song_id => o.show,
+            _ => self.matched_song_id.as_deref() == Some(song_id) && !self.doc.lines.is_empty(),
+        }
     }
 
     /// Zero the lyric clock. Load-bearing at every song change: the frame tick
@@ -223,6 +252,7 @@ impl LyricsState {
                 // the user did to the one it replaces, and its clock starts
                 // from the new track.
                 self.drift_offset = 0.0;
+                self.auto_override = None;
                 self.reset_clock();
                 self.reset_scroll();
                 self.load_epoch.bump();

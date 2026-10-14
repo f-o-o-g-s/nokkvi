@@ -1440,3 +1440,244 @@ fn a_sheet_landing_mid_track_starts_its_clock_at_the_transport() {
     frame(&mut app, std::time::Instant::now());
     assert_eq!(app.lyrics.clock_ms, 61_000);
 }
+
+// ── Auto: the layer only for songs that have lyrics ─────────────────────────
+
+/// Auto on the Queue with `song_id` playing and its lookup not landed yet.
+fn auto_app(song_id: &str) -> crate::Nokkvi {
+    let mut app = test_app();
+    app.settings.lyrics_mode = LyricsMode::Auto;
+    app.current_view = crate::View::Queue;
+    app.scrobble.current_song_id = Some(song_id.to_string());
+    app.playback.playing = true;
+    app
+}
+
+/// The lookup for `song_id` lands under the live epoch.
+fn land(app: &mut crate::Nokkvi, song_id: &str, doc: LrcDocument) {
+    let epoch = app.lyrics.load_epoch.current();
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: song_id.to_string(),
+        doc: Box::new(doc),
+        epoch,
+    });
+}
+
+/// The next song's lookup lands ahead of the track change.
+fn prefetch(app: &mut crate::Nokkvi, song_id: &str, doc: LrcDocument) {
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::PrefetchLoaded {
+        song_id: song_id.to_string(),
+        doc: Box::new(doc),
+    });
+}
+
+fn layer_up(app: &crate::Nokkvi) -> bool {
+    app.queue_lyrics_panel_data().is_some()
+}
+
+fn toggle(app: &mut crate::Nokkvi) {
+    let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
+}
+
+#[test]
+fn auto_covers_the_art_only_once_the_song_has_lyrics() {
+    let mut app = auto_app("song_1");
+    assert!(
+        !layer_up(&app),
+        "the cover stays plain while the lookup runs"
+    );
+    assert!(!app.lyrics_layer_wanted(), "and the button is dark");
+
+    land(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    assert!(layer_up(&app), "synced lyrics raise the layer");
+    assert!(app.lyrics_layer_wanted(), "and light the button");
+}
+
+#[test]
+fn auto_counts_a_plain_sheet_as_lyrics() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", plain_doc(4));
+    assert!(layer_up(&app));
+}
+
+#[test]
+fn auto_leaves_a_song_without_lyrics_on_the_plain_cover() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", LrcDocument::default());
+    assert!(!layer_up(&app), "no empty overlay for a resolved no-match");
+    assert!(!app.lyrics_layer_wanted());
+}
+
+#[test]
+fn auto_hides_the_layer_again_for_the_next_song_without_lyrics() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", timed_doc(&[1_000]));
+    assert!(layer_up(&app));
+
+    // No prefetch: the next song's lookup runs after the change.
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert!(!layer_up(&app), "the next song starts on the plain cover");
+    land(&mut app, "song_2", LrcDocument::default());
+    assert!(!layer_up(&app), "and stays on it without lyrics");
+}
+
+#[test]
+fn auto_shows_a_prefetched_sheet_at_the_track_change() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", timed_doc(&[1_000]));
+    prefetch(&mut app, "song_2", timed_doc(&[0, 2_000]));
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 100));
+    assert!(layer_up(&app), "the decision is ready when the song starts");
+}
+
+#[test]
+fn auto_looks_the_song_up_on_a_lyrics_surface_only() {
+    let mut app = auto_app("song_1");
+    let before = app.lyrics.load_epoch.current();
+    let _ = app.lyrics_kick_if_unresolved();
+    assert_ne!(
+        app.lyrics.load_epoch.current(),
+        before,
+        "Auto looks the playing song up while the layer is hidden"
+    );
+
+    app.current_view = crate::View::Albums;
+    let before = app.lyrics.load_epoch.current();
+    let _ = app.lyrics_kick_if_unresolved();
+    assert_eq!(
+        app.lyrics.load_epoch.current(),
+        before,
+        "nothing is looked up off the Queue and Theater Mode"
+    );
+}
+
+#[test]
+fn toggle_in_auto_hides_lyrics_for_the_current_song_only() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", timed_doc(&[1_000]));
+
+    toggle(&mut app);
+    assert!(!layer_up(&app), "Toggle Lyrics hides what Auto showed");
+    assert!(!app.lyrics_layer_wanted(), "and darkens the button");
+    assert_eq!(
+        app.settings.lyrics_mode,
+        LyricsMode::Auto,
+        "the setting stays Auto"
+    );
+    assert!(
+        !app.lyrics.doc.lines.is_empty(),
+        "the sheet stays loaded for a second press"
+    );
+
+    prefetch(&mut app, "song_2", timed_doc(&[0, 2_000]));
+    let _ = app.handle_playback_state_updated(update_for("song_2", 100));
+    assert!(layer_up(&app), "the next song with lyrics shows them again");
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Auto);
+}
+
+#[test]
+fn toggle_in_auto_shows_the_empty_overlay_on_a_song_without_lyrics() {
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", LrcDocument::default());
+
+    toggle(&mut app);
+    let data = app
+        .queue_lyrics_panel_data()
+        .expect("Toggle Lyrics raises the layer");
+    assert_eq!(data.empty_message, Some("No lyrics for this track"));
+    assert!(app.lyrics_layer_wanted(), "and lights the button");
+
+    toggle(&mut app);
+    assert!(!layer_up(&app), "a second press hides it again");
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Auto);
+}
+
+#[test]
+fn toggle_in_auto_on_the_next_song_without_lyrics_is_auto_again() {
+    // Shown on a lyric-less song, then the next lyric-less song: hidden.
+    let mut app = auto_app("song_1");
+    land(&mut app, "song_1", LrcDocument::default());
+    toggle(&mut app);
+    assert!(layer_up(&app));
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    land(&mut app, "song_2", LrcDocument::default());
+    assert!(!layer_up(&app));
+}
+
+#[test]
+fn a_lyrics_mode_change_drops_the_toggle_override() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = auto_app("song_1");
+    app.start_view_applied = true;
+    land(&mut app, "song_1", timed_doc(&[1_000]));
+    toggle(&mut app);
+    assert!(!layer_up(&app));
+
+    load_lyrics_setting(&mut app, LyricsMode::On);
+    assert!(
+        layer_up(&app),
+        "On shows lyrics whatever was toggled in Auto"
+    );
+    load_lyrics_setting(&mut app, LyricsMode::Auto);
+    assert!(
+        layer_up(&app),
+        "back in Auto, the song's lyrics decide again"
+    );
+}
+
+#[test]
+fn toggle_in_on_and_off_still_flips_the_setting() {
+    let mut app = test_app();
+    app.settings.lyrics_mode = LyricsMode::On;
+    toggle(&mut app);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::Off);
+    toggle(&mut app);
+    assert_eq!(app.settings.lyrics_mode, LyricsMode::On);
+}
+
+#[test]
+fn auto_drops_the_dissolve_when_the_next_song_starts_uncovered() {
+    let mut app = auto_app("song_1");
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
+    land(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert!(
+        app.lyrics.outgoing.is_none(),
+        "with no layer up, a parked sheet would surface mid-fade when song 2's lyrics land"
+    );
+}
+
+#[test]
+fn auto_dissolves_into_a_prefetched_sheet() {
+    let mut app = auto_app("song_1");
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
+    land(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    prefetch(&mut app, "song_2", timed_doc(&[0, 2_000]));
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert!(
+        app.lyrics.outgoing.is_some(),
+        "both sheets are up, so the old one dissolves as in On"
+    );
+}
+
+#[test]
+fn auto_never_dissolves_a_sheet_toggle_lyrics_hid() {
+    let mut app = auto_app("song_1");
+    app.settings.crossfade_enabled = true;
+    app.settings.crossfade_duration_secs = 7;
+    land(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    toggle(&mut app);
+    prefetch(&mut app, "song_2", timed_doc(&[0, 2_000]));
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert!(
+        app.lyrics.outgoing.is_none(),
+        "the hidden sheet must not fade back in over song 2"
+    );
+}

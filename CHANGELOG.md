@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The Lyrics setting gains Auto, which shows lyrics over the Queue cover and in Theater Mode only for songs that have them.
+
 ### Changed
 
 - Opening the playlist editor now plays the view-change sound, like other view switches.

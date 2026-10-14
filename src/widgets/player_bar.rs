@@ -447,16 +447,18 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
         }
         ModeId::Lyrics => {
             use nokkvi_data::types::player_settings::LyricsMode;
-            let (label, active) = match data.lyrics_mode {
-                LyricsMode::Off => ("Lyrics: Off", false),
-                LyricsMode::On => ("Lyrics: On", true),
+            let label = match data.lyrics_mode {
+                LyricsMode::Off => "Lyrics: Off",
+                LyricsMode::On => "Lyrics: On",
+                LyricsMode::Auto if data.lyrics_shown => "Lyrics: Auto (shown)",
+                LyricsMode::Auto => "Lyrics: Auto (hidden)",
             };
             ModeDescriptor {
                 face: ModeFace::Icon("assets/icons/captions.svg"),
                 tooltip: label,
                 kebab_label: label,
                 message: PlayerBarMessage::ToggleLyrics,
-                active,
+                active: data.lyrics_shown,
                 // Lyrics follow the queue's now-playing track.
                 enabled: queue_modes_enabled,
                 shown_inline: true,
@@ -756,8 +758,11 @@ pub(crate) struct PlayerBarViewData {
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
     /// The Lyrics setting (`general.lyrics_mode`). Drives the Lyrics mode
-    /// button's label and active state.
+    /// button's label.
     pub lyrics_mode: nokkvi_data::types::player_settings::LyricsMode,
+    /// Whether the lyrics layer is up for the playing song: the Lyrics
+    /// button's lit state (in Auto it differs from song to song).
+    pub lyrics_shown: bool,
     /// Bit-perfect output mode (the setting: Off / Strict / Relaxed). Drives the
     /// Bit-Perfect mode toggle's icon + active state. Distinct from
     /// `bit_perfect_status` (the honest device-rate badge).
@@ -2562,6 +2567,7 @@ mod mode_descriptor_tests {
             sfx_volume: 1.0,
             crossfade_enabled: false,
             lyrics_mode: nokkvi_data::types::player_settings::LyricsMode::Off,
+            lyrics_shown: false,
             bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode::Off,
             visualization_mode: VisualizationMode::Off,
             window_width: 1200.0,
@@ -2803,6 +2809,25 @@ mod mode_descriptor_tests {
                 ModeId::Lyrics => matches!(d.message, PlayerBarMessage::ToggleLyrics),
             };
             assert!(ok, "wrong message ctor for {mode:?}: {:?}", d.message);
+        }
+    }
+
+    /// In Auto the Lyrics button lights for what is on screen, song by song;
+    /// in Off and On it shows the setting.
+    #[test]
+    fn lyrics_button_lights_what_auto_shows() {
+        use nokkvi_data::types::player_settings::LyricsMode;
+        let mut data = sample_data();
+        for (mode, shown, label, active) in [
+            (LyricsMode::Off, false, "Lyrics: Off", false),
+            (LyricsMode::On, true, "Lyrics: On", true),
+            (LyricsMode::Auto, false, "Lyrics: Auto (hidden)", false),
+            (LyricsMode::Auto, true, "Lyrics: Auto (shown)", true),
+        ] {
+            data.lyrics_mode = mode;
+            data.lyrics_shown = shown;
+            let d = mode_descriptor(ModeId::Lyrics, &data);
+            assert_eq!((d.tooltip, d.kebab_label, d.active), (label, label, active));
         }
     }
 

@@ -696,6 +696,7 @@ impl Nokkvi {
             sfx_volume: self.settings.sfx_volume,
             crossfade_enabled: self.settings.crossfade_enabled,
             lyrics_mode: self.settings.lyrics_mode,
+            lyrics_shown: self.lyrics_layer_wanted(),
             bit_perfect_mode: self.settings.bit_perfect,
             visualization_mode: self.settings.visualization_mode,
             // The lowered bar lays out against its own width: its modes cull
@@ -1734,7 +1735,7 @@ impl Nokkvi {
     /// applies it only while the panel locks to the playing track (the blur is
     /// keyed to the PLAYING track's cover; a centered-row panel stays sharp).
     pub(crate) fn lyrics_blurred_cover_for_view(&self) -> Option<&iced::widget::image::Handle> {
-        if !self.settings.lyrics_mode.is_active() || !self.active_playback.is_queue() {
+        if !self.lyrics_layer_wanted() || !self.active_playback.is_queue() {
             return None;
         }
         // MilkDrop replaces the cover, so there is no cover to frost.
@@ -2125,7 +2126,7 @@ impl Nokkvi {
         // survives `stop()`) — so neither means audio is live. The real gate
         // is the transport: playing or paused. Stopped / never-played leaves
         // the cover art bare.
-        (self.settings.lyrics_mode.is_active()
+        (self.lyrics_layer_wanted()
             && self.active_playback.is_queue()
             && (self.playback.playing || self.playback.paused)
             && self.scrobble.current_song_id.is_some())

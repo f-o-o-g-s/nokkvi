@@ -396,8 +396,8 @@ define_labeled_enum! {
     /// (`lyrics_enabled = false` / `true`), so a config.toml or redb store
     /// written before the mode existed loads unchanged and an older nokkvi
     /// still reads what this one writes. The hand-written serde impls below
-    /// own that wire; the `wire` strings are what `Display` prints, and they
-    /// load too.
+    /// own that wire; Auto, which the bool never had, writes `"auto"`. The
+    /// `wire` strings are what `Display` prints, and they all load.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub enum LyricsMode {
         /// No lyrics, and none looked up.
@@ -405,6 +405,9 @@ define_labeled_enum! {
         Off { label: "Off", wire: "off" },
         /// Lyrics over the cover for every song (a note when a song has none).
         On { label: "On", wire: "on" },
+        /// Lyrics over the cover only for songs that have some. Every song is
+        /// looked up while a lyrics surface shows, overlay hidden or not.
+        Auto { label: "Auto", wire: "auto" },
     }
 }
 
@@ -421,6 +424,7 @@ impl Serialize for LyricsMode {
         match self {
             Self::Off => serializer.serialize_bool(false),
             Self::On => serializer.serialize_bool(true),
+            Self::Auto => serializer.serialize_str("auto"),
         }
     }
 }
@@ -433,7 +437,7 @@ impl<'de> Deserialize<'de> for LyricsMode {
             type Value = LyricsMode;
 
             fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(r#"true, false, "off" or "on""#)
+                f.write_str(r#"true, false, "off", "on" or "auto""#)
             }
 
             fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<LyricsMode, E> {
@@ -444,7 +448,8 @@ impl<'de> Deserialize<'de> for LyricsMode {
                 match v {
                     "off" => Ok(LyricsMode::Off),
                     "on" => Ok(LyricsMode::On),
-                    other => Err(E::unknown_variant(other, &["off", "on"])),
+                    "auto" => Ok(LyricsMode::Auto),
+                    other => Err(E::unknown_variant(other, &["off", "on", "auto"])),
                 }
             }
         }
@@ -457,7 +462,7 @@ impl<'de> Deserialize<'de> for LyricsMode {
 mod tests {
     use super::*;
 
-    const LYRICS_MODES: [LyricsMode; 2] = [LyricsMode::Off, LyricsMode::On];
+    const LYRICS_MODES: [LyricsMode; 3] = [LyricsMode::Off, LyricsMode::On, LyricsMode::Auto];
 
     #[derive(Serialize, Deserialize)]
     struct LyricsWrapper {
@@ -509,6 +514,21 @@ mod tests {
     }
 
     #[test]
+    fn lyrics_mode_auto_round_trips_as_a_string() {
+        let w = LyricsWrapper {
+            lyrics_enabled: LyricsMode::Auto,
+        };
+        assert_eq!(
+            serde_json::to_string(&w).unwrap(),
+            r#"{"lyrics_enabled":"auto"}"#
+        );
+        let toml_line = toml::to_string(&w).unwrap();
+        assert_eq!(toml_line.trim(), r#"lyrics_enabled = "auto""#);
+        let back: LyricsWrapper = toml::from_str(&toml_line).unwrap();
+        assert_eq!(back.lyrics_enabled, LyricsMode::Auto);
+    }
+
+    #[test]
     fn lyrics_mode_rejects_an_unknown_value() {
         assert!(
             serde_json::from_str::<LyricsWrapper>(r#"{"lyrics_enabled":"sometimes"}"#).is_err()
@@ -521,7 +541,7 @@ mod tests {
         for mode in LYRICS_MODES {
             assert_eq!(LyricsMode::from_label(mode.as_label()), mode);
         }
-        assert_eq!(LyricsMode::LABELS, ["Off", "On"]);
+        assert_eq!(LyricsMode::LABELS, ["Off", "On", "Auto"]);
     }
 
     #[test]

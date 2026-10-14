@@ -158,8 +158,9 @@ pub struct TomlSettings {
 
     // -- Playback --
     pub crossfade_enabled: bool,
-    /// Lyrics: Off / On. On-disk key `lyrics_enabled`, the bool this replaced;
-    /// Off and On stay `false` / `true`, so older files load unchanged.
+    /// Lyrics: Off / On / Auto. On-disk key `lyrics_enabled`, the bool this
+    /// replaced; Off and On stay `false` / `true`, so older files load
+    /// unchanged, and Auto is `"auto"`.
     #[serde(rename = "lyrics_enabled")]
     pub lyrics_mode: LyricsMode,
     pub lyrics_fetch_online: bool,

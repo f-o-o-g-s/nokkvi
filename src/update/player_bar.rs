@@ -56,33 +56,10 @@ impl Nokkvi {
             PlayerBarMessage::ToggleBitPerfect => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleBitPerfect))
             }
-            PlayerBarMessage::ToggleLyrics => {
-                // Flip the setting synchronously (the value the render reads —
-                // observable in tests, where the async persist below never
-                // runs), then persist + drive the surface. Deliberately NOT
-                // the Crossfade re-dispatch hop: that extra Task indirection
-                // is inert in test_app and adds nothing here.
-                use nokkvi_data::types::player_settings::LyricsMode;
-                let mode = match self.settings.lyrics_mode {
-                    LyricsMode::Off => LyricsMode::On,
-                    LyricsMode::On => LyricsMode::Off,
-                };
-                self.settings.lyrics_mode = mode;
-                let persist = self.shell_task(
-                    move |shell| async move {
-                        let mgr = shell.settings().settings_manager();
-                        let mut mgr = mgr.lock().await;
-                        if let Err(e) = mgr.set_lyrics_mode(mode) {
-                            tracing::warn!(error = %e, "failed to persist lyrics_mode");
-                        }
-                    },
-                    |()| Message::NoOp,
-                );
-                let drive = self.lyrics_mode_changed();
-                self.settings_page.config_dirty = true;
-                self.refresh_settings_entries_if_dirty();
-                Task::batch([persist, drive])
-            }
+            // Handled in place, deliberately NOT through the Crossfade
+            // re-dispatch hop: that extra Task indirection is inert in
+            // test_app and adds nothing here.
+            PlayerBarMessage::ToggleLyrics => self.toggle_lyrics(),
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
                 scroll_volume_to_committed_message(self.settings.volume, delta),
             ),
