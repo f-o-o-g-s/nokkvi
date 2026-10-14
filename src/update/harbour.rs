@@ -810,7 +810,7 @@ impl Nokkvi {
     /// same success/failure copy.
     fn enqueue_harbour_batch(&self, payload: BatchPayload) -> Task<Message> {
         self.shell_action_task(
-            move |shell| async move { shell.add_batch_to_queue(payload).await },
+            move |shell| async move { shell.add_batch_to_queue(payload).await.map(|_count| ()) },
             added_to_queue_message(),
             ADD_TO_QUEUE_CTX,
         )
@@ -824,7 +824,10 @@ impl Nokkvi {
         self.shell_action_task(
             move |shell| async move {
                 let songs = random_genre_songs(&shell, &genre_name).await?;
-                shell.add_batch_to_queue(song_batch(songs)).await
+                shell
+                    .add_batch_to_queue(song_batch(songs))
+                    .await
+                    .map(|_count| ())
             },
             added_to_queue_message(),
             ADD_TO_QUEUE_CTX,

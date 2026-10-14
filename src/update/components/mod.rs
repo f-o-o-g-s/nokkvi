@@ -56,6 +56,23 @@ pub(super) fn duplicates_removed_text(count: usize) -> String {
     let plural = if count == 1 { "" } else { "s" };
     format!("Removed {count} duplicate{plural}")
 }
+
+/// The queue-add toast, counting the songs the add resolved to (a whole
+/// playlist or album is one batch item): `Added 1 song to queue`.
+pub(crate) fn songs_added_text(count: usize) -> String {
+    format!("Added {} to queue", song_count_text(count))
+}
+
+/// The drag-drop insert toast; `at` is the 0-based drop slot, shown 1-based:
+/// `Inserted 3 songs at position 5`.
+pub(crate) fn songs_inserted_text(count: usize, at: usize) -> String {
+    format!("Inserted {} at position {}", song_count_text(count), at + 1)
+}
+
+fn song_count_text(count: usize) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} song{plural}")
+}
 // The pure planning half of `prefetch_album_artwork_tasks`, for the handler
 // tests (production calls go through the task builder).
 #[cfg(test)]
@@ -621,8 +638,26 @@ impl Nokkvi {
         F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
     {
+        self.shell_labeled_queue_task(action_fn, move |()| success_label, error_ctx)
+    }
+
+    /// [`Self::shell_fire_and_forget_task`] whose success toast is built from
+    /// what the action returns (the batch adds answer how many songs they
+    /// queued).
+    pub(crate) fn shell_labeled_queue_task<F, Fut, T>(
+        &self,
+        action_fn: F,
+        success_label: impl FnOnce(T) -> String + Send + 'static,
+        error_ctx: &'static str,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<T>> + Send,
+        T: Send + 'static,
+    {
         self.shell_task(action_fn, move |result| match result {
-            Ok(()) => {
+            Ok(value) => {
+                let success_label = success_label(value);
                 info!(" {}", success_label);
                 Message::Toast(crate::app_message::ToastMessage::PushThen(
                     nokkvi_data::types::toast::Toast::new(
@@ -1141,7 +1176,6 @@ impl Nokkvi {
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
     ) -> Task<Message> {
-        let len = payload.items.len();
         if let Some(pos) = self.cross_pane_drag.pending_queue_insert_position.take() {
             // While a playlist edit session is active the drop target is the
             // editor's LEFT pane, so resolve the dragged item(s) into editor
@@ -1156,15 +1190,15 @@ impl Nokkvi {
                     move |result| Self::editor_batch_resolved_message(result, pos),
                 );
             }
-            return self.shell_fire_and_forget_task(
+            return self.shell_labeled_queue_task(
                 move |shell| async move { shell.insert_batch_at_position(payload, pos).await },
-                format!("Inserted {len} items at position {}", pos + 1),
+                move |count| songs_inserted_text(count, pos),
                 "insert batch to queue",
             );
         }
-        self.shell_fire_and_forget_task(
+        self.shell_labeled_queue_task(
             move |shell| async move { shell.add_batch_to_queue(payload).await },
-            format!("Added {len} items to queue"),
+            songs_added_text,
             "add batch to queue",
         )
     }

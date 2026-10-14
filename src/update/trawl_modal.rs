@@ -220,8 +220,7 @@ impl Nokkvi {
             }
             TrawlModalMessage::AddMixCompleted(result) => match result {
                 Ok(count) => {
-                    let noun = if count == 1 { "song" } else { "songs" };
-                    self.toast_success(format!("Added {count} {noun} to queue"));
+                    self.toast_success(crate::update::components::songs_added_text(count));
                     // Reload the queue as the entity adds do (their toast
                     // chains `LoadQueue`), or an open Queue view keeps its
                     // old rows and count until something else reloads it.

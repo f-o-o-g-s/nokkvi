@@ -1365,3 +1365,18 @@ fn play_playlist_from_track_sets_active_playlist_info_when_unblocked() {
          (set+persist runs after enter_new_playback_context)"
     );
 }
+
+// Queue-add toasts count the songs a batch resolved to
+// ============================================================================
+
+#[test]
+fn queue_add_toasts_count_songs_with_the_right_plural() {
+    // A whole playlist or album is one batch item, so the old toast read
+    // "Added 1 items to queue" for any number of songs.
+    use crate::update::components::{songs_added_text, songs_inserted_text};
+    assert_eq!(songs_added_text(1), "Added 1 song to queue");
+    assert_eq!(songs_added_text(12), "Added 12 songs to queue");
+    // The position is the 0-based drop slot, shown 1-based.
+    assert_eq!(songs_inserted_text(1, 0), "Inserted 1 song at position 1");
+    assert_eq!(songs_inserted_text(7, 4), "Inserted 7 songs at position 5");
+}

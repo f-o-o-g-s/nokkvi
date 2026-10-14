@@ -561,6 +561,20 @@ impl AppService {
         verb: QueueVerb,
         shuffle: OneShotShuffle,
     ) -> Result<()> {
+        self.dispatch_counted(source, verb, shuffle)
+            .await
+            .map(|_count| ())
+    }
+
+    /// [`Self::dispatch_shuffled`] that answers how many songs it handed to
+    /// the queue verb (after the source's own de-duplication), for a toast
+    /// that counts songs rather than the batch items they came from.
+    async fn dispatch_counted(
+        &self,
+        source: SongSource,
+        verb: QueueVerb,
+        shuffle: OneShotShuffle,
+    ) -> Result<usize> {
         // `resolve` consumes the source — capture the log label and the
         // empty-resolution message first.
         let label = source.log_label();
@@ -602,7 +616,7 @@ impl AppService {
             "Queue dispatch: {:?} of {} song(s) from {} (shuffle={:?})",
             verb, count, label, shuffle
         );
-        Ok(())
+        Ok(count)
     }
 
     /// Play an album by ID.
@@ -1902,9 +1916,18 @@ impl AppService {
     }
 
     /// Add a batch to the queue (append).
-    pub async fn add_batch_to_queue(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        self.dispatch(SongSource::Batch(batch), QueueVerb::Enqueue)
-            .await
+    /// Returns the number of songs added (a whole playlist or album is one
+    /// batch item), for the confirmation toast.
+    pub async fn add_batch_to_queue(
+        &self,
+        batch: crate::types::batch::BatchPayload,
+    ) -> Result<usize> {
+        self.dispatch_counted(
+            SongSource::Batch(batch),
+            QueueVerb::Enqueue,
+            OneShotShuffle::None,
+        )
+        .await
     }
 
     /// Add a batch right after the currently playing track.
@@ -1913,14 +1936,19 @@ impl AppService {
             .await
     }
 
-    /// Insert a batch at a specific position in the queue.
+    /// Insert a batch at a specific position in the queue. Returns the number
+    /// of songs inserted, as [`Self::add_batch_to_queue`] does.
     pub async fn insert_batch_at_position(
         &self,
         batch: crate::types::batch::BatchPayload,
         position: usize,
-    ) -> Result<()> {
-        self.dispatch(SongSource::Batch(batch), QueueVerb::InsertAt(position))
-            .await
+    ) -> Result<usize> {
+        self.dispatch_counted(
+            SongSource::Batch(batch),
+            QueueVerb::InsertAt(position),
+            OneShotShuffle::None,
+        )
+        .await
     }
 
     // =========================================================================
@@ -1957,10 +1985,12 @@ impl AppService {
     /// Returns the number of songs added, for the confirmation toast.
     pub async fn add_trawl_to_queue(&self, mix: &crate::types::trawl::TrawlCrate) -> Result<usize> {
         let songs = self.library_orchestrator().resolve_trawl(mix).await?;
-        let count = songs.len();
-        self.dispatch(SongSource::Preloaded(songs), QueueVerb::Enqueue)
-            .await?;
-        Ok(count)
+        self.dispatch_counted(
+            SongSource::Preloaded(songs),
+            QueueVerb::Enqueue,
+            OneShotShuffle::None,
+        )
+        .await
     }
 
     /// Remove queue rows by per-row `entry_id` and keep the audio engine in
@@ -2907,6 +2937,37 @@ mod tests {
         .expect("enqueue dispatch");
 
         assert_eq!(dispatch_queue_ids(&app), vec!["a", "b"]);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// The batch add and insert answer how many songs they put in the queue,
+    /// not how many batch items they got (a whole playlist or album is one
+    /// item): the songs after the batch's own de-duplication.
+    #[tokio::test]
+    async fn batch_add_and_insert_count_the_songs_they_queue() {
+        use crate::types::batch::{BatchItem, BatchPayload};
+        let (app, db_path) = test_app().await;
+        let batch = |ids: &[&str]| {
+            dispatch_test_songs(ids)
+                .into_iter()
+                .fold(BatchPayload::new(), |payload, song| {
+                    payload.with_item(BatchItem::Song(Box::new(song)))
+                })
+        };
+
+        let added = app
+            .add_batch_to_queue(batch(&["a", "b", "a"]))
+            .await
+            .expect("batch add");
+        assert_eq!(added, 2);
+        let inserted = app
+            .insert_batch_at_position(batch(&["x", "y", "z"]), 1)
+            .await
+            .expect("batch insert");
+        assert_eq!(inserted, 3);
+        assert_eq!(dispatch_queue_ids(&app), vec!["a", "x", "y", "z", "b"]);
 
         drop(app);
         let _ = std::fs::remove_file(&db_path);
