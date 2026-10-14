@@ -46,6 +46,20 @@ fn refuses_ranges(headers: &reqwest::header::HeaderMap) -> bool {
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("none"))
 }
 
+/// The answer's `Content-Length` header, when it names a length. Read from
+/// the header itself: reqwest's `content_length()` is the body's size, which
+/// a HEAD answer never has.
+fn header_content_length(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+        .filter(|&len| len > 0)
+}
+
 /// The stream's length in ms from an `X-Content-Duration` header (seconds,
 /// as a float), or `None` when absent or unusable.
 fn x_content_duration_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
@@ -772,10 +786,8 @@ impl AudioDecoder {
             // transcode): no later probe can turn up a length, and each one
             // is a full stream request (with the transcode cache off, its
             // own ffmpeg run), so the open goes straight to the stream GET.
-            // A HEAD's length can't be read here (reqwest's `content_length`
-            // is the body's size, which a HEAD answer never has), so on the
-            // HEAD this is the refusal alone; Navidrome sends it only on the
-            // uncached-transcode path, never for a file it serves in ranges.
+            // Navidrome sends the refusal only on the uncached-transcode
+            // path, never for a file it serves in ranges.
             let mut lengthless = false;
 
             // Try HEAD request first
@@ -819,9 +831,19 @@ impl AudioDecoder {
                             trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
                             None
                         } else {
-                            let length = head_response.content_length().filter(|&len| len > 0);
-                            lengthless = length.is_none() && refuses_ranges(headers);
-                            length
+                            // A length sizes the stream only from a server
+                            // that serves ranges, so a file skips the Range
+                            // probe. Beside the refusal it is at most
+                            // Navidrome's estimate for a live transcode
+                            // (`estimateContentLength`): no file to read in
+                            // ranges, so the open still goes straight to the
+                            // stream GET.
+                            lengthless = refuses_ranges(headers);
+                            if lengthless {
+                                None
+                            } else {
+                                header_content_length(headers)
+                            }
                         }
                     }
                     _ => None,
@@ -2486,14 +2508,17 @@ pub(crate) mod tests {
         Arc<std::sync::atomic::AtomicUsize>,
         Arc<parking_lot::Mutex<Vec<String>>>,
     ) {
-        spawn_lengthless_stream(duration_header, true).await
+        spawn_lengthless_stream(duration_header, true, None).await
     }
 
     /// The live-transcode server, with `Accept-Ranges: none` only when
-    /// `refuse_ranges` is set (Navidrome always sends it).
+    /// `refuse_ranges` is set (Navidrome always sends it), and a
+    /// Content-Length on the HEAD when `head_length` is set (Navidrome's
+    /// estimate under `estimateContentLength`).
     async fn spawn_lengthless_stream(
         duration_header: Option<&'static str>,
         refuse_ranges: bool,
+        head_length: Option<usize>,
     ) -> (
         String,
         Arc<std::sync::atomic::AtomicUsize>,
@@ -2543,6 +2568,9 @@ pub(crate) mod tests {
                         }
                         let _ = socket.write_all(b"0\r\n\r\n").await;
                     } else {
+                        if let Some(len) = head_length {
+                            headers.push_str(&format!("Content-Length: {len}\r\n"));
+                        }
                         headers.push_str("Connection: close\r\n\r\n");
                         let _ = socket.write_all(headers.as_bytes()).await;
                     }
@@ -2667,13 +2695,136 @@ pub(crate) mod tests {
     /// GET), since a later answer may still carry a length.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lengthless_answer_that_allows_ranges_keeps_probing() {
-        let (url, _requests, methods) = spawn_lengthless_stream(Some("245.5"), false).await;
+        let (url, _requests, methods) = spawn_lengthless_stream(Some("245.5"), false, None).await;
 
         let mut decoder = AudioDecoder::default();
         decoder.init(&url).await.expect("the stream must open");
 
         assert_eq!(*methods.lock(), ["HEAD", "GET", "GET", "GET"]);
         assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+    }
+
+    /// With `estimateContentLength`, Navidrome puts an estimated
+    /// Content-Length on a live transcode's answer beside
+    /// `Accept-Ranges: none`. That is no file to read in ranges: the open
+    /// stays the HEAD and the stream GET, and the track stays `Unsized`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_transcode_with_an_estimated_length_stays_unsized() {
+        let (url, _requests, methods) =
+            spawn_lengthless_stream(Some("245.5"), true, Some(3_928_000)).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the transcode must open");
+
+        assert_eq!(*methods.lock(), ["HEAD", "GET"]);
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+    }
+
+    /// The bytes [`spawn_sized_file`] serves.
+    const SIZED_FILE: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+
+    /// A local server shaped like Navidrome serving a file it has whole
+    /// (`http.ServeContent`): every answer carries `Accept-Ranges: bytes` and
+    /// a Content-Length, a HEAD gets the headers alone, a GET with a Range
+    /// header gets that slice (206) and a GET without one the whole file.
+    /// Returns the stream URL and each request as `"METHOD"` or
+    /// `"METHOD <range>"`, in the order the server read them.
+    async fn spawn_sized_file() -> (String, Arc<parking_lot::Mutex<Vec<String>>>) {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let logged = requests.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let logged = logged.clone();
+                tokio::spawn(async move {
+                    let mut request = [0u8; 2048];
+                    let len = socket.read(&mut request).await.unwrap_or(0);
+                    let request = String::from_utf8_lossy(&request[..len]).into_owned();
+                    let method = request.split_whitespace().next().unwrap_or("").to_owned();
+                    let range = request.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("range")
+                            .then(|| value.trim().to_owned())
+                    });
+                    logged.lock().push(match &range {
+                        Some(range) => format!("{method} {range}"),
+                        None => method.clone(),
+                    });
+
+                    let last = SIZED_FILE.len() - 1;
+                    let slice = range
+                        .as_deref()
+                        .and_then(|r| r.strip_prefix("bytes="))
+                        .and_then(|r| r.split_once('-'))
+                        .map(|(start, end)| {
+                            let start: usize = start.parse().unwrap();
+                            let end = end.parse::<usize>().map_or(last, |end| end.min(last));
+                            (start, end)
+                        });
+                    let (status, body) = match slice {
+                        Some((start, end)) => ("206 Partial Content", &SIZED_FILE[start..=end]),
+                        None => ("200 OK", SIZED_FILE),
+                    };
+                    let mut headers = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: audio/mpeg\r\n\
+                         Accept-Ranges: bytes\r\nContent-Length: {}\r\n",
+                        body.len()
+                    );
+                    if let Some((start, end)) = slice {
+                        headers.push_str(&format!(
+                            "Content-Range: bytes {start}-{end}/{}\r\n",
+                            SIZED_FILE.len()
+                        ));
+                    }
+                    headers.push_str("Connection: close\r\n\r\n");
+                    let _ = socket.write_all(headers.as_bytes()).await;
+                    if method != "HEAD" {
+                        let _ = socket.write_all(body).await;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}/rest/stream?id=t1&f=json"), requests)
+    }
+
+    /// A file the server serves in ranges opens with the HEAD, whose
+    /// Content-Length sizes the stream, and the reader's range GET. It used
+    /// to send a `bytes=0-0` Range probe between the two on every open:
+    /// reqwest's `content_length()` is the body's size, which a HEAD answer
+    /// never has, so the HEAD sized nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sized_file_opens_with_a_head_and_its_range_get() {
+        let (url, requests) = spawn_sized_file().await;
+
+        // A sized open builds `RangeHttpReader`'s blocking reqwest client,
+        // which a debug build refuses on a runtime thread (its readiness
+        // wait drops a throwaway runtime there), so the open runs on a
+        // blocking thread with only the runtime's handle entered.
+        let runtime = tokio::runtime::Handle::current();
+        let delivery = tokio::task::spawn_blocking(move || {
+            let _entered = runtime.enter();
+            let mut decoder = AudioDecoder::default();
+            futures::executor::block_on(decoder.init(&url)).expect("the file must open");
+            decoder.delivery()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *requests.lock(),
+            [
+                "HEAD".to_owned(),
+                format!("GET bytes=0-{}", SIZED_FILE.len() - 1)
+            ]
+        );
+        assert_eq!(delivery, StreamDelivery::Sized);
     }
 
     /// The header's parse: Navidrome writes seconds as a float (Go's `'G'`

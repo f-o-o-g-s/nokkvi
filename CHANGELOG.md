@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Opening the playlist editor now plays the view-change sound, like other view switches.
 - Find Similar from another view now plays the view-change sound.
 - A song the server transcodes on the fly now opens with two requests to the server instead of four.
+- A song the server serves as a file now opens with one request fewer to the server.
 
 ### Fixed
 
