@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
-use tracing::{debug, trace};
+use tracing::trace;
 
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
@@ -517,8 +517,10 @@ impl AlbumsService {
 
         // What covers cost, for the `square=true` (always PNG) decision. The
         // size label is parsed out of the URL; the URL itself carries the
-        // Subsonic credential and must never reach the log.
-        debug!(
+        // Subsonic credential and must never reach the log. One line per cover
+        // made it three quarters of a normal session's log, so it is trace:
+        // `RUST_LOG=nokkvi_data::backend::albums=trace` brings it back.
+        trace!(
             "artwork fetched: size={} bytes={} type={}",
             artwork_size_label(url),
             bytes.len(),
