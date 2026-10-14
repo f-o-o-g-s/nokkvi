@@ -27,7 +27,8 @@ pub async fn set_rating(
         "setRating",
         subsonic_credential,
         &[("id", item_id), ("rating", &rating_str)],
-        &format!("Failed to set rating for {item_id}"),
+        // No id here: the text reaches a toast, and the caller logs the id.
+        "Failed to set rating",
     )
     .await
 }

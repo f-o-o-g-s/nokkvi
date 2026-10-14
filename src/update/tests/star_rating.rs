@@ -327,13 +327,16 @@ fn star_result_message_sends_only_a_songs_confirmed_love_to_the_rating() {
         );
     }
     let msg = crate::Nokkvi::star_result_message(
-        Err(anyhow::anyhow!("boom")),
+        Err(anyhow::anyhow!("Failed to star song: HTTP 500")),
         "s1".into(),
         ItemKind::Song,
         true,
     );
     let (text, msg) = error_toast_then(msg);
-    assert_eq!(text, "Failed to star song: boom");
+    assert_eq!(
+        text, "Failed to star song: HTTP 500",
+        "the API error names the action"
+    );
     assert!(
         matches!(
             msg,
@@ -502,13 +505,13 @@ fn failed_star_reverts_instead_of_refreshing() {
     use nokkvi_data::types::ItemKind;
 
     let msg = crate::Nokkvi::star_result_message(
-        Err(anyhow::anyhow!("boom")),
+        Err(anyhow::anyhow!("Failed to star album: HTTP 500")),
         "a1".into(),
         ItemKind::Album,
         true,
     );
     let (text, msg) = error_toast_then(msg);
-    assert_eq!(text, "Failed to star album: boom");
+    assert_eq!(text, "Failed to star album: HTTP 500");
     assert!(
         matches!(
             msg,
@@ -526,13 +529,13 @@ fn failed_rating_reverts_and_toasts_the_error() {
 
     use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::rating_result_message(
-        Err(anyhow::anyhow!("boom")),
+        Err(anyhow::anyhow!("Failed to set rating: HTTP 500")),
         "s1".into(),
         ItemKind::Song,
         3,
     );
     let (text, msg) = error_toast_then(msg);
-    assert_eq!(text, "Failed to set rating: boom");
+    assert_eq!(text, "Failed to set rating: HTTP 500");
     assert!(
         matches!(
             msg,
@@ -557,14 +560,14 @@ fn a_failed_love_shows_an_error_toast_and_restores_the_star() {
     assert!(app.library.queue_songs[0].starred);
 
     let failed = crate::Nokkvi::star_result_message(
-        Err(anyhow::anyhow!("boom")),
+        Err(anyhow::anyhow!("Failed to star song: HTTP 500")),
         "s1".into(),
         ItemKind::Song,
         true,
     );
     let (_, revert) = error_toast_then(failed);
     let failed = crate::Nokkvi::star_result_message(
-        Err(anyhow::anyhow!("boom")),
+        Err(anyhow::anyhow!("Failed to star song: HTTP 500")),
         "s1".into(),
         ItemKind::Song,
         true,
@@ -574,7 +577,7 @@ fn a_failed_love_shows_an_error_toast_and_restores_the_star() {
         app.toast
             .toasts
             .iter()
-            .any(|t| t.level == ToastLevel::Error && t.message == "Failed to star song: boom"),
+            .any(|t| t.level == ToastLevel::Error && t.message == "Failed to star song: HTTP 500"),
         "toasts: {:?}",
         app.toast
             .toasts

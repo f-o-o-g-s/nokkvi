@@ -957,14 +957,12 @@ impl Nokkvi {
                 if let Some(msg) = session_expired_message(&e) {
                     return msg;
                 }
-                let action = if star { "star" } else { "unstar" };
-                error!(" Failed to {} {}: {}", action, kind, e);
+                // The API error already names the action ("Failed to star
+                // song: HTTP 500 …").
+                error!(" {} ({} {})", e, kind, id);
                 // Say so (the optimistic "★ Starred" toast is already up),
                 // then revert by emitting the original starred state.
-                error_toast_then(
-                    format!("Failed to {action} {kind}: {e}"),
-                    Self::starred_flag_message(id, kind, !star),
-                )
+                error_toast_then(e.to_string(), Self::starred_flag_message(id, kind, !star))
             }
         }
     }
@@ -1080,10 +1078,12 @@ impl Nokkvi {
                 if let Some(msg) = session_expired_message(&e) {
                     return msg;
                 }
-                error!(" Failed to set rating: {}", e);
+                // The API error already names the action ("Failed to set
+                // rating: HTTP 500 …").
+                error!(" {} ({} {})", e, kind, id);
                 // The optimistic "⭐ Rated" toast is already up, as for a star.
                 error_toast_then(
-                    format!("Failed to set rating: {e}"),
+                    e.to_string(),
                     Self::rating_revert_message(id, kind, current_rating),
                 )
             }
