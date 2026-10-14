@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Under the Trawl window, `nokkvi add-to-queue` now replies `Trawl mix` instead of naming the row behind the window.
 - `nokkvi selection` now names a centered playlist or genre row instead of replying null.
 - Adding or dropping a whole playlist or album into the queue now toasts how many songs it added, not "1 items".
+- A love or rating the server refuses now shows an error toast instead of leaving only the "Starred" or "Rated" toast.
 
 ### Removed
 

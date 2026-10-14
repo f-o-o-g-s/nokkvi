@@ -167,12 +167,12 @@ fn a_failed_unstar_restores_the_star_and_leaves_the_rating_alone() {
     queue_song.rating = Some(3);
     app.library.queue_songs = vec![queue_song];
 
-    let revert = crate::Nokkvi::star_result_message(
+    let (_, revert) = error_toast_then(crate::Nokkvi::star_result_message(
         Err(anyhow::anyhow!("boom")),
         "s1".into(),
         ItemKind::Song,
         false,
-    );
+    ));
     let _ = app.update(revert);
 
     assert!(app.library.songs[0].is_starred, "the star is back");
@@ -240,12 +240,13 @@ fn a_failed_love_leaves_the_rating_alone() {
         ItemKind::Song,
         true,
     ));
-    let _ = app.update(crate::Nokkvi::star_result_message(
+    let (_, revert) = error_toast_then(crate::Nokkvi::star_result_message(
         Err(anyhow::anyhow!("boom")),
         "s1".into(),
         ItemKind::Song,
         true,
     ));
+    let _ = app.update(revert);
 
     assert!(!app.library.songs[0].is_starred, "the flag is put back");
     assert_eq!(app.library.songs[0].rating, Some(3));
@@ -331,6 +332,8 @@ fn star_result_message_sends_only_a_songs_confirmed_love_to_the_rating() {
         ItemKind::Song,
         true,
     );
+    let (text, msg) = error_toast_then(msg);
+    assert_eq!(text, "Failed to star song: boom");
     assert!(
         matches!(
             msg,
@@ -474,7 +477,26 @@ fn confirmed_rating_refreshes_the_rated_kind() {
     );
 }
 
-/// A failed write still reverts, and refreshes nothing.
+/// A failed write's message: the error toast, then the message it chains.
+/// The optimistic toast ("★ Starred", "⭐ Rated") is already on screen, so a
+/// refused write has to say so.
+fn error_toast_then(msg: crate::app_message::Message) -> (String, crate::app_message::Message) {
+    use crate::app_message::{Message, ToastMessage};
+    match msg {
+        Message::Toast(ToastMessage::PushThen(toast, next)) => {
+            assert_eq!(
+                toast.level,
+                nokkvi_data::types::toast::ToastLevel::Error,
+                "{}",
+                toast.message
+            );
+            (toast.message, *next)
+        }
+        other => panic!("expected an error toast, got {other:?}"),
+    }
+}
+
+/// A failed write still reverts, toasts the error, and refreshes nothing.
 #[test]
 fn failed_star_reverts_instead_of_refreshing() {
     use nokkvi_data::types::ItemKind;
@@ -485,6 +507,8 @@ fn failed_star_reverts_instead_of_refreshing() {
         ItemKind::Album,
         true,
     );
+    let (text, msg) = error_toast_then(msg);
+    assert_eq!(text, "Failed to star album: boom");
     assert!(
         matches!(
             msg,
@@ -494,4 +518,70 @@ fn failed_star_reverts_instead_of_refreshing() {
         ),
         "got {msg:?}"
     );
+}
+
+#[test]
+fn failed_rating_reverts_and_toasts_the_error() {
+    use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
+    let msg = crate::Nokkvi::rating_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        3,
+    );
+    let (text, msg) = error_toast_then(msg);
+    assert_eq!(text, "Failed to set rating: boom");
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongRatingUpdated(ref id, 3)) if id == "s1"
+        ),
+        "got {msg:?}"
+    );
+}
+
+/// The failed love lands as an error toast in the app, and the chained
+/// revert puts the flag back.
+#[test]
+fn a_failed_love_shows_an_error_toast_and_restores_the_star() {
+    use nokkvi_data::types::{ItemKind, toast::ToastLevel};
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "Song 1", "Artist", "Album")];
+    let _ = app.update(crate::Nokkvi::starred_flag_message(
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    ));
+    assert!(app.library.queue_songs[0].starred);
+
+    let failed = crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    );
+    let (_, revert) = error_toast_then(failed);
+    let failed = crate::Nokkvi::star_result_message(
+        Err(anyhow::anyhow!("boom")),
+        "s1".into(),
+        ItemKind::Song,
+        true,
+    );
+    let _ = app.update(failed);
+    assert!(
+        app.toast
+            .toasts
+            .iter()
+            .any(|t| t.level == ToastLevel::Error && t.message == "Failed to star song: boom"),
+        "toasts: {:?}",
+        app.toast
+            .toasts
+            .iter()
+            .map(|t| &t.message)
+            .collect::<Vec<_>>()
+    );
+    let _ = app.update(revert);
+    assert!(!app.library.queue_songs[0].starred);
 }

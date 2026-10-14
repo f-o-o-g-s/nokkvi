@@ -69,6 +69,15 @@ pub(crate) fn songs_inserted_text(count: usize, at: usize) -> String {
     format!("Inserted {} at position {}", song_count_text(count), at + 1)
 }
 
+/// An error toast, then `next`: a failed write that also has to undo its
+/// optimistic update.
+fn error_toast_then(text: String, next: Message) -> Message {
+    Message::Toast(crate::app_message::ToastMessage::PushThen(
+        nokkvi_data::types::toast::Toast::new(text, nokkvi_data::types::toast::ToastLevel::Error),
+        Box::new(next),
+    ))
+}
+
 fn song_count_text(count: usize) -> String {
     let plural = if count == 1 { "" } else { "s" };
     format!("{count} song{plural}")
@@ -923,9 +932,10 @@ impl Nokkvi {
         )
     }
 
-    /// Map a star / unstar call's outcome: a failure reverts the optimistic
-    /// update (or expires the session), a success replays the event the
-    /// server no longer echoes to nokkvi ([`LibraryChange::for_annotation`]).
+    /// Map a star / unstar call's outcome: a failure toasts the error and
+    /// reverts the optimistic update (or expires the session), a success
+    /// replays the event the server no longer echoes to nokkvi
+    /// ([`LibraryChange::for_annotation`]).
     /// A song's confirmed love goes to `SongLoved` instead, which rates it
     /// five stars and replays the same event.
     ///
@@ -949,8 +959,12 @@ impl Nokkvi {
                 }
                 let action = if star { "star" } else { "unstar" };
                 error!(" Failed to {} {}: {}", action, kind, e);
-                // Revert optimistic update by emitting the original starred state
-                Self::starred_flag_message(id, kind, !star)
+                // Say so (the optimistic "★ Starred" toast is already up),
+                // then revert by emitting the original starred state.
+                error_toast_then(
+                    format!("Failed to {action} {kind}: {e}"),
+                    Self::starred_flag_message(id, kind, !star),
+                )
             }
         }
     }
@@ -1048,9 +1062,10 @@ impl Nokkvi {
         Task::batch(vec![Task::done(optimistic_msg), api_task])
     }
 
-    /// Map a setRating call's outcome: a failure reverts to `current_rating`
-    /// (or expires the session), a success replays the event the server no
-    /// longer echoes to nokkvi, as [`Self::star_result_message`] does.
+    /// Map a setRating call's outcome: a failure toasts the error and reverts
+    /// to `current_rating` (or expires the session), a success replays the
+    /// event the server no longer echoes to nokkvi, as
+    /// [`Self::star_result_message`] does.
     pub(crate) fn rating_result_message(
         result: anyhow::Result<()>,
         id: String,
@@ -1066,7 +1081,11 @@ impl Nokkvi {
                     return msg;
                 }
                 error!(" Failed to set rating: {}", e);
-                Self::rating_revert_message(id, kind, current_rating)
+                // The optimistic "⭐ Rated" toast is already up, as for a star.
+                error_toast_then(
+                    format!("Failed to set rating: {e}"),
+                    Self::rating_revert_message(id, kind, current_rating),
+                )
             }
         }
     }
