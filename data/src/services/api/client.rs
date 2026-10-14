@@ -167,7 +167,8 @@ fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value> {
         .split('.')
         .nth(1)
         .context("token is not in JWT header.payload.signature form")?;
-    let bytes = decode_base64url(payload).context("JWT payload is not valid base64url")?;
+    let bytes =
+        crate::utils::base64::decode(payload).context("JWT payload is not valid base64url")?;
     serde_json::from_slice(&bytes).context("JWT payload is not valid JSON")
 }
 
@@ -204,7 +205,7 @@ pub(crate) fn decode_jwt_sub(jwt: &str) -> Result<String> {
 }
 
 /// Tiny base64url encoder for the test-fixture path only. Mirrors RFC
-/// 4648 §5 (no padding), same alphabet as `decode_base64url`.
+/// 4648 §5 (no padding), an alphabet `utils::base64::decode` reads.
 #[cfg(test)]
 pub(crate) fn encode_base64url(input: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -233,33 +234,6 @@ pub(crate) fn jwt_for_test(claims: &serde_json::Value) -> String {
         "hdr.{}.sig",
         encode_base64url(claims.to_string().as_bytes())
     )
-}
-
-/// Minimal base64url decoder (RFC 4648 §5, no padding). Inlined to avoid
-/// pulling `base64` in as a direct workspace dependency for this single use.
-fn decode_base64url(input: &str) -> Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-    let mut buf: u32 = 0;
-    let mut bits: u32 = 0;
-    for byte in input.bytes() {
-        let v: u32 = match byte {
-            b'A'..=b'Z' => (byte - b'A') as u32,
-            b'a'..=b'z' => (byte - b'a' + 26) as u32,
-            b'0'..=b'9' => (byte - b'0' + 52) as u32,
-            b'-' => 62,
-            b'_' => 63,
-            b'=' => continue,
-            _ => return Err(anyhow!("invalid base64url byte: 0x{byte:02x}")),
-        };
-        buf = (buf << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-            buf &= (1 << bits) - 1;
-        }
-    }
-    Ok(out)
 }
 
 /// Body-read policy for [`ApiClient::execute`], chosen per HTTP verb.
@@ -684,7 +658,7 @@ mod tests {
             br#"{"exp":1234567890}"#,
         ] {
             let encoded = encode_base64url(sample);
-            let decoded = decode_base64url(&encoded).unwrap();
+            let decoded = crate::utils::base64::decode(&encoded).unwrap();
             assert_eq!(decoded, sample);
         }
     }

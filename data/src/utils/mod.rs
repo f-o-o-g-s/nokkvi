@@ -2,6 +2,7 @@
 //! block reorder, duplicate detection, NaN-safe config clamps
 
 pub mod artwork_url;
+pub(crate) mod base64;
 pub mod calendar;
 pub(crate) mod clamp;
 pub mod cycle;
@@ -15,4 +16,5 @@ pub mod scale;
 pub mod search;
 pub mod server_url;
 pub mod setting_keywords;
+pub mod thumbhash;
 pub mod url_redaction;
