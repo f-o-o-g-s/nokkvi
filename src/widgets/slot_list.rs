@@ -719,15 +719,26 @@ impl SlotListConfig {
     /// short windows get fewer slots (7, 5, 3, 1) as before.
     /// Slot count is always odd so the center slot works correctly.
     pub(crate) fn with_dynamic_slots(window_height: f32, chrome_height: f32) -> Self {
+        Self::with_dynamic_slots_at(window_height, chrome_height, target_row_height())
+    }
+
+    /// [`Self::with_dynamic_slots`] against an explicit target row height
+    /// instead of the live setting. The slot-count tests call this with a
+    /// fixed target: the settings tests write the global setting in parallel.
+    fn with_dynamic_slots_at(
+        window_height: f32,
+        chrome_height: f32,
+        target_row_height: f32,
+    ) -> Self {
         let available_height = (window_height - chrome_height).max(0.0);
 
         // Estimate content height with a mid-range spacing guess for initial calc
         let estimated_spacing = 8.0 * SLOT_SPACING; // ~9 slots worth
         let estimated_content = (available_height - estimated_spacing).max(0.0);
-        let raw_count = estimated_content / target_row_height();
+        let raw_count = estimated_content / target_row_height;
 
         // Round to nearest odd number: try both adjacent odds, pick the one
-        // whose resulting row height is closest to target_row_height().
+        // whose resulting row height is closest to target_row_height.
         let lower_odd = ((raw_count as usize) | 1).max(1); // nearest odd <= raw (or 1)
         let upper_odd = lower_odd + 2;
 
@@ -742,8 +753,7 @@ impl SlotListConfig {
 
         let best_slot_count = if upper_odd <= MAX_SLOT_COUNT
             && upper_height >= MIN_COMFORTABLE_ROW_HEIGHT
-            && (upper_height - target_row_height()).abs()
-                <= (lower_height - target_row_height()).abs()
+            && (upper_height - target_row_height).abs() <= (lower_height - target_row_height).abs()
         {
             upper_odd
         } else if lower_height >= MIN_COMFORTABLE_ROW_HEIGHT {
@@ -2425,10 +2435,36 @@ mod tests {
         assert_eq!(row_height, 40.0); // Should clamp to minimum
     }
 
+    /// The shipped default target row height (`SlotRowHeight::Default`)
+    /// the slot-count math tests pin, so a settings test writing the live
+    /// setting in parallel can't move their expected counts.
+    fn default_target() -> f32 {
+        f32::from(nokkvi_data::types::player_settings::SlotRowHeight::Default.to_pixels())
+    }
+
+    /// `with_dynamic_slots` at the default target row height.
+    fn dynamic_slots(window_height: f32, chrome_height: f32) -> SlotListConfig {
+        SlotListConfig::with_dynamic_slots_at(window_height, chrome_height, default_target())
+    }
+
+    #[test]
+    fn slot_count_math_ignores_the_live_row_height_setting() {
+        use nokkvi_data::types::player_settings::SlotRowHeight;
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::slot_row_height_variant();
+        crate::theme::set_slot_row_height(SlotRowHeight::Spacious);
+        let pinned = dynamic_slots(900.0, 134.0).slot_count;
+        let live = SlotListConfig::with_dynamic_slots(900.0, 134.0).slot_count;
+        crate::theme::set_slot_row_height(prior);
+        assert_eq!(pinned, 11);
+        // The production entry point follows the setting: 110 px rows fit 7.
+        assert_eq!(live, 7);
+    }
+
     #[test]
     fn test_dynamic_slot_count_large_window() {
         // Large window: should get more than 9 slots to keep row height near TARGET
-        let config = SlotListConfig::with_dynamic_slots(900.0, 134.0);
+        let config = dynamic_slots(900.0, 134.0);
         // Available = 900 - 134 - 10 = 756, SLOT_SPACING=0 (flat redesign).
         // raw ≈ 756 / 70 ≈ 10.8 → try 11 and 13
         // 11 slots: spacing=0, content=756, row=68.7  (|68.7-70|=1.3)
@@ -2441,7 +2477,7 @@ mod tests {
     #[test]
     fn test_dynamic_slot_count_medium_window() {
         // Medium window should get fewer slots
-        let config = SlotListConfig::with_dynamic_slots(450.0, 134.0);
+        let config = dynamic_slots(450.0, 134.0);
         // Available = 450 - 134 - 10 = 306, SLOT_SPACING=0.
         // raw ≈ 306 / 70 ≈ 4.37 → try 3 and 5
         // 3 slots: spacing=0, content=306, row=102 (|102-70|=32)
@@ -2454,7 +2490,7 @@ mod tests {
     #[test]
     fn test_dynamic_slot_count_small_window() {
         // Very small window should fall back to minimum slots
-        let config = SlotListConfig::with_dynamic_slots(250.0, 134.0);
+        let config = dynamic_slots(250.0, 134.0);
         // Available = 250 - 134 - 10 = 106, SLOT_SPACING=0.
         // raw ≈ 106 / 70 ≈ 1.51 → lower_odd=1, upper_odd=3
         // 1 slot: content=106, row=106  (|106-70|=36)
@@ -2466,9 +2502,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_slot_count_keeps_target_row_height() {
-        // At various window heights, row height should stay near target_row_height()
+        // At various window heights, row height should stay near the target
         for window_height in [600.0, 758.0, 900.0, 1080.0, 1200.0, 1440.0, 2160.0] {
-            let config = SlotListConfig::with_dynamic_slots(window_height, 134.0);
+            let config = dynamic_slots(window_height, 134.0);
             let row_height = config.row_height();
             // Row height should always be in a reasonable range
             assert!(
@@ -2477,9 +2513,9 @@ mod tests {
             );
             // Should never exceed 2× TARGET (prevents comically large slots)
             assert!(
-                row_height < target_row_height() * 2.0,
+                row_height < default_target() * 2.0,
                 "window_height={window_height}: row_height={row_height} >= 2×TARGET={}",
-                target_row_height() * 2.0
+                default_target() * 2.0
             );
         }
     }
@@ -2489,7 +2525,7 @@ mod tests {
     #[test]
     fn slot_count_always_odd() {
         for height in (300..=2160).step_by(50) {
-            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            let config = dynamic_slots(height as f32, 134.0);
             assert_eq!(
                 config.slot_count % 2,
                 1,
@@ -2503,7 +2539,7 @@ mod tests {
     fn slot_count_monotonically_increases_with_height() {
         let mut prev_count = 0;
         for height in (300..=2160).step_by(50) {
-            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            let config = dynamic_slots(height as f32, 134.0);
             assert!(
                 config.slot_count >= prev_count,
                 "slot_count decreased from {prev_count} to {} at height={height}",
@@ -2516,7 +2552,7 @@ mod tests {
     #[test]
     fn center_slot_is_always_middle() {
         for height in (300..=2160).step_by(100) {
-            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            let config = dynamic_slots(height as f32, 134.0);
             assert_eq!(
                 config.center_slot,
                 config.slot_count / 2,
@@ -2533,7 +2569,7 @@ mod tests {
         // so `available` is simply `height - chrome`.
         for height in (300..=2160).step_by(50) {
             for chrome in [100.0, 134.0, 170.0, 200.0] {
-                let config = SlotListConfig::with_dynamic_slots(height as f32, chrome);
+                let config = dynamic_slots(height as f32, chrome);
                 let row_height = config.row_height();
                 let spacing = config.slot_count.saturating_sub(1) as f32 * SLOT_SPACING;
                 let used = config.slot_count as f32 * row_height + spacing;
