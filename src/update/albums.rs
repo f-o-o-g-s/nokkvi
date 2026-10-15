@@ -385,6 +385,52 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// A navigation step centred `target`: fetch its full-size cover now
+    /// when the step is a lone one or the cover is cached, else hold it until
+    /// the selection settles ([`crate::state::PanelArtSettle`]). Every
+    /// navigation-driven big panel load goes through here; a load with
+    /// another trigger (a view switch, an expand, a page landing, the playing
+    /// song) calls its loader directly.
+    pub(crate) fn panel_art_step(&mut self, target: crate::state::PanelArt) -> Task<Message> {
+        use crate::state::{PANEL_ART_SETTLE, PanelArt, PanelArtStep};
+
+        let cached = match &target {
+            PanelArt::Album(id) | PanelArt::Artist(id) => self.artwork.large_artwork.contains(id),
+        };
+        match self
+            .artwork
+            .panel_settle
+            .step(target, std::time::Instant::now(), cached)
+        {
+            PanelArtStep::Now(target) => self.load_panel_art(target),
+            // The timer is made when the task first runs, inside the
+            // runtime, not here.
+            PanelArtStep::Wait(target) => Task::perform(
+                async { tokio::time::sleep(PANEL_ART_SETTLE).await },
+                move |()| Message::Artwork(ArtworkMessage::PanelArtSettled(target)),
+            ),
+        }
+    }
+
+    /// A settle timer fired: fetch the cover when the run stopped on it.
+    pub(crate) fn handle_panel_art_settled(
+        &mut self,
+        target: crate::state::PanelArt,
+    ) -> Task<Message> {
+        if self.artwork.panel_settle.settled(&target) {
+            self.load_panel_art(target)
+        } else {
+            Task::none()
+        }
+    }
+
+    fn load_panel_art(&mut self, target: crate::state::PanelArt) -> Task<Message> {
+        match target {
+            crate::state::PanelArt::Album(id) => self.handle_load_large_artwork(id),
+            crate::state::PanelArt::Artist(id) => self.handle_load_artist_large_artwork(id),
+        }
+    }
+
     /// Force-refresh a specific album's artwork (user-initiated, with toasts).
     /// A changed cover also refreshes on its own on Navidrome 0.64+: the
     /// image hash is the prefetch version, and `handle_artwork_loaded` drops
@@ -664,11 +710,10 @@ impl Nokkvi {
 
                     let mut tasks = Vec::new();
                     // Direct call (rather than dispatching Message::Artwork(LoadLarge))
-                    // so loading_large_artwork is set in the same tick as the action.
-                    // Prevents racing with subsequent LoadLargeArtwork actions during
-                    // rapid scroll/seek-settled cycles.
+                    // so a lone step's load starts in the same tick as the action;
+                    // a run of steps waits for the selection to settle.
                     if let Some(album_id) = resolved_album_id {
-                        tasks.push(self.handle_load_large_artwork(album_id));
+                        tasks.push(self.panel_art_step(crate::state::PanelArt::Album(album_id)));
                     }
 
                     // Prefetch viewport mini artwork + chain a page-load if

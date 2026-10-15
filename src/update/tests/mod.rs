@@ -41,6 +41,7 @@ mod milkdrop;
 mod milkdrop_picker;
 mod modals;
 mod mpris;
+mod panel_art;
 mod placeholders;
 #[macro_use]
 mod navigation_macros;

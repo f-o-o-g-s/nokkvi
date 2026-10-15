@@ -7,6 +7,7 @@
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
+    time::{Duration, Instant},
 };
 
 use iced::widget::image;
@@ -129,6 +130,78 @@ impl<V> InFlight<V> {
     }
 }
 
+/// Steps closer together than this are one run of movement: a held arrow
+/// key repeats every 40 ms or so and a spun wheel faster still, while
+/// separate presses land further apart.
+pub(crate) const PANEL_ART_RUN_GAP: Duration = Duration::from_millis(150);
+/// How long the row a run stops on waits before its full-size cover is
+/// fetched; past the gap between a run's steps, so a run still going never
+/// lets one through.
+pub(crate) const PANEL_ART_SETTLE: Duration = Duration::from_millis(150);
+
+/// The full-size cover a centred row shows in the big panel, by the loader
+/// it comes from: an album's, or an artist's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelArt {
+    Album(String),
+    Artist(String),
+}
+
+/// What [`PanelArtSettle::step`] decided for a centred row.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PanelArtStep {
+    /// Fetch now: a lone step, or a cover already cached.
+    Now(PanelArt),
+    /// A run is under way: fetch once it stops here
+    /// (`ArtworkMessage::PanelArtSettled` after [`PANEL_ART_SETTLE`]).
+    Wait(PanelArt),
+}
+
+/// Holds the big panel's full-size cover back while the selection moves, so
+/// a fast scroll fetches one cover (about 1 MB at 1000 px) for the row it
+/// stops on instead of one for every row it passes. Each request also took a
+/// slot ahead of the thumbnails of the rows the scroll stopped on: on a
+/// server answering in 0.5 s, an 80-row scroll left them waiting seconds.
+/// A lone step fetches at once, as before; the panel shows the thumbnail or
+/// the blurred placeholder (`views::panel_cover`) while a run's row waits.
+/// Reset on logout via `ArtworkState::default()`, so a settle timer from an
+/// ended session finds nothing waiting.
+#[derive(Debug, Clone, Default)]
+pub struct PanelArtSettle {
+    last_step: Option<Instant>,
+    waiting: Option<PanelArt>,
+}
+
+impl PanelArtSettle {
+    /// The selection centred `target` at `now`. `cached`: its full-size cover
+    /// is already in the cache, so showing it costs nothing and it never
+    /// waits; the step still counts toward the run.
+    pub fn step(&mut self, target: PanelArt, now: Instant, cached: bool) -> PanelArtStep {
+        let in_run = self
+            .last_step
+            .is_some_and(|last| now.saturating_duration_since(last) < PANEL_ART_RUN_GAP);
+        self.last_step = Some(now);
+        if in_run && !cached {
+            self.waiting = Some(target.clone());
+            PanelArtStep::Wait(target)
+        } else {
+            self.waiting = None;
+            PanelArtStep::Now(target)
+        }
+    }
+
+    /// A settle timer for `target` fired: `true` when it is still the row the
+    /// run stopped on, which stops waiting.
+    pub fn settled(&mut self, target: &PanelArt) -> bool {
+        if self.waiting.as_ref() == Some(target) {
+            self.waiting = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// A cover's blurred stand-in: the ThumbHash (Navidrome 0.64+) it was
 /// decoded from, and the picture. See [`ArtworkState::placeholders`].
 #[derive(Debug, Clone)]
@@ -241,6 +314,9 @@ pub struct ArtworkState {
     /// write `None` into `album_art_versions`. Unbounded like the version
     /// map; reset on logout via `Default`.
     pub large_artwork_hashes: HashMap<String, String>,
+    /// The big panel's settle gate ([`PanelArtSettle`]): a full-size cover
+    /// waits while the selection runs past rows.
+    pub panel_settle: PanelArtSettle,
     /// In-flight large-art fetches ([`InFlight`]): album/artist id (the id
     /// space of [`Self::large_artwork`]) -> the version the request carries
     /// (image hash on Navidrome 0.64+, else `updated_at`). Every centering
@@ -371,6 +447,7 @@ impl Default for ArtworkState {
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             large_artwork_hashes: HashMap::new(),
             large_artwork_pending: InFlight::default(),
+            panel_settle: PanelArtSettle::default(),
             radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
             radio_art_pending: InFlight::default(),
             radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
@@ -413,7 +490,74 @@ impl std::fmt::Debug for ArtworkState {
 
 #[cfg(test)]
 mod tests {
-    use super::InFlight;
+    use std::time::{Duration, Instant};
+
+    use super::{InFlight, PANEL_ART_RUN_GAP, PanelArt, PanelArtSettle, PanelArtStep};
+
+    fn album(id: &str) -> PanelArt {
+        PanelArt::Album(id.to_string())
+    }
+
+    #[test]
+    fn a_lone_step_fetches_and_a_run_waits_for_its_last_row() {
+        let mut settle = PanelArtSettle::default();
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+
+        assert_eq!(
+            settle.step(album("a"), t0, false),
+            PanelArtStep::Now(album("a"))
+        );
+        // A held key: each step lands inside the gap and waits.
+        assert_eq!(
+            settle.step(album("b"), t0 + ms(40), false),
+            PanelArtStep::Wait(album("b"))
+        );
+        assert_eq!(
+            settle.step(album("c"), t0 + ms(80), false),
+            PanelArtStep::Wait(album("c"))
+        );
+
+        assert!(
+            !settle.settled(&album("b")),
+            "a row the run passed is never fetched"
+        );
+        assert!(settle.settled(&album("c")), "the row the run stopped on is");
+        assert!(!settle.settled(&album("c")), "and only once");
+
+        // A press after a pause is a lone step again.
+        let later = t0 + ms(80) + PANEL_ART_RUN_GAP;
+        assert_eq!(
+            settle.step(album("d"), later, false),
+            PanelArtStep::Now(album("d"))
+        );
+    }
+
+    #[test]
+    fn a_cached_cover_never_waits_but_keeps_the_run_going() {
+        let mut settle = PanelArtSettle::default();
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        assert_eq!(
+            settle.step(album("a"), t0, false),
+            PanelArtStep::Now(album("a"))
+        );
+        assert_eq!(
+            settle.step(album("b"), t0 + ms(40), false),
+            PanelArtStep::Wait(album("b"))
+        );
+        // A cached row shows at once and drops the wait for the row before it.
+        assert_eq!(
+            settle.step(album("c"), t0 + ms(80), true),
+            PanelArtStep::Now(album("c"))
+        );
+        assert!(!settle.settled(&album("b")));
+        // The run goes on through the cached row.
+        assert_eq!(
+            settle.step(album("d"), t0 + ms(120), false),
+            PanelArtStep::Wait(album("d"))
+        );
+    }
 
     #[test]
     fn in_flight_holds_only_the_claimed_version() {

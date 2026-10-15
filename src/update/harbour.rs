@@ -602,12 +602,14 @@ impl Nokkvi {
             _ => None,
         };
 
+        // Through the big panel's settle gate: a run of steps fetches only
+        // the row it stops on.
         let mut tasks = Vec::new();
         if let Some(id) = album_large {
-            tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(id))));
+            tasks.push(self.panel_art_step(crate::state::PanelArt::Album(id)));
         }
         if let Some(id) = artist_large {
-            tasks.push(self.handle_load_artist_large_artwork(id));
+            tasks.push(self.panel_art_step(crate::state::PanelArt::Artist(id)));
         }
         if let Some((target, entity_id, album_ids)) = collage {
             tasks.push(self.warm_harbour_collage(target, entity_id, album_ids));

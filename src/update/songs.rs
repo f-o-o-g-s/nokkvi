@@ -390,8 +390,9 @@ impl Nokkvi {
             }
             SongsAction::LoadLargeArtwork(album_id) => {
                 // Direct call (rather than dispatching Message::Artwork(LoadLarge))
-                // so loading_large_artwork is set in the same tick as the action.
-                let mut tasks = vec![self.handle_load_large_artwork(album_id)];
+                // so a lone step's load starts in the same tick as the action;
+                // a run of steps waits for the selection to settle.
+                let mut tasks = vec![self.panel_art_step(crate::state::PanelArt::Album(album_id))];
 
                 // Prefetch viewport mini artwork + chain a page-load if
                 // scrolling near the loaded edge.

@@ -300,7 +300,20 @@ impl Nokkvi {
     /// arrow key scrolls past.
     pub(crate) fn artist_center_tasks(&mut self, artist_id: String) -> Task<Message> {
         let artwork = self.handle_load_artist_large_artwork(artist_id.clone());
-        let info = if self.artist_info.centre(&artist_id) && self.app_service.is_some() {
+        Task::batch([artwork, self.artist_info_settle_task(artist_id)])
+    }
+
+    /// [`Self::artist_center_tasks`] for a navigation step: the large artwork
+    /// goes through the big panel's settle gate (`panel_art_step`), so a run
+    /// of steps fetches only the artist it stops on.
+    pub(crate) fn artist_step_tasks(&mut self, artist_id: String) -> Task<Message> {
+        let artwork = self.panel_art_step(crate::state::PanelArt::Artist(artist_id.clone()));
+        Task::batch([artwork, self.artist_info_settle_task(artist_id)])
+    }
+
+    /// Start the info settle timer for a newly centred artist.
+    fn artist_info_settle_task(&mut self, artist_id: String) -> Task<Message> {
+        if self.artist_info.centre(&artist_id) && self.app_service.is_some() {
             Task::perform(tokio::time::sleep(ARTIST_INFO_SETTLE), move |()| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoSettled(
                     artist_id,
@@ -308,8 +321,7 @@ impl Nokkvi {
             })
         } else {
             Task::none()
-        };
-        Task::batch([artwork, info])
+        }
     }
 
     /// An artist's settle timer fired: ask about it if it is still the one
@@ -683,7 +695,7 @@ impl Nokkvi {
                 let mut batch: Vec<Task<Message>> = vec![cmd.map(Message::Artists)];
 
                 if let Some(id) = self.centred_artist_id() {
-                    batch.push(self.artist_center_tasks(id));
+                    batch.push(self.artist_step_tasks(id));
                 }
 
                 // Prefetch viewport mini artwork + chain a page-load if

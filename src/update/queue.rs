@@ -971,8 +971,9 @@ impl Nokkvi {
                 && let Some(song) = rows.get(center_idx)
                 && self.artwork.large_artwork.peek(&song.album_id).is_none()
             {
-                tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                    song.album_id.clone(),
+                // A step: through the big panel's settle gate.
+                tasks.push(Task::done(Message::Artwork(ArtworkMessage::PanelArtStep(
+                    crate::state::PanelArt::Album(song.album_id.clone()),
                 ))));
             }
         }

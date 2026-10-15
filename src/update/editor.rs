@@ -20,7 +20,7 @@ use super::components::{
 };
 use crate::{
     Nokkvi,
-    app_message::{ArtworkMessage, EditorMessage, Message},
+    app_message::{EditorMessage, Message},
     views::queue::QueueContextEntry,
     widgets::drag_column::DragEvent,
 };
@@ -553,9 +553,7 @@ impl Nokkvi {
             .map(|song| song.album_id.clone());
         self.claim_minis(queued);
         if let Some(album_id) = center_album {
-            tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                album_id,
-            ))));
+            tasks.push(self.panel_art_step(crate::state::PanelArt::Album(album_id)));
         }
 
         Task::batch(tasks)

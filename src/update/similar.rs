@@ -46,9 +46,7 @@ impl Nokkvi {
             }
 
             SimilarAction::LoadLargeArtwork(album_id) => {
-                let mut tasks = vec![Task::done(Message::Artwork(
-                    crate::app_message::ArtworkMessage::LoadLarge(album_id),
-                ))];
+                let mut tasks = vec![self.panel_art_step(crate::state::PanelArt::Album(album_id))];
 
                 if let Some(shell) = &self.app_service {
                     let gate = crate::update::components::ArtworkGate::new(&self.artwork);

@@ -537,6 +537,13 @@ pub enum ArtworkMessage {
     LargeLoaded(String, Option<image::Handle>),
     LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
+    /// A navigation step centred a row: its big panel cover is fetched now,
+    /// or once the selection settles (`Nokkvi::panel_art_step`). Sent by a
+    /// path that plans the step while it borrows the rows (the queue's
+    /// viewport warm); the others call `panel_art_step` directly.
+    PanelArtStep(crate::state::PanelArt),
+    /// The settle timer of a row a run of steps passed or stopped on.
+    PanelArtSettled(crate::state::PanelArt),
     /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch).
     /// User-initiated: shows "Refreshing artwork…" / "Artwork refreshed" toasts.
     RefreshAlbumArtwork(String),
