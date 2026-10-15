@@ -23,6 +23,7 @@ mod artwork;
 mod artwork_064;
 mod artwork_drag;
 mod autohide_toolbar;
+mod background_reload;
 mod boat;
 mod components;
 mod cross_pane_drag;

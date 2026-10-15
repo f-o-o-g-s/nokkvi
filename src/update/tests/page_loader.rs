@@ -101,7 +101,7 @@ fn load_paged_albums_offset_zero_always_dispatches() {
     app.albums_page.common.slot_list.viewport_offset = 0;
 
     // `handle_load_albums` is the offset == 0 path.
-    let _task = app.handle_load_albums(false, None);
+    let _task = app.handle_load_albums(None);
 
     assert!(
         app.library.albums.is_loading(),

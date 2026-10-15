@@ -250,8 +250,13 @@ fn artist_rating_propagates_to_artists_list() {
 //  Artists Background Reload: viewport/selection preservation
 // ══════════════════════════════════════════════════════════════════════
 
+/// A background reload fetches every row down to the viewport, so a missing
+/// anchor means the artist is gone: the viewport keeps its offset, clamped
+/// into the new list, rather than jumping to the top (Random-sort lists, where
+/// the anchor was usually missing from a fresh random page, are no longer
+/// reloaded in the background at all).
 #[test]
-fn background_artists_reload_anchor_not_found_resets_to_zero() {
+fn background_artists_reload_anchor_not_found_keeps_offset_in_bounds() {
     let mut app = test_app();
 
     // Initial list: 5 artists, centered on "ar3" (viewport_offset = 2)
@@ -264,18 +269,22 @@ fn background_artists_reload_anchor_not_found_resets_to_zero() {
     ]);
     app.artists_page.common.slot_list.viewport_offset = 2;
 
-    // Background reload returns a new random first page that does NOT contain "ar3"
+    // Background reload returns rows that do NOT contain "ar3"
     let new_page = vec![
         make_artist("ar6", "Zeta"),
         make_artist("ar7", "Eta"),
         make_artist("ar8", "Theta"),
     ];
-    let _ = app.handle_artists_loaded(Ok(new_page), 8, true, Some("ar3".to_string()));
-
+    let _ = app.handle_artists_loaded(Ok(new_page.clone()), 8, true, Some("ar3".to_string()));
     assert_eq!(
-        app.artists_page.common.slot_list.viewport_offset, 0,
-        "anchor not found in new random page must reset viewport to 0, not leave it stale"
+        app.artists_page.common.slot_list.viewport_offset, 2,
+        "a missing anchor keeps the viewport where it was"
     );
+
+    // Past the end of the new list, the offset is clamped into it.
+    app.artists_page.common.slot_list.viewport_offset = 4;
+    let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar3".to_string()));
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, 2);
 }
 
 #[test]
@@ -336,8 +345,9 @@ fn artist_rating_update_does_not_move_viewport() {
 //  Songs Background Reload: viewport/selection preservation
 // ══════════════════════════════════════════════════════════════════════
 
+/// Same as `background_artists_reload_anchor_not_found_keeps_offset_in_bounds`.
 #[test]
-fn background_songs_reload_anchor_not_found_resets_to_zero() {
+fn background_songs_reload_anchor_not_found_keeps_offset_in_bounds() {
     let mut app = test_app();
 
     app.library.songs.set_from_vec(vec![
@@ -349,18 +359,21 @@ fn background_songs_reload_anchor_not_found_resets_to_zero() {
     ]);
     app.songs_page.common.slot_list.viewport_offset = 2;
 
-    // Background reload returns a new random first page that does NOT contain "s3"
+    // Background reload returns rows that do NOT contain "s3"
     let new_page = vec![
         make_song("s6", "Zeta", "Artist"),
         make_song("s7", "Eta", "Artist"),
         make_song("s8", "Theta", "Artist"),
     ];
-    let _ = app.handle_songs_loaded(Ok(new_page), 8, true, Some("s3".to_string()));
-
+    let _ = app.handle_songs_loaded(Ok(new_page.clone()), 8, true, Some("s3".to_string()));
     assert_eq!(
-        app.songs_page.common.slot_list.viewport_offset, 0,
-        "anchor not found in new random page must reset viewport to 0, not leave it stale"
+        app.songs_page.common.slot_list.viewport_offset, 2,
+        "a missing anchor keeps the viewport where it was"
     );
+
+    app.songs_page.common.slot_list.viewport_offset = 4;
+    let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s3".to_string()));
+    assert_eq!(app.songs_page.common.slot_list.viewport_offset, 2);
 }
 
 #[test]

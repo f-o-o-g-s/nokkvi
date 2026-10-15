@@ -1217,7 +1217,7 @@ pub enum LibraryMessage {
 //
 // Variant shape per the plan §2.4:
 //   - Paged domains: `Loaded { result, total_count, background, anchor_id }`
-//                  + `PageLoaded(result, total_count)`
+//                  + `PageLoaded { slot, result, total_count }`
 //   - Single-shot domains: `Loaded(result, total_count)` (or `Loaded(result)`
 //                          for Queue, which has no separate `total_count`).
 //
@@ -1231,7 +1231,7 @@ pub enum LibraryMessage {
 /// `Loaded` is the first-page response (or background reload via SSE);
 /// `background` and `anchor_id` drive the SSE-refresh re-anchor path.
 /// `PageLoaded` is a subsequent paged-scroll response and is appended to the
-/// existing `PagedBuffer<AlbumUIViewData>`.
+/// existing `PagedBuffer<AlbumUIViewData>`, only where it was asked for.
 #[derive(Debug, Clone)]
 pub enum AlbumsLoaderMessage {
     Loaded {
@@ -1240,10 +1240,13 @@ pub enum AlbumsLoaderMessage {
         background: bool,
         anchor_id: Option<String>,
     },
-    PageLoaded(
-        Result<Vec<nokkvi_data::backend::albums::AlbumUIViewData>, String>,
-        usize,
-    ),
+    PageLoaded {
+        /// Where the page was asked for: it lands only there
+        /// (`PagedBuffer::append_page_at`).
+        slot: nokkvi_data::types::paged_buffer::PageSlot,
+        result: Result<Vec<nokkvi_data::backend::albums::AlbumUIViewData>, String>,
+        total_count: usize,
+    },
 }
 
 // --- Artists Loader --------------------------------------------------------
@@ -1258,10 +1261,13 @@ pub enum ArtistsLoaderMessage {
         background: bool,
         anchor_id: Option<String>,
     },
-    PageLoaded(
-        Result<Vec<nokkvi_data::backend::artists::ArtistUIViewData>, String>,
-        usize,
-    ),
+    PageLoaded {
+        /// Where the page was asked for: it lands only there
+        /// (`PagedBuffer::append_page_at`).
+        slot: nokkvi_data::types::paged_buffer::PageSlot,
+        result: Result<Vec<nokkvi_data::backend::artists::ArtistUIViewData>, String>,
+        total_count: usize,
+    },
     /// A `getArtistInfo2` answer for `artist_id`, fetched when the artist was
     /// centred. `generation` is the session counter it was dispatched under
     /// (see `ArtistInfoState`). A rejected session never arrives here: it is
@@ -1288,10 +1294,13 @@ pub enum SongsLoaderMessage {
         background: bool,
         anchor_id: Option<String>,
     },
-    PageLoaded(
-        Result<Vec<nokkvi_data::backend::songs::SongUIViewData>, String>,
-        usize,
-    ),
+    PageLoaded {
+        /// Where the page was asked for: it lands only there
+        /// (`PagedBuffer::append_page_at`).
+        slot: nokkvi_data::types::paged_buffer::PageSlot,
+        result: Result<Vec<nokkvi_data::backend::songs::SongUIViewData>, String>,
+        total_count: usize,
+    },
 }
 
 // --- Genres Loader ---------------------------------------------------------

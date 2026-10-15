@@ -1,13 +1,16 @@
 //! Artist data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::artists::ArtistUIViewData,
+    types::{ItemKind, paged_buffer::PageSlot},
+};
 use tracing::debug;
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
-    update::ArtistsTarget,
+    update::{ArtistsTarget, PagedLoad, Reload},
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
 };
@@ -67,18 +70,15 @@ impl Nokkvi {
         }
     }
 
-    pub(crate) fn handle_load_artists(
-        &mut self,
-        background: bool,
-        anchor_id: Option<String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_load_artists(&mut self, reload: Option<Reload>) -> Task<Message> {
+        let background = reload.is_some();
+        let (load, anchor_id) = Reload::first_rows(reload);
         let is_rating_sort =
             self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
         let album_artists_only = self.settings.show_album_artists_only;
         debug!(album_artists_only, "LoadArtists per-call flags");
         self.load_paged::<ArtistsTarget, _, _, _>(
-            0,
-            false,
+            load,
             move |(result, total_count)| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::Loaded {
                     result,
@@ -98,14 +98,15 @@ impl Nokkvi {
         let is_rating_sort =
             self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
         let album_artists_only = self.settings.show_album_artists_only;
+        let slot = self.library.artists.page_slot(offset);
         self.load_paged::<ArtistsTarget, _, _, _>(
-            offset,
-            false,
-            |(result, total_count)| {
-                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+            PagedLoad::Page(offset),
+            move |(result, total_count)| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             move |shell, params| {
                 Self::fetch_artists_page(shell, params, is_rating_sort, album_artists_only)
@@ -119,14 +120,15 @@ impl Nokkvi {
         let is_rating_sort =
             self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
         let album_artists_only = self.settings.show_album_artists_only;
+        let slot = self.library.artists.page_slot(offset);
         self.load_paged::<ArtistsTarget, _, _, _>(
-            offset,
-            true,
-            |(result, total_count)| {
-                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+            PagedLoad::ForcedPage(offset),
+            move |(result, total_count)| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             move |shell, params| {
                 Self::fetch_artists_page(shell, params, is_rating_sort, album_artists_only)
@@ -397,10 +399,11 @@ impl Nokkvi {
 
     pub(crate) fn handle_artists_page_loaded(
         &mut self,
+        slot: PageSlot,
         result: Result<Vec<ArtistUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.handle_page_loaded_with::<ArtistsTarget>(result, total_count)
+        self.handle_page_loaded_with::<ArtistsTarget>(slot, result, total_count)
     }
 
     pub(crate) fn handle_artists_loaded(
@@ -737,9 +740,11 @@ impl Nokkvi {
                 background,
                 anchor_id,
             } => self.handle_artists_loaded(result, total_count, background, anchor_id),
-            ArtistsLoaderMessage::PageLoaded(result, total_count) => {
-                self.handle_artists_page_loaded(result, total_count)
-            }
+            ArtistsLoaderMessage::PageLoaded {
+                slot,
+                result,
+                total_count,
+            } => self.handle_artists_page_loaded(slot, result, total_count),
             ArtistsLoaderMessage::InfoLoaded {
                 generation,
                 artist_id,

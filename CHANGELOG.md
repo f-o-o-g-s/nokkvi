@@ -54,6 +54,7 @@ All notable changes to this project will be documented in this file.
 - Focusing a text box from the keyboard (`/`, or Tab on the login screen) now puts the cursor after its text instead of before it.
 - With Cover Blur on, the cover no longer blinks blank for a frame when lyrics show or hide.
 - An artist with no picture on the server but an outside poster now shows that poster as its thumbnail, as the big panel already did.
+- Far down a long Albums, Artists or Songs list, the view now stays put when a scrobble or an artist refresh reloads the list.
 
 ### Removed
 

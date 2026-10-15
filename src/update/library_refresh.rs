@@ -10,7 +10,10 @@ use iced::Task;
 use tracing::info;
 
 use crate::{
-    Nokkvi, app_message::Message, services::navidrome_sse::LibraryChange,
+    Nokkvi,
+    app_message::Message,
+    services::navidrome_sse::LibraryChange,
+    update::{AlbumsTarget, ArtistsTarget, SongsTarget},
     widgets::view_header::SortMode,
 };
 
@@ -65,7 +68,9 @@ impl Nokkvi {
         // on first visit. The Random-sort gate protects the artwork
         // reference (a background reload would return a new random order and
         // jar the user mid-browse); the user can press F5 to re-randomize
-        // intentionally.
+        // intentionally. A paged view reloads every row down to its viewport
+        // (`background_reload`), so the row it was on comes back and the
+        // view stays there, or keeps its rows when scrolled too deep.
         let affects_albums = is_wildcard || !album_ids.is_empty();
         let affects_artists = is_wildcard || !artist_ids.is_empty();
         let affects_songs = is_wildcard || !song_ids.is_empty();
@@ -74,32 +79,26 @@ impl Nokkvi {
 
         // 1. Snapshot current viewport state and trigger reload for Albums.
         if affects_albums
-            && !self.library.albums.is_empty()
             && self.albums_page.common.current_sort_mode != SortMode::Random
+            && let Some(reload) = self.background_reload::<AlbumsTarget>()
         {
-            let offset = self.albums_page.common.slot_list.viewport_offset;
-            let anchor_id = self.library.albums.get(offset).map(|a| a.id.clone());
-            tasks.push(self.handle_load_albums(true, anchor_id));
+            tasks.push(self.handle_load_albums(Some(reload)));
         }
 
         // 2. Snapshot current viewport state and trigger reload for Artists.
         if affects_artists
-            && !self.library.artists.is_empty()
             && self.artists_page.common.current_sort_mode != SortMode::Random
+            && let Some(reload) = self.background_reload::<ArtistsTarget>()
         {
-            let offset = self.artists_page.common.slot_list.viewport_offset;
-            let anchor_id = self.library.artists.get(offset).map(|a| a.id.clone());
-            tasks.push(self.handle_load_artists(true, anchor_id));
+            tasks.push(self.handle_load_artists(Some(reload)));
         }
 
         // 3. Snapshot current viewport state and trigger reload for Songs.
         if affects_songs
-            && !self.library.songs.is_empty()
             && self.songs_page.common.current_sort_mode != SortMode::Random
+            && let Some(reload) = self.background_reload::<SongsTarget>()
         {
-            let offset = self.songs_page.common.slot_list.viewport_offset;
-            let anchor_id = self.library.songs.get(offset).map(|a| a.id.clone());
-            tasks.push(self.handle_load_songs(true, anchor_id));
+            tasks.push(self.handle_load_songs(Some(reload)));
         }
 
         // 4. Playlists: single-shot reload (not paged, no anchor-based

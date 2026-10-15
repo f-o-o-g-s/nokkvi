@@ -39,6 +39,26 @@ pub struct PagedBuffer<T> {
     loading_since: Option<Instant>,
     /// Mutation counter — bumped by every method that mutates `items`.
     generation: u64,
+    /// Bumped whenever the whole list is replaced (`set_first_page`,
+    /// `set_from_vec`, `clear`), never by an append or an edit: the identity
+    /// of the list a page request continues ([`PageSlot`]).
+    epoch: u64,
+}
+
+/// Where a page asked for now belongs: the list it continues (the buffer's
+/// epoch at the time) and the row it starts at.
+/// [`PagedBuffer::append_page_at`] appends it only there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageSlot {
+    epoch: u64,
+    offset: usize,
+}
+
+impl PageSlot {
+    /// The row the page starts at.
+    pub fn offset(self) -> usize {
+        self.offset
+    }
 }
 
 impl<T> PagedBuffer<T> {
@@ -50,6 +70,7 @@ impl<T> PagedBuffer<T> {
             loading: false,
             loading_since: None,
             generation: 0,
+            epoch: 0,
         }
     }
 
@@ -62,6 +83,25 @@ impl<T> PagedBuffer<T> {
     #[inline]
     fn bump_generation(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    #[inline]
+    fn replace_list(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+    }
+
+    /// The slot a page starting at `offset`, asked for now, fills.
+    pub fn page_slot(&self, offset: usize) -> PageSlot {
+        PageSlot {
+            epoch: self.epoch,
+            offset,
+        }
+    }
+
+    /// Whether a page asked for at `slot` still fits: the list it continues
+    /// is still the loaded one and the loaded rows end where it starts.
+    pub fn takes_page(&self, slot: PageSlot) -> bool {
+        slot.epoch == self.epoch && slot.offset == self.items.len()
     }
 
     /// Total items on the server (not just loaded items).
@@ -139,6 +179,7 @@ impl<T> PagedBuffer<T> {
         self.loading = false;
         self.loading_since = None;
         self.bump_generation();
+        self.replace_list();
     }
 
     /// Append a page of items to the buffer.
@@ -151,6 +192,21 @@ impl<T> PagedBuffer<T> {
         self.bump_generation();
     }
 
+    /// Append a page where it was asked for ([`takes_page`](Self::takes_page)).
+    /// A page that no longer fits changes nothing and returns `false`: a
+    /// reload, sort or search replaced the list since, or another page
+    /// landed first, and appending it would repeat rows or mix two orders.
+    /// The loading flag is left alone then: whatever made the page stale
+    /// already cleared it, and a request sent since may hold it.
+    #[must_use = "a page that no longer fits is not appended"]
+    pub fn append_page_at(&mut self, slot: PageSlot, items: Vec<T>, total_count: usize) -> bool {
+        if !self.takes_page(slot) {
+            return false;
+        }
+        self.append_page(items, total_count);
+        true
+    }
+
     /// Clear all loaded data. Used when sort/search params change.
     pub fn clear(&mut self) {
         self.items.clear();
@@ -158,6 +214,7 @@ impl<T> PagedBuffer<T> {
         self.loading = false;
         self.loading_since = None;
         self.bump_generation();
+        self.replace_list();
     }
 
     /// Get a mutable reference to an item by index. Bumps the generation
@@ -214,6 +271,7 @@ impl<T> PagedBuffer<T> {
         self.loading = false;
         self.loading_since = None;
         self.bump_generation();
+        self.replace_list();
     }
 }
 
@@ -545,6 +603,36 @@ mod tests {
             buf.generation() > before,
             "iter_mut must keep its eager-invalidation contract for legacy callers"
         );
+    }
+
+    /// A page lands only on the list it continues, right after the rows it
+    /// follows; a page that no longer fits changes nothing.
+    #[test]
+    fn a_page_lands_only_where_it_was_asked_for() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![0, 1, 2], 9);
+
+        let next = buf.page_slot(3);
+        assert!(buf.append_page_at(next, vec![3, 4, 5], 9));
+        assert_eq!(&buf[..], &[0, 1, 2, 3, 4, 5]);
+
+        // The same page again: the rows it follows no longer end at it.
+        assert!(!buf.append_page_at(next, vec![3, 4, 5], 9));
+        assert_eq!(buf.len(), 6);
+
+        // A page asked for before a reload replaced the list.
+        let stale = buf.page_slot(6);
+        buf.set_loading(true);
+        buf.set_first_page(vec![0, 1, 2, 3, 4, 5], 9);
+        buf.set_loading(true);
+        assert!(!buf.append_page_at(stale, vec![6, 7, 8], 9));
+        assert_eq!(buf.len(), 6, "the reloaded rows stand");
+        assert!(buf.is_loading(), "a request sent since keeps its flag");
+
+        // Edits keep the list: a page asked for before one still fits.
+        let after_edit = buf.page_slot(6);
+        buf.update_by(|x| *x == 2, |x| *x = 20);
+        assert!(buf.takes_page(after_edit));
     }
 
     /// Existing get_mut callers continue to bump generation even

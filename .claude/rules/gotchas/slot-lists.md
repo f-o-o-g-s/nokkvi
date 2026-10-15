@@ -25,7 +25,7 @@ paths:
 
 ## Expansion, Drag & Viewport
 
-- **Albums viewport clamp**: clamp `viewport_offset` against the new total count on background refresh — otherwise the viewport can land past the end after a remove.
+- **Paged viewport clamp**: a background refresh that can't find the viewport's row keeps `viewport_offset`, clamped to the new length (Albums, Artists, Songs) — otherwise the viewport can land past the end after a remove, or jump to the top.
 - **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
 - **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand.target` (on the `PendingExpandState` cluster) runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.
 - **Expansion artwork retry**: artwork fetches dispatched from inline expansions retry on transient failure and reject empty-bytes responses, so a flaky first request doesn't leave a permanent empty cell.

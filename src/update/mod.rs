@@ -108,7 +108,7 @@ pub(crate) use ipc::{
     switchable_view_names as ipc_switchable_view_names,
 };
 pub(crate) use loader_target::{
-    AlbumsTarget, ArtistsTarget, GenresTarget, PlaylistsTarget, SongsTarget,
+    AlbumsTarget, ArtistsTarget, GenresTarget, PagedLoad, PlaylistsTarget, Reload, SongsTarget,
 };
 pub(crate) use pending_expand_resolve::{AlbumSpec, ArtistSpec, GenreSpec, SongSpec};
 
@@ -259,7 +259,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Data Loading: Albums
             // -----------------------------------------------------------------
-            Message::LoadAlbums => self.handle_load_albums(false, None),
+            Message::LoadAlbums => self.handle_load_albums(None),
             // -----------------------------------------------------------------
             // Data Loading: Queue
             //
@@ -317,7 +317,7 @@ impl Nokkvi {
             // `Message::ArtistsLoader(ArtistsLoaderMessage::{Loaded,PageLoaded})`,
             // routed in the "Loader Results" block above.
             // -----------------------------------------------------------------
-            Message::LoadArtists => self.handle_load_artists(false, None),
+            Message::LoadArtists => self.handle_load_artists(None),
 
             // -----------------------------------------------------------------
             // Data Loading: Songs
@@ -326,7 +326,7 @@ impl Nokkvi {
             // `Message::SongsLoader(SongsLoaderMessage::{Loaded,PageLoaded}(...))`,
             // routed in the "Loader Results" block above.
             // -----------------------------------------------------------------
-            Message::LoadSongs => self.handle_load_songs(false, None),
+            Message::LoadSongs => self.handle_load_songs(None),
 
             // -----------------------------------------------------------------
             // Data Loading: Genres

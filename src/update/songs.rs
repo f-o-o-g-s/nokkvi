@@ -3,14 +3,14 @@
 use iced::Task;
 use nokkvi_data::{
     backend::songs::SongUIViewData,
-    types::{ItemKind, OneShotShuffle, library_query::LibraryQuery},
+    types::{ItemKind, OneShotShuffle, library_query::LibraryQuery, paged_buffer::PageSlot},
 };
 use tracing::{debug, error};
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message, MiniArt, NavigationMessage},
-    update::SongsTarget,
+    update::{PagedLoad, Reload, SongsTarget},
     views::{self, HasCommonAction, SongsAction},
 };
 
@@ -42,14 +42,11 @@ impl Nokkvi {
         }
     }
 
-    pub(crate) fn handle_load_songs(
-        &mut self,
-        background: bool,
-        anchor_id: Option<String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_load_songs(&mut self, reload: Option<Reload>) -> Task<Message> {
+        let background = reload.is_some();
+        let (load, anchor_id) = Reload::first_rows(reload);
         self.load_paged::<SongsTarget, _, _, _>(
-            0,
-            false,
+            load,
             move |(result, total_count)| {
                 Message::SongsLoader(crate::app_message::SongsLoaderMessage::Loaded {
                     result,
@@ -64,14 +61,15 @@ impl Nokkvi {
 
     /// Load a subsequent page of songs (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_songs_load_page(&mut self, offset: usize) -> Task<Message> {
+        let slot = self.library.songs.page_slot(offset);
         self.load_paged::<SongsTarget, _, _, _>(
-            offset,
-            false,
-            |(result, total_count)| {
-                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
+            PagedLoad::Page(offset),
+            move |(result, total_count)| {
+                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             Self::fetch_songs_page,
         )
@@ -82,14 +80,15 @@ impl Nokkvi {
     /// library while the viewport stays at 0 (the user pressed Shift+C and
     /// the playing track isn't in the loaded buffer yet).
     pub(crate) fn force_load_songs_page(&mut self, offset: usize) -> Task<Message> {
+        let slot = self.library.songs.page_slot(offset);
         self.load_paged::<SongsTarget, _, _, _>(
-            offset,
-            true,
-            |(result, total_count)| {
-                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
+            PagedLoad::ForcedPage(offset),
+            move |(result, total_count)| {
+                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             Self::fetch_songs_page,
         )
@@ -97,10 +96,11 @@ impl Nokkvi {
 
     pub(crate) fn handle_songs_page_loaded(
         &mut self,
+        slot: PageSlot,
         result: Result<Vec<SongUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.handle_page_loaded_with::<SongsTarget>(result, total_count)
+        self.handle_page_loaded_with::<SongsTarget>(slot, result, total_count)
     }
 
     pub(crate) fn handle_songs_loaded(
@@ -491,9 +491,11 @@ impl Nokkvi {
                 background,
                 anchor_id,
             } => self.handle_songs_loaded(result, total_count, background, anchor_id),
-            SongsLoaderMessage::PageLoaded(result, total_count) => {
-                self.handle_songs_page_loaded(result, total_count)
-            }
+            SongsLoaderMessage::PageLoaded {
+                slot,
+                result,
+                total_count,
+            } => self.handle_songs_page_loaded(slot, result, total_count),
         }
     }
 }

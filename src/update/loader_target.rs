@@ -16,7 +16,10 @@
 use std::future::Future;
 
 use iced::Task;
-use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBuffer};
+use nokkvi_data::{
+    backend::app_service::AppService,
+    types::paged_buffer::{PageSlot, PagedBuffer},
+};
 use tracing::{debug, error};
 
 use super::components::{
@@ -29,6 +32,63 @@ use crate::{
     views,
     widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
+
+/// What a `Nokkvi::load_paged` call fetches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PagedLoad {
+    /// One page from the top: a fresh list (view entry, sort, search,
+    /// filter).
+    First,
+    /// A background reload's rows from the top ([`Reload`]).
+    Reload(usize),
+    /// The page at this offset, as the scroll nears the loaded edge;
+    /// skipped when `needs_fetch` finds nothing due.
+    Page(usize),
+    /// The page at this offset for a find chain, past the `needs_fetch`
+    /// gate.
+    ForcedPage(usize),
+}
+
+/// A paged view's background reload (`handle_library_changed`): `rows`
+/// from the top ([`reload_rows`]), and the row the viewport was on, which
+/// `apply_viewport_on_load` finds again once they land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Reload {
+    pub(crate) rows: usize,
+    pub(crate) anchor_id: Option<String>,
+}
+
+impl Reload {
+    /// A list's first load: the reload's rows with its anchor, else one
+    /// fresh page.
+    pub(crate) fn first_rows(reload: Option<Self>) -> (PagedLoad, Option<String>) {
+        match reload {
+            Some(Self { rows, anchor_id }) => (PagedLoad::Reload(rows), anchor_id),
+            None => (PagedLoad::First, None),
+        }
+    }
+}
+
+/// Most rows a background reload fetches. A view scrolled deeper keeps its
+/// rows until the user reloads it (sort, search, refresh): refetching every
+/// row above that deep a position on each scrobble would cost a second or
+/// more and megabytes (5,000 songs took 0.45 s from a local server).
+pub(crate) const MAX_RELOAD_ROWS: usize = 10_000;
+
+/// Rows a background reload fetches from the top: down past the last
+/// visible row and the fetch look-ahead below it, in whole pages, so the row
+/// the viewport is on is in the new buffer and no page fetch is due once it
+/// lands. One page reloaded only the top of a long list: a viewport further
+/// down lost its row and went back to the top. `None` past
+/// [`MAX_RELOAD_ROWS`].
+pub(crate) fn reload_rows(slot_list: &SlotListView, page_size: usize) -> Option<usize> {
+    let page_size = page_size.max(1);
+    let through = slot_list.viewport_offset
+        + slot_list.slot_count
+        + nokkvi_data::types::player_settings::pagination_fetch_threshold(page_size);
+    let rows = through.div_ceil(page_size).max(1) * page_size;
+    (rows <= MAX_RELOAD_ROWS.max(page_size)).then_some(rows)
+}
 
 /// Per-view hooks driving `handle_loaded_with` and `handle_page_loaded_with`.
 ///
@@ -59,19 +119,12 @@ pub(crate) trait LoaderTarget {
     fn item_id(item: &Self::Item) -> &str;
 
     // ── Defaulted: viewport ───────────────────────────────────────────────
-    /// Fallback when the anchor id is not found in the newly-loaded buffer.
-    /// Default: reset to 0. `AlbumsTarget` overrides to clamp to `new_len − 1`
-    /// so that if the centered item was deleted during a background sync the
-    /// viewport stays near its last position instead of jumping to the top.
-    fn anchor_miss_fallback(current_offset: usize, new_len: usize) -> usize {
-        let _ = (current_offset, new_len);
-        0
-    }
-
     /// Apply viewport state after initial load. Default implements anchor-based
     /// preservation for paged views (Albums / Artists / Songs): on a background
-    /// reload the centered item's id is used to relocate the viewport, keeping
-    /// the user's position in large libraries. `GenresTarget` and
+    /// reload the viewport's top row is found again by id (the reload fetched
+    /// every row down to it, `reload_rows`), keeping the user's position in
+    /// large libraries; a row gone from the list leaves the viewport at the
+    /// same offset, clamped to the new length. `GenresTarget` and
     /// `PlaylistsTarget` override to reset to 0 unconditionally because these
     /// are small, fully-refreshed lists where a background sync may reorder
     /// entries — preserving an arbitrary offset would be misleading.
@@ -94,8 +147,7 @@ pub(crate) trait LoaderTarget {
                     .iter()
                     .position(|item| Self::item_id(item) == id)
             });
-            let new_offset =
-                anchor_idx.unwrap_or_else(|| Self::anchor_miss_fallback(current, new_len));
+            let new_offset = anchor_idx.unwrap_or_else(|| current.min(new_len.saturating_sub(1)));
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = new_offset;
             // Clear the multi-selection rather than retaining in-range indices:
@@ -166,11 +218,6 @@ impl LoaderTarget for AlbumsTarget {
 
     fn entity_label() -> &'static str {
         "Albums"
-    }
-
-    // Stay near current position when the anchor album was deleted.
-    fn anchor_miss_fallback(current_offset: usize, new_len: usize) -> usize {
-        current_offset.min(new_len.saturating_sub(1))
     }
 
     fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
@@ -508,8 +555,10 @@ impl Nokkvi {
     /// can collapse to a one-line delegation.
     ///
     /// The body, in order:
-    /// 1. Read `library_page_size` from settings.
-    /// 2. **Phase 5A defensive gate** — when `force == false` and `offset > 0`,
+    /// 1. Read `library_page_size` from settings; `load` picks the offset and
+    ///    row count ([`PagedLoad`]: a background reload asks for more than a
+    ///    page).
+    /// 2. **Phase 5A defensive gate** — for a `PagedLoad::Page` past offset 0,
     ///    skip the dispatch if `PagedBuffer::needs_fetch` returns `None`.
     ///    This catches duplicate dispatches that race past the upstream
     ///    `needs_fetch` check at the action site. Initial loads (`offset == 0`)
@@ -531,8 +580,7 @@ impl Nokkvi {
     ///    trait — keeps Albums/Songs fetch signatures clean.
     pub(crate) fn load_paged<T, F, Fut, M>(
         &mut self,
-        offset: usize,
-        force: bool,
+        load: PagedLoad,
         msg_ctor: M,
         fetch: F,
     ) -> Task<Message>
@@ -544,12 +592,17 @@ impl Nokkvi {
     {
         let page_size = self.settings.library_page_size.to_usize();
         let viewport_offset = T::page_common(self).slot_list.viewport_offset;
+        let (offset, rows) = match load {
+            PagedLoad::First => (0, page_size),
+            PagedLoad::Reload(rows) => (0, rows),
+            PagedLoad::Page(offset) | PagedLoad::ForcedPage(offset) => (offset, page_size),
+        };
         // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
         // pass needs_fetch. Catches duplicate dispatches that race past
         // the upstream needs_fetch check at the action site. Initial
         // loads (offset 0) always proceed — sort/search changes need a
         // fresh page even if the old one is still in flight.
-        if !force
+        if matches!(load, PagedLoad::Page(_))
             && offset > 0
             && T::library(self)
                 .needs_fetch(viewport_offset, page_size)
@@ -557,12 +610,8 @@ impl Nokkvi {
         {
             return Task::none();
         }
-        let params = PaginatedFetch::from_common(
-            T::page_common(self),
-            T::sort_mode_to_api,
-            offset,
-            page_size,
-        );
+        let params =
+            PaginatedFetch::from_common(T::page_common(self), T::sort_mode_to_api, offset, rows);
         debug!(
             " Load{}: offset={}, page_size={}, view={}, sort={}, search={:?}",
             T::entity_label(),
@@ -700,16 +749,48 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// The background reload of a paged view: [`reload_rows`] from the top
+    /// and the row the viewport is on as the anchor. `None` for a view not
+    /// loaded yet (it fetches fresh on its first visit) or scrolled past
+    /// [`MAX_RELOAD_ROWS`] (it keeps its rows).
+    pub(crate) fn background_reload<T: LoaderTarget>(&self) -> Option<Reload> {
+        let library = T::library(self);
+        if library.is_empty() {
+            return None;
+        }
+        let slot_list = &T::page_common(self).slot_list;
+        let rows = reload_rows(slot_list, self.settings.library_page_size.to_usize())?;
+        let anchor_id = library
+            .get(slot_list.viewport_offset)
+            .map(|item| T::item_id(item).to_owned());
+        Some(Reload { rows, anchor_id })
+    }
+
     pub(crate) fn handle_page_loaded_with<T: LoaderTarget>(
         &mut self,
+        slot: PageSlot,
         result: Result<Vec<T::Item>, String>,
         total_count: usize,
     ) -> Task<Message> {
+        // A page lands only where it was asked for. When a reload, sort or
+        // search replaced the rows since, or another page landed first, it no
+        // longer follows the loaded rows: appending it would repeat rows or
+        // mix two orders (the Shift+C find chain's page landing after a
+        // background reload), and its failure is nobody's.
+        let stale = |entity: &str| {
+            debug!(
+                "📄 {entity} page for row {} dropped: the list changed since it was asked for",
+                slot.offset()
+            );
+            Task::none()
+        };
         match result {
             Ok(new_items) => {
                 let count = new_items.len();
                 let loaded_before = T::library(self).loaded_count();
-                T::library_mut(self).append_page(new_items, total_count);
+                if !T::library_mut(self).append_page_at(slot, new_items, total_count) {
+                    return stale(T::entity_label());
+                }
                 debug!(
                     "📄 {} page loaded: {} new items ({}→{} of {})",
                     T::entity_label(),
@@ -726,6 +807,9 @@ impl Nokkvi {
                 if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
                     T::library_mut(self).set_loading(false);
                     return self.handle_session_expired();
+                }
+                if !T::library(self).takes_page(slot) {
+                    return stale(T::entity_label());
                 }
                 error!("Error loading {} page: {}", T::entity_label(), e);
                 T::library_mut(self).set_loading(false);

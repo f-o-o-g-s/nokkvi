@@ -1,13 +1,16 @@
 //! Album data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::albums::AlbumUIViewData,
+    types::{ItemKind, paged_buffer::PageSlot},
+};
 use tracing::debug;
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, MiniArt, NavigationMessage},
-    update::AlbumsTarget,
+    update::{AlbumsTarget, PagedLoad, Reload},
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
 
@@ -43,14 +46,11 @@ impl Nokkvi {
         }
     }
 
-    pub(crate) fn handle_load_albums(
-        &mut self,
-        background: bool,
-        anchor_id: Option<String>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_load_albums(&mut self, reload: Option<Reload>) -> Task<Message> {
+        let background = reload.is_some();
+        let (load, anchor_id) = Reload::first_rows(reload);
         self.load_paged::<AlbumsTarget, _, _, _>(
-            0,
-            false,
+            load,
             move |(result, total_count)| {
                 Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::Loaded {
                     result,
@@ -65,14 +65,15 @@ impl Nokkvi {
 
     /// Load a subsequent page of albums (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_albums_load_page(&mut self, offset: usize) -> Task<Message> {
+        let slot = self.library.albums.page_slot(offset);
         self.load_paged::<AlbumsTarget, _, _, _>(
-            offset,
-            false,
-            |(result, total_count)| {
-                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
+            PagedLoad::Page(offset),
+            move |(result, total_count)| {
+                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             Self::fetch_albums_page,
         )
@@ -83,14 +84,15 @@ impl Nokkvi {
     /// library while the viewport stays at 0 (the user hasn't scrolled
     /// because they're waiting for the target to appear).
     pub(crate) fn force_load_albums_page(&mut self, offset: usize) -> Task<Message> {
+        let slot = self.library.albums.page_slot(offset);
         self.load_paged::<AlbumsTarget, _, _, _>(
-            offset,
-            true,
-            |(result, total_count)| {
-                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
+            PagedLoad::ForcedPage(offset),
+            move |(result, total_count)| {
+                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded {
+                    slot,
                     result,
                     total_count,
-                ))
+                })
             },
             Self::fetch_albums_page,
         )
@@ -98,10 +100,11 @@ impl Nokkvi {
 
     pub(crate) fn handle_albums_page_loaded(
         &mut self,
+        slot: PageSlot,
         result: Result<Vec<AlbumUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.handle_page_loaded_with::<AlbumsTarget>(result, total_count)
+        self.handle_page_loaded_with::<AlbumsTarget>(slot, result, total_count)
     }
 
     pub(crate) fn handle_albums_loaded(
@@ -982,9 +985,11 @@ impl Nokkvi {
                 background,
                 anchor_id,
             } => self.handle_albums_loaded(result, total_count, background, anchor_id),
-            AlbumsLoaderMessage::PageLoaded(result, total_count) => {
-                self.handle_albums_page_loaded(result, total_count)
-            }
+            AlbumsLoaderMessage::PageLoaded {
+                slot,
+                result,
+                total_count,
+            } => self.handle_albums_page_loaded(slot, result, total_count),
         }
     }
 }

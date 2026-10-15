@@ -142,9 +142,9 @@ impl Nokkvi {
         // tasks that pick up `active_library_ids_vec()` through their
         // `_with_libraries` plumbing.
         match self.current_view {
-            View::Albums => self.handle_load_albums(false, None),
-            View::Artists => self.handle_load_artists(false, None),
-            View::Songs => self.handle_load_songs(false, None),
+            View::Albums => self.handle_load_albums(None),
+            View::Artists => self.handle_load_artists(None),
+            View::Songs => self.handle_load_songs(None),
             View::Genres => self.handle_load_genres(),
             View::Playlists => self.handle_load_playlists(),
             // Reload the shelves for the new scope; if a whole-library search is
