@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.26.0 — 2026-10-14
+
+### Added
+
 - The Lyrics setting gains Auto, which shows lyrics over the Queue cover and in Theater Mode only for songs that have them.
 - A new Playback setting, Lyrics: Alignment, sets lyric lines against the left edge, centered, or against the right edge.
 - While covers load on Navidrome 0.64 or newer, album and artist rows show a blurred preview of each cover instead of a flat square.
@@ -36,7 +46,7 @@ All notable changes to this project will be documented in this file.
 - Clicking the Editing tab while Settings is open now opens the playlist editor.
 - A scrobble the server rejects no longer bumps the song's play count in nokkvi.
 - A scrobble or now-playing update rejected by an expired login now returns you to the login screen.
-- A view switch made while Settings is open (a nav tab, a view hotkey, `nokkvi switch-view`) now opens that view, not the one you came from.
+- A view switch made from Settings (a nav tab, a view hotkey, `nokkvi switch-view`) now opens that view, not the one you came from.
 - Find Similar now stops a roulette spin running on the view it leaves.
 - Find Similar now cancels a pending jump to a clicked album, artist or genre on the view it leaves.
 - With Enter set to Append & Play and shuffle on, Enter while stopped or paused now plays every appended song instead of skipping some.
@@ -56,29 +66,9 @@ All notable changes to this project will be documented in this file.
 - An artist with no picture on the server but an outside poster now shows that poster as its thumbnail, as the big panel already did.
 - Far down a long Albums, Artists or Songs list, the view now stays put when a scrobble or an artist refresh reloads the list.
 
-### Removed
-
-## v0.25.0 — 2026-10-12
-
-### Added
-
-- A new Player Bar setting, Seekbar Style, draws the seek bar as Classic, Line, Capsule, Cells or Waveform.
-- The mini player keeps its own Seekbar Style, starting on the Capsule it already used.
-- Hovering the Line, Capsule, Cells or Waveform seek bar shows the time under the cursor.
-- The mini player's Visible Controls can now hide the cover art.
-- The Waveform seek bar works out each song's shape once in the background and keeps it, so replays draw it instantly.
-- The Waveform seek bar works out the next song's shape ahead of time, so it is usually ready when that song starts.
-- On a link too slow to scan without crowding playback, the Waveform seek bar stops scanning new songs for the session.
-
-### Fixed
-
-- Releasing a seek bar drag after the song changed to one that can't seek no longer seeks a later song.
-- Saving a different Last.fm API key now disconnects the old Last.fm login instead of still showing it as connected.
-- When Last.fm rejects the saved login during radio scrobbling, nokkvi now disconnects it and warns you to reconnect.
-- The Scrobble Radio setting's description now mentions Last.fm, which it also scrobbles to.
-
 ## Older releases
 
+- **v0.25.x** (2026-10-12, v0.25.0): [CHANGELOG-0.25.md](./changelog-archive/CHANGELOG-0.25.md)
 - **v0.24.x** (2026-10-11 → 2026-10-12, v0.24.0–v0.24.1): [CHANGELOG-0.24.md](./changelog-archive/CHANGELOG-0.24.md)
 - **v0.23.x** (2026-10-09, v0.23.0): [CHANGELOG-0.23.md](./changelog-archive/CHANGELOG-0.23.md)
 - **v0.22.x** (2026-10-04 → 2026-10-07, v0.22.0–v0.22.2): [CHANGELOG-0.22.md](./changelog-archive/CHANGELOG-0.22.md)
