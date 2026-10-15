@@ -233,9 +233,11 @@ impl Nokkvi {
     /// The centered Harbour row's title, for the rows Shift+A enqueues (the
     /// same rows `handle_harbour_slot_list`'s `AddCenterToQueue` arm adds).
     fn harbour_center_name(&self) -> Option<String> {
-        use crate::views::harbour::{HarbourRow, build_harbour_rows, has_random_pick};
+        use crate::views::harbour::{
+            HarbourRow, ShelfStyle, has_random_pick, has_shelf_pick, shelf_title,
+        };
 
-        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed, &self.trawl.mix);
+        let rows = self.harbour_rows();
         let center = self.harbour_page.common.get_center_item_index(rows.len())?;
         match rows.into_iter().nth(center)? {
             HarbourRow::Item { title, .. } => Some(title),
@@ -243,6 +245,9 @@ impl Nokkvi {
             HarbourRow::RandomPlay { kind } => {
                 has_random_pick(&self.harbour, kind).then(|| kind.title())
             }
+            // So does an empty one-press shelf.
+            HarbourRow::ShelfPlay { id, .. } => has_shelf_pick(&self.harbour, id)
+                .then(|| shelf_title(id, ShelfStyle::OnePress).to_string()),
             HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
         }
     }

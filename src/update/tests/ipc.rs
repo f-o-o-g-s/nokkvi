@@ -228,15 +228,12 @@ fn add_to_queue_names_rows_nothing_rates() {
 
     let mut app = test_app();
     app.current_view = crate::View::Harbour;
+    app.settings.harbour_expandable_shelves = true;
     app.harbour.recently_added = vec![crate::test_helpers::make_album("a1", "Added", "Artist")];
     app.harbour_page
         .collapsed
         .remove(&crate::views::harbour::HarbourSectionId::RecentlyAdded);
-    let rows = crate::views::harbour::build_harbour_rows(
-        &app.harbour,
-        &app.harbour_page.collapsed,
-        &app.trawl.mix,
-    );
+    let rows = app.harbour_rows();
     let item = rows
         .iter()
         .position(|r| matches!(r, crate::views::harbour::HarbourRow::Item { .. }))
@@ -247,6 +244,34 @@ fn add_to_queue_names_rows_nothing_rates() {
         .set_selected(item, rows.len());
     let resp = drive_on(&mut app, "add-to-queue");
     assert_eq!(resp.data, Some(json!({ "added": "Added" })), "harbour item");
+
+    // A one-press shelf (the default) names the shelf, as a Random row does.
+    let mut app = test_app();
+    app.current_view = crate::View::Harbour;
+    app.harbour.recently_added = vec![crate::test_helpers::make_album("a1", "Added", "Artist")];
+    let rows = app.harbour_rows();
+    let shelf = rows
+        .iter()
+        .position(|r| {
+            matches!(
+                r,
+                crate::views::harbour::HarbourRow::ShelfPlay {
+                    id: crate::views::harbour::HarbourSectionId::RecentlyAdded,
+                    ..
+                }
+            )
+        })
+        .expect("the one-press Recently Added row");
+    app.harbour_page
+        .common
+        .slot_list
+        .set_selected(shelf, rows.len());
+    let resp = drive_on(&mut app, "add-to-queue");
+    assert_eq!(
+        resp.data,
+        Some(json!({ "added": "Recently Added" })),
+        "one-press shelf"
+    );
 }
 
 #[test]

@@ -75,6 +75,11 @@ crate::player_settings_schema! {
     /// MODE — it never writes `queue.shuffle`.
     #[serde(default)]
     same enter_shuffle: bool = false,
+    /// Whether a Harbour shelf opens to browse its picks (default: false).
+    /// Off, Enter / click plays the shelf in one press: its top album,
+    /// artist or genre, or its songs.
+    #[serde(default)]
+    same harbour_expandable_shelves: bool = false,
     /// Local filesystem prefix for the music library (default: empty = not configured).
     /// Joined with the server-relative song path to form an absolute local path.
     /// e.g. "/music/Library" for local Navidrome, or "/mnt/nas/music" for NFS mounts.

@@ -14,7 +14,7 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`):
 - `reload_message(&self) -> Option<Message>` — emits the view's "reload from server" message (the RefreshView hotkey, `r`, and Escape on an empty search call it; the header Refresh button reaches its reload through `handle_common_view_action`'s `reload_msg` argument). Reloadable views return `Some(...)`; views without server backing return `None`.
 - `slot_list_message(&self, msg: SlotListPageMessage) -> Message` — wraps a `SlotListPageMessage` in the view's per-view `*Message::SlotList(...)` variant. Lets cross-view dispatch (slot_list.rs, roulette.rs, center-on-playing) fan out without a manual match on `View`.
 
-Harbour (`HarbourPage`, `View::Harbour`) is the whole-library home view (collapsible shelves + whole-library search) and the default start view. Similar has no `View` enum variant — it only renders inside the browsing panel.
+Harbour (`HarbourPage`, `View::Harbour`) is the whole-library home view (shelves + whole-library search) and the default start view. Its shelves come in two `ShelfStyle`s read from `settings.harbour_expandable_shelves` (General → Expandable Harbour Shelves, default off): one-press `HarbourRow::ShelfPlay` rows that play what they show (`shelf_play_target`: an entity shelf's top pick, a song shelf's batch of up to `SHELF_SONG_BATCH`), or collapsible `Section` headers over their picks. Every handler builds rows through `Nokkvi::harbour_rows()`, the view's own builder and style, and a style flip settles the list (`harbour_shelf_style_changed`). Similar has no `View` enum variant — it only renders inside the browsing panel.
 
 ## SlotListPageState
 

@@ -45,6 +45,7 @@ impl Nokkvi {
             auto_follow_playing: self.settings.auto_follow_playing,
             enter_behavior: self.settings.enter_behavior.as_label().into(),
             enter_shuffle: self.settings.enter_shuffle,
+            harbour_expandable_shelves: self.settings.harbour_expandable_shelves,
             seek_step_secs: i64::from(self.settings.seek_step_secs),
             local_music_path: self.settings.local_music_path.clone().into(),
             verbose_config: self.settings.verbose_config.as_label().into(),

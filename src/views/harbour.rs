@@ -10,11 +10,15 @@
 //! playlists, genres, and search results under one list.
 //!
 //! Two modes under a stable root:
-//! - **Shelves** (empty search): collapsible discovery sections — Recently
-//!   Played/Added and the play-gated Most Played group, each capped at
-//!   [`HOT_PICKS_PER_SECTION`] hot picks and starting collapsed (the home
-//!   reads as a compact index; centering a header previews its section in the
-//!   large artwork column, [`section_preview_panel`]) — followed by the
+//! - **Shelves** (empty search): the discovery shelves, Recently Played/Added
+//!   and the play-gated Most Played group, in one of two [`ShelfStyle`]s. By
+//!   default each is ONE row that plays what it shows in one press
+//!   ([`HarbourRow::ShelfPlay`], [`shelf_play_target`]); with Expandable
+//!   Harbour Shelves on (Settings → General) each is a collapsible header
+//!   capped at [`HOT_PICKS_PER_SECTION`] hot picks and starting collapsed.
+//!   Either way the home reads as a compact index, and centering a shelf
+//!   previews it in the large artwork column ([`section_preview_panel`]).
+//!   The shelves are followed by the
 //!   Random block: five one-press [`HarbourRow::RandomPlay`] action rows
 //!   (Albums, Artists, Songs, Genres, Playlists — mirroring the top nav's tab
 //!   order), each previewing a PRE-DRAWN pick that activation plays verbatim.
@@ -78,6 +82,31 @@ pub(crate) const RANDOM_SONGS_DRAW: usize = 100;
 // own row cap. Past that the server silently truncates and every row subtitle
 // would over-promise, so make the ceiling a compile error rather than a warn log.
 const _: () = assert!(RANDOM_SONGS_DRAW <= nokkvi_data::services::api::random::MAX_RANDOM_SONGS);
+
+/// Songs one press of a song shelf plays (Recently Played, Most Played
+/// Tracks), in the shelf's order. Recently Played fetches this many; Most
+/// Played Tracks takes them from its deeper tally pool.
+pub(crate) const SHELF_SONG_BATCH: usize = 100;
+
+/// How the shelves behave (Settings → General → Expandable Harbour Shelves).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShelfStyle {
+    /// One press plays the shelf ([`HarbourRow::ShelfPlay`]): its top album,
+    /// artist or genre, or its songs. The default.
+    OnePress,
+    /// A collapsible header that opens on its picks ([`HarbourRow::Section`]).
+    Expandable,
+}
+
+impl ShelfStyle {
+    pub(crate) fn from_expandable(expandable: bool) -> Self {
+        if expandable {
+            Self::Expandable
+        } else {
+            Self::OnePress
+        }
+    }
+}
 
 /// Stable identity for every collapsible Harbour section (shelf + search
 /// group). Membership in the page's `collapsed` set is keyed on this.
@@ -195,6 +224,112 @@ impl HarbourSection {
 pub(crate) enum PlayTarget {
     Item(BatchItem),
     GenreRandom(String),
+    /// A song shelf's batch, played in the shelf's order.
+    Songs(Vec<Song>),
+}
+
+/// A shelf's title in the given style. The one-press entity shelves read
+/// singular ("Most Played Album"), like the Random block: one press plays ONE
+/// album. The song shelves play a batch, so they stay plural.
+pub(crate) fn shelf_title(id: HarbourSectionId, style: ShelfStyle) -> &'static str {
+    let one_press = style == ShelfStyle::OnePress;
+    match id {
+        HarbourSectionId::RecentlyPlayed => "Recently Played",
+        HarbourSectionId::RecentlyAdded => "Recently Added",
+        HarbourSectionId::MostPlayedTracks => "Most Played Tracks",
+        HarbourSectionId::MostPlayedAlbums if one_press => "Most Played Album",
+        HarbourSectionId::MostPlayedAlbums => "Most Played Albums",
+        HarbourSectionId::MostPlayedArtists if one_press => "Most Played Artist",
+        HarbourSectionId::MostPlayedArtists => "Most Played Artists",
+        HarbourSectionId::MostPlayedGenres if one_press => "Most Played Genre",
+        HarbourSectionId::MostPlayedGenres => "Most Played Genres",
+        HarbourSectionId::SearchArtists
+        | HarbourSectionId::SearchAlbums
+        | HarbourSectionId::SearchSongs
+        | HarbourSectionId::SearchGenres
+        | HarbourSectionId::SearchPlaylists => "",
+    }
+}
+
+/// What one press of a [`HarbourRow::ShelfPlay`] row plays, or `None` for an
+/// empty shelf.
+///
+/// The Random block's rule: an entity shelf plays ONE entity, the top pick its
+/// row names (the newest album, your most played album / artist, a capped
+/// random draw from your most played genre), and a song shelf plays a batch of
+/// its songs ([`shelf_song_batch`]).
+pub(crate) fn shelf_play_target(
+    harbour: &crate::state::HarbourState,
+    id: HarbourSectionId,
+) -> Option<PlayTarget> {
+    let songs = |songs: &[Song], flavor| {
+        let batch: Vec<Song> = shelf_song_batch(songs, flavor).cloned().collect();
+        (!batch.is_empty()).then_some(PlayTarget::Songs(batch))
+    };
+    match id {
+        HarbourSectionId::RecentlyPlayed => songs(&harbour.recently_played, ShelfFlavor::Recent),
+        HarbourSectionId::MostPlayedTracks => {
+            songs(&harbour.most_played_songs, ShelfFlavor::MostPlayed)
+        }
+        HarbourSectionId::RecentlyAdded => harbour
+            .recently_added
+            .first()
+            .map(|a| PlayTarget::Item(BatchItem::Album(a.id.clone()))),
+        HarbourSectionId::MostPlayedAlbums => harbour
+            .most_played_albums
+            .first()
+            .map(|a| PlayTarget::Item(BatchItem::Album(a.id.clone()))),
+        HarbourSectionId::MostPlayedArtists => harbour
+            .most_played_artists
+            .first()
+            .map(|a| PlayTarget::Item(BatchItem::Artist(a.id.clone()))),
+        HarbourSectionId::MostPlayedGenres => harbour
+            .most_played_genres
+            .first()
+            .map(|g| PlayTarget::GenreRandom(g.name.clone())),
+        HarbourSectionId::SearchArtists
+        | HarbourSectionId::SearchAlbums
+        | HarbourSectionId::SearchSongs
+        | HarbourSectionId::SearchGenres
+        | HarbourSectionId::SearchPlaylists => None,
+    }
+}
+
+/// The songs one press of a song shelf plays: the shelf's order, capped at
+/// [`SHELF_SONG_BATCH`]. Most Played Tracks skips never-played songs, which a
+/// small library's play-count sort still returns at its tail.
+fn shelf_song_batch(songs: &[Song], flavor: ShelfFlavor) -> impl Iterator<Item = &Song> {
+    songs
+        .iter()
+        .filter(move |s| flavor == ShelfFlavor::Recent || s.play_count.unwrap_or(0) > 0)
+        .take(SHELF_SONG_BATCH)
+}
+
+/// Whether a one-press shelf has anything to play. One predicate for the
+/// activate SFX, the play and add-to-queue handlers and the Shift+A toast name,
+/// like [`has_random_pick`].
+pub(crate) fn has_shelf_pick(harbour: &crate::state::HarbourState, id: HarbourSectionId) -> bool {
+    match id {
+        HarbourSectionId::RecentlyPlayed => {
+            shelf_song_batch(&harbour.recently_played, ShelfFlavor::Recent)
+                .next()
+                .is_some()
+        }
+        HarbourSectionId::MostPlayedTracks => {
+            shelf_song_batch(&harbour.most_played_songs, ShelfFlavor::MostPlayed)
+                .next()
+                .is_some()
+        }
+        HarbourSectionId::RecentlyAdded => !harbour.recently_added.is_empty(),
+        HarbourSectionId::MostPlayedAlbums => !harbour.most_played_albums.is_empty(),
+        HarbourSectionId::MostPlayedArtists => !harbour.most_played_artists.is_empty(),
+        HarbourSectionId::MostPlayedGenres => !harbour.most_played_genres.is_empty(),
+        HarbourSectionId::SearchArtists
+        | HarbourSectionId::SearchAlbums
+        | HarbourSectionId::SearchSongs
+        | HarbourSectionId::SearchGenres
+        | HarbourSectionId::SearchPlaylists => false,
+    }
 }
 
 /// Join a set of optional metadata facets into a single ` • `-separated line,
@@ -332,8 +467,38 @@ pub(crate) enum HarbourRow {
     /// same genre. Deliberately NOT a `Section` — nothing to expand, nothing joins
     /// the collapse machinery.
     RandomPlay { kind: RandomKind },
+    /// A one-press shelf ([`ShelfStyle::OnePress`]): activation plays what the
+    /// row shows ([`shelf_play_target`]), the top album / artist / genre or
+    /// the shelf's songs. Deliberately NOT a `Section`: nothing to expand, so
+    /// it never joins the collapse machinery (the RandomPlay precedent).
+    ShelfPlay {
+        id: HarbourSectionId,
+        /// The shelf's pick count, so the view header's total reads the same
+        /// in both shelf styles.
+        count: usize,
+        /// The row's cover and subtitle; `None` for an empty shelf.
+        teaser: Option<SectionTeaser>,
+    },
     /// A non-interactive centered hint (search prompts / empty states).
     Hint(String),
+}
+
+/// The view header's "N items" total: every shelf's pick count (expanded,
+/// collapsed or one-press alike), so it reflects the populated home rather
+/// than dropping to "0 items" when every shelf is collapsed (the default
+/// landing state) and reads the same in both shelf styles. `count` already caps
+/// at HOT_PICKS / carries the search group size; Item and Hint rows add nothing
+/// (a section's items are tallied through its header).
+pub(crate) fn harbour_item_count(rows: &[HarbourRow]) -> usize {
+    rows.iter()
+        .map(|r| match r {
+            HarbourRow::Section { count, .. } | HarbourRow::ShelfPlay { count, .. } => *count,
+            HarbourRow::Trawl { .. }
+            | HarbourRow::Item { .. }
+            | HarbourRow::RandomPlay { .. }
+            | HarbourRow::Hint(_) => 0,
+        })
+        .sum()
 }
 
 /// The Trawl row's live subtitle: an invitation when the crate is empty,
@@ -357,6 +522,7 @@ pub(crate) fn build_harbour_rows(
     harbour: &crate::state::HarbourState,
     collapsed: &HashSet<HarbourSectionId>,
     trawl: &nokkvi_data::types::trawl::TrawlCrate,
+    style: ShelfStyle,
 ) -> Vec<HarbourRow> {
     let mut rows = Vec::new();
     let query = harbour.search_query.trim();
@@ -372,18 +538,18 @@ pub(crate) fn build_harbour_rows(
         push_song_section(
             &mut rows,
             HarbourSectionId::RecentlyPlayed,
-            "Recently Played",
             &harbour.recently_played,
             collapsed,
             ShelfFlavor::Recent,
+            style,
         );
         push_album_section(
             &mut rows,
             HarbourSectionId::RecentlyAdded,
-            "Recently Added",
             &harbour.recently_added,
             collapsed,
             ShelfFlavor::Recent,
+            style,
         );
         // "Most Played" shelves. Each is hidden when its top item has no plays
         // (a fresh/near-empty library), so the shelf never shows arbitrary
@@ -397,10 +563,10 @@ pub(crate) fn build_harbour_rows(
             push_song_section(
                 &mut rows,
                 HarbourSectionId::MostPlayedTracks,
-                "Most Played Tracks",
                 &harbour.most_played_songs,
                 collapsed,
                 ShelfFlavor::MostPlayed,
+                style,
             );
         }
         if harbour
@@ -411,10 +577,10 @@ pub(crate) fn build_harbour_rows(
             push_album_section(
                 &mut rows,
                 HarbourSectionId::MostPlayedAlbums,
-                "Most Played Albums",
                 &harbour.most_played_albums,
                 collapsed,
                 ShelfFlavor::MostPlayed,
+                style,
             );
         }
         if harbour
@@ -425,9 +591,9 @@ pub(crate) fn build_harbour_rows(
             push_artist_section(
                 &mut rows,
                 HarbourSectionId::MostPlayedArtists,
-                "Most Played Artists",
                 &harbour.most_played_artists,
                 collapsed,
+                style,
             );
         }
         // Genres derive from the tracks pool, so they need plays (tracks_played)
@@ -437,9 +603,9 @@ pub(crate) fn build_harbour_rows(
             push_genre_section(
                 &mut rows,
                 HarbourSectionId::MostPlayedGenres,
-                "Most Played Genres",
                 &harbour.most_played_genres,
                 collapsed,
+                style,
             );
         }
         // The "Random" block: five one-press quick-play rows (no expansion, no
@@ -846,10 +1012,10 @@ enum ShelfFlavor {
 fn push_song_section(
     rows: &mut Vec<HarbourRow>,
     id: HarbourSectionId,
-    title: &str,
     songs: &[Song],
     collapsed: &HashSet<HarbourSectionId>,
     flavor: ShelfFlavor,
+    style: ShelfStyle,
 ) {
     let expanded = !collapsed.contains(&id);
     // One fact builder for the teaser AND the item rows, so the header's
@@ -861,6 +1027,26 @@ fn push_song_section(
             .map(|d| format!("Played {}", format_relative_time(d))),
         ShelfFlavor::MostPlayed => Some(plays_label(s.play_count.unwrap_or(0))),
     };
+    let count = songs.len().min(HOT_PICKS_PER_SECTION);
+    if style == ShelfStyle::OnePress {
+        // A press plays the batch, so the third fact counts it (the Random
+        // Songs row's shape) instead of dating the first song.
+        let batch = shelf_song_batch(songs, flavor).count();
+        let teaser = shelf_song_batch(songs, flavor)
+            .next()
+            .map(|s| SectionTeaser {
+                subtitle: join_facts(vec![
+                    Some(s.title.clone()),
+                    (!s.artist.is_empty()).then(|| s.artist.clone()),
+                    Some(songs_label(batch)),
+                ]),
+                art_album_id: s.album_id.clone(),
+                art_album_ids: s.album_id.clone().into_iter().collect(),
+                custom_playlist_id: None,
+            });
+        rows.push(HarbourRow::ShelfPlay { id, count, teaser });
+        return;
+    }
     let teaser = songs.first().map(|s| SectionTeaser {
         subtitle: join_facts(vec![
             Some(s.title.clone()),
@@ -873,8 +1059,8 @@ fn push_song_section(
     });
     rows.push(HarbourRow::Section {
         id,
-        title: title.to_string(),
-        count: songs.len().min(HOT_PICKS_PER_SECTION),
+        title: shelf_title(id, style).to_string(),
+        count,
         expanded,
         see_all: None,
         glyph: section_icon(id),
@@ -902,10 +1088,10 @@ fn push_song_section(
 fn push_album_section(
     rows: &mut Vec<HarbourRow>,
     id: HarbourSectionId,
-    title: &str,
     albums: &[AlbumUIViewData],
     collapsed: &HashSet<HarbourSectionId>,
     flavor: ShelfFlavor,
+    style: ShelfStyle,
 ) {
     let expanded = !collapsed.contains(&id);
     // Shared fact builder (teaser + the most-played item rows). The teaser
@@ -928,10 +1114,15 @@ fn push_album_section(
         art_album_ids: vec![a.id.clone()],
         custom_playlist_id: None,
     });
+    let count = albums.len().min(HOT_PICKS_PER_SECTION);
+    if style == ShelfStyle::OnePress {
+        rows.push(HarbourRow::ShelfPlay { id, count, teaser });
+        return;
+    }
     rows.push(HarbourRow::Section {
         id,
-        title: title.to_string(),
-        count: albums.len().min(HOT_PICKS_PER_SECTION),
+        title: shelf_title(id, style).to_string(),
+        count,
         expanded,
         see_all: None,
         glyph: section_icon(id),
@@ -964,9 +1155,9 @@ fn push_album_section(
 fn push_artist_section(
     rows: &mut Vec<HarbourRow>,
     id: HarbourSectionId,
-    title: &str,
     artists: &[Artist],
     collapsed: &HashSet<HarbourSectionId>,
+    style: ShelfStyle,
 ) {
     let expanded = !collapsed.contains(&id);
     let teaser = artists.first().map(|a| SectionTeaser {
@@ -978,10 +1169,15 @@ fn push_artist_section(
         art_album_ids: Vec::new(),
         custom_playlist_id: None,
     });
+    let count = artists.len().min(HOT_PICKS_PER_SECTION);
+    if style == ShelfStyle::OnePress {
+        rows.push(HarbourRow::ShelfPlay { id, count, teaser });
+        return;
+    }
     rows.push(HarbourRow::Section {
         id,
-        title: title.to_string(),
-        count: artists.len().min(HOT_PICKS_PER_SECTION),
+        title: shelf_title(id, style).to_string(),
+        count,
         expanded,
         see_all: None,
         glyph: section_icon(id),
@@ -1019,9 +1215,9 @@ fn album_item_subtitle(a: &AlbumUIViewData) -> String {
 fn push_genre_section(
     rows: &mut Vec<HarbourRow>,
     id: HarbourSectionId,
-    title: &str,
     genres: &[GenreUIViewData],
     collapsed: &HashSet<HarbourSectionId>,
+    style: ShelfStyle,
 ) {
     let expanded = !collapsed.contains(&id);
     // Shared facts line (teaser + item rows).
@@ -1038,10 +1234,15 @@ fn push_genre_section(
         art_album_ids: g.artwork_album_ids.clone(),
         custom_playlist_id: None,
     });
+    let count = genres.len().min(HOT_PICKS_PER_SECTION);
+    if style == ShelfStyle::OnePress {
+        rows.push(HarbourRow::ShelfPlay { id, count, teaser });
+        return;
+    }
     rows.push(HarbourRow::Section {
         id,
-        title: title.to_string(),
-        count: genres.len().min(HOT_PICKS_PER_SECTION),
+        title: shelf_title(id, style).to_string(),
+        count,
         expanded,
         see_all: None,
         glyph: section_icon(id),
@@ -1153,6 +1354,8 @@ pub enum HarbourMessage {
 /// Borrowed app state the Harbour view renders from.
 pub(crate) struct HarbourViewData<'a> {
     pub harbour: &'a crate::state::HarbourState,
+    /// One-press or expandable shelves (Settings → General).
+    pub shelf_style: ShelfStyle,
     /// The Trawl crate — seed count + blend feed the Trawl row's subtitle.
     pub trawl_crate: &'a nokkvi_data::types::trawl::TrawlCrate,
     /// 80px album-cover cache (row thumbnails).
@@ -1201,20 +1404,13 @@ pub(crate) struct HarbourViewData<'a> {
 impl HarbourPage {
     /// Render the Harbour view — mirrors Similar's slot-list layout.
     pub(crate) fn view<'a>(&'a self, data: HarbourViewData<'a>) -> Element<'a, HarbourMessage> {
-        let rows = build_harbour_rows(data.harbour, &self.collapsed, data.trawl_crate);
-        // Count items across every section (expanded or not) via each Section's
-        // `count`, so the header total reflects the populated home rather than
-        // dropping to "0 items" when all sections are collapsed — the default
-        // landing state. Section `count` already caps at HOT_PICKS / carries the
-        // search group size; Item and Hint rows add nothing (a section's items
-        // are tallied through its header).
-        let item_count: usize = rows
-            .iter()
-            .map(|r| match r {
-                HarbourRow::Section { count, .. } => *count,
-                _ => 0,
-            })
-            .sum();
+        let rows = build_harbour_rows(
+            data.harbour,
+            &self.collapsed,
+            data.trawl_crate,
+            data.shelf_style,
+        );
+        let item_count = harbour_item_count(&rows);
 
         // No sort dropdown — pass an empty slice so the header hides it.
         let empty_options: &[String] = &[];
@@ -1372,9 +1568,12 @@ impl HarbourPage {
                     )
                 }
             }
-            Some(HarbourRow::Section {
-                id, see_all: None, ..
-            }) => section_preview_panel(*id, &data),
+            Some(
+                HarbourRow::Section {
+                    id, see_all: None, ..
+                }
+                | HarbourRow::ShelfPlay { id, .. },
+            ) => section_preview_panel(*id, &data),
             // The centered Trawl door: the trawling-longship scene — the
             // themed logo dragging its anchor across a procedural sea — over
             // a quiet pill naming the crate's state (kept fg2-level — Harbour
@@ -1809,6 +2008,62 @@ fn render_row<'a>(
                 HarbourMessage::SlotList,
             )
         }
+        HarbourRow::ShelfPlay { id, count, teaser } => {
+            // A one-press shelf, drawn like a RandomPlay row: the first pick's
+            // cover through the shared custom→quad→single ladder (the shelf
+            // glyph in the quiet fg2 chassis while it's empty), the facts of
+            // what plays as the subtitle, standard slot-button plumbing.
+            // Activation plays what is shown (`play_harbour_shelf`).
+            let m = ctx.metrics;
+            let style = ctx.slot_style(false, false, 0);
+            let art_el: Element<'a, HarbourMessage> = match teaser {
+                Some(t) => harbour_art_element(
+                    t.custom_playlist_id.as_deref(),
+                    t.art_album_id.as_ref(),
+                    &t.art_album_ids,
+                    data,
+                    m.artwork_size,
+                    ctx.is_center,
+                    ctx.opacity,
+                ),
+                None => glyph_art_square(
+                    section_icon(*id),
+                    m.artwork_size,
+                    style,
+                    ctx.opacity,
+                    theme::fg2(),
+                ),
+            };
+
+            let content_row = iced::widget::Row::new()
+                .spacing(6.0)
+                .align_y(Alignment::Center)
+                .height(Length::Fill)
+                // This row's ONE padding call — see HARBOUR_ROW_INSET.
+                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
+                .push(art_el)
+                .push(slot_list_text_column(
+                    SlotTextColumn {
+                        title: shelf_title(*id, ShelfStyle::OnePress).to_string(),
+                        title_on_press: None,
+                        title_size: m.title_size_lg,
+                        subtitle: section_header_subtitle(teaser.as_ref(), false, *count, false),
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
+                    style,
+                    100,
+                ));
+
+            child_slot_button(
+                content_row,
+                &ctx,
+                style,
+                data.stable_viewport,
+                HarbourMessage::SlotList,
+            )
+        }
         HarbourRow::Hint(msg) => container(
             text(msg.clone())
                 .size(ctx.metrics.subtitle_size)
@@ -1945,7 +2200,7 @@ fn section_preview_panel<'a>(
                     .as_deref()
                     .map(|d| format!("Played {}", format_relative_time(d))),
             ]);
-            ("Recently Played", s.title.clone(), meta)
+            (shelf_title(id, data.shelf_style), s.title.clone(), meta)
         }),
         HarbourSectionId::RecentlyAdded => harbour.recently_added.first().map(|a| {
             let meta = join_facts(vec![
@@ -1955,25 +2210,25 @@ fn section_preview_panel<'a>(
                     .map(|d| format!("Added {}", format_relative_time(d))),
                 a.year.map(|y| y.to_string()),
             ]);
-            ("Recently Added", a.name.clone(), meta)
+            (shelf_title(id, data.shelf_style), a.name.clone(), meta)
         }),
         HarbourSectionId::MostPlayedTracks => harbour.most_played_songs.first().map(|s| {
             let meta = join_facts(vec![
                 (!s.artist.is_empty()).then(|| s.artist.clone()),
                 Some(plays_label(s.play_count.unwrap_or(0))),
             ]);
-            ("Most Played Tracks", s.title.clone(), meta)
+            (shelf_title(id, data.shelf_style), s.title.clone(), meta)
         }),
         HarbourSectionId::MostPlayedAlbums => harbour.most_played_albums.first().map(|a| {
             let meta = join_facts(vec![
                 (!a.artist.is_empty()).then(|| a.artist.clone()),
                 Some(plays_label(a.play_count.unwrap_or(0))),
             ]);
-            ("Most Played Albums", a.name.clone(), meta)
+            (shelf_title(id, data.shelf_style), a.name.clone(), meta)
         }),
         HarbourSectionId::MostPlayedArtists => harbour.most_played_artists.first().map(|a| {
             (
-                "Most Played Artists",
+                shelf_title(id, data.shelf_style),
                 a.name.clone(),
                 plays_label(a.play_count.unwrap_or(0)),
             )
@@ -1985,7 +2240,7 @@ fn section_preview_panel<'a>(
                 if n == 1 { "track" } else { "tracks" }
             );
             (
-                "Most Played Genres",
+                shelf_title(id, data.shelf_style),
                 format!("Featuring {}", first.name),
                 meta,
             )
@@ -2038,7 +2293,7 @@ fn collection_collage<'a>(
     match play {
         PlayTarget::Item(BatchItem::Playlist(pid)) => data.playlist_collage.get(pid),
         PlayTarget::GenreRandom(gid) => data.genre_collage.get(gid),
-        PlayTarget::Item(_) => None,
+        PlayTarget::Item(_) | PlayTarget::Songs(_) => None,
     }
 }
 

@@ -188,6 +188,9 @@ keyword_table! {
         "general.start_view" => &["home", "startup", "landing page", "default page"],
         "general.enter_behavior" => &["return key", "double click", "activate"],
         "general.enter_shuffle" => &["random", "shuffle play", "randomize", "mix"],
+        "general.harbour_expandable_shelves" => {
+            &["home", "one press", "dropdown", "collapse", "recently added", "most played"]
+        },
         "general.auto_follow_playing" => &["autoscroll", "jump to current", "center on track"],
         "general.stable_viewport" => &["no scroll", "click to select", "anchor", "in place"],
         "general.suppress_library_refresh_toasts" => {

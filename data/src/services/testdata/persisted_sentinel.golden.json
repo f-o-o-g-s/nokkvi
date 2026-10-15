@@ -14,6 +14,7 @@
   "auto_follow_playing": false,
   "enter_behavior": "append_and_play",
   "enter_shuffle": true,
+  "harbour_expandable_shelves": true,
   "local_music_path": "/tmp/sentinel/music",
   "rounded_mode": "player_only",
   "nav_layout": "side",

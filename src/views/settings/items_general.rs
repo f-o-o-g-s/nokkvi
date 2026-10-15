@@ -3,14 +3,14 @@
 //! Section layout (top-to-bottom):
 //!   1. Library  — library_page_size, artwork_resolution, show_album_artists_only
 //!   2. Display  — start_view, suppress_library_refresh_toasts
-//!   3. Behavior — enter_behavior, enter_shuffle, stable_viewport, auto_follow_playing,
-//!      seek_step
+//!   3. Behavior — enter_behavior, enter_shuffle, harbour_expandable_shelves,
+//!      stable_viewport, auto_follow_playing, seek_step
 //!   4. Window & Tray — show_tray_icon, close_to_tray
 //!   5. Advanced — local_music_path, verbose_config
 //!   6. Account  — read-only server URL + username mirrors and the logout
 //!      dialog sentinel
 //!
-//! 14 of the 17 visible rows come from `define_settings!` via the
+//! 15 of the 18 visible rows come from `define_settings!` via the
 //! macro-emitted `build_general_tab_settings_items` helper. Section headers
 //! and the read-only Account section (server URL, username, logout dialog
 //! sentinel) stay hand-written here — the dialog row uses the special
@@ -66,6 +66,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         },
         macro_rows.take("general.enter_behavior"),
         macro_rows.take("general.enter_shuffle"),
+        macro_rows.take("general.harbour_expandable_shelves"),
         macro_rows.take("general.stable_viewport"),
         macro_rows.take("general.auto_follow_playing"),
         macro_rows.take("general.seek_step"),

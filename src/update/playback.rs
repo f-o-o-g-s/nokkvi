@@ -2486,7 +2486,13 @@ impl Nokkvi {
         // for the subsequent column-visibility / theme-atomic / engine-push
         // steps that read individual fields.
         let previous_lyrics_mode = self.settings.lyrics_mode;
+        let previous_shelf_style = self.harbour_shelf_style();
         self.settings = settings.clone();
+        let shelf_task = if previous_shelf_style == self.harbour_shelf_style() {
+            Task::none()
+        } else {
+            self.harbour_shelf_style_changed()
+        };
         // Lyrics switched from the Settings row or config.toml take the
         // player-bar toggle's edges (clear on off, resolve on on). The first
         // load after login only arms them: the restored track's lyrics
@@ -2710,6 +2716,7 @@ impl Nokkvi {
             crossfade_task,
             active_playlist_cover_task,
             lyrics_task,
+            shelf_task,
         ])
     }
 

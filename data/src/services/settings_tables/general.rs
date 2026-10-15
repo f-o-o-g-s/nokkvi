@@ -1,6 +1,7 @@
 //! General-tab settings table.
 //!
-//! Migrated keys: Application (start_view, enter_behavior, library_page_size,
+//! Migrated keys: Application (start_view, enter_behavior, enter_shuffle,
+//! harbour_expandable_shelves, library_page_size,
 //! suppress_library_refresh_toasts, artwork_resolution, show_album_artists_only,
 //! local_music_path, verbose_config), Mouse Behavior (stable_viewport,
 //! auto_follow_playing), System Tray (show_tray_icon, close_to_tray), and the
@@ -94,6 +95,23 @@ define_settings! {
                 default: "Play All",
                 options: EnterBehavior::LABELS,
                 read_field: |d| d.enter_behavior.as_ref(),
+            },
+        },
+        HarbourExpandableShelves {
+            key: "general.harbour_expandable_shelves",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_harbour_expandable_shelves(v),
+            toml_apply: |ts, p| p.harbour_expandable_shelves = ts.harbour_expandable_shelves,
+            read: |src, out| out.harbour_expandable_shelves = src.harbour_expandable_shelves,
+            write: |ps, ts| ts.harbour_expandable_shelves = ps.harbour_expandable_shelves,
+            ui_meta: {
+                label: "Expandable Harbour Shelves",
+                category: "Application",
+                subtitle: Some(
+                    "On: Enter/click opens a Harbour shelf to browse its picks · Off: plays it in one press",
+                ),
+                default: false,
+                read_field: |d| d.harbour_expandable_shelves,
             },
         },
         EnterShuffle {
@@ -747,6 +765,7 @@ mod tests {
             auto_follow_playing: true,
             enter_behavior: "Play All".into(),
             enter_shuffle: false,
+            harbour_expandable_shelves: false,
             seek_step_secs: 5,
             local_music_path: "".into(),
             verbose_config: "Clean".into(),
@@ -760,13 +779,13 @@ mod tests {
     }
 
     /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
-    /// 13 of the 14 declared keys carry ui_meta — light_mode does not (it
-    /// renders on the Theme tab, not General), so the helper emits 13 rows.
+    /// 15 of the 16 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 15 rows.
     #[test]
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 14);
+        assert_eq!(entries.len(), 15);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -876,6 +895,7 @@ mod tests {
             auto_follow_playing: live.auto_follow_playing,
             enter_behavior: live.enter_behavior.as_label().into(),
             enter_shuffle: live.enter_shuffle,
+            harbour_expandable_shelves: live.harbour_expandable_shelves,
             seek_step_secs: i64::from(live.seek_step_secs),
             local_music_path: live.local_music_path.clone().into(),
             verbose_config: live.verbose_config.as_label().into(),

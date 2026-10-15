@@ -571,6 +571,7 @@ mod tests {
                 "general.suppress_library_refresh_toasts",
                 "general.enter_behavior",
                 "general.enter_shuffle",
+                "general.harbour_expandable_shelves",
                 "general.stable_viewport",
                 "general.auto_follow_playing",
                 "general.seek_step",

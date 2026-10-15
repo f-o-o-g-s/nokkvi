@@ -352,6 +352,14 @@ impl Nokkvi {
                             audio::SfxType::Escape
                         }
                     }
+                    // Same rule for a one-press shelf: an empty one only toasts.
+                    Some(crate::views::harbour::HarbourRow::ShelfPlay { id, .. }) => {
+                        if crate::views::harbour::has_shelf_pick(&self.harbour, *id) {
+                            audio::SfxType::Enter
+                        } else {
+                            audio::SfxType::Escape
+                        }
+                    }
                     // A Hint row (keep-typing / searching / no matches)
                     // activates nothing — same escape cue as an empty list.
                     Some(crate::views::harbour::HarbourRow::Hint(_)) | None => {

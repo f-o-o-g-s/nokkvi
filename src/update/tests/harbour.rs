@@ -12,10 +12,19 @@ use crate::{
     test_helpers::*,
     views::{
         HarbourMessage,
-        harbour::{HarbourRow, HarbourSection, HarbourSectionId, build_harbour_rows},
+        harbour::{HarbourRow, HarbourSection, HarbourSectionId},
     },
     widgets::SlotListPageMessage,
 };
+
+/// A test app with the collapsible shelf headers on (Settings → General →
+/// Expandable Harbour Shelves). Most of this file pins that mode's headers and
+/// picks; the one-press shelves (the default) have their own block at the end.
+fn expandable_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.settings.harbour_expandable_shelves = true;
+    app
+}
 
 fn search_results_with_genre() -> Box<nokkvi_data::types::library_search::LibrarySearchResults> {
     use nokkvi_data::types::{genre::Genre, library_search::LibrarySearchResults};
@@ -324,11 +333,11 @@ fn genre_quad_ids_loaded_stale_generation_dropped() {
 fn shelves_mode_builds_sections_then_random_block_in_nav_order() {
     use crate::views::harbour::RandomKind;
 
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s3", "Recent", "Artist", "al3")];
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
 
     // Section rows for every ungated shelf, top to bottom.
     let sections: Vec<(HarbourSectionId, bool)> = rows
@@ -389,7 +398,7 @@ fn shelves_mode_builds_sections_then_random_block_in_nav_order() {
 #[test]
 fn shelves_mode_caps_each_section_at_hot_picks() {
     use crate::views::harbour::HOT_PICKS_PER_SECTION;
-    let mut app = test_app();
+    let mut app = expandable_app();
     // More songs than the cap allows — the view must clamp to HOT_PICKS.
     app.harbour.recently_played = (0..HOT_PICKS_PER_SECTION + 3)
         .map(|i| {
@@ -406,7 +415,7 @@ fn shelves_mode_caps_each_section_at_hot_picks() {
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let item_count = rows
         .iter()
         .filter(|r| matches!(r, HarbourRow::Item { .. }))
@@ -419,14 +428,14 @@ fn shelves_mode_caps_each_section_at_hot_picks() {
 
 #[test]
 fn toggling_collapsed_flips_a_sections_expanded() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
     // Recently Added starts collapsed — removing it from the set expands it.
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::RecentlyAdded);
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let recently_added_expanded = rows.iter().any(|r| {
         matches!(
             r,
@@ -449,7 +458,7 @@ fn search_query_builds_search_sections_expanded_with_see_all() {
     app.harbour.search_query = "amb".into();
     app.harbour.search_results = Some(*search_results_with_genre());
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
 
     // A single non-empty group (genres) → one Section (expanded, See-all) + item.
     assert!(matches!(
@@ -472,7 +481,7 @@ fn short_query_builds_a_single_hint_row() {
     let mut app = test_app();
     app.harbour.search_query = "a".into();
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert_eq!(rows.len(), 1);
     assert!(matches!(rows.first(), Some(HarbourRow::Hint(_))));
 }
@@ -481,7 +490,7 @@ fn short_query_builds_a_single_hint_row() {
 
 /// The subtitle of the single item under an expanded shelf section.
 fn item_subtitle(app: &crate::Nokkvi, id: HarbourSectionId) -> String {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     // Find the section, then the first following Item row.
     let sec = rows
         .iter()
@@ -495,7 +504,7 @@ fn item_subtitle(app: &crate::Nokkvi, id: HarbourSectionId) -> String {
 
 #[test]
 fn recently_played_subtitle_is_artist_when_no_play_date() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // No play_date → the song subtitle collapses to just the artist.
     let mut s = make_recent_song("s1", "Kiara", "Bonobo", "al1");
     s.play_date = None;
@@ -512,7 +521,7 @@ fn recently_played_subtitle_is_artist_when_no_play_date() {
 
 #[test]
 fn recently_played_subtitle_prefixes_played_when_dated() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // make_recent_song sets play_date → subtitle is "Artist • Played <relative>".
     app.harbour.recently_played = vec![make_recent_song("s1", "Kiara", "Bonobo", "al1")];
     app.harbour_page
@@ -528,7 +537,7 @@ fn recently_played_subtitle_prefixes_played_when_dated() {
 
 #[test]
 fn recently_added_subtitle_joins_artist_and_year() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // created_at None (deterministic) leaves artist + year.
     let mut a = make_album("a1", "Album", "Aphex Twin");
     a.year = Some(2023);
@@ -545,7 +554,7 @@ fn recently_added_subtitle_joins_artist_and_year() {
 
 #[test]
 fn recently_added_subtitle_prefixes_added_when_dated() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut a = make_album("a1", "Album", "Aphex Twin");
     a.created_at = Some("2020-01-01T00:00:00Z".to_string());
     app.harbour.recently_added = vec![a];
@@ -795,10 +804,10 @@ fn toggle_section_flips_page_collapsed_set() {
 
 #[test]
 fn activate_center_on_section_row_toggles_it() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
 
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     // Row 0 is the RecentlyPlayed section header — focus it.
     app.harbour_page.common.slot_list.set_selected(1, total);
 
@@ -816,7 +825,7 @@ fn activate_center_on_section_row_toggles_it() {
 
 #[test]
 fn activate_center_on_item_row_transitions_radio_to_queue() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     seed_radio_playback(&mut app);
     // Expand RecentlyPlayed so its item row exists at row 1.
@@ -824,7 +833,7 @@ fn activate_center_on_item_row_transitions_radio_to_queue() {
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
 
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     // Row 1 is the album item under the expanded RecentlyPlayed section.
     app.harbour_page.common.slot_list.set_selected(2, total);
 
@@ -840,7 +849,7 @@ fn activate_center_on_item_row_transitions_radio_to_queue() {
 
 #[test]
 fn activate_center_on_genre_item_transitions_radio_to_queue() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // A genre item plays via PlayTarget::GenreRandom, a separate play arm that
     // must run the same guard_play_action radio->queue transition as the
     // batch-item arm (an easy copy/paste divergence otherwise). Genre items
@@ -856,7 +865,7 @@ fn activate_center_on_genre_item_transitions_radio_to_queue() {
         .collapsed
         .remove(&HarbourSectionId::MostPlayedGenres);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(|r| {
@@ -886,7 +895,7 @@ fn activate_center_on_genre_item_transitions_radio_to_queue() {
 
 /// Center the RandomPlay row of `kind` (always present in shelves mode).
 fn center_random_play_row(app: &mut crate::Nokkvi, kind: crate::views::harbour::RandomKind) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::RandomPlay { kind: k } if *k == kind))
@@ -1156,11 +1165,11 @@ fn every_refresh_route_is_skipped_while_a_shelf_load_is_in_flight() {
 
 #[test]
 fn expand_center_on_collapsed_section_expands_it() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
     // Locate the (default-collapsed) Recently Added header row and center it.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let total = rows.len();
     let idx = rows
         .iter()
@@ -1193,7 +1202,7 @@ fn expand_center_on_collapsed_section_expands_it() {
 
 #[test]
 fn expand_center_on_expanded_section_header_collapses_it() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
     // Expand Recently Added so the header under test starts expanded.
     app.harbour_page
@@ -1202,7 +1211,7 @@ fn expand_center_on_expanded_section_header_collapses_it() {
 
     // Center the expanded header via the keyboard path (viewport_offset, no
     // click-to-focus marker) — the flow the hotkey uses.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(|r| {
@@ -1228,7 +1237,7 @@ fn expand_center_on_expanded_section_header_collapses_it() {
 
 #[test]
 fn expand_center_on_item_row_collapses_owning_section() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![
         make_recent_song("s1", "A", "Artist", "al1"),
         make_recent_song("s2", "B", "Artist", "al2"),
@@ -1240,7 +1249,7 @@ fn expand_center_on_item_row_collapses_owning_section() {
 
     // Center the SECOND item under the header (row 3: Trawl, header, s1, s2)
     // via click-to-focus — the state after expanding and browsing downward.
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page.common.slot_list.set_selected(3, total);
 
     let _ = app.handle_harbour(HarbourMessage::ExpandCenter);
@@ -1254,7 +1263,7 @@ fn expand_center_on_item_row_collapses_owning_section() {
     );
     // The center must land back on the collapsed header so the highlight
     // doesn't strand on a vanished row and a second Shift+Enter re-expands.
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let center = app
         .harbour_page
         .common
@@ -1280,7 +1289,7 @@ fn expand_center_on_search_item_row_collapses_its_search_group() {
     // nearest-Section-above scan.
     app.harbour.search_query = "amb".into();
     app.harbour.search_results = Some(*search_results_with_genre());
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page.common.slot_list.set_selected(1, total);
 
     let _ = app.handle_harbour(HarbourMessage::ExpandCenter);
@@ -1291,7 +1300,7 @@ fn expand_center_on_search_item_row_collapses_its_search_group() {
             .contains(&HarbourSectionId::SearchGenres),
         "Shift+Enter centered on a search-result item collapses its group"
     );
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let center = app
         .harbour_page
         .common
@@ -1311,7 +1320,7 @@ fn expand_center_on_search_item_row_collapses_its_search_group() {
 
 #[test]
 fn expand_center_roundtrip_via_keyboard_center_toggles_both_ways() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     // RecentlyPlayed starts collapsed (the default landing state).
     assert!(
@@ -1520,7 +1529,7 @@ fn invalidate_shelves_clears_data_and_bumps_generation() {
 /// resolved dynamically so shelf reorderings don't silently retarget these
 /// stationary-center tests.
 fn section_row_index(app: &crate::Nokkvi, id: HarbourSectionId) -> (usize, usize) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::Section { id: sid, .. } if *sid == id))
@@ -1542,7 +1551,7 @@ fn seed_most_played_genre(app: &mut crate::Nokkvi, ids: Vec<String>) {
 
 #[test]
 fn genre_quad_ids_loaded_warms_the_centered_collection() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // Center the Most Played Genres header while its album ids are still
     // unresolved — the ShelvesLoaded-time warm no-ops on empty ids, so the
     // quad-id arrival is the first moment the collage CAN warm.
@@ -1678,12 +1687,12 @@ fn genre_quad_ids_land_on_the_pick_and_tally_by_name() {
 fn toggle_section_warms_the_row_newly_centered() {
     use crate::views::harbour::RandomKind;
 
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     seed_most_played_genre(&mut app, vec!["al1".into()]);
     // All collapsed — center the first RandomPlay row (the row directly below
     // the Most Played Genres header).
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(|r| matches!(r, HarbourRow::RandomPlay { kind } if *kind == RandomKind::Albums))
@@ -1708,7 +1717,7 @@ fn toggle_section_warms_the_row_newly_centered() {
 
 #[test]
 fn activating_a_centered_header_warms_its_preview() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     seed_most_played_genre(&mut app, vec!["al1".into()]);
     let (idx, total) = section_row_index(&app, HarbourSectionId::MostPlayedGenres);
     app.harbour_page.common.slot_list.set_selected(idx, total);
@@ -1760,7 +1769,7 @@ fn search_changed_mirrors_common_query_and_resets_viewport() {
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page
         .common
         .slot_list
@@ -1808,7 +1817,7 @@ fn reset_session_state_preserves_harbour_generations() {
 /// Center the first row matching `pred` and warm its artwork, returning nothing
 /// — assertions read `app.artwork.{playlist,genre}.pending` afterwards.
 fn warm_center_matching(app: &mut crate::Nokkvi, pred: impl Fn(&HarbourRow) -> bool) {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let idx = rows
         .iter()
         .position(pred)
@@ -1843,7 +1852,7 @@ fn centering_playlist_item_warms_its_collage() {
 
 #[test]
 fn centering_genre_item_warms_its_collage() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // Harbour keys genre collages by NAME: a genre item plays via
     // GenreRandom(name), and a tally genre's id is its stamped tag id (or the
     // name when the stamp missed), so only the name is stable.
@@ -1862,7 +1871,7 @@ fn centering_genre_item_warms_its_collage() {
 
 #[test]
 fn centering_genres_section_header_warms_first_picks_collage() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     seed_most_played_genre(&mut app, vec!["al1".into(), "al2".into()]);
     let mut second = make_genre("Jazz", "Jazz");
     second.artwork_album_ids = vec!["al9".into()];
@@ -1891,7 +1900,7 @@ fn centering_genres_section_header_warms_first_picks_collage() {
 
 #[test]
 fn centering_album_item_warms_no_collage() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_added = vec![make_album("a1", "Album", "Artist")];
     app.harbour_page
         .collapsed
@@ -1907,7 +1916,7 @@ fn centering_album_item_warms_no_collage() {
 
 #[test]
 fn centering_collection_without_album_ids_warms_no_collage() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // A genre whose album ids have not resolved yet: nothing to tile, so the
     // collage warm must not mark it pending (it would fetch zero tiles).
     seed_most_played_genre(&mut app, Vec::new());
@@ -2000,7 +2009,7 @@ fn artist_search_row_resolves_its_image_from_the_artist_id() {
         ..Default::default()
     });
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     // The artist Item row (subtitle "Artist") must key its thumbnail on the
     // artist id — artist images live in album_art keyed by artist id.
     let art = rows
@@ -2026,7 +2035,7 @@ fn genre_search_row_reads_resolved_album_ids_from_the_side_map() {
         .search_genre_album_ids
         .insert("Ambient".into(), vec!["al1".into(), "al2".into()]);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let ids = rows
         .iter()
         .find_map(|r| match r {
@@ -2124,7 +2133,7 @@ fn centering_artist_search_row_warms_the_artist_large_image() {
 
 #[test]
 fn centering_most_played_artists_header_warms_the_artist_large_image() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut ar = search_artist("mpa1", "Top Artist");
     ar.play_count = Some(9);
     app.harbour.most_played_artists = vec![ar];
@@ -2338,13 +2347,13 @@ fn genres_needing_quad_ids_dedups_by_name_and_prefers_the_picks_tag_id() {
 
 #[test]
 fn most_played_tracks_shelf_shows_play_count_subtitle() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.most_played_songs = vec![played_song("s1", "Techno", 42)];
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::MostPlayedTracks);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         rows.iter().any(|r| matches!(
             r,
@@ -2370,34 +2379,41 @@ fn most_played_tracks_shelf_shows_play_count_subtitle() {
 
 #[test]
 fn most_played_shelf_hidden_when_top_item_has_zero_plays() {
-    let mut app = test_app();
-    // A fresh/low-play library: the top "most played" track has no plays.
-    app.harbour.most_played_songs = vec![played_song("s1", "Techno", 0)];
+    for expandable in [false, true] {
+        let mut app = test_app();
+        app.settings.harbour_expandable_shelves = expandable;
+        // A fresh/low-play library: the top "most played" track has no plays.
+        app.harbour.most_played_songs = vec![played_song("s1", "Techno", 0)];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
-    assert!(
-        !rows.iter().any(|r| matches!(
-            r,
-            HarbourRow::Section {
-                id: HarbourSectionId::MostPlayedTracks,
-                ..
-            }
-        )),
-        "a zero-play Most Played shelf is hidden so it never shows arbitrary rows"
-    );
+        let rows = app.harbour_rows();
+        assert!(
+            !rows.iter().any(|r| matches!(
+                r,
+                HarbourRow::Section {
+                    id: HarbourSectionId::MostPlayedTracks,
+                    ..
+                } | HarbourRow::ShelfPlay {
+                    id: HarbourSectionId::MostPlayedTracks,
+                    ..
+                }
+            )),
+            "a zero-play Most Played shelf is hidden so it never shows arbitrary rows \
+             (expandable: {expandable})"
+        );
+    }
 }
 
 #[test]
 fn most_played_artist_row_keys_thumbnail_on_artist_id() {
     let mut a = search_artist("ar1", "Aphex Twin");
     a.play_count = Some(99);
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.most_played_artists = vec![a];
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::MostPlayedArtists);
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     let art = rows
         .iter()
         .find_map(|r| match r {
@@ -2439,14 +2455,14 @@ fn shelves_loaded_populates_most_played_shelves() {
 
 #[test]
 fn most_played_genres_hidden_when_tally_is_empty() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // Top tracks have plays, but the genre tally produced nothing (e.g. the top
     // tracks carry no genre tags) — the genre shelf must not render a "(0)"
     // header just because tracks have plays.
     app.harbour.most_played_songs = vec![played_song("s1", "Techno", 42)];
     app.harbour.most_played_genres = Vec::new();
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         !rows.iter().any(|r| matches!(
             r,
@@ -2460,7 +2476,7 @@ fn most_played_genres_hidden_when_tally_is_empty() {
 
     // With a tallied genre present, it renders.
     app.harbour.most_played_genres = vec![make_genre("Techno", "Techno")];
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         rows.iter().any(|r| matches!(
             r,
@@ -2480,7 +2496,7 @@ fn most_played_genres_hidden_when_tally_is_empty() {
 #[test]
 fn trawl_row_is_first_in_shelves_mode() {
     let app = test_app();
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         matches!(rows.first(), Some(HarbourRow::Trawl { .. })),
         "the Trawl door leads the shelves index"
@@ -2493,7 +2509,7 @@ fn trawl_row_absent_in_search_mode() {
     app.harbour.search_query = "night".into();
     app.harbour.search_results =
         Some(nokkvi_data::types::library_search::LibrarySearchResults::default());
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         !rows.iter().any(|r| matches!(r, HarbourRow::Trawl { .. })),
         "search mode shows results only"
@@ -2509,7 +2525,7 @@ fn trawl_row_carries_crate_count_and_blend() {
         "Artist",
     ));
     app.trawl.mix.blend = nokkvi_data::types::trawl::TrawlBlend::Weighted;
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     assert!(
         matches!(
             rows.first(),
@@ -2544,7 +2560,7 @@ fn trawl_subtitle_copy() {
 #[test]
 fn activate_center_on_trawl_row_opens_the_modal() {
     let mut app = test_app();
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page.common.slot_list.set_selected(0, total);
     assert!(app.trawl.modal.is_none());
 
@@ -2566,7 +2582,7 @@ fn activate_center_on_trawl_row_opens_the_modal() {
 #[test]
 fn add_center_to_queue_on_trawl_row_is_noop() {
     let mut app = test_app();
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page.common.slot_list.set_selected(0, total);
 
     let _ = app.handle_harbour(HarbourMessage::SlotList(
@@ -2580,7 +2596,7 @@ fn add_center_to_queue_on_trawl_row_is_noop() {
 #[test]
 fn expand_center_on_trawl_row_is_noop() {
     let mut app = test_app();
-    let total = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix).len();
+    let total = app.harbour_rows().len();
     app.harbour_page.common.slot_list.set_selected(0, total);
     let collapsed_before = app.harbour_page.collapsed.clone();
 
@@ -2607,7 +2623,7 @@ fn header_teaser(
     app: &crate::Nokkvi,
     id: HarbourSectionId,
 ) -> Option<(String, Option<String>, Vec<String>, Option<String>)> {
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
     rows.iter()
         .find_map(|r| match r {
             HarbourRow::Section {
@@ -2708,13 +2724,15 @@ fn random_kind_icons_match_the_nav_and_section_vocabulary() {
 fn every_section_header_carries_its_section_icon_glyph() {
     use crate::views::harbour::section_icon;
 
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     app.harbour.recently_added = vec![make_album("a1", "Added", "Artist")];
 
-    let rows = build_harbour_rows(&app.harbour, &app.harbour_page.collapsed, &app.trawl.mix);
+    let rows = app.harbour_rows();
+    let mut headers = 0;
     for row in &rows {
         if let HarbourRow::Section { id, glyph, .. } = row {
+            headers += 1;
             assert_eq!(
                 *glyph,
                 section_icon(*id),
@@ -2722,13 +2740,14 @@ fn every_section_header_carries_its_section_icon_glyph() {
             );
         }
     }
+    assert!(headers >= 2, "the shelf headers were checked");
 }
 
 #[test]
 fn recently_played_header_teaser_names_the_first_pick() {
     use nokkvi_data::utils::formatters::format_relative_time;
 
-    let mut app = test_app();
+    let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "Karma Police", "Radiohead", "al1")];
 
     let (subtitle, art_id, art_ids, custom) =
@@ -2749,7 +2768,7 @@ fn recently_played_header_teaser_names_the_first_pick() {
 
 #[test]
 fn recently_played_teaser_drops_a_missing_play_date() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut s = make_recent_song("s1", "Karma Police", "Radiohead", "al1");
     s.play_date = None;
     app.harbour.recently_played = vec![s];
@@ -2766,7 +2785,7 @@ fn recently_played_teaser_drops_a_missing_play_date() {
 fn recently_added_header_teaser_drops_the_year() {
     use nokkvi_data::utils::formatters::format_relative_time;
 
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut a = make_album("al9", "In Rainbows", "Radiohead");
     a.year = Some(2007);
     a.created_at = Some("2020-01-01T00:00:00Z".to_string());
@@ -2790,7 +2809,7 @@ fn recently_added_header_teaser_drops_the_year() {
 
 #[test]
 fn most_played_tracks_header_teaser_shows_plays_not_recency() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // make_recent_song sets play_date — the Most Played teaser must ignore it.
     let mut s = make_recent_song("s1", "Weird Fishes", "Radiohead", "al1");
     s.play_count = Some(87);
@@ -2803,7 +2822,7 @@ fn most_played_tracks_header_teaser_shows_plays_not_recency() {
 
 #[test]
 fn most_played_albums_header_teaser_shows_plays() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut a = make_album("al2", "OK Computer", "Radiohead");
     a.play_count = Some(214);
     app.harbour.most_played_albums = vec![a];
@@ -2816,7 +2835,7 @@ fn most_played_albums_header_teaser_shows_plays() {
 
 #[test]
 fn most_played_artists_header_teaser_keys_art_on_the_artist_id() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     let mut ar = search_artist("ar1", "Radiohead");
     ar.play_count = Some(542);
     app.harbour.most_played_artists = vec![ar];
@@ -2834,7 +2853,7 @@ fn most_played_artists_header_teaser_keys_art_on_the_artist_id() {
 
 #[test]
 fn most_played_genres_header_teaser_shows_the_top_track_share() {
-    let mut app = test_app();
+    let mut app = expandable_app();
     // Gate: the genre shelf rides the tracks pool's has-plays gate.
     app.harbour.most_played_songs = vec![played_song("s1", "Art Rock", 42)];
     let mut g = make_genre("Art Rock", "Art Rock");
@@ -2848,7 +2867,7 @@ fn most_played_genres_header_teaser_shows_the_top_track_share() {
 
 #[test]
 fn empty_shelf_headers_have_no_teaser() {
-    let app = test_app();
+    let app = expandable_app();
     assert!(
         header_teaser(&app, HarbourSectionId::RecentlyPlayed).is_none(),
         "an empty shelf never fakes a pick"
@@ -3094,4 +3113,439 @@ fn hover_and_toolbar_reveal_skip_the_row_build_but_still_land() {
         SlotListPageMessage::ToolbarDropdownToggled(true),
     ));
     assert!(app.harbour_page.common.toolbar_dropdown_open);
+}
+
+// ============================================================================
+// One-press shelves (the default). Settings → General → Expandable Harbour
+// Shelves brings the collapsible headers back.
+// ============================================================================
+
+use crate::views::harbour::{
+    PlayTarget, SHELF_SONG_BATCH, ShelfStyle, harbour_item_count, has_shelf_pick,
+    shelf_play_target, shelf_title,
+};
+
+/// The six shelves in render order.
+const SHELVES: [HarbourSectionId; 6] = [
+    HarbourSectionId::RecentlyPlayed,
+    HarbourSectionId::RecentlyAdded,
+    HarbourSectionId::MostPlayedTracks,
+    HarbourSectionId::MostPlayedAlbums,
+    HarbourSectionId::MostPlayedArtists,
+    HarbourSectionId::MostPlayedGenres,
+];
+
+/// Every shelf populated, with plays so the Most Played shelves show. The
+/// tracks pool ends in a never-played song, as a small library's does.
+fn one_press_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.harbour.recently_played = vec![
+        make_recent_song("rp1", "Latest", "Artist A", "al1"),
+        make_recent_song("rp2", "Earlier", "Artist B", "al2"),
+    ];
+    app.harbour.recently_added = vec![
+        make_album("ra1", "Newest", "Artist"),
+        make_album("ra2", "Older", "Artist"),
+    ];
+    let mut top = make_recent_song("mp1", "Top Track", "Artist", "al3");
+    top.play_count = Some(9);
+    let mut second = make_recent_song("mp2", "Second", "Artist", "al4");
+    second.play_count = Some(3);
+    let mut never = make_recent_song("mp3", "Never", "Artist", "al5");
+    never.play_count = Some(0);
+    app.harbour.most_played_songs = vec![top, second, never];
+    let mut album = make_album("ma1", "Top Album", "Artist");
+    album.play_count = Some(7);
+    app.harbour.most_played_albums = vec![album, make_album("ma2", "Next", "Artist")];
+    let mut artist = search_artist("mar1", "Top Artist");
+    artist.play_count = Some(40);
+    app.harbour.most_played_artists = vec![artist, search_artist("mar2", "Next Artist")];
+    app.harbour.most_played_genres = vec![make_genre("Rock", "Rock"), make_genre("Jazz", "Jazz")];
+    app
+}
+
+fn center_shelf(app: &mut crate::Nokkvi, id: HarbourSectionId) {
+    let rows = app.harbour_rows();
+    let idx = rows
+        .iter()
+        .position(|r| matches!(r, HarbourRow::ShelfPlay { id: i, .. } if *i == id))
+        .expect("the one-press shelf row is present");
+    app.harbour_page
+        .common
+        .slot_list
+        .set_selected(idx, rows.len());
+}
+
+fn shelf_subtitle(app: &crate::Nokkvi, id: HarbourSectionId) -> Option<String> {
+    app.harbour_rows().into_iter().find_map(|r| match r {
+        HarbourRow::ShelfPlay { id: i, teaser, .. } if i == id => teaser.map(|t| t.subtitle),
+        _ => None,
+    })
+}
+
+fn song_ids(target: Option<PlayTarget>) -> Vec<String> {
+    match target {
+        Some(PlayTarget::Songs(songs)) => songs.into_iter().map(|s| s.id).collect(),
+        other => panic!("expected a song batch, got {other:?}"),
+    }
+}
+
+#[test]
+fn one_press_is_the_default_shelf_style() {
+    assert_eq!(test_app().harbour_shelf_style(), ShelfStyle::OnePress);
+}
+
+#[test]
+fn one_press_shelves_are_single_rows_in_shelf_order() {
+    let app = one_press_app();
+    let rows = app.harbour_rows();
+
+    let shelves: Vec<HarbourSectionId> = rows
+        .iter()
+        .filter_map(|r| match r {
+            HarbourRow::ShelfPlay { id, .. } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shelves, SHELVES.to_vec());
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r, HarbourRow::Section { .. } | HarbourRow::Item { .. })),
+        "no headers to open and no picks to browse"
+    );
+    assert!(matches!(rows.first(), Some(HarbourRow::Trawl { .. })));
+    assert_eq!(
+        rows.iter()
+            .filter(|r| matches!(r, HarbourRow::RandomPlay { .. }))
+            .count(),
+        5,
+        "the Random block is unchanged"
+    );
+}
+
+#[test]
+fn expandable_shelves_keep_the_collapsible_headers() {
+    let mut app = one_press_app();
+    app.settings.harbour_expandable_shelves = true;
+
+    let rows = app.harbour_rows();
+
+    assert_eq!(
+        rows.iter()
+            .filter(|r| matches!(r, HarbourRow::Section { .. }))
+            .count(),
+        SHELVES.len()
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r, HarbourRow::ShelfPlay { .. }))
+    );
+}
+
+#[test]
+fn entity_shelves_play_their_top_pick() {
+    use nokkvi_data::types::batch::BatchItem;
+    let app = one_press_app();
+    let h = &app.harbour;
+
+    assert!(matches!(
+        shelf_play_target(h, HarbourSectionId::RecentlyAdded),
+        Some(PlayTarget::Item(BatchItem::Album(id))) if id == "ra1"
+    ));
+    assert!(matches!(
+        shelf_play_target(h, HarbourSectionId::MostPlayedAlbums),
+        Some(PlayTarget::Item(BatchItem::Album(id))) if id == "ma1"
+    ));
+    assert!(matches!(
+        shelf_play_target(h, HarbourSectionId::MostPlayedArtists),
+        Some(PlayTarget::Item(BatchItem::Artist(id))) if id == "mar1"
+    ));
+    // A genre plays a capped random draw, like the Random Genre row.
+    assert!(matches!(
+        shelf_play_target(h, HarbourSectionId::MostPlayedGenres),
+        Some(PlayTarget::GenreRandom(name)) if name == "Rock"
+    ));
+}
+
+#[test]
+fn song_shelves_play_their_songs_in_shelf_order() {
+    let app = one_press_app();
+
+    assert_eq!(
+        song_ids(shelf_play_target(
+            &app.harbour,
+            HarbourSectionId::RecentlyPlayed
+        )),
+        vec!["rp1", "rp2"]
+    );
+    assert_eq!(
+        song_ids(shelf_play_target(
+            &app.harbour,
+            HarbourSectionId::MostPlayedTracks
+        )),
+        vec!["mp1", "mp2"],
+        "a never-played song is not one of your most played"
+    );
+}
+
+#[test]
+fn song_shelves_cap_their_batch() {
+    let mut app = test_app();
+    app.harbour.recently_played = (0..SHELF_SONG_BATCH + 50)
+        .map(|i| make_recent_song(&format!("s{i}"), "T", "A", "al1"))
+        .collect();
+
+    let ids = song_ids(shelf_play_target(
+        &app.harbour,
+        HarbourSectionId::RecentlyPlayed,
+    ));
+
+    assert_eq!(ids.len(), SHELF_SONG_BATCH);
+    assert_eq!(ids.first().map(String::as_str), Some("s0"), "newest first");
+}
+
+#[test]
+fn has_shelf_pick_agrees_with_what_a_press_plays() {
+    let full = one_press_app();
+    let empty = test_app();
+    for id in SHELVES {
+        assert!(has_shelf_pick(&full.harbour, id), "{id:?}");
+        assert!(shelf_play_target(&full.harbour, id).is_some(), "{id:?}");
+        assert!(!has_shelf_pick(&empty.harbour, id), "{id:?}");
+        assert!(shelf_play_target(&empty.harbour, id).is_none(), "{id:?}");
+    }
+}
+
+#[test]
+fn one_press_entity_shelves_read_singular() {
+    use HarbourSectionId as S;
+    let one = |id| shelf_title(id, ShelfStyle::OnePress);
+    let exp = |id| shelf_title(id, ShelfStyle::Expandable);
+
+    assert_eq!(one(S::RecentlyPlayed), "Recently Played");
+    assert_eq!(one(S::RecentlyAdded), "Recently Added");
+    assert_eq!(one(S::MostPlayedTracks), "Most Played Tracks");
+    assert_eq!(one(S::MostPlayedAlbums), "Most Played Album");
+    assert_eq!(one(S::MostPlayedArtists), "Most Played Artist");
+    assert_eq!(one(S::MostPlayedGenres), "Most Played Genre");
+    assert_eq!(exp(S::MostPlayedAlbums), "Most Played Albums");
+    assert_eq!(exp(S::MostPlayedArtists), "Most Played Artists");
+    assert_eq!(exp(S::MostPlayedGenres), "Most Played Genres");
+}
+
+#[test]
+fn song_shelf_rows_name_how_many_songs_play() {
+    let app = one_press_app();
+
+    assert_eq!(
+        shelf_subtitle(&app, HarbourSectionId::RecentlyPlayed).as_deref(),
+        Some("Latest • Artist A • 2 songs")
+    );
+    assert_eq!(
+        shelf_subtitle(&app, HarbourSectionId::MostPlayedTracks).as_deref(),
+        Some("Top Track • Artist • 2 songs")
+    );
+    // An entity shelf names the one pick it plays, as its header did.
+    assert_eq!(
+        shelf_subtitle(&app, HarbourSectionId::MostPlayedAlbums).as_deref(),
+        Some("Top Album • Artist • 7 plays")
+    );
+}
+
+#[test]
+fn pressing_a_shelf_plays_it() {
+    for id in [
+        HarbourSectionId::RecentlyAdded,
+        HarbourSectionId::RecentlyPlayed,
+    ] {
+        let mut app = one_press_app();
+        seed_radio_playback(&mut app);
+        center_shelf(&mut app, id);
+        let collapsed_before = app.harbour_page.collapsed.clone();
+
+        let _ = app.handle_harbour(HarbourMessage::SlotList(
+            SlotListPageMessage::ActivateCenter(false),
+        ));
+
+        assert!(
+            matches!(app.active_playback, crate::state::ActivePlayback::Queue),
+            "{id:?}: a press plays, running the radio-to-queue guard"
+        );
+        assert_eq!(app.harbour_page.collapsed, collapsed_before, "{id:?}");
+    }
+}
+
+#[test]
+fn pressing_an_empty_shelf_plays_nothing_and_says_so() {
+    let mut app = test_app();
+    seed_radio_playback(&mut app);
+    center_shelf(&mut app, HarbourSectionId::RecentlyPlayed);
+
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::ActivateCenter(false),
+    ));
+
+    assert!(
+        matches!(app.active_playback, crate::state::ActivePlayback::Radio(_)),
+        "nothing to play, so the station keeps playing"
+    );
+    assert!(!app.toast.toasts.is_empty(), "the user is told why");
+}
+
+#[test]
+fn the_header_count_reads_the_same_in_both_styles() {
+    let mut app = one_press_app();
+    let one_press = harbour_item_count(&app.harbour_rows());
+    app.settings.harbour_expandable_shelves = true;
+    let expandable = harbour_item_count(&app.harbour_rows());
+
+    assert_eq!(one_press, expandable);
+    assert!(one_press > 0);
+}
+
+#[test]
+fn switching_styles_keeps_the_list_inside_its_rows() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = one_press_app();
+    app.settings.harbour_expandable_shelves = true;
+    app.harbour_page.collapsed.clear();
+    let expanded_total = app.harbour_rows().len();
+    app.harbour_page.common.slot_list.viewport_offset = expanded_total - 1;
+
+    let mut settings = app.settings.clone();
+    settings.harbour_expandable_shelves = false;
+    let _ = app.handle_player_settings_loaded(settings);
+
+    let total = app.harbour_rows().len();
+    assert!(total < expanded_total, "one-press has fewer rows");
+    assert!(
+        app.harbour_page.common.slot_list.viewport_offset < total,
+        "the viewport lands on a row, not past the end"
+    );
+}
+
+#[test]
+fn only_the_shown_song_rows_warm_thumbnails() {
+    let mut app = test_app();
+    app.harbour.recently_played = (0..SHELF_SONG_BATCH)
+        .map(|i| make_recent_song(&format!("s{i}"), "T", "A", &format!("al{i}")))
+        .collect();
+
+    let ids = crate::update::harbour::harbour_song_mini_ids(&app.harbour);
+
+    assert_eq!(
+        ids.len(),
+        crate::views::harbour::HOT_PICKS_PER_SECTION,
+        "a deep batch warms only the covers a shelf can show"
+    );
+}
+
+#[test]
+fn centering_a_one_press_artist_shelf_warms_the_artist_large_image() {
+    let mut app = one_press_app();
+
+    warm_center_matching(&mut app, |r| {
+        matches!(
+            r,
+            HarbourRow::ShelfPlay {
+                id: HarbourSectionId::MostPlayedArtists,
+                ..
+            }
+        )
+    });
+
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("mar1"),
+        "the artist shelf warms its top artist through the artist loader"
+    );
+}
+
+#[test]
+fn centering_a_one_press_genre_shelf_warms_its_top_genres_collage() {
+    let mut app = one_press_app();
+    seed_most_played_genre(&mut app, vec!["al1".into(), "al2".into()]);
+
+    warm_center_matching(&mut app, |r| {
+        matches!(
+            r,
+            HarbourRow::ShelfPlay {
+                id: HarbourSectionId::MostPlayedGenres,
+                ..
+            }
+        )
+    });
+
+    assert!(app.artwork.genre.pending.contains("Rock"));
+}
+
+#[test]
+fn the_most_played_pool_keeps_what_a_press_plays() {
+    use crate::update::harbour::shape_most_played;
+    let pool: Vec<_> = (0..SHELF_SONG_BATCH + 50)
+        .map(|i| played_song(&format!("s{i}"), "Techno", 10))
+        .collect();
+
+    let (songs, genres) = shape_most_played(pool, &[]);
+
+    assert_eq!(
+        songs.len(),
+        SHELF_SONG_BATCH,
+        "the shelf keeps a press's batch"
+    );
+    assert_eq!(
+        genres.first().map(|g| g.song_count),
+        Some(u32::try_from(SHELF_SONG_BATCH + 50).unwrap_or(u32::MAX)),
+        "the genre tally still reads the whole pool"
+    );
+}
+
+#[test]
+fn recently_played_keeps_only_songs_that_were_played() {
+    use crate::update::harbour::shape_recently_played;
+    let mut never = make_recent_song("rp3", "Never", "Artist", "al9");
+    never.play_date = None;
+    // The server's play-date sort puts never-played songs last.
+    let fetched = vec![
+        make_recent_song("rp1", "Latest", "Artist A", "al1"),
+        make_recent_song("rp2", "Earlier", "Artist B", "al2"),
+        never,
+    ];
+
+    let ids: Vec<String> = shape_recently_played(fetched)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+
+    assert_eq!(ids, vec!["rp1", "rp2"]);
+}
+
+#[test]
+fn a_library_with_no_plays_has_nothing_recently_played() {
+    use crate::update::harbour::shape_recently_played;
+    let mut app = test_app();
+    let mut never = make_recent_song("s1", "Never", "Artist", "al1");
+    never.play_date = None;
+    app.harbour.recently_played = shape_recently_played(vec![never]);
+
+    assert!(!has_shelf_pick(
+        &app.harbour,
+        HarbourSectionId::RecentlyPlayed
+    ));
+    assert!(shelf_play_target(&app.harbour, HarbourSectionId::RecentlyPlayed).is_none());
+    assert_eq!(
+        shelf_subtitle(&app, HarbourSectionId::RecentlyPlayed),
+        None,
+        "the row reads Nothing here yet"
+    );
+    assert_eq!(
+        crate::views::harbour::section_cover_album_id(
+            &app.harbour,
+            HarbourSectionId::RecentlyPlayed
+        ),
+        None,
+        "and the panel shows no never-played cover"
+    );
 }

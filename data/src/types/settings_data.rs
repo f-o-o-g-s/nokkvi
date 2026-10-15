@@ -30,6 +30,7 @@ pub struct GeneralSettingsData {
     pub auto_follow_playing: bool,
     pub enter_behavior: Cow<'static, str>,
     pub enter_shuffle: bool,
+    pub harbour_expandable_shelves: bool,
     /// Seconds the Seek Backward / Seek Forward keys jump.
     pub seek_step_secs: i64,
     pub local_music_path: Cow<'static, str>,
@@ -53,6 +54,7 @@ impl Default for GeneralSettingsData {
             auto_follow_playing: false,
             enter_behavior: Cow::Borrowed("test-default"),
             enter_shuffle: false,
+            harbour_expandable_shelves: false,
             seek_step_secs: 0,
             local_music_path: Cow::Borrowed("test-default"),
             verbose_config: Cow::Borrowed("test-default"),

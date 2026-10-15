@@ -34,6 +34,9 @@ pub struct TomlSettings {
     pub start_view: String,
     pub enter_behavior: EnterBehavior,
     pub enter_shuffle: bool,
+    /// Harbour shelves open to browse their picks instead of playing in one
+    /// press.
+    pub harbour_expandable_shelves: bool,
     pub local_music_path: String,
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool values load via the compat shim (`true` → On, `false` → Off).
@@ -338,6 +341,7 @@ impl Default for TomlSettings {
             start_view: "Harbour".to_string(),
             enter_behavior: EnterBehavior::default(),
             enter_shuffle: false,
+            harbour_expandable_shelves: false,
             local_music_path: String::new(),
             verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),

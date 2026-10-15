@@ -14,6 +14,7 @@
   "auto_follow_playing": true,
   "enter_behavior": "play_all",
   "enter_shuffle": false,
+  "harbour_expandable_shelves": false,
   "local_music_path": "",
   "rounded_mode": "on",
   "nav_layout": "top",

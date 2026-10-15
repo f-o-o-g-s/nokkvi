@@ -2621,6 +2621,7 @@ impl Nokkvi {
                 self.harbour_page
                     .view(views::HarbourViewData {
                         harbour: &self.harbour,
+                        shelf_style: self.harbour_shelf_style(),
                         trawl_crate: &self.trawl.mix,
                         album_art: &self.artwork.album_art.snapshot,
                         placeholders: &self.artwork.placeholders.snapshot,

@@ -6,13 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A new General setting, Expandable Harbour Shelves, brings back Harbour shelves that open to browse their picks.
+
 ### Changed
 
 - Escape in Settings now steps from the rows back to the categories, and a second Escape leaves Settings.
+- Pressing a Harbour shelf now plays it instead of opening it.
+- The Recently Added, Most Played Album, Most Played Artist and Most Played Genre shelves each play their top pick.
+- The Recently Played and Most Played Tracks shelves play up to 100 of their songs.
+- The Recently Played and Most Played Tracks shelves name how many songs a press plays.
 
 ### Fixed
 
 - Arrow keys and Enter alone now reach the Settings categories, so a keyboard or d-pad no longer gets stuck in one category's rows.
+- Harbour's Recently Played shelf no longer lists songs you have never played.
 
 ### Removed
 
