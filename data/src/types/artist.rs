@@ -56,6 +56,19 @@ pub struct SimilarArtist {
 }
 
 impl Artist {
+    /// The outside poster link the server passed along for the artist
+    /// (large, else medium): what the big panel shows, and what the
+    /// thumbnail shows when the server has no image of its own
+    /// (`image_info::artist_mini_entry`). One pick for both, because the
+    /// sizes can come from different agents with different pictures (a
+    /// Deezer small and medium beside a Last.fm large).
+    pub fn poster(&self) -> Option<&str> {
+        [&self.large_image_url, &self.medium_image_url]
+            .into_iter()
+            .filter_map(|link| link.as_deref())
+            .find(|link| !link.is_empty())
+    }
+
     /// Get display name for the artist
     pub fn display_name(&self) -> &str {
         &self.name

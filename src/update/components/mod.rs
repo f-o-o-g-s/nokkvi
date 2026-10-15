@@ -84,14 +84,14 @@ fn song_count_text(count: usize) -> String {
 }
 // The pure planning half of `prefetch_album_artwork_tasks`, for the handler
 // tests (production calls go through the task builder).
-#[cfg(test)]
-pub(super) use artwork_prefetch::plan_album_artwork_fetches;
 pub(super) use artwork_prefetch::{
     ArtworkGate, album_prefetch_entry, artist_mini_task, expansion_album_artwork_tasks,
     expansion_child_album_ids, passive_artwork_version, prefetch_album_artwork_tasks,
     prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
     quad_album_artwork_tasks_for_ids,
 };
+#[cfg(test)]
+pub(super) use artwork_prefetch::{plan_album_artwork_fetches, shrink_poster};
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its
 /// underlying cause is [`NokkviError::Unauthorized`] — the canonical

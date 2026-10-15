@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, genres::GenreUIViewData, playlists::PlaylistUIViewData},
     types::{
-        artist::Artist, image_info::artist_art_entry, library_search::LibrarySearchResults,
+        artist::Artist,
+        image_info::{ArtistMini, artist_mini_entry},
+        library_search::LibrarySearchResults,
         song::Song,
     },
 };
@@ -117,14 +119,14 @@ impl HarbourState {
             && self.random_playlist.is_none()
     }
 
-    /// The `(artist_id, version)` entries of the shelf artists whose
-    /// `ar-{id}` mini needs warming: every Most Played artist plus the Random
-    /// Artist pick, minus art the server marked absent.
-    pub fn shelf_artist_minis(&self) -> Vec<(String, Option<String>)> {
+    /// The thumbnail entries of the shelf artists (`artist_mini_entry`):
+    /// every Most Played artist plus the Random Artist pick. Art the server
+    /// marked absent comes from the artist's poster, or not at all.
+    pub fn shelf_artist_minis(&self) -> Vec<ArtistMini> {
         self.most_played_artists
             .iter()
             .chain(self.random_artist.iter())
-            .filter_map(|a| artist_art_entry(&a.id, &a.image))
+            .filter_map(|a| artist_mini_entry(&a.id, &a.image, a.poster()))
             .collect()
     }
 

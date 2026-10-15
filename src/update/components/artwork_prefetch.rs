@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use iced::Task;
 use nokkvi_data::{
     backend::albums::{AlbumUIViewData, AlbumsService},
-    types::image_info::artwork_version,
+    types::image_info::{ArtistMini, artwork_version},
     utils::artwork_url::THUMBNAIL_SIZE,
 };
 
@@ -224,27 +224,65 @@ pub(crate) fn album_prefetch_entry(album: &AlbumUIViewData) -> (String, Option<S
     )
 }
 
-/// Fetch one artist's 80px `ar-{id}` mini into `album_art[id]`, recording
-/// `version` (its `artist_art_entry` version) beside it. Shared by the
-/// Artists view's prefetch and Harbour's artist warm, so both request the
-/// same URL and record the same version.
-pub(crate) fn artist_mini_task(
-    albums_vm: AlbumsService,
-    id: String,
-    version: Option<String>,
-) -> Task<Message> {
+/// Fetch one artist's 80px thumbnail into `album_art[id]`, recording the
+/// entry's version beside it: the server's `ar-{id}` cover, or the poster
+/// for an artist with no image of its own, shrunk to thumbnail size off the
+/// UI thread ([`shrink_poster`]). Shared by every artist surface (the
+/// Artists view, Harbour, the search rows), so all of them request the same
+/// picture and record the same version.
+pub(crate) fn artist_mini_task(albums_vm: AlbumsService, mini: ArtistMini) -> Task<Message> {
     Task::perform(
         async move {
-            let art_id = format!("ar-{id}");
-            let art = MiniArt::from_fetch(
-                albums_vm
-                    .fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), version.as_deref())
-                    .await,
-            );
+            let ArtistMini {
+                id,
+                version,
+                poster,
+            } = mini;
+            let art = match poster {
+                // The poster link passes through the URL builder untouched.
+                Some(link) => match albums_vm
+                    .fetch_album_artwork(&link, Some(THUMBNAIL_SIZE), None)
+                    .await
+                {
+                    Ok(bytes) => tokio::task::spawn_blocking(move || shrink_poster(&bytes))
+                        .await
+                        .ok()
+                        .flatten()
+                        .map_or(MiniArt::Missing, MiniArt::Loaded),
+                    Err(e) => MiniArt::from_fetch(Err(e)),
+                },
+                None => MiniArt::from_fetch(
+                    albums_vm
+                        .fetch_album_artwork(
+                            &format!("ar-{id}"),
+                            Some(THUMBNAIL_SIZE),
+                            version.as_deref(),
+                        )
+                        .await,
+                ),
+            };
             (id, version, art)
         },
         |(id, version, art)| Message::Artwork(ArtworkMessage::Loaded(id, version, art)),
     )
+}
+
+/// An artist's outside poster (250 px to full size) shrunk to fit the 80px
+/// thumbnail square, so it costs what every other thumbnail costs on the
+/// GPU (about 25 KB) instead of up to a few MB for a 46 px square. `None`
+/// when the bytes don't decode, which the caller negative-caches at the
+/// poster's link. Runs on a blocking thread.
+pub(crate) fn shrink_poster(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
+    let shrunk = image::load_from_memory(bytes)
+        .ok()?
+        .thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+        .to_rgba8();
+    let (width, height) = shrunk.dimensions();
+    Some(iced::widget::image::Handle::from_rgba(
+        width,
+        height,
+        shrunk.into_raw(),
+    ))
 }
 
 /// Generate song artwork prefetch tasks for a slot list viewport.

@@ -353,11 +353,11 @@ impl Nokkvi {
         )))
     }
 
-    /// The `(artist_id, version)` entries of the Artists viewport: the
-    /// version is the artist's image hash (Navidrome 0.64+; artists have no
-    /// `updated_at`), `None` on an older server. Art the server marked
-    /// absent is never planned.
-    fn artist_viewport_entries(&self) -> Vec<(String, Option<String>)> {
+    /// The thumbnail entries of the Artists viewport (`artist_mini_entry`):
+    /// the server's own cover at the artist's image hash (Navidrome 0.64+;
+    /// artists have no `updated_at`), `None` on an older server. Art the
+    /// server marked absent comes from the artist's poster, or not at all.
+    fn artist_viewport_entries(&self) -> Vec<nokkvi_data::types::image_info::ArtistMini> {
         let total = self.library.artists.len();
         self.artists_page
             .common
@@ -365,20 +365,23 @@ impl Nokkvi {
             .prefetch_indices(total)
             .filter_map(|idx| self.library.artists.get(idx))
             .filter_map(|artist| {
-                nokkvi_data::types::image_info::artist_art_entry(&artist.id, &artist.image)
+                nokkvi_data::types::image_info::artist_mini_entry(
+                    &artist.id,
+                    &artist.image,
+                    artist.poster(),
+                )
             })
             .collect()
     }
 
-    /// The `(artist_id, version)` minis the Artists viewport prefetch would
-    /// fetch: the viewport's entries through Harbour's
+    /// The thumbnails the Artists viewport prefetch would fetch: the viewport's entries through Harbour's
     /// [`artist_minis_to_warm`](Self::artist_minis_to_warm), the one gate
     /// every `ar-` mini surface shares (the version-aware
     /// [`should_refetch`](crate::update::components::should_refetch) plus
     /// the in-flight set). A changed artist image refetches; on an older
     /// server the `None` version gates exactly like the old id-only
     /// `contains` + failed-at-`None` check.
-    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<(String, Option<String>)> {
+    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<nokkvi_data::types::image_info::ArtistMini> {
         self.artist_minis_to_warm(self.artist_viewport_entries())
     }
 

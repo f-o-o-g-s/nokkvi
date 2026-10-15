@@ -53,6 +53,7 @@ All notable changes to this project will be documented in this file.
 - A song without lyrics now shows the "No lyrics for this track" note over the cover instead of a blank overlay.
 - Focusing a text box from the keyboard (`/`, or Tab on the login screen) now puts the cursor after its text instead of before it.
 - With Cover Blur on, the cover no longer blinks blank for a frame when lyrics show or hide.
+- An artist with no picture on the server but an outside poster now shows that poster as its thumbnail, as the big panel already did.
 
 ### Removed
 

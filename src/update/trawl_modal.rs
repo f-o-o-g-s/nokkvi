@@ -444,7 +444,7 @@ impl Nokkvi {
         let albums_vm = shell.albums().clone();
 
         let mut id_slices: Vec<Vec<String>> = Vec::new();
-        let mut artists: Vec<(String, Option<String>)> = Vec::new();
+        let mut artists: Vec<nokkvi_data::types::image_info::ArtistMini> = Vec::new();
         if let Some(state) = &self.trawl.modal
             && let Some(r) = &state.search_results
         {
@@ -459,7 +459,9 @@ impl Nokkvi {
             artists = r
                 .artists
                 .iter()
-                .filter_map(|a| nokkvi_data::types::image_info::artist_art_entry(&a.id, &a.image))
+                .filter_map(|a| {
+                    nokkvi_data::types::image_info::artist_mini_entry(&a.id, &a.image, a.poster())
+                })
                 .collect();
         }
 

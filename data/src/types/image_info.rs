@@ -115,13 +115,41 @@ pub fn artwork_version(image: &ImageInfo, updated_at: Option<&str>) -> Option<St
     image.valid_hash().or(updated_at).map(str::to_owned)
 }
 
-/// The `(id, version)` an artist's `ar-{id}` cover is fetched and cached
-/// under, the same for every surface that shows one. Artists carry no
-/// `updated_at`, so the version is the image hash, or `None` on servers older
-/// than 0.64. `None` overall when the server marked the art absent: there is
-/// nothing to fetch.
-pub fn artist_art_entry(id: &str, image: &ImageInfo) -> Option<(String, Option<String>)> {
-    (!image.image_absent).then(|| (id.to_owned(), artwork_version(image, None)))
+/// An artist's 80px thumbnail: the id it is cached under, the version it
+/// is cached at, and an outside `poster` to fetch it from instead of the
+/// server's own `ar-{id}` cover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtistMini {
+    pub id: String,
+    /// The image hash for the server's own cover (`None` before 0.64, as
+    /// artists carry no `updated_at`); the poster link for a poster.
+    pub version: Option<String>,
+    /// Set when the server has no image of its own for the artist
+    /// (`imageAbsent`) but passed an agent's poster link along (a Deezer or
+    /// Last.fm image). The big panel already shows that poster; the
+    /// thumbnail fetches it too, shrunk to thumbnail size on arrival.
+    pub poster: Option<String>,
+}
+
+/// The thumbnail entry for an artist, the same for every surface that shows
+/// one: the server's own `ar-{id}` cover at its version, or, when the server
+/// marked its own art absent, the `poster` link if one came along, with the
+/// link as its version so a replaced poster is fetched again. `None` when
+/// there is nothing to fetch.
+pub fn artist_mini_entry(id: &str, image: &ImageInfo, poster: Option<&str>) -> Option<ArtistMini> {
+    if image.image_absent {
+        let poster = poster.filter(|link| !link.is_empty())?;
+        return Some(ArtistMini {
+            id: id.to_owned(),
+            version: Some(poster.to_owned()),
+            poster: Some(poster.to_owned()),
+        });
+    }
+    Some(ArtistMini {
+        id: id.to_owned(),
+        version: artwork_version(image, None),
+        poster: None,
+    })
 }
 
 // Serde's `skip_serializing_if` hands the field by reference.
@@ -268,6 +296,76 @@ mod tests {
     }
 
     /// Artists and playlists carry the same keys.
+    fn raw_artist(fields: serde_json::Value) -> crate::types::artist::Artist {
+        let mut v = json!({ "id": "ar1", "name": "X" });
+        if let (Some(obj), Some(more)) = (v.as_object_mut(), fields.as_object()) {
+            obj.extend(more.clone());
+        }
+        serde_json::from_value(v).expect("artist parses")
+    }
+
+    fn mini_of(artist: &crate::types::artist::Artist) -> Option<ArtistMini> {
+        artist_mini_entry(&artist.id, &artist.image, artist.poster())
+    }
+
+    #[test]
+    fn an_artist_thumbnail_comes_from_the_server_or_its_poster() {
+        // An image of its own: the server's cover at its hash, no poster.
+        let own = raw_artist(json!({
+            "imageHash": "0123456789abcdef", "largeImageUrl": "https://lfm/big.jpg"
+        }));
+        assert_eq!(
+            mini_of(&own),
+            Some(ArtistMini {
+                id: "ar1".into(),
+                version: Some("0123456789abcdef".into()),
+                poster: None,
+            })
+        );
+
+        // None of its own, posters passed along: the large one, the picture
+        // the big panel shows, versioned by its link.
+        let posters = raw_artist(json!({
+            "imageAbsent": true,
+            "smallImageUrl": "https://dz/250.jpg",
+            "mediumImageUrl": "https://dz/500.jpg",
+            "largeImageUrl": "https://lfm/big.jpg"
+        }));
+        assert_eq!(
+            mini_of(&posters),
+            Some(ArtistMini {
+                id: "ar1".into(),
+                version: Some("https://lfm/big.jpg".into()),
+                poster: Some("https://lfm/big.jpg".into()),
+            })
+        );
+
+        // The large link empty: the medium one. A small one alone: none, as
+        // the panel shows none.
+        let medium = raw_artist(json!({
+            "imageAbsent": true, "largeImageUrl": "", "mediumImageUrl": "https://dz/500.jpg"
+        }));
+        assert_eq!(medium.poster(), Some("https://dz/500.jpg"));
+        let small =
+            raw_artist(json!({ "imageAbsent": true, "smallImageUrl": "https://dz/250.jpg" }));
+        assert_eq!(mini_of(&small), None);
+
+        // None of its own and no poster: nothing to fetch.
+        assert_eq!(mini_of(&raw_artist(json!({ "imageAbsent": true }))), None);
+    }
+
+    #[test]
+    fn artist_rows_pick_the_same_poster_as_raw_artists() {
+        let raw = raw_artist(json!({
+            "smallImageUrl": "https://dz/250.jpg",
+            "mediumImageUrl": "https://dz/500.jpg",
+            "largeImageUrl": ""
+        }));
+        let row = crate::backend::artists::ArtistUIViewData::from(raw.clone());
+        assert_eq!(row.poster(), Some("https://dz/500.jpg"));
+        assert_eq!(row.poster(), raw.poster());
+    }
+
     #[test]
     fn artist_and_playlist_parse_image_info() {
         let artist: crate::types::artist::Artist = serde_json::from_value(json!({

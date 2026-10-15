@@ -36,6 +36,14 @@ pub struct ArtistUIViewData {
     pub searchable_lower: String,
 }
 
+impl ArtistUIViewData {
+    /// The outside poster link for the artist (`image_url`, picked by
+    /// [`crate::types::artist::Artist::poster`]: large, else medium).
+    pub fn poster(&self) -> Option<&str> {
+        self.image_url.as_deref().filter(|link| !link.is_empty())
+    }
+}
+
 impl crate::backend::Starable for ArtistUIViewData {
     fn entity_id(&self) -> &str {
         &self.id
@@ -62,10 +70,9 @@ impl crate::backend::Ratable for ArtistUIViewData {
 
 impl From<Artist> for ArtistUIViewData {
     fn from(a: Artist) -> Self {
-        let image_url = a
-            .large_image_url
-            .clone()
-            .or_else(|| a.medium_image_url.clone());
+        // One pick with the thumbnails (`Artist::poster`), so a row's panel
+        // and its thumbnail show the same picture.
+        let image_url = a.poster().map(str::to_owned);
         let artwork_url = a
             .small_image_url
             .clone()

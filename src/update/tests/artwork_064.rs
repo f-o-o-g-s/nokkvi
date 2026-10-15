@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use nokkvi_data::{
     backend::albums::AlbumUIViewData,
-    types::{album::Album, artist::Artist},
+    types::{album::Album, artist::Artist, image_info::ArtistMini},
 };
 
 use crate::{
@@ -159,7 +159,7 @@ fn absent_artists_plan_no_mini_fetch() {
     let ids = |app: &crate::Nokkvi| -> Vec<String> {
         app.artist_minis_to_fetch()
             .into_iter()
-            .map(|(id, _)| id)
+            .map(|mini| mini.id)
             .collect()
     };
     assert_eq!(ids(&app), vec!["r1", "r3"]);
@@ -169,6 +169,106 @@ fn absent_artists_plan_no_mini_fetch() {
         .set_from_vec(vec![artist("r2", false), artist("r4", true)]);
     assert_eq!(ids(&app), vec!["r2"]);
     assert!(app.artwork.failed_art.is_empty());
+}
+
+/// An artist with no image of its own but an outside poster: its thumbnail
+/// is the poster the big panel shows (the large one), versioned by the
+/// poster's link, in the Artists view and on Harbour alike.
+#[test]
+fn absent_artists_with_a_poster_get_their_thumbnail_from_it() {
+    let mut app = test_app();
+    let mut posters = artist("r1", true);
+    posters.artwork_url = Some("https://dz/250.jpg".into());
+    posters.image_url = Some("https://lfm/big.jpg".into());
+    let mut large_only = artist("r2", true);
+    large_only.image_url = Some("https://lfm/r2.jpg".into());
+    let mut small_only = artist("r4", true);
+    small_only.artwork_url = Some("https://dz/r4-250.jpg".into());
+    app.library
+        .artists
+        .set_from_vec(vec![posters, large_only, artist("r3", true), small_only]);
+    assert_eq!(
+        app.artist_minis_to_fetch(),
+        vec![
+            ArtistMini {
+                id: "r1".into(),
+                version: Some("https://lfm/big.jpg".into()),
+                poster: Some("https://lfm/big.jpg".into()),
+            },
+            ArtistMini {
+                id: "r2".into(),
+                version: Some("https://lfm/r2.jpg".into()),
+                poster: Some("https://lfm/r2.jpg".into()),
+            },
+        ],
+        "r3 has neither an image nor a poster; r4's small poster is one the panel never shows"
+    );
+
+    let shelf: Artist = serde_json::from_value(serde_json::json!({
+        "id": "h1", "name": "h1", "imageAbsent": true,
+        "smallImageUrl": "https://dz/h1-250.jpg", "mediumImageUrl": "https://dz/h1-500.jpg",
+        "largeImageUrl": "https://lfm/h1.jpg"
+    }))
+    .expect("artist");
+    app.harbour.most_played_artists = vec![shelf];
+    let planned: Vec<Option<String>> = app
+        .harbour
+        .shelf_artist_minis()
+        .into_iter()
+        .map(|mini| mini.poster)
+        .collect();
+    assert_eq!(planned, vec![Some("https://lfm/h1.jpg".to_owned())]);
+}
+
+/// A poster thumbnail that landed is current: the row isn't planned again
+/// until the poster's link changes.
+#[test]
+fn a_landed_poster_thumbnail_is_not_fetched_again() {
+    let mut app = test_app();
+    let mut row = artist("r1", true);
+    row.image_url = Some("https://lfm/big.jpg".into());
+    app.library.artists.set_from_vec(vec![row]);
+    for mini in app.artist_minis_to_fetch() {
+        let _ = app.handle_artwork_loaded(
+            mini.id,
+            mini.version,
+            crate::app_message::MiniArt::Loaded(iced::widget::image::Handle::from_rgba(
+                1,
+                1,
+                vec![0, 0, 0, 255],
+            )),
+        );
+    }
+    assert!(app.artist_minis_to_fetch().is_empty());
+
+    let mut moved = artist("r1", true);
+    moved.image_url = Some("https://lfm/new.jpg".into());
+    app.library.artists.set_from_vec(vec![moved]);
+    assert_eq!(
+        app.artist_minis_to_fetch().len(),
+        1,
+        "a new poster is fetched"
+    );
+}
+
+/// A poster shrinks to the 80px thumbnail square, keeping its shape; bytes
+/// that aren't a picture give nothing.
+#[test]
+fn a_poster_shrinks_to_thumbnail_size() {
+    use crate::update::components::shrink_poster;
+
+    let poster = image::RgbaImage::from_pixel(250, 200, image::Rgba([200, 30, 30, 255]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(poster)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("png");
+    match shrink_poster(png.get_ref()) {
+        Some(iced::widget::image::Handle::Rgba { width, height, .. }) => {
+            assert_eq!((width, height), (80, 64));
+        }
+        other => panic!("expected an RGBA thumbnail, got {other:?}"),
+    }
+    assert!(shrink_poster(b"<html>not a picture</html>").is_none());
 }
 
 /// The 500px artist panel: absent → no load; an artist with an external
@@ -205,7 +305,7 @@ fn harbour_absent_artists_are_not_warmed() {
         .harbour
         .shelf_artist_minis()
         .into_iter()
-        .map(|(id, _)| id)
+        .map(|mini| mini.id)
         .collect();
     assert_eq!(ids, vec!["h1"]);
 }
@@ -337,7 +437,11 @@ fn artist_minis_version_by_hash() {
     app.library.artists.set_from_vec(vec![r1]);
     assert_eq!(
         app.artist_minis_to_fetch(),
-        vec![("r1".to_owned(), Some("0123456789abcdef".to_owned()))]
+        vec![ArtistMini {
+            id: "r1".to_owned(),
+            version: Some("0123456789abcdef".to_owned()),
+            poster: None,
+        }]
     );
     // Warmed at that hash: nothing more to fetch.
     app.artwork.album_art.put(
@@ -459,9 +563,11 @@ mod background_reload {
         app.library
             .artists
             .set_from_vec(vec![artist("r1", A), artist("r2", B)]);
-        for (id, version) in app.artist_minis_to_fetch() {
-            app.artwork.album_art_versions.insert(id.clone(), version);
-            app.artwork.album_art.put(id, handle());
+        for mini in app.artist_minis_to_fetch() {
+            app.artwork
+                .album_art_versions
+                .insert(mini.id.clone(), mini.version);
+            app.artwork.album_art.put(mini.id, handle());
         }
         let _ = app.handle_artists_loaded(
             Ok(vec![artist("r1", A), artist("r2", C)]),
@@ -472,7 +578,7 @@ mod background_reload {
         let ids: Vec<String> = app
             .artist_minis_to_fetch()
             .into_iter()
-            .map(|(id, _)| id)
+            .map(|mini| mini.id)
             .collect();
         assert_eq!(ids, vec!["r2"]);
     }
@@ -580,10 +686,10 @@ fn shelf_artist(id: &str, hash: &str) -> Artist {
 /// would record.
 fn warm_harbour_artists(app: &mut crate::Nokkvi) {
     let entries = app.harbour.shelf_artist_minis();
-    for (id, version) in app.artist_minis_to_warm(entries) {
+    for mini in app.artist_minis_to_warm(entries) {
         let _ = app.handle_artwork_loaded(
-            id,
-            version,
+            mini.id,
+            mini.version,
             crate::app_message::MiniArt::Loaded(iced::widget::image::Handle::from_bytes(
                 Vec::<u8>::new(),
             )),
@@ -620,7 +726,11 @@ fn harbour_artist_warm_refetches_only_a_changed_hash() {
     let entries = app.harbour.shelf_artist_minis();
     assert_eq!(
         app.artist_minis_to_warm(entries),
-        vec![("h2".to_owned(), Some(B.to_owned()))]
+        vec![ArtistMini {
+            id: "h2".to_owned(),
+            version: Some(B.to_owned()),
+            poster: None,
+        }]
     );
 }
 

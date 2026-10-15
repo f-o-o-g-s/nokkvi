@@ -187,15 +187,16 @@ impl Nokkvi {
             .artists
             .iter()
             .find(|a| a.id == artist_id)
-            .and_then(|a| a.image_url.clone())
+            .and_then(|a| a.poster().map(str::to_owned))
             .or_else(|| {
                 // Harbour rows (Most Played Artists shelf / the Random Artist
                 // pick / search results) hold raw `Artist`s that may never enter
                 // the Artists view's paged buffer — resolve their external poster
-                // the same way `ArtistUIViewData` does (large, falling back to
-                // medium). Every Harbour surface that renders an artist must be
-                // in this chain, or centering that row shows local `ar-{id}` art
-                // (or a blank square) where the shelf shows the full poster.
+                // with the pick the rows and thumbnails share (`poster`: large,
+                // falling back to medium). Every Harbour surface that renders an
+                // artist must be in this chain, or centering that row shows local
+                // `ar-{id}` art (or a blank square) where the shelf shows the
+                // full poster.
                 self.harbour
                     .most_played_artists
                     .iter()
@@ -207,11 +208,7 @@ impl Nokkvi {
                             .flat_map(|r| r.artists.iter()),
                     )
                     .find(|a| a.id == artist_id)
-                    .and_then(|a| {
-                        a.large_image_url
-                            .clone()
-                            .or_else(|| a.medium_image_url.clone())
-                    })
+                    .and_then(|a| a.poster().map(str::to_owned))
             });
 
         // The server marked the artist's art absent (Navidrome 0.64+) and no
