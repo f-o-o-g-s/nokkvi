@@ -115,19 +115,41 @@ fn artists_and_expanded_albums_get_placeholders() {
     assert_eq!(placeholder_hash(&app, "a9").as_deref(), Some(DIVISION_BELL));
 }
 
+/// Absent art keeps nokkvi's plain square, even when a server sends a
+/// ThumbHash beside the flag.
+#[test]
+fn absent_art_gets_no_placeholder() {
+    let mut app = test_app();
+    let mut absent = album("a1", Some(DIVISION_BELL));
+    absent.image.image_absent = true;
+    app.library.albums.set_from_vec(vec![absent]);
+
+    app.claim_minis(["a1".to_string()]);
+
+    assert_eq!(placeholder_hash(&app, "a1"), None);
+}
+
+/// The source with code only: `//` comments dropped, then every whitespace
+/// character, so a claim rustfmt splits over lines reads as one.
+fn squashed_code(text: &str) -> String {
+    text.lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .flat_map(|code| code.chars().filter(|c| !c.is_whitespace()))
+        .collect()
+}
+
 /// Every 80px fetch claims through `claim_minis`, the one place that decodes
 /// the placeholder; a path that claims `album_art_pending` by hand would draw
-/// its rows' plain square while they load.
+/// its rows' plain square while they load. Catches a call split over lines
+/// and a `&mut` borrow of the set handed elsewhere.
 #[test]
 fn every_mini_claim_goes_through_claim_minis() {
-    const NEEDLES: [&str; 2] = [
-        concat!("album_art_pending", ".extend("),
-        concat!("album_art_pending", ".insert("),
-    ];
-    // `claim_minis` itself.
-    const ALLOWED: &str = "self.artwork.album_art_pending.extend(ids);";
+    const SET: &str = concat!("album_art_", "pending");
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let src = root.join("src");
+    // `claim_minis` lives here, and claims once.
+    let home = src.join("update").join("albums.rs");
+    let allowed = format!("self.artwork.{SET}.extend(ids)");
     // Handler tests may stand in for an earlier pass's claim.
     let tests = src.join("update").join("tests");
     let mut stray = Vec::new();
@@ -145,16 +167,27 @@ fn every_mini_claim_goes_through_claim_minis() {
             if path.extension().is_none_or(|e| e != "rs") {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).unwrap();
-            for (i, line) in text.lines().enumerate() {
-                let code = line.trim_start();
-                if code.starts_with("//")
-                    || code == ALLOWED
-                    || !NEEDLES.iter().any(|needle| code.contains(needle))
-                {
-                    continue;
-                }
-                stray.push(format!("{}:{}: {code}", path.display(), i + 1));
+            let code = squashed_code(&std::fs::read_to_string(&path).unwrap());
+            let mut claims = code.matches(&format!("{SET}.extend(")).count()
+                + code.matches(&format!("{SET}.insert(")).count();
+            if path == home {
+                assert_eq!(code.matches(&allowed).count(), 1, "claim_minis claims once");
+                claims -= 1;
+            }
+            let borrows = code
+                .match_indices("&mut")
+                .filter(|(at, _)| {
+                    code[at + 4..]
+                        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                        .next()
+                        .is_some_and(|place| place.ends_with(SET))
+                })
+                .count();
+            if claims + borrows > 0 {
+                stray.push(format!(
+                    "{}: {claims} claim(s), {borrows} &mut borrow(s)",
+                    path.display()
+                ));
             }
         }
     }

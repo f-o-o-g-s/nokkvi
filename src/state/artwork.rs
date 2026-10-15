@@ -164,8 +164,11 @@ pub enum PanelArtStep {
 /// server answering in 0.5 s, an 80-row scroll left them waiting seconds.
 /// A lone step fetches at once, as before; the panel shows the thumbnail or
 /// the blurred placeholder (`views::panel_cover`) while a run's row waits.
-/// Reset on logout via `ArtworkState::default()`, so a settle timer from an
-/// ended session finds nothing waiting.
+/// Only steps in the list the user is steering reach the gate
+/// (`Nokkvi::panel_art_step`); one shared waiting slot is enough because a
+/// step from any other list loads directly. Reset on logout via
+/// `ArtworkState::default()`, so a settle timer from an ended session finds
+/// nothing waiting.
 #[derive(Debug, Clone, Default)]
 pub struct PanelArtSettle {
     last_step: Option<Instant>,

@@ -1157,6 +1157,8 @@ pub(crate) struct HarbourViewData<'a> {
     pub trawl_crate: &'a nokkvi_data::types::trawl::TrawlCrate,
     /// 80px album-cover cache (row thumbnails).
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Blurred stand-ins for covers on their way (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     /// Large-cover cache (side artwork panel).
     pub large_artwork: &'a HashMap<String, image::Handle>,
     /// User-uploaded playlist covers, 80px (row thumbnails).
@@ -1355,9 +1357,14 @@ impl HarbourPage {
                 } else {
                     // Single-cover item — the crisp large cover warmed on center.
                     single_artwork_panel_with_menu::<HarbourMessage>(
-                        art_album_id
-                            .as_ref()
-                            .and_then(|id| data.large_artwork.get(id)),
+                        art_album_id.as_ref().and_then(|id| {
+                            crate::views::panel_cover(
+                                data.large_artwork,
+                                data.album_art,
+                                data.placeholders,
+                                id,
+                            )
+                        }),
                         Vec::new(),
                         false,
                         None,
@@ -1453,9 +1460,12 @@ impl HarbourPage {
                     )
                 } else {
                     let cover = teaser.art_album_id.as_ref().and_then(|id| {
-                        data.large_artwork
-                            .get(id)
-                            .or_else(|| data.album_art.get(id))
+                        crate::views::panel_cover(
+                            data.large_artwork,
+                            data.album_art,
+                            data.placeholders,
+                            id,
+                        )
                     });
                     single_artwork_panel_with_pill::<HarbourMessage>(
                         cover,
@@ -1830,7 +1840,10 @@ fn harbour_art_element<'a, M: 'a>(
     use crate::widgets::slot_list::{slot_list_artwork_column, slot_list_artwork_quad_column};
 
     let custom_art = custom_playlist_id.and_then(|pid| data.playlist_custom_art.get(pid));
-    let art_handle = custom_art.or_else(|| art_album_id.and_then(|id| data.album_art.get(id)));
+    let art_handle = custom_art.or_else(|| {
+        art_album_id
+            .and_then(|id| crate::views::mini_or_placeholder(data.album_art, data.placeholders, id))
+    });
     let quad = if custom_art.is_some() {
         None
     } else {
@@ -1917,9 +1930,9 @@ fn section_preview_panel<'a>(
     // by the handler, see `section_cover_album_id`), fall back to the 80px mini
     // until it lands. Panel and warm-path resolve the SAME id so they agree.
     let cover_id = section_cover_album_id(harbour, id);
-    let cover = cover_id
-        .as_ref()
-        .and_then(|a| data.large_artwork.get(a).or_else(|| data.album_art.get(a)));
+    let cover = cover_id.as_ref().and_then(|a| {
+        crate::views::panel_cover(data.large_artwork, data.album_art, data.placeholders, a)
+    });
 
     // Resolve (eyebrow label, title, meta line) for the section, or bail to a
     // blank square when the section has no data. The eyebrow icon comes from

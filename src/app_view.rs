@@ -2489,6 +2489,7 @@ impl Nokkvi {
                         let view_data = views::SimilarViewData {
                             songs,
                             album_art: &self.artwork.album_art.snapshot,
+                            placeholders: &self.artwork.placeholders.snapshot,
                             large_artwork,
                             window_width: chrome.pane_width,
                             window_height: chrome.pane_height,
@@ -2622,6 +2623,7 @@ impl Nokkvi {
                         harbour: &self.harbour,
                         trawl_crate: &self.trawl.mix,
                         album_art: &self.artwork.album_art.snapshot,
+                        placeholders: &self.artwork.placeholders.snapshot,
                         large_artwork: &self.artwork.large_artwork.snapshot,
                         playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
                         playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,

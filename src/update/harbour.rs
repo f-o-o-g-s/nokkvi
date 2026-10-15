@@ -606,10 +606,11 @@ impl Nokkvi {
         // the row it stops on.
         let mut tasks = Vec::new();
         if let Some(id) = album_large {
-            tasks.push(self.panel_art_step(crate::state::PanelArt::Album(id)));
+            tasks.push(self.panel_art_step(Some(View::Harbour), crate::state::PanelArt::Album(id)));
         }
         if let Some(id) = artist_large {
-            tasks.push(self.panel_art_step(crate::state::PanelArt::Artist(id)));
+            tasks
+                .push(self.panel_art_step(Some(View::Harbour), crate::state::PanelArt::Artist(id)));
         }
         if let Some((target, entity_id, album_ids)) = collage {
             tasks.push(self.warm_harbour_collage(target, entity_id, album_ids));

@@ -42,6 +42,9 @@ super::define_view_columns! {
 pub struct SimilarViewData<'a> {
     pub songs: &'a [Song],
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Blurred stand-ins for album covers on their way, wherever nokkvi holds
+    /// the album's row (`ArtworkState::placeholders`).
+    pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
@@ -391,6 +394,7 @@ impl SimilarPage {
 
         let songs = data.songs;
         let song_artwork = data.album_art;
+        let placeholders = data.placeholders;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
         let open_menu_for_rows = data.overlay.open_menu;
         let column_visibility = self.column_visibility;
@@ -457,7 +461,9 @@ impl SimilarPage {
                 }
                 if column_visibility.thumbnail {
                     use crate::widgets::slot_list::slot_list_artwork_column;
-                    let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
+                    let artwork_handle = album_id.as_ref().and_then(|id| {
+                        crate::views::mini_or_placeholder(song_artwork, placeholders, id)
+                    });
                     content_row = content_row.push(slot_list_artwork_column(
                         artwork_handle,
                         artwork_size,
@@ -577,7 +583,14 @@ impl SimilarPage {
         let centered_song = center_index.and_then(|idx| songs.get(idx));
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
-            .and_then(|album_id| data.large_artwork.get(album_id));
+            .and_then(|album_id| {
+                crate::views::panel_cover(
+                    data.large_artwork,
+                    data.album_art,
+                    data.placeholders,
+                    album_id,
+                )
+            });
         // No menu entries wired up for Similar artwork — pass inert
         // controlled-component arguments. The helper returns the bare panel
         // for an empty entries list.

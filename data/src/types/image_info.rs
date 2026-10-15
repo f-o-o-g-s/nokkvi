@@ -31,7 +31,8 @@ pub struct ImageInfo {
         skip_serializing_if = "is_false"
     )]
     pub image_absent: bool,
-    /// ThumbHash placeholder (base64). Parsed and kept, not rendered.
+    /// ThumbHash placeholder (base64): `utils::thumbhash` decodes it into the
+    /// blurred stand-in a cover slot draws while its picture loads.
     #[serde(
         rename = "thumbHash",
         default,

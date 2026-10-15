@@ -392,7 +392,10 @@ impl Nokkvi {
                 // Direct call (rather than dispatching Message::Artwork(LoadLarge))
                 // so a lone step's load starts in the same tick as the action;
                 // a run of steps waits for the selection to settle.
-                let mut tasks = vec![self.panel_art_step(crate::state::PanelArt::Album(album_id))];
+                let mut tasks = vec![self.panel_art_step(
+                    Some(crate::View::Songs),
+                    crate::state::PanelArt::Album(album_id),
+                )];
 
                 // Prefetch viewport mini artwork + chain a page-load if
                 // scrolling near the loaded edge.

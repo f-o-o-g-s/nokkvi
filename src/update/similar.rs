@@ -46,7 +46,9 @@ impl Nokkvi {
             }
 
             SimilarAction::LoadLargeArtwork(album_id) => {
-                let mut tasks = vec![self.panel_art_step(crate::state::PanelArt::Album(album_id))];
+                // `None`: the Similar tab, in `current_target_view` terms.
+                let mut tasks =
+                    vec![self.panel_art_step(None, crate::state::PanelArt::Album(album_id))];
 
                 if let Some(shell) = &self.app_service {
                     let gate = crate::update::components::ArtworkGate::new(&self.artwork);

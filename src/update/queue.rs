@@ -969,12 +969,13 @@ impl Nokkvi {
                 .slot_list
                 .get_center_item_index(total)
                 && let Some(song) = rows.get(center_idx)
-                && self.artwork.large_artwork.peek(&song.album_id).is_none()
             {
-                // A step: through the big panel's settle gate.
-                tasks.push(Task::done(Message::Artwork(ArtworkMessage::PanelArtStep(
-                    crate::state::PanelArt::Album(song.album_id.clone()),
-                ))));
+                // A step: through the big panel's settle gate, cached rows
+                // included, so a run that stops on one leaves nothing waiting.
+                tasks.push(Task::done(Message::Artwork(ArtworkMessage::PanelArtStep {
+                    source: Some(crate::View::Queue),
+                    target: crate::state::PanelArt::Album(song.album_id.clone()),
+                })));
             }
         }
 

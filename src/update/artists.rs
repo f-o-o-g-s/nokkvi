@@ -307,7 +307,10 @@ impl Nokkvi {
     /// goes through the big panel's settle gate (`panel_art_step`), so a run
     /// of steps fetches only the artist it stops on.
     pub(crate) fn artist_step_tasks(&mut self, artist_id: String) -> Task<Message> {
-        let artwork = self.panel_art_step(crate::state::PanelArt::Artist(artist_id.clone()));
+        let artwork = self.panel_art_step(
+            Some(View::Artists),
+            crate::state::PanelArt::Artist(artist_id.clone()),
+        );
         Task::batch([artwork, self.artist_info_settle_task(artist_id)])
     }
 

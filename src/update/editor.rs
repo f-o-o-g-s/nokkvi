@@ -553,7 +553,10 @@ impl Nokkvi {
             .map(|song| song.album_id.clone());
         self.claim_minis(queued);
         if let Some(album_id) = center_album {
-            tasks.push(self.panel_art_step(crate::state::PanelArt::Album(album_id)));
+            tasks.push(self.panel_art_step(
+                Some(crate::View::PlaylistEditor),
+                crate::state::PanelArt::Album(album_id),
+            ));
         }
 
         Task::batch(tasks)

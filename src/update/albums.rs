@@ -193,53 +193,117 @@ impl Nokkvi {
     /// through here (`every_mini_claim_goes_through_claim_minis`).
     pub(crate) fn claim_minis(&mut self, ids: impl IntoIterator<Item = String>) {
         let ids: Vec<String> = ids.into_iter().collect();
-        for id in &ids {
-            self.warm_placeholder(id);
+        if ids.is_empty() {
+            return;
+        }
+        // One walk over the rows for the whole batch: a refill claims tens of
+        // ids, and a library paged deep holds tens of thousands of rows.
+        let fresh: Vec<(String, String)> = self
+            .thumb_hashes_of(&ids)
+            .into_iter()
+            .filter(|(id, hash)| {
+                !self
+                    .artwork
+                    .placeholders
+                    .peek(id)
+                    .is_some_and(|cached| &cached.thumb_hash == hash)
+            })
+            .collect();
+        // A decode is a 32 px picture, tens of microseconds, and only for a
+        // cover that is about to be fetched.
+        for (id, thumb_hash) in fresh {
+            if let Some(picture) = nokkvi_data::utils::thumbhash::decode_thumb_hash(&thumb_hash) {
+                let handle = image::Handle::from_rgba(picture.width, picture.height, picture.rgba);
+                self.artwork
+                    .placeholders
+                    .put(id, crate::state::Placeholder { thumb_hash, handle });
+            }
         }
         self.artwork.album_art_pending.extend(ids);
     }
 
-    /// Decode `id`'s placeholder, unless the one cached came from the
-    /// ThumbHash the rows give it now. A decode is a 32 px picture, tens of
-    /// microseconds, and only for a cover that is about to be fetched.
-    fn warm_placeholder(&mut self, id: &str) {
-        let Some(hash) = self.thumb_hash_of(id) else {
-            return;
-        };
-        if self
-            .artwork
-            .placeholders
-            .peek(&id.to_owned())
-            .is_some_and(|cached| cached.thumb_hash == hash)
-        {
-            return;
-        }
-        let thumb_hash = hash.to_owned();
-        if let Some(picture) = nokkvi_data::utils::thumbhash::decode_thumb_hash(&thumb_hash) {
-            let handle = image::Handle::from_rgba(picture.width, picture.height, picture.rgba);
-            self.artwork.placeholders.put(
-                id.to_owned(),
-                crate::state::Placeholder { thumb_hash, handle },
-            );
-        }
-    }
+    /// The ThumbHash the rows nokkvi holds give each of `ids`: albums and
+    /// artists, the albums an expanded artist or genre lists included, in
+    /// `album_image` / `artist_image`'s order (the first row with an id
+    /// wins). Rows the server marked absent give none, so absent art keeps
+    /// its plain square. One pass, stopping once every id is found.
+    fn thumb_hashes_of(&self, ids: &[String]) -> Vec<(String, String)> {
+        use nokkvi_data::types::image_info::ImageInfo;
 
-    /// The ThumbHash the rows nokkvi holds give `id`: an album or an artist,
-    /// the albums an expanded artist or genre lists included. `None` on
-    /// servers older than 0.64 and for art the server marked absent.
-    fn thumb_hash_of(&self, id: &str) -> Option<&str> {
-        self.album_image(id)
-            .or_else(|| self.artist_image(id))
-            .or_else(|| {
-                self.artists_page
-                    .expansion
-                    .children
-                    .iter()
-                    .chain(self.genres_page.expansion.children.iter())
-                    .find(|album| album.id == id)
-                    .map(|album| &album.image)
-            })
-            .and_then(|image| image.thumb_hash.as_deref())
+        fn take<'a>(
+            rows: impl Iterator<Item = (&'a str, &'a ImageInfo)>,
+            wanted: &mut std::collections::HashSet<&str>,
+            found: &mut Vec<(String, String)>,
+        ) {
+            for (id, image) in rows {
+                if wanted.is_empty() {
+                    return;
+                }
+                if !wanted.contains(id) {
+                    continue;
+                }
+                // The first row with the id decides, as in `album_image`.
+                wanted.remove(id);
+                if let Some(hash) = image.thumb_hash.as_deref()
+                    && !image.image_absent
+                {
+                    found.push((id.to_owned(), hash.to_owned()));
+                }
+            }
+        }
+
+        let mut wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let mut found = Vec::new();
+        let harbour = &self.harbour;
+        let search = harbour.search_results.iter();
+        take(
+            self.library
+                .albums
+                .iter()
+                .chain(harbour.recently_added.iter())
+                .chain(harbour.most_played_albums.iter())
+                .chain(harbour.random_album.iter())
+                .map(|a| (a.id.as_str(), &a.image)),
+            &mut wanted,
+            &mut found,
+        );
+        take(
+            search
+                .clone()
+                .flat_map(|r| r.albums.iter())
+                .map(|a| (a.id.as_str(), &a.image)),
+            &mut wanted,
+            &mut found,
+        );
+        take(
+            self.library
+                .artists
+                .iter()
+                .map(|a| (a.id.as_str(), &a.image)),
+            &mut wanted,
+            &mut found,
+        );
+        take(
+            harbour
+                .most_played_artists
+                .iter()
+                .chain(harbour.random_artist.iter())
+                .chain(search.flat_map(|r| r.artists.iter()))
+                .map(|a| (a.id.as_str(), &a.image)),
+            &mut wanted,
+            &mut found,
+        );
+        take(
+            self.artists_page
+                .expansion
+                .children
+                .iter()
+                .chain(self.genres_page.expansion.children.iter())
+                .map(|a| (a.id.as_str(), &a.image)),
+            &mut wanted,
+            &mut found,
+        );
+        found
     }
 
     /// The image info (Navidrome 0.64+) of an album row nokkvi holds: the
@@ -385,39 +449,51 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// A navigation step centred `target`: fetch its full-size cover now
-    /// when the step is a lone one or the cover is cached, else hold it until
-    /// the selection settles ([`crate::state::PanelArtSettle`]). Every
-    /// navigation-driven big panel load goes through here; a load with
-    /// another trigger (a view switch, an expand, a page landing, the playing
-    /// song) calls its loader directly.
-    pub(crate) fn panel_art_step(&mut self, target: crate::state::PanelArt) -> Task<Message> {
+    /// A navigation step in `source`'s list (`None`: the Similar tab, as in
+    /// [`Self::current_target_view`]) centred `target`. A step in the list
+    /// the user is steering goes through the big panel's settle gate
+    /// ([`crate::state::PanelArtSettle`]): it loads now when it is a lone step
+    /// or the cover is cached, else it waits until the selection settles. A
+    /// step in any other list (a shelf or a buffer landing behind another
+    /// view) loads directly and leaves the gate alone, so it can neither
+    /// replace nor clear the row a run is waiting on. A load with another
+    /// trigger (a view switch, an expand, a page landing, the playing song)
+    /// calls its loader directly.
+    pub(crate) fn panel_art_step(
+        &mut self,
+        source: Option<View>,
+        target: crate::state::PanelArt,
+    ) -> Task<Message> {
         use crate::state::{PANEL_ART_SETTLE, PanelArt, PanelArtStep};
 
+        if source != self.current_target_view() {
+            return self.load_panel_art(target);
+        }
         let cached = match &target {
             PanelArt::Album(id) | PanelArt::Artist(id) => self.artwork.large_artwork.contains(id),
         };
-        match self
-            .artwork
-            .panel_settle
-            .step(target, std::time::Instant::now(), cached)
-        {
+        // tokio's clock: the system clock in the app, the paused clock in tests.
+        let now = tokio::time::Instant::now().into_std();
+        match self.artwork.panel_settle.step(target, now, cached) {
             PanelArtStep::Now(target) => self.load_panel_art(target),
             // The timer is made when the task first runs, inside the
             // runtime, not here.
             PanelArtStep::Wait(target) => Task::perform(
                 async { tokio::time::sleep(PANEL_ART_SETTLE).await },
-                move |()| Message::Artwork(ArtworkMessage::PanelArtSettled(target)),
+                move |()| Message::Artwork(ArtworkMessage::PanelArtSettled { source, target }),
             ),
         }
     }
 
-    /// A settle timer fired: fetch the cover when the run stopped on it.
+    /// A settle timer fired: fetch the cover when the run stopped on it and
+    /// its list is still the one being steered. A view switch or a pane change
+    /// since leaves it unfetched.
     pub(crate) fn handle_panel_art_settled(
         &mut self,
+        source: Option<View>,
         target: crate::state::PanelArt,
     ) -> Task<Message> {
-        if self.artwork.panel_settle.settled(&target) {
+        if self.artwork.panel_settle.settled(&target) && source == self.current_target_view() {
             self.load_panel_art(target)
         } else {
             Task::none()
@@ -713,7 +789,10 @@ impl Nokkvi {
                     // so a lone step's load starts in the same tick as the action;
                     // a run of steps waits for the selection to settle.
                     if let Some(album_id) = resolved_album_id {
-                        tasks.push(self.panel_art_step(crate::state::PanelArt::Album(album_id)));
+                        tasks.push(self.panel_art_step(
+                            Some(View::Albums),
+                            crate::state::PanelArt::Album(album_id),
+                        ));
                     }
 
                     // Prefetch viewport mini artwork + chain a page-load if
