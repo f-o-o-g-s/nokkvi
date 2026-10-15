@@ -61,8 +61,8 @@ impl Nokkvi {
             }
             ArtworkMessage::LoadLarge(album_id) => self.handle_load_large_artwork(album_id),
             ArtworkMessage::PanelArtStep { source, target } => self.panel_art_step(source, target),
-            ArtworkMessage::PanelArtSettled { source, target } => {
-                self.handle_panel_art_settled(source, target)
+            ArtworkMessage::PanelArtOverdue { source, target } => {
+                self.handle_panel_art_overdue(source, target)
             }
             ArtworkMessage::LyricsBlurReady(album_id, level, source_id, handle) => {
                 self.handle_lyrics_blur_ready(album_id, level, source_id, handle)

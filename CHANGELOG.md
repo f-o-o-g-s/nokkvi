@@ -19,8 +19,7 @@ All notable changes to this project will be documented in this file.
 - A song the server transcodes on the fly now opens with two requests to the server instead of four.
 - A song the server serves as a file now opens with one request fewer to the server.
 - Lyrics are now centered on the Queue cover and in Theater Mode instead of starting at the left edge.
-- Scrolling fast through a list now fetches the big panel's full-size cover only for the row you stop on, not every row you pass.
-- After a fast scroll, the big panel's full-size cover now appears about 150 ms after you stop.
+- Scrolling fast through a list now downloads one full-size cover for the big panel at a time, not one for every row you pass.
 
 ### Fixed
 

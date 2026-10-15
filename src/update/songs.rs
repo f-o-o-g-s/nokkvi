@@ -390,8 +390,8 @@ impl Nokkvi {
             }
             SongsAction::LoadLargeArtwork(album_id) => {
                 // Direct call (rather than dispatching Message::Artwork(LoadLarge))
-                // so a lone step's load starts in the same tick as the action;
-                // a run of steps waits for the selection to settle.
+                // so the load starts in the same tick as the action; a step
+                // behind a cover still on its way waits for it (`panel_art_step`).
                 let mut tasks = vec![self.panel_art_step(
                     Some(crate::View::Songs),
                     crate::state::PanelArt::Album(album_id),

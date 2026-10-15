@@ -546,9 +546,9 @@ pub enum ArtworkMessage {
         source: Option<crate::View>,
         target: crate::state::PanelArt,
     },
-    /// The settle timer of a row a run of steps in `source`'s list passed or
-    /// stopped on.
-    PanelArtSettled {
+    /// The overdue timer of a row that waited, in `source`'s list, for the
+    /// cover on its way (`PANEL_ART_OVERDUE`).
+    PanelArtOverdue {
         source: Option<crate::View>,
         target: crate::state::PanelArt,
     },

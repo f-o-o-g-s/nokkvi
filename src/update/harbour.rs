@@ -602,8 +602,8 @@ impl Nokkvi {
             _ => None,
         };
 
-        // Through the big panel's settle gate: a run of steps fetches only
-        // the row it stops on.
+        // Through the big panel's gate: one full-size cover on its way at a
+        // time, the newest centred row next.
         let mut tasks = Vec::new();
         if let Some(id) = album_large {
             tasks.push(self.panel_art_step(Some(View::Harbour), crate::state::PanelArt::Album(id)));

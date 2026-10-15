@@ -970,8 +970,8 @@ impl Nokkvi {
                 .get_center_item_index(total)
                 && let Some(song) = rows.get(center_idx)
             {
-                // A step: through the big panel's settle gate, cached rows
-                // included, so a run that stops on one leaves nothing waiting.
+                // A step: through the big panel's gate, cached rows included,
+                // so a step onto one leaves nothing waiting from before it.
                 tasks.push(Task::done(Message::Artwork(ArtworkMessage::PanelArtStep {
                     source: Some(crate::View::Queue),
                     target: crate::state::PanelArt::Album(song.album_id.clone()),

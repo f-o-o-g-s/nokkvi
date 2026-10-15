@@ -451,50 +451,57 @@ impl Nokkvi {
 
     /// A navigation step in `source`'s list (`None`: the Similar tab, as in
     /// [`Self::current_target_view`]) centred `target`. A step in the list
-    /// the user is steering goes through the big panel's settle gate
-    /// ([`crate::state::PanelArtSettle`]): it loads now when it is a lone step
-    /// or the cover is cached, else it waits until the selection settles. A
-    /// step in any other list (a shelf or a buffer landing behind another
-    /// view) loads directly and leaves the gate alone, so it can neither
-    /// replace nor clear the row a run is waiting on. A load with another
-    /// trigger (a view switch, an expand, a page landing, the playing song)
-    /// calls its loader directly.
+    /// the user is steering goes through the big panel's gate
+    /// ([`crate::state::PanelArtGate`]): it loads now when no full-size cover
+    /// is on its way or its own is cached, else it waits as the newest row
+    /// until that cover lands. A step in any other list (a shelf or a buffer
+    /// landing behind another view) loads directly and leaves the gate
+    /// alone, so it can neither replace nor clear the waiting row. A load
+    /// with another trigger (a view switch, an expand, a page landing, the
+    /// playing song) calls its loader directly.
     pub(crate) fn panel_art_step(
         &mut self,
         source: Option<View>,
         target: crate::state::PanelArt,
     ) -> Task<Message> {
-        use crate::state::{PANEL_ART_SETTLE, PanelArt, PanelArtStep};
+        use crate::state::{PANEL_ART_OVERDUE, PanelArtStep};
 
         if source != self.current_target_view() {
             return self.load_panel_art(target);
         }
-        let cached = match &target {
-            PanelArt::Album(id) | PanelArt::Artist(id) => self.artwork.large_artwork.contains(id),
-        };
-        // tokio's clock: the system clock in the app, the paused clock in tests.
-        let now = tokio::time::Instant::now().into_std();
-        match self.artwork.panel_settle.step(target, now, cached) {
-            PanelArtStep::Now(target) => self.load_panel_art(target),
+        let cached = self.artwork.large_artwork.contains(&target.id().to_owned());
+        match self.artwork.panel_gate.step(source, target, cached) {
+            PanelArtStep::Now(target) => self.send_panel_art(target),
             // The timer is made when the task first runs, inside the
             // runtime, not here.
             PanelArtStep::Wait(target) => Task::perform(
-                async { tokio::time::sleep(PANEL_ART_SETTLE).await },
-                move |()| Message::Artwork(ArtworkMessage::PanelArtSettled { source, target }),
+                async { tokio::time::sleep(PANEL_ART_OVERDUE).await },
+                move |()| Message::Artwork(ArtworkMessage::PanelArtOverdue { source, target }),
             ),
         }
     }
 
-    /// A settle timer fired: fetch the cover when the run stopped on it and
-    /// its list is still the one being steered. A view switch or a pane change
-    /// since leaves it unfetched.
-    pub(crate) fn handle_panel_art_settled(
+    /// Load `target` through the gate: when its loader sends a fetch (a claim
+    /// in `large_artwork_pending`, also when one was already out), that fetch
+    /// is the cover on its way. A cached, absent or sessionless load sends
+    /// none, so nothing waits behind it.
+    fn send_panel_art(&mut self, target: crate::state::PanelArt) -> Task<Message> {
+        let task = self.load_panel_art(target.clone());
+        if self.artwork.large_artwork_pending.contains(target.id()) {
+            self.artwork.panel_gate.sent(target);
+        }
+        task
+    }
+
+    /// The cover a waiting row trusted to land is overdue: fetch the row past
+    /// it, when it is still the newest waiting and its list is still steered.
+    pub(crate) fn handle_panel_art_overdue(
         &mut self,
         source: Option<View>,
         target: crate::state::PanelArt,
     ) -> Task<Message> {
-        if self.artwork.panel_settle.settled(&target) && source == self.current_target_view() {
-            self.load_panel_art(target)
+        if self.artwork.panel_gate.overdue(&target) && source == self.current_target_view() {
+            self.send_panel_art(target)
         } else {
             Task::none()
         }
@@ -626,7 +633,16 @@ impl Nokkvi {
         if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
             self.artwork.loading_large_artwork = None;
         }
-        Task::none()
+        // The big panel's cover on its way landed (on any outcome): the
+        // newest row that waited for it goes next, through the gate again
+        // (a cached cover shows at once), while its list is still the one
+        // being steered; after a view switch or a pane change it is dropped.
+        match self.artwork.panel_gate.landed(&id) {
+            Some((source, next)) if source == self.current_target_view() => {
+                self.panel_art_step(source, next)
+            }
+            Some(_) | None => Task::none(),
+        }
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {
@@ -786,8 +802,8 @@ impl Nokkvi {
 
                     let mut tasks = Vec::new();
                     // Direct call (rather than dispatching Message::Artwork(LoadLarge))
-                    // so a lone step's load starts in the same tick as the action;
-                    // a run of steps waits for the selection to settle.
+                    // so the load starts in the same tick as the action; a step
+                    // behind a cover still on its way waits for it (`panel_art_step`).
                     if let Some(album_id) = resolved_album_id {
                         tasks.push(self.panel_art_step(
                             Some(View::Albums),

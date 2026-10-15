@@ -304,8 +304,8 @@ impl Nokkvi {
     }
 
     /// [`Self::artist_center_tasks`] for a navigation step: the large artwork
-    /// goes through the big panel's settle gate (`panel_art_step`), so a run
-    /// of steps fetches only the artist it stops on.
+    /// goes through the big panel's gate (`panel_art_step`), one full-size
+    /// cover on its way at a time.
     pub(crate) fn artist_step_tasks(&mut self, artist_id: String) -> Task<Message> {
         let artwork = self.panel_art_step(
             Some(View::Artists),

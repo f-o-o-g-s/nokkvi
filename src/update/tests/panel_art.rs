@@ -1,19 +1,21 @@
-//! The big panel's full-size cover waits while the selection runs past rows:
-//! a lone step fetches it at once, a run of steps fetches only the row it
-//! stops on, once the settle timer fires (`PanelArtSettle`). Only steps in
-//! the list the user is steering wait; a step in any other list loads
-//! directly and leaves the gate alone.
+//! The big panel keeps one full-size cover on its way at a time
+//! (`PanelArtGate`): a step with nothing on its way fetches at once, a step
+//! while a cover is on its way waits as the newest row, and the landing of
+//! that cover sends the newest waiting row. Only steps in the list the user
+//! is steering reach the gate; a step in any other list loads directly and
+//! leaves it alone.
 //!
 //! `loading_large_artwork` is the observable: it names the latest cover a
-//! load started for. The gate reads tokio's clock, so these tests run on the
-//! paused clock and step it by hand.
+//! load started for. Tests have no backend, so no loader claims a fetch;
+//! `panel_gate.sent` stands in for one, except in
+//! `a_loader_claim_marks_the_cover_on_its_way`.
 
 use nokkvi_data::{backend::albums::AlbumUIViewData, types::album::Album};
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
-    state::{PANEL_ART_RUN_GAP, PanelArt},
+    state::PanelArt,
     test_helpers::*,
     views::{AlbumsMessage, ArtistsMessage, SongsMessage},
     widgets::SlotListPageMessage,
@@ -49,115 +51,119 @@ fn album_step(app: &mut Nokkvi) -> String {
     app.library.albums[idx].id.clone()
 }
 
-fn settle(app: &mut Nokkvi, source: Option<View>, target: PanelArt) {
-    let _ = app.update(Message::Artwork(ArtworkMessage::PanelArtSettled {
-        source,
-        target,
-    }));
+/// The cover for `id` lands (here: a failed fetch, which also releases).
+fn land(app: &mut Nokkvi, id: &str) {
+    let _ = app.update(Message::Artwork(ArtworkMessage::LargeLoaded(
+        id.to_string(),
+        None,
+    )));
 }
 
 fn loading(app: &Nokkvi) -> Option<&str> {
     app.artwork.loading_large_artwork.as_deref()
 }
 
-fn cache_large(app: &mut Nokkvi, id: &str) {
-    app.artwork.large_artwork.put(
-        id.to_string(),
-        iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_lone_step_fetches_the_big_cover_at_once() {
+#[test]
+fn a_step_with_nothing_on_its_way_fetches_at_once() {
     let mut app = albums_app(20);
     let first = album_step(&mut app);
     assert_eq!(loading(&app), Some(first.as_str()));
-
-    // A press after a pause is lone again.
-    tokio::time::advance(PANEL_ART_RUN_GAP).await;
-    let later = album_step(&mut app);
-    assert_eq!(loading(&app), Some(later.as_str()));
-}
-
-/// A held arrow key: the rows the run passes never fetch their full-size
-/// cover, the row it stops on does, once its settle timer fires.
-#[tokio::test(start_paused = true)]
-async fn a_run_of_steps_fetches_only_the_row_it_stops_on() {
-    let mut app = albums_app(20);
-    let first = album_step(&mut app);
-    let passed: Vec<String> = (0..3).map(|_| album_step(&mut app)).collect();
-    assert_eq!(loading(&app), Some(first.as_str()), "the run's rows wait");
-
-    let (stopped_on, passed_by) = passed.split_last().expect("moved");
-    for id in passed_by {
-        settle(&mut app, Some(View::Albums), PanelArt::Album(id.clone()));
-    }
+    let second = album_step(&mut app);
     assert_eq!(
         loading(&app),
-        Some(first.as_str()),
-        "a passed row's timer fetches nothing"
+        Some(second.as_str()),
+        "nothing was sent, so nothing waits"
     );
-
-    settle(
-        &mut app,
-        Some(View::Albums),
-        PanelArt::Album(stopped_on.clone()),
-    );
-    assert_eq!(loading(&app), Some(stopped_on.as_str()));
 }
 
-/// A waiting step hands back its settle timer: without it the row a run
-/// stops on would never be fetched.
-#[tokio::test(start_paused = true)]
-async fn a_waiting_step_schedules_its_settle_timer() {
+/// A held arrow key while a cover is on its way: the rows passed never fetch
+/// their full-size cover; the newest goes out when that cover lands.
+#[test]
+fn steps_wait_for_the_cover_on_its_way_and_the_newest_follows_it() {
+    let mut app = albums_app(20);
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
+
+    let passed: Vec<String> = (0..3).map(|_| album_step(&mut app)).collect();
+    assert_eq!(loading(&app), Some(first.as_str()), "the rows wait");
+
+    land(&mut app, &first);
+    let newest = passed.last().expect("moved");
+    assert_eq!(loading(&app), Some(newest.as_str()));
+}
+
+/// A waiting step hands back its overdue timer: without it a stuck cover
+/// would hold the row the scroll stopped on until the request timed out.
+#[test]
+fn a_waiting_step_schedules_its_overdue_timer() {
     let mut app = albums_app(4);
-    let lone = app.panel_art_step(Some(View::Albums), PanelArt::Album("a1".into()));
-    assert_eq!(lone.units(), 0, "a lone step loads (no backend in tests)");
+    let now = app.panel_art_step(Some(View::Albums), PanelArt::Album("a1".into()));
+    assert_eq!(now.units(), 0, "a step that loads (no backend in tests)");
+    app.artwork.panel_gate.sent(PanelArt::Album("a1".into()));
     let waiting = app.panel_art_step(Some(View::Albums), PanelArt::Album("a2".into()));
-    assert_eq!(waiting.units(), 1, "the settle timer");
+    assert_eq!(waiting.units(), 1, "the overdue timer");
+}
+
+#[test]
+fn an_overdue_cover_lets_the_newest_row_through() {
+    let mut app = albums_app(20);
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
+    album_step(&mut app);
+    let newest = album_step(&mut app);
+
+    let _ = app.update(Message::Artwork(ArtworkMessage::PanelArtOverdue {
+        source: Some(View::Albums),
+        target: PanelArt::Album(newest.clone()),
+    }));
+    assert_eq!(loading(&app), Some(newest.as_str()));
+
+    land(&mut app, &first);
+    assert_eq!(
+        loading(&app),
+        Some(newest.as_str()),
+        "the slow cover's landing sends nothing"
+    );
 }
 
 /// A shelf or buffer landing behind another view steps its own list: that
-/// loads directly and leaves the row the visible run is waiting on alone.
-#[tokio::test(start_paused = true)]
-async fn a_step_in_a_list_out_of_sight_leaves_the_wait_alone() {
+/// loads directly and leaves the row the visible scroll is waiting on alone.
+#[test]
+fn a_step_in_a_list_out_of_sight_leaves_the_wait_alone() {
     let mut app = albums_app(20);
-    album_step(&mut app);
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
     let waiting = album_step(&mut app);
 
     let _ = app.panel_art_step(Some(View::Harbour), PanelArt::Album("h1".into()));
     assert_eq!(loading(&app), Some("h1"), "out of sight: loaded directly");
 
-    settle(
-        &mut app,
-        Some(View::Albums),
-        PanelArt::Album(waiting.clone()),
-    );
+    land(&mut app, &first);
     assert_eq!(
         loading(&app),
         Some(waiting.as_str()),
-        "the run's row still loads"
+        "the waiting row still goes"
     );
 }
 
-/// A run's last row is fetched only while its list is still the one being
-/// steered.
-#[tokio::test(start_paused = true)]
-async fn a_settle_after_a_view_switch_fetches_nothing() {
+/// A waiting row is fetched only while its list is still the one steered.
+#[test]
+fn a_landing_after_a_view_switch_fetches_nothing() {
     let mut app = albums_app(20);
     let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
     let waiting = album_step(&mut app);
 
     app.current_view = View::Songs;
-    settle(&mut app, Some(View::Albums), PanelArt::Album(waiting));
+    land(&mut app, &first);
 
-    assert_eq!(loading(&app), Some(first.as_str()));
+    assert_ne!(loading(&app), Some(waiting.as_str()));
 }
 
-/// The Queue steps through its message, cached rows included: a run that
-/// passes a cached row leaves nothing waiting from before it.
-#[tokio::test(start_paused = true)]
-async fn a_queue_run_through_a_cached_row_leaves_nothing_waiting() {
+/// The Queue steps through its message, cached rows included: a cached row
+/// shows at once and leaves nothing waiting from before it.
+#[test]
+fn a_queue_step_onto_a_cached_row_leaves_nothing_waiting() {
     let mut app = test_app();
     assert_eq!(app.current_view, View::Queue);
     let step = |app: &mut Nokkvi, id: &str| {
@@ -167,17 +173,21 @@ async fn a_queue_run_through_a_cached_row_leaves_nothing_waiting() {
         }));
     };
     step(&mut app, "q1");
+    app.artwork.panel_gate.sent(PanelArt::Album("q1".into()));
     step(&mut app, "q2");
-    cache_large(&mut app, "q3");
+    app.artwork.large_artwork.put(
+        "q3".to_string(),
+        iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]),
+    );
     step(&mut app, "q3");
 
-    settle(&mut app, Some(View::Queue), PanelArt::Album("q2".into()));
-    assert_eq!(loading(&app), Some("q1"), "the passed row is not fetched");
+    land(&mut app, "q1");
+    assert_ne!(loading(&app), Some("q2"), "the passed row is not fetched");
 }
 
-/// The Artists view's centring waits the same way.
-#[tokio::test(start_paused = true)]
-async fn artists_hold_the_big_cover_back_too() {
+/// The Artists view's centring goes through the gate too.
+#[test]
+fn artists_wait_for_the_cover_on_its_way_too() {
     let mut app = test_app();
     app.current_view = View::Artists;
     app.library.artists.set_from_vec(
@@ -193,19 +203,19 @@ async fn artists_hold_the_big_cover_back_too() {
     };
     let first = step(&mut app);
     assert_eq!(loading(&app), Some(first.as_str()));
+    app.artwork.panel_gate.sent(PanelArt::Artist(first.clone()));
     let second = step(&mut app);
-    assert_eq!(loading(&app), Some(first.as_str()), "a run's row waits");
-    settle(
-        &mut app,
-        Some(View::Artists),
-        PanelArt::Artist(second.clone()),
-    );
+    assert_eq!(loading(&app), Some(first.as_str()), "the row waits");
+
+    let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+        first, None,
+    )));
     assert_eq!(loading(&app), Some(second.as_str()));
 }
 
 /// The Songs view's panel shows the centred song's album, and waits too.
-#[tokio::test(start_paused = true)]
-async fn songs_hold_the_big_cover_back_too() {
+#[test]
+fn songs_wait_for_the_cover_on_its_way_too() {
     let mut app = test_app();
     app.current_view = View::Songs;
     app.library.songs.set_from_vec(
@@ -231,22 +241,42 @@ async fn songs_hold_the_big_cover_back_too() {
     };
     let first = step(&mut app);
     assert_eq!(loading(&app), Some(first.as_str()));
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
     let second = step(&mut app);
-    assert_eq!(loading(&app), Some(first.as_str()), "a run's row waits");
-    settle(&mut app, Some(View::Songs), PanelArt::Album(second.clone()));
+    assert_eq!(loading(&app), Some(first.as_str()), "the row waits");
+
+    land(&mut app, &first);
     assert_eq!(loading(&app), Some(second.as_str()));
 }
 
-/// Logout resets the artwork state, so a settle timer still running from
-/// the ended session finds nothing waiting.
-#[tokio::test(start_paused = true)]
-async fn a_settle_timer_from_an_ended_session_fetches_nothing() {
+/// Logout resets the artwork state, so a cover landing from the ended
+/// session finds nothing waiting.
+#[test]
+fn a_landing_from_an_ended_session_fetches_nothing() {
     let mut app = albums_app(20);
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
     album_step(&mut app);
-    let waiting = album_step(&mut app);
 
     app.artwork = crate::state::ArtworkState::default();
-    settle(&mut app, Some(View::Albums), PanelArt::Album(waiting));
+    land(&mut app, &first);
 
     assert_eq!(loading(&app), None);
+}
+
+/// The gate learns a fetch went out from the loader's claim in
+/// `large_artwork_pending`, which a fetch already on its way also holds.
+#[test]
+fn a_loader_claim_marks_the_cover_on_its_way() {
+    let mut app = albums_app(8);
+    // a3's full-size fetch is already out (its row version is "T1").
+    app.artwork
+        .large_artwork_pending
+        .claim("a3".into(), Some("T1".into()));
+
+    let _ = app.panel_art_step(Some(View::Albums), PanelArt::Album("a3".into()));
+    let waiting = app.panel_art_step(Some(View::Albums), PanelArt::Album("a4".into()));
+
+    assert_eq!(waiting.units(), 1, "a4 waits for a3");
+    assert_eq!(loading(&app), Some("a3"));
 }
