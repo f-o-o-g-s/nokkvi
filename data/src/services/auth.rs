@@ -112,8 +112,7 @@ impl AuthService {
     ) -> std::result::Result<(), AttemptError> {
         let login_url = format!("{base_url}/auth/login");
 
-        let client = reqwest::Client::builder()
-            .user_agent(crate::USER_AGENT)
+        let client = crate::utils::http::client_base()
             // The body is the password.
             .redirect(crate::utils::redirects::server_only())
             .build()

@@ -220,13 +220,14 @@ fn escalate_backoff(prev: Duration) -> Duration {
 /// Start the SSE subscription loop
 pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
     sipper(async |mut output| {
-        let client = reqwest::Client::builder()
-            .user_agent(nokkvi_data::USER_AGENT)
+        let client = nokkvi_data::utils::http::client_base()
             .timeout(Duration::from_secs(60 * 60 * 24)) // 24 hour total connection timeout
             // The JWT rides in a header reqwest keeps across hosts.
             .redirect(nokkvi_data::utils::redirects::server_only())
             .build()
-            .unwrap_or_default();
+            // `unwrap_or_default` would fall back to reqwest's default redirect
+            // policy, and `Client::default()` panics on the same failure anyway.
+            .expect("Failed to build the event-stream HTTP client");
 
         let mut backoff = SSE_BACKOFF_FLOOR;
 

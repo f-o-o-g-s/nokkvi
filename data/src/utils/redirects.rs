@@ -66,6 +66,23 @@ pub fn guard_credential_urls() -> Policy {
     })
 }
 
+/// The policy for a client that fetches untrusted public hosts with no
+/// credential (an external image, LRCLIB): every hop is re-checked with
+/// `is_blocked`, the entry guard's own predicate, so a public host can't
+/// `302` the fetch onto a private or loopback address the entry guard would
+/// have refused. `label` names the client in the error.
+pub fn public_hosts_only(label: &'static str, is_blocked: fn(&str) -> bool) -> Policy {
+    Policy::custom(move |attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            attempt.error(format!("{label}: too many redirects"))
+        } else if is_blocked(attempt.url().as_str()) {
+            attempt.error(format!("{label}: redirect to a private/loopback host"))
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
 /// Hand a refused redirect back to the caller as the answer. Logs the host it
 /// pointed at, never the URL (the caller's URL can hold the credential).
 fn refuse(attempt: Attempt<'_>) -> Action {

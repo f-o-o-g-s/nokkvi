@@ -72,8 +72,7 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn new(base_url: Url, token: String) -> Self {
         // Configure client with shorter idle timeout for faster shutdown
-        let client = Client::builder()
-            .user_agent(crate::USER_AGENT)
+        let client = crate::utils::http::client_base()
             .pool_idle_timeout(std::time::Duration::from_secs(5))
             // Every request carries the JWT header or a /rest credential.
             .redirect(crate::utils::redirects::server_only())

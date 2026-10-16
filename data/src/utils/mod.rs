@@ -9,6 +9,7 @@ pub mod cycle;
 pub mod dedupe;
 pub mod formatters;
 pub mod fuzzy;
+pub mod http;
 pub mod paths;
 pub mod redirects;
 pub mod reorder;

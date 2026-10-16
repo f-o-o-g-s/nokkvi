@@ -174,9 +174,9 @@ impl AppService {
 
         let task_manager = Arc::new(TaskManager::new());
         let radio_scrobble_http = Arc::new(
-            reqwest::Client::builder()
+            crate::utils::http::client_base()
+                // Its own name: the scrobble services see it, not the server.
                 .user_agent(RADIO_SCROBBLE_USER_AGENT)
-                .connect_timeout(std::time::Duration::from_secs(8))
                 .read_timeout(std::time::Duration::from_secs(20))
                 .build()
                 .expect("Failed to build radio-scrobble HTTP client"),

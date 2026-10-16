@@ -360,10 +360,7 @@ pub(crate) fn external_host_is_blocked(url_str: &str) -> bool {
 /// `pub(crate)` so the lyrics LRCLIB fetch reuses the same user-agent + stall
 /// timeouts as a base for its own redirect-guarded client.
 pub(crate) fn artwork_client_base() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .user_agent(crate::USER_AGENT)
-        .connect_timeout(std::time::Duration::from_secs(8))
-        .read_timeout(std::time::Duration::from_secs(20))
+    crate::utils::http::client_base().read_timeout(std::time::Duration::from_secs(20))
 }
 
 #[derive(Clone)]
@@ -425,15 +422,10 @@ impl AlbumsService {
                     // would transparently follow a `302` from a public host to
                     // `http://127.0.0.1/…`, re-introducing the SSRF the guard
                     // exists to stop. Re-check every hop, and cap the chain.
-                    .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                        if attempt.previous().len() >= 10 {
-                            attempt.error("external image: too many redirects")
-                        } else if external_host_is_blocked(attempt.url().as_str()) {
-                            attempt.error("external image: redirect to a private/loopback host")
-                        } else {
-                            attempt.follow()
-                        }
-                    }))
+                    .redirect(crate::utils::redirects::public_hosts_only(
+                        "external image",
+                        external_host_is_blocked,
+                    ))
                     .build()
                     .expect("Failed to build external-image HTTP client"),
             ),

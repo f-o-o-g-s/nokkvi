@@ -57,15 +57,10 @@ fn lrclib_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         artwork_client_base()
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 10 {
-                    attempt.error("lrclib: too many redirects")
-                } else if external_host_is_blocked(attempt.url().as_str()) {
-                    attempt.error("lrclib: redirect to a private/loopback host")
-                } else {
-                    attempt.follow()
-                }
-            }))
+            .redirect(crate::utils::redirects::public_hosts_only(
+                "lrclib",
+                external_host_is_blocked,
+            ))
             .build()
             .expect("Failed to build LRCLIB HTTP client")
     })
