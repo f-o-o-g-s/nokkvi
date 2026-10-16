@@ -778,3 +778,88 @@ fn artist_rows_carry_the_loading_fill() {
     let row = nokkvi_data::backend::artists::ArtistUIViewData::from(raw);
     assert_eq!(row.image.loading_fill(), Some([0, 0, 0]));
 }
+
+/// Every list that holds album or artist rows answers the shared lookups
+/// through `held_albums` / `held_artists`: the image info, the big panel's
+/// poster pick and the placeholder hash. A surface added to one of them is
+/// in all of them; four hand-kept copies once differed in membership.
+#[test]
+fn every_held_list_answers_the_shared_lookups() {
+    use nokkvi_data::types::library_search::LibrarySearchResults;
+    let hashed = |id: &str| serde_json::json!({ "thumbHash": format!("{id}-hash") });
+    let raw_album = |id: &str| -> Album {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": id, "thumbHash": format!("{id}-hash")
+        }))
+        .expect("album")
+    };
+    // Absent art with a poster: the panel loads the poster, which it can
+    // only find through the shared list.
+    let poster_artist = |id: &str| -> Artist {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": id, "imageAbsent": true,
+            "largeImageUrl": format!("https://img.example/{id}.jpg")
+        }))
+        .expect("artist")
+    };
+    let mut app = test_app();
+    app.library
+        .albums
+        .set_from_vec(vec![album("al-lib", hashed("al-lib"))]);
+    app.harbour.recently_added = vec![album("al-recent", hashed("al-recent"))];
+    app.harbour.most_played_albums = vec![album("al-most", hashed("al-most"))];
+    app.harbour.random_album = Some(album("al-rand", hashed("al-rand")));
+    app.artists_page.expansion.children = vec![album("al-child", hashed("al-child"))];
+    let mut lib_artist = artist("ar-lib", false);
+    lib_artist.image.thumb_hash = Some("ar-lib-hash".into());
+    app.library.artists.set_from_vec(vec![lib_artist]);
+    app.harbour.most_played_artists = vec![poster_artist("ar-most")];
+    app.harbour.random_artist = Some(poster_artist("ar-rand"));
+    app.harbour.search_results = Some(LibrarySearchResults {
+        artists: vec![poster_artist("ar-search")],
+        albums: vec![raw_album("al-search")],
+        songs: Vec::new(),
+        genres: Vec::new(),
+        playlists: Vec::new(),
+    });
+
+    let albums = [
+        "al-lib",
+        "al-recent",
+        "al-most",
+        "al-rand",
+        "al-search",
+        "al-child",
+    ];
+    for id in albums {
+        assert!(app.album_image(id).is_some(), "{id} answers album_image");
+    }
+    for id in ["ar-lib", "ar-most", "ar-rand", "ar-search"] {
+        assert!(app.artist_image(id).is_some(), "{id} answers artist_image");
+    }
+    for id in ["ar-most", "ar-rand", "ar-search"] {
+        let _ = app.handle_load_artist_large_artwork(id.to_string());
+        assert_eq!(
+            app.artwork.loading_large_artwork.as_deref(),
+            Some(id),
+            "{id}'s panel finds its poster"
+        );
+    }
+    let ids: Vec<String> = albums
+        .iter()
+        .chain(["ar-lib"].iter())
+        .map(|s| (*s).to_string())
+        .collect();
+    let mut hashed_ids: Vec<String> = app
+        .thumb_hashes_of(&ids)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    hashed_ids.sort();
+    let mut expected = ids;
+    expected.sort();
+    assert_eq!(
+        hashed_ids, expected,
+        "every held row's placeholder hash is found"
+    );
+}

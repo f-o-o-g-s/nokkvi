@@ -227,12 +227,12 @@ impl Nokkvi {
         self.artwork.album_art_pending.extend(ids);
     }
 
-    /// The ThumbHash the rows nokkvi holds give each of `ids`: albums and
-    /// artists, the albums an expanded artist or genre lists included, in
-    /// `album_image` / `artist_image`'s order (the first row with an id
-    /// wins). Rows the server marked absent give none, so absent art keeps
-    /// its plain square. One pass, stopping once every id is found.
-    fn thumb_hashes_of(&self, ids: &[String]) -> Vec<(String, String)> {
+    /// The ThumbHash the rows nokkvi holds give each of `ids`: the albums of
+    /// [`Self::held_albums`], then the artists of [`Self::held_artists`] (the
+    /// first row with an id wins). Rows the server marked absent give none,
+    /// so absent art keeps its plain square. One pass, stopping once every id
+    /// is found.
+    pub(crate) fn thumb_hashes_of(&self, ids: &[String]) -> Vec<(String, String)> {
         use nokkvi_data::types::image_info::ImageInfo;
 
         fn take<'a>(
@@ -259,79 +259,61 @@ impl Nokkvi {
 
         let mut wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
         let mut found = Vec::new();
-        let harbour = &self.harbour;
-        let search = harbour.search_results.iter();
+        take(self.held_albums(), &mut wanted, &mut found);
         take(
-            self.library
-                .albums
-                .iter()
-                .chain(harbour.recently_added.iter())
-                .chain(harbour.most_played_albums.iter())
-                .chain(harbour.random_album.iter())
-                .map(|a| (a.id.as_str(), &a.image)),
-            &mut wanted,
-            &mut found,
-        );
-        take(
-            search
-                .clone()
-                .flat_map(|r| r.albums.iter())
-                .map(|a| (a.id.as_str(), &a.image)),
-            &mut wanted,
-            &mut found,
-        );
-        take(
-            self.library
-                .artists
-                .iter()
-                .map(|a| (a.id.as_str(), &a.image)),
-            &mut wanted,
-            &mut found,
-        );
-        take(
-            harbour
-                .most_played_artists
-                .iter()
-                .chain(harbour.random_artist.iter())
-                .chain(search.flat_map(|r| r.artists.iter()))
-                .map(|a| (a.id.as_str(), &a.image)),
-            &mut wanted,
-            &mut found,
-        );
-        take(
-            self.artists_page
-                .expansion
-                .children
-                .iter()
-                .chain(self.genres_page.expansion.children.iter())
-                .map(|a| (a.id.as_str(), &a.image)),
+            self.held_artists().map(|(id, image, _)| (id, image)),
             &mut wanted,
             &mut found,
         );
         found
     }
 
-    /// The image info (Navidrome 0.64+) of an album row nokkvi holds: the
-    /// Albums view or Harbour's shelves. `None` for an unknown id; the
-    /// default on older servers.
-    fn album_image(&self, album_id: &str) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
+    /// The album rows nokkvi holds, as `(id, image info)`, in lookup order:
+    /// the Albums view, Harbour's shelves and random pick, Harbour's search
+    /// results, then the albums an expanded artist or genre lists. The one
+    /// list behind [`Self::album_image`] (absent art, versions, the
+    /// stale-large-art check) and the placeholder decode
+    /// ([`Self::thumb_hashes_of`]), so a surface that holds albums joins it
+    /// here and nowhere else (`every_held_list_answers_the_shared_lookups`).
+    pub(crate) fn held_albums(
+        &self,
+    ) -> impl Iterator<Item = (&str, &nokkvi_data::types::image_info::ImageInfo)> {
+        let harbour = &self.harbour;
         self.library
             .albums
             .iter()
-            .chain(self.harbour.recently_added.iter())
-            .chain(self.harbour.most_played_albums.iter())
-            .chain(self.harbour.random_album.iter())
-            .find(|a| a.id == album_id)
-            .map(|a| &a.image)
-            .or_else(|| {
+            .chain(harbour.recently_added.iter())
+            .chain(harbour.most_played_albums.iter())
+            .chain(harbour.random_album.iter())
+            .map(|a| (a.id.as_str(), &a.image))
+            .chain(
                 // Harbour's search rows are raw `Album`s.
-                self.harbour
+                harbour
                     .search_results
                     .iter()
                     .flat_map(|r| r.albums.iter())
-                    .find(|a| a.id == album_id)
-                    .map(|a| &a.image)
-            })
+                    .map(|a| (a.id.as_str(), &a.image)),
+            )
+            .chain(
+                self.artists_page
+                    .expansion
+                    .children
+                    .iter()
+                    .chain(self.genres_page.expansion.children.iter())
+                    .map(|a| (a.id.as_str(), &a.image)),
+            )
+    }
+
+    /// The image info (Navidrome 0.64+) of an album row nokkvi holds
+    /// ([`Self::held_albums`]). `None` for an unknown id; the default on
+    /// older servers.
+    pub(crate) fn album_image(
+        &self,
+        album_id: &str,
+    ) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
+        self.held_albums()
+            .find(|(id, _)| *id == album_id)
+            .map(|(_, image)| image)
     }
 
     /// The valid image hash the rows nokkvi holds currently give `id`, an

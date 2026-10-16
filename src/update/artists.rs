@@ -149,28 +149,53 @@ impl Nokkvi {
     /// click bypasses every scroll-driven trigger, so the expand path has to
     /// kick the fetch itself or the artwork column would stay blank until
     /// the user scrolled away and back.
-    /// The image info (Navidrome 0.64+) of an artist row nokkvi holds: the
-    /// Artists view, else Harbour's raw artist lists. `None` for an unknown
-    /// id; the default on older servers.
+    /// The artist rows nokkvi holds, as `(id, image info, poster)`, in lookup
+    /// order: the Artists view, then Harbour's Most Played Artists shelf, its
+    /// random pick and its search results (raw `Artist`s that may never enter
+    /// the Artists view's buffer). The one list behind [`Self::artist_image`]
+    /// (absent art, versions), the big panel's poster pick and the placeholder
+    /// decode, so a surface that renders artists joins it here and nowhere
+    /// else (`every_held_list_answers_the_shared_lookups`); a surface missing
+    /// from it showed local `ar-{id}` art, or a blank square, where the shelf
+    /// showed the poster.
+    pub(crate) fn held_artists(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &str,
+            &nokkvi_data::types::image_info::ImageInfo,
+            Option<&str>,
+        ),
+    > {
+        self.library
+            .artists
+            .iter()
+            .map(|a| (a.id.as_str(), &a.image, a.poster()))
+            .chain(
+                self.harbour
+                    .most_played_artists
+                    .iter()
+                    .chain(self.harbour.random_artist.iter())
+                    .chain(
+                        self.harbour
+                            .search_results
+                            .iter()
+                            .flat_map(|r| r.artists.iter()),
+                    )
+                    .map(|a| (a.id.as_str(), &a.image, a.poster())),
+            )
+    }
+
+    /// The image info (Navidrome 0.64+) of an artist row nokkvi holds
+    /// ([`Self::held_artists`]). `None` for an unknown id; the default on
+    /// older servers.
     pub(crate) fn artist_image(
         &self,
         artist_id: &str,
     ) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
-        if let Some(artist) = self.library.artists.iter().find(|a| a.id == artist_id) {
-            return Some(&artist.image);
-        }
-        self.harbour
-            .most_played_artists
-            .iter()
-            .chain(self.harbour.random_artist.iter())
-            .chain(
-                self.harbour
-                    .search_results
-                    .iter()
-                    .flat_map(|r| r.artists.iter()),
-            )
-            .find(|a| a.id == artist_id)
-            .map(|a| &a.image)
+        self.held_artists()
+            .find(|(id, _, _)| *id == artist_id)
+            .map(|(_, image, _)| image)
     }
 
     /// Whether the server marked this artist's art absent (Navidrome 0.64+).
@@ -185,34 +210,12 @@ impl Nokkvi {
             return Task::none();
         }
 
+        // The poster the rows and thumbnails share (`poster`: large, falling
+        // back to medium), from whichever held list has the artist.
         let external_url = self
-            .library
-            .artists
-            .iter()
-            .find(|a| a.id == artist_id)
-            .and_then(|a| a.poster().map(str::to_owned))
-            .or_else(|| {
-                // Harbour rows (Most Played Artists shelf / the Random Artist
-                // pick / search results) hold raw `Artist`s that may never enter
-                // the Artists view's paged buffer — resolve their external poster
-                // with the pick the rows and thumbnails share (`poster`: large,
-                // falling back to medium). Every Harbour surface that renders an
-                // artist must be in this chain, or centering that row shows local
-                // `ar-{id}` art (or a blank square) where the shelf shows the
-                // full poster.
-                self.harbour
-                    .most_played_artists
-                    .iter()
-                    .chain(self.harbour.random_artist.iter())
-                    .chain(
-                        self.harbour
-                            .search_results
-                            .iter()
-                            .flat_map(|r| r.artists.iter()),
-                    )
-                    .find(|a| a.id == artist_id)
-                    .and_then(|a| a.poster().map(str::to_owned))
-            });
+            .held_artists()
+            .find(|(id, _, _)| *id == artist_id)
+            .and_then(|(_, _, poster)| poster.map(str::to_owned));
 
         // The server marked the artist's art absent (Navidrome 0.64+) and no
         // external poster is known: no request, the panel stays blank. An
