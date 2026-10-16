@@ -661,6 +661,12 @@ const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
 /// derives matching, also-time-based rebuffer thresholds.
 pub(crate) const CUSHION_MS: u64 = 1100;
 
+/// A finite track whose decoder reaches EOF more than this far short of its
+/// length is logged as ended early (`on_renderer_finished`): a live transcode
+/// whose socket closed mid-song, or a truncated file. Wide enough to cover a
+/// probed or `X-Content-Duration` length that is off by a second.
+const EARLY_END_SLACK_MS: u64 = 2_000;
+
 /// The decode loop releases backpressure (resumes decoding) once the ring drains
 /// to `CUSHION_MS / BACKPRESSURE_RELEASE_DIVISOR` of audio. `pub(crate)` so the
 /// renderer can assert at compile time that its rebuffer entry watermark stays
@@ -4625,6 +4631,18 @@ impl CustomAudioEngine {
                 " [RENDERER FINISHED] Track finished (EOF={}, pos={} >= dur={}, pos_finished={})",
                 is_eof, position, duration, position_indicates_finished
             );
+            // The queue moves on either way, so this line is the only trace
+            // of a stream that lost its bytes before its end.
+            if is_eof && duration > 0 && position.saturating_add(EARLY_END_SLACK_MS) < duration {
+                warn!(
+                    " [RENDERER FINISHED] Track ended {}s early (pos={}ms, dur={}ms, \
+                     delivery={:?})",
+                    (duration - position) / 1000,
+                    position,
+                    duration,
+                    self.delivery
+                );
+            }
             self.on_decoder_finished().await;
             true
         } else if !is_eof && self.playing && !self.paused {
