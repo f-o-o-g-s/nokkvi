@@ -141,10 +141,10 @@ async fn accept_loop(
             Err(err) => {
                 tracing::error!("IPC accept failed: {err}");
                 // A persistent accept failure (e.g. listener fd closed) would
-                // spin this loop. Yield once to avoid pegging a core in that
-                // pathological case; the listener will continue to error and
-                // the consumer's stream stays alive but unfed.
-                tokio::task::yield_now().await;
+                // spin this loop; a short sleep keeps it off the core (a yield
+                // throttles nothing). The listener keeps erroring and the
+                // consumer's stream stays alive but unfed.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }

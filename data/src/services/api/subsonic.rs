@@ -94,7 +94,8 @@ fn subsonic_post_request(
 /// Convenience wrapper around [`subsonic_post`] that applies
 /// [`check_subsonic_response_status`] (HTTP status and the envelope's own
 /// status) and returns a descriptive error on failure. Use for fire-and-forget mutation
-/// endpoints (star, setRating, createPlaylist, deletePlaylist, updatePlaylist).
+/// endpoints (star, setRating, createPlaylist, the radio station edits,
+/// savePlayQueueByIndex).
 pub async fn subsonic_post_ok(
     http_client: &Arc<reqwest::Client>,
     server_url: &str,
@@ -133,8 +134,10 @@ const SESSION_REJECTED_CODES: [i64; 4] = [40, 41, 42, 44];
 /// Apply Subsonic response status/body policy.
 ///
 /// Pure (no I/O) so it can be unit-tested without an HTTP server. Returns:
-/// - `Err(NokkviError::Unauthorized)` for HTTP 401, so the UI drops to login on
-///   JWT expiry (mirrors [`crate::services::api::client::ApiClient`]).
+/// - `Err(NokkviError::Unauthorized)` for HTTP 401, so the UI drops to login
+///   (Navidrome's `/rest` never sends one; a reverse proxy in front of it can.
+///   The native path's [`crate::services::api::client::ApiClient`] maps its
+///   401 the same way).
 /// - `Err(anyhow!(...))` for any other non-2xx status.
 /// - `Err(NokkviError::Unauthorized)` when the body wraps a Subsonic-envelope
 ///   error (`subsonic-response.status == "failed"`) inside an HTTP 200 whose
@@ -343,7 +346,7 @@ pub(crate) mod tests {
     ///
     /// Mirrors [`crate::services::api::client::ApiClient`]'s discipline; without
     /// this routing, star/unstar/setRating + radio CRUD + replace_playlist_tracks
-    /// surface a generic toast on JWT expiry instead of returning to the login screen.
+    /// surface a generic toast on a proxy's 401 instead of returning to the login screen.
     #[test]
     fn check_subsonic_response_status_routes_401_to_unauthorized() {
         let err = check_subsonic_response_status(StatusCode::UNAUTHORIZED, "", "star song")
