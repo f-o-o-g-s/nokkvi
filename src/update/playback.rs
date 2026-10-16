@@ -2300,6 +2300,10 @@ impl Nokkvi {
             && self.active_playback.is_queue()
             && let Some(left) = self.playback.station_left_for_play.take()
         {
+            debug!(
+                " Queue play failed before the engine; radio mode handed back to '{}'",
+                left.radio.station.name
+            );
             self.active_playback = crate::state::ActivePlayback::Radio(left.radio);
         }
         Task::none()
