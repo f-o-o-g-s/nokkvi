@@ -92,10 +92,21 @@ pub struct LibraryChange {
     pub song_ids: Vec<String>,
     pub playlist_ids: Vec<String>,
     pub genre_ids: Vec<String>,
+    /// Libraries created, updated, deleted or newly granted: Navidrome
+    /// broadcasts `{"library":[id]}` for them (`core/library.go`), with the
+    /// user for an access change.
+    pub library_ids: Vec<String>,
     pub is_wildcard: bool,
 }
 
 impl LibraryChange {
+    /// Whether the event calls for refetching the library list: a full scan,
+    /// or a `library` refresh. A picker that refetched only on the wildcard
+    /// never showed a library added or granted while nokkvi ran.
+    pub(crate) fn refreshes_libraries(&self) -> bool {
+        self.is_wildcard || !self.library_ids.is_empty()
+    }
+
     /// The `refreshResource` Navidrome sends for a star or setRating on `id`:
     /// one id under the entity's own kind (`server/subsonic/media_annotation.go`).
     ///
@@ -341,15 +352,20 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                                             "playlist",
                                                         ),
                                                         genre_ids: take(&mut resources, "genre"),
+                                                        library_ids: take(
+                                                            &mut resources,
+                                                            "library",
+                                                        ),
                                                         is_wildcard,
                                                     };
                                                     debug!(
-                                                        " [SSE] refreshResource — wildcard={is_wildcard}, albums={}, artists={}, songs={}, playlists={}, genres={}",
+                                                        " [SSE] refreshResource — wildcard={is_wildcard}, albums={}, artists={}, songs={}, playlists={}, genres={}, libraries={}",
                                                         change.album_ids.len(),
                                                         change.artist_ids.len(),
                                                         change.song_ids.len(),
                                                         change.playlist_ids.len(),
                                                         change.genre_ids.len(),
+                                                        change.library_ids.len(),
                                                     );
                                                     output
                                                         .send(SseEvent::LibraryChanged(change))

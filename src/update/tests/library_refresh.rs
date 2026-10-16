@@ -111,6 +111,7 @@ fn change_with(
         song_ids: v(songs),
         playlist_ids: v(playlists),
         genre_ids: v(genres),
+        library_ids: Vec::new(),
         is_wildcard: false,
     }
 }
@@ -1073,3 +1074,20 @@ fn library_changed_reloads_when_idle() {
 }
 
 // ============================================================================
+
+/// Navidrome announces a library created, deleted or newly granted as a
+/// `library` refresh, not a full scan; the picker refetches on it too.
+#[test]
+fn a_library_event_refreshes_the_library_list() {
+    let library = LibraryChange {
+        library_ids: vec!["3".into()],
+        ..Default::default()
+    };
+    assert!(library.refreshes_libraries());
+    assert!(wildcard_change().refreshes_libraries());
+    let album = LibraryChange {
+        album_ids: vec!["a1".into()],
+        ..Default::default()
+    };
+    assert!(!album.refreshes_libraries());
+}

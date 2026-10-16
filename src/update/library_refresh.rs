@@ -42,22 +42,25 @@ impl Nokkvi {
             return Task::none();
         }
 
+        let refresh_libraries = change.refreshes_libraries();
         let LibraryChange {
             album_ids,
             artist_ids,
             song_ids,
             playlist_ids,
             genre_ids,
+            library_ids,
             is_wildcard,
         } = change;
 
         info!(
-            "🔄 Navidrome library changed (wildcard={is_wildcard}, albums={}, artists={}, songs={}, playlists={}, genres={}), initiating background refresh",
+            "🔄 Navidrome library changed (wildcard={is_wildcard}, albums={}, artists={}, songs={}, playlists={}, genres={}, libraries={}), initiating background refresh",
             album_ids.len(),
             artist_ids.len(),
             song_ids.len(),
             playlist_ids.len(),
             genre_ids.len(),
+            library_ids.len(),
         );
 
         let mut tasks = Vec::new();
@@ -112,15 +115,12 @@ impl Nokkvi {
             tasks.push(self.handle_load_genres());
         }
 
-        // 6. Library list refresh on wildcard (full-scan) events. Navidrome
-        //    does not emit a dedicated `library_changed` SSE event today (see
-        //    plan §14.3), so the popover's source-of-truth would otherwise
-        //    drift if an admin adds / renames / removes a library while the
-        //    client is running. Re-fetch on every wildcard refresh so the
-        //    next time the user opens the popover, the row count matches
-        //    the server. `Library::Loaded` also prunes `active_library_ids`
-        //    of any IDs no longer in the refreshed list.
-        if is_wildcard {
+        // 6. Library list refresh on a full scan and on Navidrome's `library`
+        //    refresh (an admin created, renamed or deleted a library, or a
+        //    user's access changed), so the popover's row count matches the
+        //    server the next time it opens. `Library::Loaded` also prunes
+        //    `active_library_ids` of any IDs no longer in the refreshed list.
+        if refresh_libraries {
             tasks.push(self.shell_task(
                 |shell| async move { shell.refresh_libraries().await },
                 |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| match result {
