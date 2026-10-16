@@ -1675,9 +1675,7 @@ impl Nokkvi {
             id_groups.iter().map(Vec::as_slice),
         );
         drop(cached);
-        for id in queued_ids {
-            self.claim_minis([id]);
-        }
+        self.claim_minis(queued_ids);
         tasks
     }
 
@@ -1764,12 +1762,12 @@ impl Nokkvi {
         planned: Vec<ArtistMini>,
         albums_vm: &AlbumsService,
     ) -> Vec<Task<Message>> {
+        // One claim for the batch: `claim_minis` walks the held rows once per
+        // call for the ThumbHash placeholders.
+        self.claim_minis(planned.iter().map(|mini| mini.id.clone()));
         planned
             .into_iter()
-            .map(|mini| {
-                self.claim_minis([mini.id.clone()]);
-                super::components::artist_mini_task(albums_vm.clone(), mini)
-            })
+            .map(|mini| super::components::artist_mini_task(albums_vm.clone(), mini))
             .collect()
     }
 

@@ -108,9 +108,7 @@ impl Nokkvi {
             ),
         };
         drop(cached);
-        for id in queued_ids {
-            self.claim_minis([id]);
-        }
+        self.claim_minis(queued_ids);
         tasks
     }
 
