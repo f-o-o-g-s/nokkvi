@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - After a session ends (expired or Logout), `nokkvi status`, MPRIS and the tray report stopped instead of a frozen playing track.
 - Live library updates keep arriving after two days of uptime: the event stream now reconnects with the current session token.
 - Logging in no longer leaves a missing-parameter warning in Navidrome's log.
+- A rejected server credential no longer marks every cover as missing artwork for the rest of the session.
 
 ### Removed
 

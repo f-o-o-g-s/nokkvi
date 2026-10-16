@@ -482,6 +482,7 @@ impl AlbumsService {
                 response.status()
             ));
         }
+        let status = response.status();
 
         // Capture the content type before `bytes()` consumes the response.
         let content_type = response
@@ -508,6 +509,19 @@ impl AlbumsService {
         // Caching those hands every consumer (MPRIS shells, our own UI) an
         // undecodable `.jpg`, so reject anything that isn't a real image.
         if !Self::response_is_image(content_type.as_deref(), &bytes) {
+            // A dead credential answers the same way (HTTP 200 and a code-40
+            // or 44 envelope) and is not "no artwork": negative-caching it
+            // would blank every cover for the session. It surfaces as
+            // `Unauthorized`, which nothing caches and the retry stops at.
+            let text = String::from_utf8_lossy(&bytes);
+            if let Err(e) = crate::services::api::subsonic::check_subsonic_response_status(
+                status,
+                &text,
+                "cover art",
+            ) && crate::types::error::NokkviError::is_unauthorized(&e)
+            {
+                return Err(e);
+            }
             return Err(NonImageResponse {
                 content_type: content_type.as_deref().unwrap_or("<none>").to_string(),
                 snippet: String::from_utf8_lossy(&bytes[..bytes.len().min(180)]).into_owned(),
@@ -698,9 +712,12 @@ impl AlbumsService {
                 Ok(bytes) => return Ok(bytes),
                 Err(e) => {
                     // A non-image body is deterministic — every attempt re-fetches
-                    // the same error doc. Fail fast (1 request) instead of 3, while
-                    // keeping transient errors (429/timeout/empty body) retryable.
-                    if e.downcast_ref::<NonImageResponse>().is_some() {
+                    // the same error doc — and so is a rejected credential. Fail
+                    // fast (1 request) instead of 3, while keeping transient
+                    // errors (429/timeout/empty body) retryable.
+                    if e.downcast_ref::<NonImageResponse>().is_some()
+                        || crate::types::error::NokkviError::is_unauthorized(&e)
+                    {
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -951,6 +968,27 @@ mod tests {
                 "transient errors must not be treated as a deterministic miss: {transient}"
             );
         }
+    }
+
+    /// A dead credential answers `getCoverArt` with HTTP 200 and a code-40
+    /// envelope, like every `/rest` failure. That is not "no artwork": it must
+    /// not satisfy `is_missing_artwork` (the negative cache would blank every
+    /// cover for the session), and it reads as `Unauthorized`.
+    #[tokio::test]
+    async fn a_rejected_credential_on_cover_art_is_unauthorized_not_missing() {
+        use crate::services::api::subsonic::tests::{FAILED_ENVELOPE, one_shot_server};
+        let base = one_shot_server("200 OK", FAILED_ENVELOPE).await;
+        let err = AlbumsService::new()
+            .fetch_artwork_by_url(&format!(
+                "{base}/rest/getCoverArt?id=al-1&u=x&size=80&square=true"
+            ))
+            .await
+            .expect_err("a failed envelope is not an image");
+        assert!(!is_missing_artwork(&err), "{err:#}");
+        assert!(
+            crate::types::error::NokkviError::is_unauthorized(&err),
+            "{err:#}"
+        );
     }
 
     /// A cover URL carries the /rest credential, so the cover client never
