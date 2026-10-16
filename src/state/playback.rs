@@ -198,10 +198,18 @@ impl PlaybackState {
 
     /// Logout: a play that fails after this must not hand back the old
     /// session's station, so the attempt counter carries forward and the
-    /// station record goes.
+    /// station record goes. The reset also stops the engine, and the tick
+    /// that mirrors the engine's transport stands down without a shell, so
+    /// the transport is stopped here too: the `status` verb and MPRIS read
+    /// these flags, and used to report "playing" at a frozen position until
+    /// the next login. The track display (title, artist, album, duration)
+    /// stays, as after any stop.
     pub fn reset_for_session(&mut self) {
         self.station_left_for_play = None;
         self.play_attempt.bump();
+        self.playing = false;
+        self.paused = false;
+        self.position = 0;
     }
 }
 

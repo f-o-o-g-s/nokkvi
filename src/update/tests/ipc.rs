@@ -463,6 +463,33 @@ fn status_returns_a_full_state_snapshot() {
     assert_eq!(data.get("preset"), Some(&serde_json::Value::Null));
 }
 
+/// A forced logout (session expired, or the Logout entry) stops the engine,
+/// but the tick that mirrors the engine's transport stands down without a
+/// shell, so the snapshot used to say "playing" at a frozen position until
+/// the next login.
+#[test]
+fn status_reports_stopped_after_a_forced_logout() {
+    // `reset_session_state` clears the static SSE slot.
+    let _sse = super::SSE_SLOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.playback.playing = true;
+    app.playback.paused = false;
+    app.playback.position = 42;
+    app.playback.title = "Frozen".to_string();
+
+    drop(app.reset_session_state());
+
+    let data = drive_on(&mut app, "status")
+        .data
+        .expect("status must carry data");
+    assert_eq!(data.get("state"), Some(&json!("stopped")));
+    assert_eq!(data.get("position"), Some(&json!(0)));
+    // The track display stays, as after any stop.
+    assert_eq!(data.get("title"), Some(&json!("Frozen")));
+}
+
 // ----------------------------------------------------------------------------
 // theater — the same entry point as F11 (`Nokkvi::toggle_theater`)
 // ----------------------------------------------------------------------------

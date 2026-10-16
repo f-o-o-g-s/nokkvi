@@ -1972,6 +1972,16 @@ impl Nokkvi {
         self.playlist_appends.reset_for_session();
         self.roulette = None;
         self.playback.reset_for_session();
+        // The engine stop below reaches MPRIS and the tray only through the
+        // tick (`push_mpris_state`), which stands down without a shell, so a
+        // session that ends while playing would leave both saying Playing
+        // until the next login. Mirror the stop once, here.
+        if let Some(ref conn) = self.mpris_connection {
+            conn.set_playback_status(mpris_server::PlaybackStatus::Stopped);
+        }
+        if let Some(ref tray) = self.tray_connection {
+            tray.set_playing_state(false, "Nokkvi");
+        }
         // The scrobble latches gate one submission per track. A submission in
         // flight at logout never gets its result (the root drops it with the
         // session, `Message::SessionScoped`), so release them here: the same

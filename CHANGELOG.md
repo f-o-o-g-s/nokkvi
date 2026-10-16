@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- After a session ends (expired or Logout), `nokkvi status`, MPRIS and the tray report stopped instead of a frozen playing track.
+
 ### Removed
 
 ## v0.26.1 — 2026-10-15
