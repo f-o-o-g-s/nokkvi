@@ -305,9 +305,10 @@ fn shelf_song_batch(songs: &[Song], flavor: ShelfFlavor) -> impl Iterator<Item =
         .take(SHELF_SONG_BATCH)
 }
 
-/// Whether a one-press shelf has anything to play. One predicate for the
-/// activate SFX, the play and add-to-queue handlers and the Shift+A toast name,
-/// like [`has_random_pick`].
+/// Whether a one-press shelf has anything to play: the activate SFX and the
+/// Shift+A toast name read it, and `has_shelf_pick_agrees_with_what_a_press_plays`
+/// keeps it in step with `shelf_play_target`, which the play and add-to-queue
+/// handlers resolve. Like [`has_random_pick`].
 pub(crate) fn has_shelf_pick(harbour: &crate::state::HarbourState, id: HarbourSectionId) -> bool {
     match id {
         HarbourSectionId::RecentlyPlayed => {

@@ -295,7 +295,7 @@ mod tests {
         }
     }
 
-    /// Artists and playlists carry the same keys.
+    /// An artist with `fields` merged into its minimal JSON.
     fn raw_artist(fields: serde_json::Value) -> crate::types::artist::Artist {
         let mut v = json!({ "id": "ar1", "name": "X" });
         if let (Some(obj), Some(more)) = (v.as_object_mut(), fields.as_object()) {
