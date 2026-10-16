@@ -661,11 +661,18 @@ const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
 /// derives matching, also-time-based rebuffer thresholds.
 pub(crate) const CUSHION_MS: u64 = 1100;
 
-/// A finite track whose decoder reaches EOF more than this far short of its
-/// length is logged as ended early (`on_renderer_finished`): a live transcode
-/// whose socket closed mid-song, or a truncated file. Wide enough to cover a
-/// probed or `X-Content-Duration` length that is off by a second.
+/// A finite track whose decoder reaches EOF more than [`early_end_slack`]
+/// short of its length is logged as ended early (`on_renderer_finished`): a
+/// live transcode whose socket closed mid-song, or a truncated file.
 const EARLY_END_SLACK_MS: u64 = 2_000;
+
+/// How far short of `duration_ms` an end still counts as the real end: the
+/// probe's own tolerance (`sanitize_probed_duration` keeps a probed length
+/// within max(2 s, 5 %) of the server's, so a tagless VBR estimate can run
+/// that much long), never less than [`EARLY_END_SLACK_MS`].
+fn early_end_slack(duration_ms: u64) -> u64 {
+    EARLY_END_SLACK_MS.max(duration_ms / 20)
+}
 
 /// The decode loop releases backpressure (resumes decoding) once the ring drains
 /// to `CUSHION_MS / BACKPRESSURE_RELEASE_DIVISOR` of audio. `pub(crate)` so the
@@ -4601,6 +4608,7 @@ impl CustomAudioEngine {
         let decoder = self.decoder.lock().await;
         let is_eof = decoder.is_eof();
         let duration = decoder.duration();
+        let trims_leading_silence = decoder.trims_leading_silence();
         drop(decoder);
 
         let position = self.stream_position();
@@ -4632,8 +4640,14 @@ impl CustomAudioEngine {
                 is_eof, position, duration, position_indicates_finished
             );
             // The queue moves on either way, so this line is the only trace
-            // of a stream that lost its bytes before its end.
-            if is_eof && duration > 0 && position.saturating_add(EARLY_END_SLACK_MS) < duration {
+            // of a stream that lost its bytes before its end. A trimmed
+            // intro shortens the played length by an amount nothing counts,
+            // so a trimming decoder gets no verdict.
+            if is_eof
+                && !trims_leading_silence
+                && duration > 0
+                && position.saturating_add(early_end_slack(duration)) < duration
+            {
                 warn!(
                     " [RENDERER FINISHED] Track ended {}s early (pos={}ms, dur={}ms, \
                      delivery={:?})",

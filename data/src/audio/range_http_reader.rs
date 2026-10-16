@@ -862,11 +862,9 @@ mod tests {
     /// primitive (the two lines `Drop` runs) on a never-resolving task: it must
     /// stop promptly, and awaiting it must not hang or park a worker.
     ///
-    /// (We don't drop a full `RangeHttpReader` here: its `reqwest::blocking`
-    /// client owns an internal runtime that cannot be dropped inside a
-    /// `#[tokio::test]` async context. That blocking-client drop is unchanged
-    /// from the pre-read-ahead reader, which is dropped at the same gapless-swap
-    /// site in production; `Drop` only adds the non-blocking cancel+abort below.)
+    /// (We don't drop a full `RangeHttpReader` here: the two lines are what
+    /// `Drop` adds over the blocking client's own drop, which only joins the
+    /// client's thread and is unchanged from the pre-read-ahead reader.)
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_and_abort_stops_prefetch_task_promptly() {
         let cancel = CancellationToken::new();

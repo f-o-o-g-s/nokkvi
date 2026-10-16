@@ -1641,6 +1641,14 @@ impl AudioDecoder {
     }
 
     /// Check if decoder has reached end of file
+    /// Whether this decoder trims leading silence ("Skip Silence Between
+    /// Tracks" on a prepared transition decoder): its played length then
+    /// falls short of its duration by the trimmed intro, which nothing
+    /// counts, so the engine passes no verdict on an early end.
+    pub fn trims_leading_silence(&self) -> bool {
+        self.leading_trim != LeadingTrim::Off
+    }
+
     pub fn is_eof(&self) -> bool {
         self.eof
     }
