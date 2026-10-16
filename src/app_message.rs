@@ -539,7 +539,8 @@ pub enum ArtworkMessage {
     LoadLarge(String),
     /// A navigation step in `source`'s list (`None`: the Similar tab, as in
     /// `Nokkvi::current_target_view`) centred a row: its big panel cover is
-    /// fetched now, or once the selection settles (`Nokkvi::panel_art_step`).
+    /// fetched now, or once the full-size cover on its way lands
+    /// (`PanelArtGate`), or after `PANEL_ART_OVERDUE` (`Nokkvi::panel_art_step`).
     /// Sent by a path that plans the step while it borrows the rows (the
     /// queue's viewport warm); the others call `panel_art_step` directly.
     PanelArtStep {

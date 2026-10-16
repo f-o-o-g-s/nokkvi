@@ -454,6 +454,20 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Whether a step in `source`'s list (`None`: the Similar tab) steers the
+    /// big panel: the current view's list, and the browsing panel's active
+    /// tab while the split view is up. The pointer scrolls either pane;
+    /// keyboard focus (`current_target_view`) names only one of them, and
+    /// stays on the Queue while the mouse works a browsing tab.
+    pub(crate) fn panel_art_steered(&self, source: Option<View>) -> bool {
+        source == Some(self.current_view)
+            || (self.split_view_active()
+                && self
+                    .browsing_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.active_view.view() == source))
+    }
+
     /// A navigation step in `source`'s list (`None`: the Similar tab, as in
     /// [`Self::current_target_view`]) centred `target`. A step in the list
     /// the user is steering goes through the big panel's gate
@@ -471,7 +485,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::state::{PANEL_ART_OVERDUE, PanelArtStep};
 
-        if source != self.current_target_view() {
+        if !self.panel_art_steered(source) {
             return self.load_panel_art(target);
         }
         let cached = self.artwork.large_artwork.contains(&target.id().to_owned());
@@ -505,7 +519,7 @@ impl Nokkvi {
         source: Option<View>,
         target: crate::state::PanelArt,
     ) -> Task<Message> {
-        if self.artwork.panel_gate.overdue(&target) && source == self.current_target_view() {
+        if self.artwork.panel_gate.overdue(&target) && self.panel_art_steered(source) {
             self.send_panel_art(target)
         } else {
             Task::none()
@@ -643,7 +657,7 @@ impl Nokkvi {
         // (a cached cover shows at once), while its list is still the one
         // being steered; after a view switch or a pane change it is dropped.
         match self.artwork.panel_gate.landed(&id) {
-            Some((source, next)) if source == self.current_target_view() => {
+            Some((source, next)) if self.panel_art_steered(source) => {
                 self.panel_art_step(source, next)
             }
             Some(_) | None => Task::none(),

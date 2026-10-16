@@ -63,6 +63,28 @@ fn loading(app: &Nokkvi) -> Option<&str> {
     app.artwork.loading_large_artwork.as_deref()
 }
 
+/// The pointer scrolls the browsing pane's Albums tab while keyboard focus
+/// stays on the Queue: those steps steer the big panel too, so a cover on
+/// its way holds them like a step in the main view (each wheel notch used
+/// to send its own full-size request).
+#[test]
+fn a_browsing_tab_step_waits_for_the_cover_on_its_way() {
+    let mut app = albums_app(20);
+    app.current_view = View::Queue;
+    let mut panel = crate::views::BrowsingPanel::new();
+    panel.active_view = crate::views::BrowsingView::Albums;
+    app.browsing_panel = Some(panel);
+    assert!(app.split_view_active());
+
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
+    let second = album_step(&mut app);
+    assert_eq!(loading(&app), Some(first.as_str()), "the tab's step waits");
+
+    land(&mut app, &first);
+    assert_eq!(loading(&app), Some(second.as_str()));
+}
+
 #[test]
 fn a_step_with_nothing_on_its_way_fetches_at_once() {
     let mut app = albums_app(20);
