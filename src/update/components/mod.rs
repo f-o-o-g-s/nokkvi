@@ -2005,7 +2005,10 @@ impl Nokkvi {
             conn.set_playback_status(self.playback.transport().mpris());
         }
         if let Some(ref tray) = self.tray_connection {
-            tray.set_playing_state(false, "Nokkvi");
+            tray.set_playing_state(
+                false,
+                crate::update::playback::tray_title(&self.playback.title, &self.playback.artist),
+            );
         }
         // The scrobble latches gate one submission per track. A submission in
         // flight at logout never gets its result (the root drops it with the

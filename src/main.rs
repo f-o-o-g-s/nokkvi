@@ -1957,8 +1957,12 @@ mod cli_help_tests {
     fn help_lists_every_ipc_verb() {
         let help = verb_help();
         for verb in crate::update::IPC_KNOWN_COMMANDS {
+            let named = |line: &str| {
+                let line = line.trim_start();
+                line == *verb || line.starts_with(&format!("{verb} "))
+            };
             assert!(
-                help.lines().any(|line| line.trim_start().starts_with(verb)),
+                help.lines().any(named),
                 "`--help` must list `{verb}`:\n{help}"
             );
         }

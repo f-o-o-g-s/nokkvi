@@ -1320,17 +1320,28 @@ impl Nokkvi {
 
         // Mirror Play/Pause label + tooltip title to the system tray.
         if let Some(ref tray) = self.tray_connection {
-            let title = if mpris_title.is_empty() {
-                "Nokkvi".to_string()
-            } else if mpris_artist.is_empty() {
-                mpris_title.to_string()
-            } else {
-                format!("{mpris_title} — {mpris_artist}")
-            };
-            tray.set_playing_state(u.playing && !u.paused, title);
+            tray.set_playing_state(
+                u.playing && !u.paused,
+                tray_title(mpris_title, mpris_artist),
+            );
         }
     }
+}
 
+/// The tray's tooltip for a track: "title — artist", the title alone without
+/// an artist, the app name with no track. The tick's mirror and the logout
+/// push (`reset_session_state`) share it.
+pub(crate) fn tray_title(title: &str, artist: &str) -> String {
+    if title.is_empty() {
+        "Nokkvi".to_string()
+    } else if artist.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title} — {artist}")
+    }
+}
+
+impl Nokkvi {
     pub(crate) fn handle_toggle_play(&mut self) -> Task<Message> {
         // Nothing loaded and nothing in the queue — toast instead of silently failing.
         if !self.playback.playing && !self.playback.paused && self.library.queue_songs.is_empty() {

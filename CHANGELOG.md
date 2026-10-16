@@ -18,10 +18,10 @@ All notable changes to this project will be documented in this file.
 - A search or sort typed while a background reload is out no longer gets replaced by the reload's unfiltered rows.
 - Scrolling a browsing tab with the mouse now fetches one full-size cover at a time, like the main view.
 - Turning Lyrics or Cover Blur off releases the frosted cover from GPU memory.
-- A library an admin adds, removes or grants now appears in the library picker without a rescan or re-login.
+- The library picker now follows libraries an admin adds, removes or grants, without a rescan or re-login.
 - The clear-queue help line no longer claims it stops a playing radio station.
 - The library selection now belongs to the server and user it was made on, like the queue.
-- A play that fails while a station streams now hands radio mode back from every view, not only from Albums.
+- A queue-replacing play that fails while a station streams hands radio mode back from every view, not only from Albums.
 
 ### Removed
 

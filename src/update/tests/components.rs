@@ -1466,10 +1466,15 @@ fn the_play_prologue_is_not_copied() {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
+            // Clear Queue cancels the progressive load without playing.
+            let clears_queue = path.ends_with("hotkeys/queue.rs");
             for (i, line) in text.lines().enumerate() {
-                if line.contains(".enter_new_playback_context()")
-                    && !line.trim_start().starts_with("//")
-                {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let copied = line.contains(".enter_new_playback_context()")
+                    || (!clears_queue && line.contains(".cancel_progressive_queue_load()"));
+                if copied {
                     stray.push(format!(
                         "{}:{}",
                         path.strip_prefix(&src).unwrap().display(),

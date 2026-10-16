@@ -1138,8 +1138,8 @@ impl Nokkvi {
     /// seeded-random ordering and corrupt an in-progress Songs "Random"-sort
     /// pagination (see `services::api::random`). Takes the genre NAME — the
     /// endpoint's `genre` param matches the tag VALUE, and `Genre::id` from
-    /// `/api/genre` is a separate `tag.id` hash. Assumes the caller already ran
-    /// the play guard + new-context reset.
+    /// `/api/genre` is a separate `tag.id` hash. Runs the play prologue itself
+    /// (`queue_play_task`); a caller that guards first loses the radio hand-back.
     fn play_harbour_genre(&mut self, genre_name: String) -> Task<Message> {
         self.queue_play_task(
             move |shell| async move {
