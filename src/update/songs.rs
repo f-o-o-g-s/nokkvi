@@ -5,7 +5,7 @@ use nokkvi_data::{
     backend::songs::SongUIViewData,
     types::{ItemKind, OneShotShuffle, library_query::LibraryQuery, paged_buffer::PageSlot},
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::{
     Nokkvi, View,
@@ -181,14 +181,10 @@ impl Nokkvi {
                         )
                         .unwrap_or_else(Task::none);
                 }
-                // Every branch plays; only the replacing ones enter a new
-                // playback context, since Append and Play keeps the queue
-                // and anything still filling it. A stale index plays nothing,
-                // so it must not leave radio mode either.
-                if self.library.songs.get(index).is_none() {
-                    return Task::none();
-                }
-                self.guard_play_action();
+                // Every branch plays. Append and Play keeps the queue and
+                // anything still filling it, so it only guards; the replacing
+                // branches run the whole prologue inside `queue_play_task`. A
+                // stale index plays nothing, so it must not leave radio mode.
                 if let Some(song) = self.library.songs.get(index) {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);
 
@@ -197,32 +193,19 @@ impl Nokkvi {
                         EnterBehavior::PlaySingle => {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
-                            self.enter_new_playback_context();
-                            let play_task = self.shell_task(
+                            return self.queue_play_task(
                                 move |shell| async move {
                                     shell.play_songs(vec![song], 0, OneShotShuffle::None).await
                                 },
-                                |result| match result {
-                                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
-                                        View::Queue,
-                                    )),
-                                    Err(e) => {
-                                        error!(" Failed to play song: {}", e);
-                                        Message::Toast(crate::app_message::ToastMessage::Push(
-                                            nokkvi_data::types::toast::Toast::new(
-                                                format!("Failed to play song: {e}"),
-                                                nokkvi_data::types::toast::ToastLevel::Error,
-                                            ),
-                                        ))
-                                    }
-                                },
+                                || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                                "Failed to play song".into(),
                             );
-                            return play_task;
                         }
                         EnterBehavior::AppendAndPlay => {
                             // Append to existing queue and start playing
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             let title = song.title.clone();
+                            self.guard_play_action();
                             self.clear_active_playlist();
                             return self.shell_fire_and_forget_task(
                                 move |shell| async move { shell.add_song_and_play(song).await },
@@ -232,7 +215,6 @@ impl Nokkvi {
                         }
                         EnterBehavior::PlayAll => {
                             // Current behavior: replace queue with all songs
-                            self.enter_new_playback_context();
                             // CRITICAL FIX: Use the already-displayed songs list directly.
                             // Re-fetching would return a different random order for "random" sort mode,
                             // causing the wrong song to play. Convert SongUIViewData -> Song.
@@ -257,9 +239,6 @@ impl Nokkvi {
                                 Some(self.songs_page.common.search_query.clone())
                             };
 
-                            // Clear playlist context
-                            self.clear_active_playlist();
-
                             let shuffle = self.activate_shuffle_directive(force, false);
 
                             // Resolve-full (Q3): shuffling the whole Songs view fetches
@@ -277,7 +256,7 @@ impl Nokkvi {
                                 // NavigateAndFilter) so the full-resolve shuffles the
                                 // FILTERED population, not the whole library.
                                 let filter = self.songs_page.common.active_filter.clone();
-                                return self.shell_task(
+                                return self.queue_play_task(
                                     move |shell| async move {
                                         let library_ids = shell.active_library_ids_vec();
                                         let all = shell
@@ -296,20 +275,12 @@ impl Nokkvi {
                                             .await?;
                                         shell.play_songs(all, 0, OneShotShuffle::Full).await
                                     },
-                                    |result| match result {
-                                        Ok(()) => Message::Navigation(
-                                            NavigationMessage::SwitchView(View::Queue),
-                                        ),
-                                        Err(e) => {
-                                            error!(" Failed to shuffle-play all songs: {}", e);
-                                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                                nokkvi_data::types::toast::Toast::new(
-                                                    format!("Failed to shuffle songs: {e}"),
-                                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                                ),
-                                            ))
-                                        }
+                                    || {
+                                        Message::Navigation(NavigationMessage::SwitchView(
+                                            View::Queue,
+                                        ))
                                     },
+                                    "Failed to shuffle songs".into(),
                                 );
                             }
 
@@ -323,24 +294,12 @@ impl Nokkvi {
                                 .cloned()
                                 .map(|ui| ui.into())
                                 .collect();
-                            let play_task = self.shell_task(
+                            let play_task = self.queue_play_task(
                                 move |shell| async move {
                                     shell.play_songs(songs, index, shuffle).await
                                 },
-                                |result| match result {
-                                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
-                                        View::Queue,
-                                    )),
-                                    Err(e) => {
-                                        error!(" Failed to play song: {}", e);
-                                        Message::Toast(crate::app_message::ToastMessage::Push(
-                                            nokkvi_data::types::toast::Toast::new(
-                                                format!("Failed to play song: {e}"),
-                                                nokkvi_data::types::toast::ToastLevel::Error,
-                                            ),
-                                        ))
-                                    }
-                                },
+                                || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                                "Failed to play song".into(),
                             );
 
                             // Phase 2: Background-fetch remaining pages and append to queue.

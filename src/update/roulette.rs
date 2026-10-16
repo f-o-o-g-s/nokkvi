@@ -385,12 +385,10 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let genre = genre.genre_ref();
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                self.shell_action_task(
+                self.queue_play_task(
                     move |shell| async move { shell.play_genre_random(&genre).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play random song from genre",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play random song from genre".into(),
                 )
             }
             View::Artists => {
@@ -398,12 +396,10 @@ impl Nokkvi {
                     return Task::none();
                 };
                 let id = artist.id.clone();
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                self.shell_action_task(
+                self.queue_play_task(
                     move |shell| async move { shell.play_artist_random(&id).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play random song from artist",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play random song from artist".into(),
                 )
             }
             // No ViewPage and nothing to pick — unreachable in practice

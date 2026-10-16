@@ -196,19 +196,20 @@ impl Nokkvi {
 
     /// Pre-play hook for every Play* handler: transition radio playback back to
     /// queue mode so the upcoming queue play leaves the app in queue mode.
-    /// Idempotent. The play-task builders ([`Self::play_batch_task`],
-    /// [`Self::play_batch_in_place_task`], [`Self::play_entity_task`]) run it
-    /// themselves; a handler that plays through anything else calls it first.
+    /// Every call is a new play attempt, so a play calls it once:
+    /// [`Self::queue_play_task`] runs it for every queue-replacing play, and
+    /// an Append and Play branch (which keeps the queue) calls it alone.
     ///
     /// Nothing blocks a play any more: the playlist editor
     /// (`View::PlaylistEditor`) owns a track buffer fully decoupled from the
     /// live queue, so a play cannot disturb an edit session.
     ///
     /// Play actions that **replace queue contents** (album/artist/genre/
-    /// playlist/song/batch/roulette) should additionally call
-    /// [`Self::enter_new_playback_context`]. Play actions that only advance
-    /// the playback pointer within the existing queue (`PlaySong` inside the
-    /// queue view) must NOT — doing so clears the loaded-playlist header.
+    /// playlist/song/batch/roulette) go through [`Self::queue_play_task`],
+    /// which also calls [`Self::enter_new_playback_context`]. Play actions
+    /// that only advance the playback pointer within the existing queue
+    /// (`PlaySong` inside the queue view) must NOT — doing so clears the
+    /// loaded-playlist header.
     pub(crate) fn guard_play_action(&mut self) {
         // Every call is a new play attempt: a failure of an older one must
         // not hand radio mode back over it.
@@ -352,8 +353,32 @@ impl Nokkvi {
         F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
     {
+        self.queue_play_task_with(|_| (), move |shell, ()| play(shell), on_ok, failure)
+    }
+
+    /// [`Self::queue_play_task`] with a step between the prologue and the
+    /// task: `prepare` runs once the prologue has reset the previous context
+    /// and hands `play` what it computed. For the plays whose pre-play state
+    /// the prologue would otherwise erase: the Playing From header a playlist
+    /// play sets (`enter_new_playback_context` clears it). Every
+    /// queue-replacing play goes through one of the two
+    /// (`the_play_prologue_is_not_copied`); a play that only appends
+    /// (Append and Play) calls [`Self::guard_play_action`] alone.
+    pub(crate) fn queue_play_task_with<P, F, Fut>(
+        &mut self,
+        prepare: impl FnOnce(&mut Self) -> P,
+        play: F,
+        on_ok: impl FnOnce() -> Message + Send + 'static,
+        failure: String,
+    ) -> Task<Message>
+    where
+        P: Send + 'static,
+        F: FnOnce(nokkvi_data::backend::app_service::AppService, P) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
+    {
         self.guard_play_action();
         self.enter_new_playback_context();
+        let prepared = prepare(self);
         let attempt = self.playback.play_attempt.current();
         // Only the play whose own guard left the station may bring it back:
         // if an earlier play left it, that play may still be resolving, and
@@ -366,7 +391,7 @@ impl Nokkvi {
             .map(|left| left.radio.station.stream_url.clone());
         self.shell_task(
             move |shell| async move {
-                let result = play(shell.clone()).await;
+                let result = play(shell.clone(), prepared).await;
                 let station_still_on = match (&result, left_station_url) {
                     (Err(_), Some(url)) => shell.engine_source_is(&url).await,
                     _ => false,

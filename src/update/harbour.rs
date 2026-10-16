@@ -877,11 +877,7 @@ impl Nokkvi {
             PlayTarget::Item(batch) => {
                 self.play_batch_task(BatchPayload::new().with_item(batch), force)
             }
-            PlayTarget::GenreRandom(name) => {
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                self.play_harbour_genre(name)
-            }
+            PlayTarget::GenreRandom(name) => self.play_harbour_genre(name),
             // A song shelf's batch, in the shelf's order; Ctrl+Enter and Shuffle
             // Play on Enter shuffle it like any other batch.
             PlayTarget::Songs(songs) => self.play_batch_task(song_batch(songs), force),
@@ -1047,45 +1043,39 @@ impl Nokkvi {
                 if self.harbour.random_songs.is_empty() {
                     return no_pick(self);
                 }
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                self.clear_active_playlist();
                 let songs = self.harbour.random_songs.clone();
-                self.shell_action_task(
+                self.queue_play_task(
                     move |shell| async move { shell.play_songs(songs, 0, OneShotShuffle::None).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play random songs",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play random songs".into(),
                 )
             }
             RandomKind::Genres => {
                 let Some(name) = self.harbour.random_genre.as_ref().map(|g| g.name.clone()) else {
                     return no_pick(self);
                 };
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                self.clear_active_playlist();
                 self.play_harbour_genre(name)
             }
             RandomKind::Playlists => {
                 let Some(playlist) = self.harbour.random_playlist.clone() else {
                     return no_pick(self);
                 };
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                // The Playlists view's PlayAll contract: set the queue header's
-                // "Playing From" context BEFORE the play so the strip renders
-                // it on arrival (handle_queue_loaded freezes the strip quad
-                // from it).
-                self.active_playlist_info = Some(
-                    crate::state::ActivePlaylistContext::from_playlist(&playlist),
-                );
-                self.persist_active_playlist_info();
-                let shuffle = self.activate_shuffle_directive(force, false);
-                let id = playlist.id;
-                self.shell_action_task(
-                    move |shell| async move { shell.play_playlist(&id, shuffle).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play playlist",
+                // The Playlists view's PlayAll contract: the queue header's
+                // "Playing From" context is set after the prologue (which
+                // clears it) and before the play, so the strip renders it on
+                // arrival (handle_queue_loaded freezes the strip quad from it).
+                let id = playlist.id.clone();
+                self.queue_play_task_with(
+                    move |app| {
+                        app.active_playlist_info = Some(
+                            crate::state::ActivePlaylistContext::from_playlist(&playlist),
+                        );
+                        app.persist_active_playlist_info();
+                        app.activate_shuffle_directive(force, false)
+                    },
+                    move |shell, shuffle| async move { shell.play_playlist(&id, shuffle).await },
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play playlist".into(),
                 )
             }
         }
@@ -1150,14 +1140,14 @@ impl Nokkvi {
     /// endpoint's `genre` param matches the tag VALUE, and `Genre::id` from
     /// `/api/genre` is a separate `tag.id` hash. Assumes the caller already ran
     /// the play guard + new-context reset.
-    fn play_harbour_genre(&self, genre_name: String) -> Task<Message> {
-        self.shell_action_task(
+    fn play_harbour_genre(&mut self, genre_name: String) -> Task<Message> {
+        self.queue_play_task(
             move |shell| async move {
                 let songs = random_genre_songs(&shell, &genre_name).await?;
                 shell.play_songs(songs, 0, OneShotShuffle::None).await
             },
-            Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-            "play genre",
+            || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+            "Failed to play genre".into(),
         )
     }
 

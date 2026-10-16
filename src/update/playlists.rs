@@ -307,13 +307,12 @@ impl Nokkvi {
                         "add playlist to queue",
                     );
                 }
-                // Both branches play; only the replacing one enters a new
-                // playback context, since Append and Play keeps the queue
-                // and anything still filling it.
-                self.guard_play_action();
-                // AppendAndPlay: append playlist songs to queue and start playing
+                // Both branches play. Append and Play keeps the queue and
+                // anything still filling it, so it only guards; the replacing
+                // play runs the whole prologue inside `queue_play_task_with`.
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
+                    self.guard_play_action();
                     let name = self
                         .library
                         .playlists
@@ -330,22 +329,26 @@ impl Nokkvi {
                         "append playlist and play",
                     );
                 }
-                // PlayAll / PlaySingle: replace queue with playlist. The new
-                // context must be entered BEFORE the header is set below.
-                self.enter_new_playback_context();
-                // Set the active playlist info for the queue header bar
-                self.active_playlist_info = self
-                    .library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == playlist_id)
-                    .map(crate::state::ActivePlaylistContext::from_playlist);
-                self.persist_active_playlist_info();
-                let shuffle = self.activate_shuffle_directive(force, false);
-                return self.shell_action_task(
-                    move |shell| async move { shell.play_playlist(&playlist_id, shuffle).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play playlist",
+                // PlayAll / PlaySingle: replace queue with playlist. The queue
+                // header's "Playing From" context is set after the prologue
+                // (which clears it) and before the play.
+                let header_id = playlist_id.clone();
+                return self.queue_play_task_with(
+                    move |app| {
+                        app.active_playlist_info = app
+                            .library
+                            .playlists
+                            .iter()
+                            .find(|p| p.id == header_id)
+                            .map(crate::state::ActivePlaylistContext::from_playlist);
+                        app.persist_active_playlist_info();
+                        app.activate_shuffle_directive(force, false)
+                    },
+                    move |shell, shuffle| async move {
+                        shell.play_playlist(&playlist_id, shuffle).await
+                    },
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play playlist".into(),
                 );
             }
             views::PlaylistsAction::PlayBatch(payload, force) => {
@@ -389,30 +392,27 @@ impl Nokkvi {
             }
             views::PlaylistsAction::PlayPlaylistFromTrack(playlist_id, track_idx, force) => {
                 // Mirror the album-sibling prologue (`AlbumsAction::PlayAlbumFromTrack`):
-                // guard the play (radio→queue transition) then
-                // enter a new playback context (clears a stale queue_loading_target).
-                // Ordering is load-bearing — `enter_new_playback_context()` calls
-                // `clear_active_playlist()` which NULLs `active_playlist_info`, so it
-                // MUST run before the set+persist below.
-                self.guard_play_action();
-                self.enter_new_playback_context();
-                // Set the active playlist info for the queue header bar
-                self.active_playlist_info = self
-                    .library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == playlist_id)
-                    .map(crate::state::ActivePlaylistContext::from_playlist);
-                self.persist_active_playlist_info();
-                let shuffle = self.activate_shuffle_directive(force, true);
-                return self.shell_action_task(
-                    move |shell| async move {
+                // The queue header's "Playing From" context is set after the
+                // prologue (which clears it) and before the play.
+                let header_id = playlist_id.clone();
+                return self.queue_play_task_with(
+                    move |app| {
+                        app.active_playlist_info = app
+                            .library
+                            .playlists
+                            .iter()
+                            .find(|p| p.id == header_id)
+                            .map(crate::state::ActivePlaylistContext::from_playlist);
+                        app.persist_active_playlist_info();
+                        app.activate_shuffle_directive(force, true)
+                    },
+                    move |shell, shuffle| async move {
                         shell
                             .play_playlist_from_track(&playlist_id, track_idx, shuffle)
                             .await
                     },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play playlist from track",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play playlist from track".into(),
                 );
             }
 

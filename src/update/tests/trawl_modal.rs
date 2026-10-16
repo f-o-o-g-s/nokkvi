@@ -316,12 +316,12 @@ fn play_mix_with_empty_crate_is_a_noop() {
 }
 
 #[test]
-fn play_mix_completed_ok_closes_the_modal() {
+fn play_mix_played_closes_the_modal() {
     let mut app = test_app();
     open_modal(&mut app);
     app.trawl.mix.add(seed("al1"));
 
-    let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMixCompleted(Ok(())));
+    let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMixPlayed);
     assert!(app.trawl.modal.is_none(), "success closes the modal");
     assert!(
         !app.trawl.mix.is_empty(),
@@ -330,14 +330,18 @@ fn play_mix_completed_ok_closes_the_modal() {
 }
 
 #[test]
-fn play_mix_completed_err_keeps_modal_open_and_toasts() {
+fn a_failed_mix_play_keeps_modal_open_and_toasts() {
     let mut app = test_app();
     open_modal(&mut app);
     app.trawl.mix.add(seed("al1"));
 
-    let _ = app.handle_trawl_modal(TrawlModalMessage::PlayMixCompleted(Err(
-        "Mix is empty — every song was under 1:00. Lower the minimum length.".into(),
-    )));
+    // The builder's failure message, as `queue_play_task` sends it.
+    let failed = crate::Nokkvi::queue_play_failure_message(
+        &anyhow::anyhow!("Mix is empty — every song was under 1:00. Lower the minimum length."),
+        "Failed to play mix",
+        None,
+    );
+    let _ = app.update(failed);
     assert!(
         app.trawl.modal.is_some(),
         "failure keeps the modal open so the user can adjust"

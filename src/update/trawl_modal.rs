@@ -168,39 +168,23 @@ impl Nokkvi {
                     self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
-                // Same pre-play ritual as play_batch_task: radio → queue
-                // transition, then reset the previous playback context
-                // (loading target + active playlist).
-                self.guard_play_action();
-                self.enter_new_playback_context();
+                // A queue-replacing play like any other (the prologue, the
+                // failure toast, the radio hand-back). A failure leaves the
+                // modal open: "every song was under 1:00" is actionable right
+                // here (lower the minimum, re-play).
                 let mix = self.trawl.mix.clone();
-                self.shell_task(
+                self.queue_play_task(
                     move |shell| async move { shell.play_trawl(&mix).await },
-                    |result| {
-                        Message::TrawlModal(TrawlModalMessage::PlayMixCompleted(
-                            result.map_err(|e| format!("{e:#}")),
-                        ))
-                    },
+                    || Message::TrawlModal(TrawlModalMessage::PlayMixPlayed),
+                    "Failed to play mix".into(),
                 )
             }
-            TrawlModalMessage::PlayMixCompleted(result) => match result {
-                Ok(()) => {
-                    self.trawl.modal = None;
-                    Task::done(Message::Navigation(
-                        crate::app_message::NavigationMessage::SwitchView(crate::View::Queue),
-                    ))
-                }
-                Err(e) => {
-                    if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
-                        return self.handle_session_expired();
-                    }
-                    error!(" Failed to play mix: {e}");
-                    // Keep the modal open — "every song was under 1:00" is
-                    // actionable right here (lower the minimum, re-play).
-                    self.toast_error(format!("Failed to play mix: {e}"));
-                    Task::none()
-                }
-            },
+            TrawlModalMessage::PlayMixPlayed => {
+                self.trawl.modal = None;
+                Task::done(Message::Navigation(
+                    crate::app_message::NavigationMessage::SwitchView(crate::View::Queue),
+                ))
+            }
             TrawlModalMessage::AddMixToQueue => {
                 if self.trawl.mix.is_empty() {
                     // Reachable via Shift+A with nothing seeded — same warn as

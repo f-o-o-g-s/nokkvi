@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - A library an admin adds, removes or grants now appears in the library picker without a rescan or re-login.
 - The clear-queue help line no longer claims it stops a playing radio station.
 - The library selection now belongs to the server and user it was made on, like the queue.
+- A play that fails while a station streams now hands radio mode back from every view, not only from Albums.
 
 ### Removed
 

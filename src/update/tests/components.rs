@@ -1436,3 +1436,51 @@ fn text_inputs_take_focus_with_the_caret_at_the_end() {
         stray.join("\n")
     );
 }
+
+/// The queue-replacing play prologue (`guard_play_action` +
+/// `enter_new_playback_context`, the attempt bookkeeping and the radio
+/// hand-back on failure) lives in `queue_play_task` / `queue_play_task_with`
+/// alone. Fifteen handlers once copied the first two lines and lost the rest;
+/// the next copy would drift again.
+#[test]
+fn the_play_prologue_is_not_copied() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let home = src.join("update").join("components").join("mod.rs");
+    let tests = src.join("update").join("tests");
+    let mut stray = Vec::new();
+    let mut dirs = vec![src.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path != tests {
+                    dirs.push(path);
+                }
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.extension().is_none_or(|e| e != "rs")
+                || path == home
+                || name.starts_with("tests_")
+            {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                if line.contains(".enter_new_playback_context()")
+                    && !line.trim_start().starts_with("//")
+                {
+                    stray.push(format!(
+                        "{}:{}",
+                        path.strip_prefix(&src).unwrap().display(),
+                        i + 1
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        stray.is_empty(),
+        "the play prologue is copied outside queue_play_task: {stray:?}"
+    );
+}

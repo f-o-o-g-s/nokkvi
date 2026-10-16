@@ -139,7 +139,8 @@ pub enum TrawlModalMessage {
     ClearCrate,
     /// Ctrl+Enter / the Play Mix CTA.
     PlayMix,
-    PlayMixCompleted(Result<(), String>),
+    /// The mix is playing (the play's failure toasts through the builder).
+    PlayMixPlayed,
     AddMixToQueue,
     AddMixCompleted(Result<usize, String>),
     /// Shift+P / the Save as Playlist CTA — resolve the mix, then hand the

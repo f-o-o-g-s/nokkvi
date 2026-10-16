@@ -590,13 +590,11 @@ impl Nokkvi {
                         "add album to queue",
                     );
                 }
-                self.guard_play_action();
-                self.enter_new_playback_context();
                 let shuffle = self.activate_shuffle_directive(force, false);
-                return self.shell_action_task(
+                return self.queue_play_task(
                     move |shell| async move { shell.play_album(&album_id, shuffle).await },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play album",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play album".into(),
                 );
             }
 

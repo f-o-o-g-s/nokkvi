@@ -894,17 +894,15 @@ impl Nokkvi {
                     }
                     return Task::none();
                 }
-                self.guard_play_action();
-                self.enter_new_playback_context();
                 let shuffle = self.activate_shuffle_directive(force, true);
-                return self.shell_action_task(
+                return self.queue_play_task(
                     move |shell| async move {
                         shell
                             .play_album_from_track(&album_id, track_idx, shuffle)
                             .await
                     },
-                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                    "play album from track",
+                    || Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "Failed to play album from track".into(),
                 );
             }
 
