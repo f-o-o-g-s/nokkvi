@@ -38,6 +38,10 @@ pub(crate) const QUEUE_OWNER: &str = "queue_owner";
 /// owner key + separator + part (`order`, `songs`, `playlist`). See
 /// `services::queue::slots`.
 pub(crate) const QUEUE_SLOT_PREFIX: &str = "queue_slot";
+/// The user's multi-library (music folder) selection: a bincode
+/// `HashSet<i32>`. An empty set is "no filter", the same shape a fresh
+/// state reports.
+pub(crate) const ACTIVE_LIBRARY_IDS: &str = "active_library_ids";
 /// Bincode blob of remembered radio now-playing (ICY) artwork, keyed by
 /// station id and namespaced by server URL. Written/read by
 /// [`crate::services::radio_art_store::RadioArtStore`].
@@ -49,6 +53,8 @@ pub(crate) const QUEUE_SLOT_PREFIX: &str = "queue_slot";
 /// under a new station's id; with that bug fixed in code, migrating is safe and
 /// any leftover wrong entry can be cleared per-station via "Refresh artwork".
 pub(crate) const RADIO_ART_INDEX: &str = "radio_art_index_v2";
+/// The pre-`_v2` key, read once and deleted by `RadioArtStore::load_migrating`.
+pub(crate) const RADIO_ART_INDEX_LEGACY: &str = "radio_art_index";
 /// ListenBrainz user submission token for direct **radio** scrobbling. The
 /// `radio_` prefix is deliberate: library scrobbling rides Navidrome's own
 /// server-side keys, so these keys must read as radio-only and never be
@@ -84,7 +90,9 @@ mod tests {
         assert_eq!(QUEUE_SONGS, "queue_songs");
         assert_eq!(QUEUE_OWNER, "queue_owner");
         assert_eq!(QUEUE_SLOT_PREFIX, "queue_slot");
+        assert_eq!(ACTIVE_LIBRARY_IDS, "active_library_ids");
         assert_eq!(RADIO_ART_INDEX, "radio_art_index_v2");
+        assert_eq!(RADIO_ART_INDEX_LEGACY, "radio_art_index");
         assert_eq!(LISTENBRAINZ_TOKEN, "radio_listenbrainz_token");
         assert_eq!(LASTFM_API_KEY, "radio_lastfm_api_key");
         assert_eq!(LASTFM_API_SECRET, "radio_lastfm_api_secret");

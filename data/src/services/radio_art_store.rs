@@ -18,18 +18,16 @@ use std::collections::HashMap;
 use anyhow::Result;
 use bincode_next::{Decode, Encode};
 
-use crate::services::{state_storage::StateStorage, storage_keys::RADIO_ART_INDEX};
+use crate::services::{
+    state_storage::StateStorage,
+    storage_keys::{RADIO_ART_INDEX, RADIO_ART_INDEX_LEGACY},
+};
 
 /// Max number of stations whose art is retained on disk.
 const MAX_ENTRIES: usize = 96;
 /// Max total bytes retained on disk across all entries (belt-and-braces with
 /// `MAX_ENTRIES` so an unusually large image can't blow up the blob).
 const MAX_TOTAL_BYTES: usize = 48 * 1024 * 1024;
-
-/// Pre-`_v2` redb key. A short-lived earlier build used this key; its blob is
-/// merged forward into [`RADIO_ART_INDEX`] once (then deleted) so remembered
-/// art isn't lost across the key change. See [`RadioArtStore::load_migrating`].
-const LEGACY_RADIO_ART_INDEX: &str = "radio_art_index";
 
 /// Serializes the whole-blob read-modify-write across every `RadioArtStore`
 /// (each `new()` wraps the same shared redb). `load_binary` (a read txn) and
@@ -104,14 +102,14 @@ impl RadioArtStore {
     }
 
     /// One-time forward migration of the pre-`_v2` blob, then load. Merges any
-    /// [`LEGACY_RADIO_ART_INDEX`] entries (for the same server) into the current
+    /// [`RADIO_ART_INDEX_LEGACY`] entries (for the same server) into the current
     /// blob without overwriting newer ones, persists, deletes the legacy key,
     /// and returns the merged records. Idempotent: once the legacy key is gone
     /// this is just [`Self::load_for_server`]. Returns the migrated count too,
     /// for logging.
     pub fn load_migrating(&self, server: &str) -> (Vec<RadioArtRecord>, usize) {
         let _guard = blob_write_guard();
-        let legacy = self.load_blob_key(LEGACY_RADIO_ART_INDEX);
+        let legacy = self.load_blob_key(RADIO_ART_INDEX_LEGACY);
         let mut migrated = 0usize;
         // Only migrate + delete when the legacy blob is for THIS server — a
         // different-server legacy is left untouched (no cross-server data loss;
@@ -136,7 +134,7 @@ impl RadioArtStore {
             if self.storage.save_binary(RADIO_ART_INDEX, &current).is_ok() {
                 // A leftover legacy blob is merged again next launch, which
                 // the forward write makes harmless.
-                if let Err(e) = self.storage.remove(LEGACY_RADIO_ART_INDEX) {
+                if let Err(e) = self.storage.remove(RADIO_ART_INDEX_LEGACY) {
                     tracing::debug!("legacy radio-art index not removed: {e}");
                 }
             } else {
@@ -354,7 +352,7 @@ mod tests {
         };
         store
             .storage
-            .save_binary(LEGACY_RADIO_ART_INDEX, &blob)
+            .save_binary(RADIO_ART_INDEX_LEGACY, &blob)
             .unwrap();
     }
 

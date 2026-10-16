@@ -29,10 +29,9 @@ use crate::{
             lastfm::{LastfmClient, LastfmSession, is_invalid_session},
             listenbrainz::{DEFAULT_API_URL, ListenBrainzClient, TokenValidation},
         },
-        state_storage::ACTIVE_LIBRARY_IDS_KEY,
         storage_keys::{
-            LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_USERNAME,
-            LISTENBRAINZ_TOKEN,
+            ACTIVE_LIBRARY_IDS, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY,
+            LASTFM_USERNAME, LISTENBRAINZ_TOKEN,
         },
         task_manager::TaskManager,
     },
@@ -154,7 +153,7 @@ impl AppService {
         // (validating each ID against the server's current library list)
         // happens lazily on the first `refresh_libraries` call.
         let active_library_ids: HashSet<i32> = match storage
-            .load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS_KEY)
+            .load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS)
         {
             Ok(Some(set)) => {
                 debug!(
@@ -2312,7 +2311,7 @@ impl AppService {
             (guard.clone(), now_active)
         };
 
-        if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &snapshot) {
+        if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS, &snapshot) {
             warn!("[APP SERVICE] failed to persist active_library_ids after toggling {id}: {e}");
         }
 
@@ -2360,7 +2359,7 @@ impl AppService {
                 " [APP SERVICE] pruned active_library_ids to {} entries after server refresh",
                 pruned.len()
             );
-            if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &pruned) {
+            if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS, &pruned) {
                 warn!("[APP SERVICE] failed to persist pruned active_library_ids: {e}");
             }
         }
