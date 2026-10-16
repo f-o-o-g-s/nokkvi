@@ -23,7 +23,7 @@ use anyhow::Result;
 use tracing::{debug, warn};
 
 use crate::{
-    services::api::{client::ApiClient, parse, subsonic},
+    services::api::{client::ApiClient, subsonic},
     types::song::Song,
 };
 
@@ -107,32 +107,21 @@ impl RandomApiService {
         let genre = genre.filter(|g| !g.is_empty());
         let params = Self::build_random_songs_params(&size_str, genre, &library_id_strings);
 
-        // Deliberately checks the HTTP + inner Subsonic status BEFORE parsing
-        // (unlike the lenient `subsonic_get_envelope` list pipeline, and for the
-        // same reason `get_play_queue_by_index` does): Navidrome returns every
-        // Subsonic error as HTTP 200 with a `status:"failed"` envelope, which
-        // also lacks `randomSongs` — so without the check a stale credential or
-        // an inaccessible `musicFolderId` would parse to `Ok(vec![])` and reach
-        // the user as "this library has nothing to play".
-        let response = subsonic::subsonic_post(
+        // The checked reader: a failed envelope inside HTTP 200 also lacks
+        // `randomSongs`, so an unchecked read would hand a stale credential or
+        // an inaccessible `musicFolderId` to the user as "this library has
+        // nothing to play".
+        let inner: RandomSongsResponseInner = subsonic::subsonic_get_envelope_checked(
             &self.client.http_client(),
             &self.server_url,
             "getRandomSongs",
             &self.subsonic_credential,
             &params,
+            "get random songs",
         )
         .await?;
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        subsonic::check_subsonic_response_status(status, &body, "get random songs")?;
-        let envelope: subsonic::SubsonicEnvelope<RandomSongsResponseInner> =
-            parse::parse_json_with_preview(&body, "getRandomSongs")?;
 
-        let songs = envelope
-            .response
-            .random_songs
-            .and_then(|s| s.song)
-            .unwrap_or_default();
+        let songs = inner.random_songs.and_then(|s| s.song).unwrap_or_default();
 
         debug!(
             "🎲 getRandomSongs: {} songs (size={clamped}, genre={genre:?})",
