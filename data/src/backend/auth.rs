@@ -273,6 +273,13 @@ impl AuthGateway {
         auth_service.set_token_refresh_callback(callback);
     }
 
+    /// A refreshed JWT from an answer that did not pass through the client
+    /// (see `AuthService::apply_refreshed_token`).
+    pub async fn apply_refreshed_token(&self, header_value: &str) {
+        let auth_service = self.auth_service.lock().await;
+        auth_service.apply_refreshed_token(header_value);
+    }
+
     /// Get API client (cloned) - for initializing other ViewModels
     pub async fn get_client(&self) -> Option<ApiClient> {
         let auth_service = self.auth_service.lock().await;

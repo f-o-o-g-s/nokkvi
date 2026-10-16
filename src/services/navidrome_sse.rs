@@ -291,6 +291,18 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                         continue;
                     }
 
+                    // Navidrome refreshes the JWT on this answer like on every
+                    // native one; a session with no native traffic (playing
+                    // from the Queue all day) would otherwise reconnect with
+                    // an ageing token and 401 at its 48 h expiry.
+                    if let Some(refreshed) = response
+                        .headers()
+                        .get("x-nd-authorization")
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        info.auth_gateway.apply_refreshed_token(refreshed).await;
+                    }
+
                     info!(" [SSE] Connected to Navidrome event stream");
                     // Record connection start so the post-disconnect backoff
                     // (`next_backoff`) can tell a healthy connection (reset the

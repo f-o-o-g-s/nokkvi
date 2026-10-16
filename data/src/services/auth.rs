@@ -263,6 +263,19 @@ impl AuthService {
             client.set_on_token_refresh(callback);
         }
     }
+
+    /// A refreshed JWT from an `X-ND-Authorization` answer header that did
+    /// not pass through the client (the event stream's connect: Navidrome
+    /// refreshes the token on it like on every native answer). Applied like
+    /// the client's own interception, persistence callback included, so a
+    /// session with no native traffic still rotates its token on each
+    /// reconnect instead of running into the 48 h expiry.
+    pub fn apply_refreshed_token(&self, header_value: &str) {
+        if let Some(client) = &self.client {
+            let token = header_value.strip_prefix("Bearer ").unwrap_or(header_value);
+            client.apply_refreshed_token(token);
+        }
+    }
 }
 
 /// How long the version ping may take: it runs beside the login's other
@@ -521,8 +534,11 @@ mod tests {
         auth.get_client()
             .expect("a resumed session has a client")
             .apply_refreshed_token("jwt-rotated");
-
         assert_eq!(auth.get_token(), "jwt-rotated");
+
+        // The event stream's connect answer carries the header's value.
+        auth.apply_refreshed_token("Bearer jwt-from-sse");
+        assert_eq!(auth.get_token(), "jwt-from-sse");
     }
 
     /// The version ping is the shared Subsonic POST: a hand-built GET once
