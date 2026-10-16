@@ -357,12 +357,15 @@ impl AppService {
         match slots::claim(&self.storage, &owner, current_playlist, legacy)? {
             QueueClaim::Kept => {}
             QueueClaim::Replaced { playlist, restored } => {
+                // The selection moved with the queue (`slots::SlotPart::Libraries`);
+                // `new_with_storage` read the previous owner's. First, before
+                // anything below can fail: with the old owner's set still in
+                // memory, the login's library refresh would prune it against
+                // the new server and persist it over the new owner's key.
+                *self.active_library_ids.write() = stored_library_selection(&self.storage);
                 self.queue_service.reload_from_storage().await;
                 self.playback.resync_navigator_with_queue().await;
                 self.settings_service.set_active_playlist(playlist).await?;
-                // The selection moved with the queue (`slots::SlotPart::Libraries`);
-                // `new_with_storage` read the previous owner's.
-                *self.active_library_ids.write() = stored_library_selection(&self.storage);
                 info!(
                     " [QUEUE] {} for {}",
                     if restored {

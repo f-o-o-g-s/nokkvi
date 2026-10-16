@@ -816,10 +816,10 @@ impl Nokkvi {
                     ),
                     // Fetch the multi-library list at login so the nav-bar
                     // trigger knows the count (and hides itself when
-                    // N<=1). Persisted active_library_ids was already
-                    // restored by AppService::new_with_storage; this
-                    // refresh prunes any now-deleted libraries from that
-                    // set against the live server (plan §14.4).
+                    // N<=1). The persisted selection is already in memory
+                    // (AppService::new_with_storage, or the session claim
+                    // after an owner switch); this refresh prunes any
+                    // now-deleted libraries from it against the live server.
                     self.shell_task(
                         |shell| async move { shell.refresh_libraries().await },
                         |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
