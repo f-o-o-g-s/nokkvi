@@ -1977,7 +1977,7 @@ impl Nokkvi {
         // session that ends while playing would leave both saying Playing
         // until the next login. Mirror the stop once, here.
         if let Some(ref conn) = self.mpris_connection {
-            conn.set_playback_status(mpris_server::PlaybackStatus::Stopped);
+            conn.set_playback_status(self.playback.transport().mpris());
         }
         if let Some(ref tray) = self.tray_connection {
             tray.set_playing_state(false, "Nokkvi");

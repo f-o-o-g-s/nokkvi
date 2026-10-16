@@ -175,7 +175,7 @@
 //! otherwise the queue pair replies with its null payload and theater stays.
 
 use iced::Task;
-use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction, queue::RepeatMode};
+use nokkvi_data::types::{ItemKind, hotkey_config::HotkeyAction};
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
@@ -199,9 +199,15 @@ use crate::{
 /// See the module-level docs for the five arm shapes and the decision rule.
 macro_rules! define_commands {
     (
-        $( $verb:literal => $kind:ident $arg:tt ; )+ $(,)?
+        $( $verb:literal => $kind:ident $arg:tt, help ($usage:literal, $help:literal) ; )+ $(,)?
     ) => {
         pub(crate) const KNOWN_COMMANDS: &[&str] = &[ $( $verb ),+ ];
+
+        /// `--help`'s verb table: the verb, its argument as shown (`""` for
+        /// none) and its help text, from the same row as the handler, so a
+        /// new verb cannot miss the help. `verb_help` in `main.rs` renders
+        /// it and generates `switch-view`'s line from the view names.
+        pub(crate) const CLI_HELP: &[(&str, &str, &str)] = &[ $( ($verb, $usage, $help) ),+ ];
 
         pub(crate) const CLI_ARGS: &[(&'static str, Option<&'static str>)] = &[
             $( ($verb, define_commands!(@cli_arg $kind $arg)) ),+
@@ -434,12 +440,12 @@ fn selection_json(app: &Nokkvi) -> serde_json::Value {
 // presses don't silently drop on next launch. Mirrors the MPRIS SetVolume
 // handler — the `MprisEvent::SetVolume` arm in src/update/mpris.rs::handle_mpris.
 define_commands! {
-    "ping"        => respond  (json!("pong"));
+    "ping"        => respond  (json!("pong")), help ("", "Probe the running instance over the IPC socket");
     // Read-only snapshot of transport + now-playing + modes. Pure read of
     // resident state (never a prediction), so it always reports ground truth.
-    "status"      => act      (|app: &mut Nokkvi| Ok((Task::none(), status_json(app))));
-    "next"        => dispatch (Message::Playback(PlaybackMessage::NextTrack));
-    "previous"    => dispatch (Message::Playback(PlaybackMessage::PrevTrack));
+    "status"      => act      (|app: &mut Nokkvi| Ok((Task::none(), status_json(app)))), help ("", "Print playback state, track, volume, modes, and Theater Mode (JSON)");
+    "next"        => dispatch (Message::Playback(PlaybackMessage::NextTrack)), help ("", "Skip to the next track in the queue");
+    "previous"    => dispatch (Message::Playback(PlaybackMessage::PrevTrack)), help ("", "Return to the previous track in the queue");
     // Transport verbs call the real handler directly (the `PlaybackMessage`
     // arms in playback.rs are 1:1 wrappers, so no side-effects are lost) and
     // then read the post-handler play state back — the echoed value is exactly
@@ -450,20 +456,20 @@ define_commands! {
     // until the async start reconciles — consistent with the UI either way.
     "play"        => act      (|app: &mut Nokkvi| {
         let task = app.handle_play();
-        Ok((task, json!({ "state": play_state_str(&app.playback) })))
-    });
+        Ok((task, json!({ "state": app.playback.transport().ipc_token() })))
+    }), help ("", "Start playback");
     "pause"       => act      (|app: &mut Nokkvi| {
         let task = app.handle_pause();
-        Ok((task, json!({ "state": play_state_str(&app.playback) })))
-    });
+        Ok((task, json!({ "state": app.playback.transport().ipc_token() })))
+    }), help ("", "Pause playback");
     "play-pause"  => act      (|app: &mut Nokkvi| {
         let task = app.handle_toggle_play();
-        Ok((task, json!({ "state": play_state_str(&app.playback) })))
-    });
+        Ok((task, json!({ "state": app.playback.transport().ipc_token() })))
+    }), help ("", "Toggle between play and pause");
     "stop"        => act      (|app: &mut Nokkvi| {
         let task = app.handle_stop();
-        Ok((task, json!({ "state": play_state_str(&app.playback) })))
-    });
+        Ok((task, json!({ "state": app.playback.transport().ipc_token() })))
+    }), help ("", "Stop playback");
     // The seek handlers no-op on radio and on a song the server transcodes
     // on the fly (no seekable position), so guard here
     // and return an error rather than echoing a false success.
@@ -492,14 +498,14 @@ define_commands! {
                 Ok((task, json!({ "offset": round_f32(offset) })))
             }
         }
-    });
+    }), help ("<±N | N>", "Seek: ±N seconds relative, N absolute (float seconds)");
     "volume"      => act_str ("value", |app: &mut Nokkvi, raw: &str| {
         let current = app.settings.volume;
         let new = parse_volume_change(raw, current)
             .map_err(|message| ("invalid_args", message))?;
         let task = Task::done(Message::Playback(PlaybackMessage::VolumeCommitted(new)));
         Ok((task, json!({ "volume": round_f32(new) })))
-    });
+    }), help ("<±N | N>", "Volume: ±N relative (clamped), N absolute in [0.0, 1.0]");
     // Toggle-only — matches WM-hotkey ergonomics. Each calls the real handler
     // (radio guard + optimistic flip + toast + async reconcile) and then reads
     // the post-flip mode back, so the echoed value is honest even on the radio
@@ -509,15 +515,15 @@ define_commands! {
     "shuffle"     => act      (|app: &mut Nokkvi| {
         let task = app.handle_toggle_random();
         Ok((task, json!({ "random": app.modes.random })))
-    });
+    }), help ("", "Toggle shuffle (random) mode");
     "repeat"      => act      (|app: &mut Nokkvi| {
         let task = app.handle_toggle_repeat();
-        Ok((task, json!({ "repeat": repeat_str(&app.modes) })))
-    });
+        Ok((task, json!({ "repeat": crate::state::repeat_token(app.modes.repeat_mode()) })))
+    }), help ("", "Cycle repeat mode (off → one → queue)");
     "consume"     => act      (|app: &mut Nokkvi| {
         let task = app.handle_toggle_consume();
         Ok((task, json!({ "consume": app.modes.consume })))
-    });
+    }), help ("", "Toggle consume mode (drop played tracks)");
     // IPC bypasses handle_clear_queue's "not in queue view" gate — external
     // callers expect `nokkvi clear-queue` to clear from any view. The shared
     // clear_queue_action() lives in src/update/hotkeys/queue.rs.
@@ -525,7 +531,7 @@ define_commands! {
     // policy: the key is ExitOnly because the in-window clear is gated on the
     // (hidden) queue view, but the verb clears the whole queue from anywhere
     // and aims at no row, so there is nothing hidden for it to hit by mistake.
-    "clear-queue" => act      (|app: &mut Nokkvi| Ok((app.clear_queue_action(), json!({ "ok": true }))));
+    "clear-queue" => act      (|app: &mut Nokkvi| Ok((app.clear_queue_action(), json!({ "ok": true })))), help ("", "Empty the queue; a queue song stops, a radio station plays on");
     // Add the focused item (centered song/album/artist/genre/playlist) to the
     // queue — the in-app Shift+A hotkey. The echo is `add_to_queue_name()`,
     // which follows handle_add_to_queue's own routing: the Trawl mix under its
@@ -543,7 +549,7 @@ define_commands! {
         let added = app.add_to_queue_name();
         let task = app.handle_add_to_queue();
         Ok((task, json!({ "added": added })))
-    });
+    }), help ("", "Add the focused list item to the queue");
     // Remove the centered queue song — the in-app Ctrl+D hotkey. Queue-gated:
     // the centered item only has meaning in the queue view, so this errors
     // elsewhere (unlike clear-queue, which is ungated because it needs no
@@ -567,7 +573,7 @@ define_commands! {
         let removed = app.get_center_item_info().map(|info| info.name);
         let task = app.handle_remove_from_queue();
         Ok((task, json!({ "removed": removed })))
-    });
+    }), help ("", "Remove the centered song from the queue (queue view only)");
     // Switch the top-pane view. The `view` arg is required and validated
     // against the View enum before dispatch; the actual switch goes through
     // the normal NavigationMessage::SwitchView path so view-change side
@@ -578,7 +584,7 @@ define_commands! {
             .map_err(|message| ("invalid_args", message))?;
         let task = Task::done(Message::Navigation(NavigationMessage::SwitchView(view)));
         Ok((task, json!({ "view": raw })))
-    });
+    }), help ("<v>", "Switch the top pane to <v>");
     // Slot-list navigation — the in-app Backspace/Tab/Enter hotkeys, exposed so
     // a WM keybind or script can drive the focused list without focusing the
     // window. Routed through Message::SlotList so the existing handler resolves
@@ -589,18 +595,18 @@ define_commands! {
     // In Theater Mode they leave theater instead, like their keys.
     "nav-up"      => act      (|app: &mut Nokkvi| {
         Ok(list_verb(app, HotkeyAction::SlotListUp, SlotListMessage::NavigateUp))
-    });
+    }), help ("", "Move the focused list selection up (Backspace)");
     "nav-down"    => act      (|app: &mut Nokkvi| {
         Ok(list_verb(app, HotkeyAction::SlotListDown, SlotListMessage::NavigateDown))
-    });
+    }), help ("", "Move the focused list selection down (Tab)");
     // Activate the centered item (Enter): plays in Queue/Songs, expands or
     // navigates in Albums/Artists/Genres/Playlists, edits a Settings row.
     "enter"       => act      (|app: &mut Nokkvi| {
         Ok(list_verb(app, HotkeyAction::Activate, SlotListMessage::ActivateCenter))
-    });
+    }), help ("", "Activate the centered item (play/expand/edit)");
     // Read-only: the focused view's currently-centered item (or a null-valued
     // record when nothing is selectable — empty list, Settings, editor).
-    "selection"   => act      (|app: &mut Nokkvi| Ok((Task::none(), selection_json(app))));
+    "selection"   => act      (|app: &mut Nokkvi| Ok((Task::none(), selection_json(app)))), help ("", "Print the focused view's centered item (JSON)");
     // Toggle star on whatever's currently playing — the original seed's pain
     // ("rate from a WM hotkey without focusing the window"). Acts on
     // `scrobble.current_song_id` (authoritative for "the playing track")
@@ -622,7 +628,7 @@ define_commands! {
         app.notify_love_changed(&app.playback.title, &app.playback.artist, loved);
         let task = app.toggle_star_with_revert_task(song_id, ItemKind::Song, loved);
         Ok((task, json!({ "loved": loved })))
-    });
+    }), help ("", "Toggle star on the currently-playing track");
     "rate"        => act_str ("delta", |app: &mut Nokkvi, raw: &str| {
         let song_id = current_playing_song_id(app)?;
         let current = current_rating(app, &song_id);
@@ -646,7 +652,7 @@ define_commands! {
         }
         let task = app.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
         Ok((task, json!({ "rating": new_rating })))
-    });
+    }), help ("<±N | 0-5>", "Adjust playing track rating: delta (+1/-1) or 0..5");
     // Server queue sync (OpenSubsonic indexBasedQueue) — the queue header's
     // push/pull pair, exposed headless. Guarded exactly like the buttons
     // (capability + radio; the CLI has no hidden-button safety), and push
@@ -661,17 +667,17 @@ define_commands! {
         let tracks = app.library.queue_songs.len();
         let task = app.push_queue_task();
         Ok((task, json!({ "dispatched": "push", "tracks": tracks })))
-    });
+    }), help ("", "Push the local queue to the server");
     "queue-pull"  => act      (|app: &mut Nokkvi| {
         guard_queue_sync(app)?;
         let task = app.pull_queue_task();
         Ok((task, json!({ "dispatched": "pull" })))
-    });
+    }), help ("", "Replace the local queue with the server's");
     // Window: also the path MPRIS Raise and a bare second launch take.
     "show"        => act      (|app: &mut Nokkvi| {
         let (task, outcome) = app.show_window();
         Ok((task, json!({ "window": outcome.as_str() })))
-    });
+    }), help ("", "Reopen the window from the tray, or flag it when already open");
     // Layout: the same entry point F11, the corner icon and the panel menu use.
     "theater"     => act      (|app: &mut Nokkvi| {
         if app.screen != crate::Screen::Home {
@@ -683,7 +689,7 @@ define_commands! {
         }
         let task = app.toggle_theater();
         Ok((task, json!({ "theater": app.theater.active })))
-    });
+    }), help ("", "Toggle Theater Mode (the now-playing layout, like F11)");
     // Visualizer: the MilkDrop preset controls the keys and panel menus use.
     "preset"      => act_str ("action", |app: &mut Nokkvi, raw: &str| {
         if app.screen != crate::Screen::Home {
@@ -699,7 +705,7 @@ define_commands! {
             )
         })?;
         app.milkdrop_ipc_control(action)
-    });
+    }), help ("<action>", "MilkDrop: next, previous, lock, unlock, favorite,\nunfavorite or hide (MilkDrop visualizer mode only)");
 }
 
 /// The key gate of `handle_raw_key_event`, applied to a verb whose keyboard
@@ -820,37 +826,13 @@ fn round_f32(v: f32) -> f64 {
     (f64::from(v) * 1000.0).round() / 1000.0
 }
 
-/// Canonical lowercase playback-state token for IPC/`status` replies:
-/// `"playing"`, `"paused"`, or `"stopped"`. This is the scriptable wire
-/// vocabulary — distinct from the capitalized player-bar toast labels.
-fn play_state_str(playback: &crate::state::PlaybackState) -> &'static str {
-    if playback.playing && !playback.paused {
-        "playing"
-    } else if playback.paused {
-        "paused"
-    } else {
-        "stopped"
-    }
-}
-
-/// Canonical lowercase repeat-mode token: `"one"`, `"queue"`, or `"off"`.
-/// The single source of truth for rendering `(repeat, repeat_queue)` on the
-/// wire, so the `repeat` and `status` verbs can never disagree.
-fn repeat_str(modes: &crate::state::PlaybackModes) -> &'static str {
-    match modes.repeat_mode() {
-        RepeatMode::Track => "one",
-        RepeatMode::Playlist => "queue",
-        RepeatMode::None => "off",
-    }
-}
-
 /// Flat JSON snapshot for the `status` query verb: now-playing track, transport
 /// state, volume, and the three playback modes — all read synchronously from
 /// resident app state. Unlike the toggle verbs' optimistic echo, this reports
 /// ground-truth current state and never predicts.
 fn status_json(app: &Nokkvi) -> serde_json::Value {
     json!({
-        "state": play_state_str(&app.playback),
+        "state": app.playback.transport().ipc_token(),
         "title": app.playback.title,
         "artist": app.playback.artist,
         "album": app.playback.album,
@@ -858,7 +840,7 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "duration": app.playback.duration,
         "volume": round_f32(app.settings.volume),
         "random": app.modes.random,
-        "repeat": repeat_str(&app.modes),
+        "repeat": crate::state::repeat_token(app.modes.repeat_mode()),
         "consume": app.modes.consume,
         "theater": app.theater.active,
         "visualizer": app.settings.visualization_mode.to_string(),

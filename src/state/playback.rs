@@ -255,20 +255,140 @@ pub struct PlaybackModes {
     pub consume: bool,
 }
 
+/// The repeat mode a `(repeat, repeat_queue)` pair encodes. Both set is not a
+/// mode the backend reports and reads as Off. The one reading of the pair:
+/// the `status` verb and MPRIS used to project it separately and disagreed
+/// on that case.
+pub(crate) fn repeat_mode_of(repeat: bool, repeat_queue: bool) -> RepeatMode {
+    match (repeat, repeat_queue) {
+        (true, false) => RepeatMode::Track,
+        (false, true) => RepeatMode::Playlist,
+        (false, false) | (true, true) => RepeatMode::None,
+    }
+}
+
+/// The lowercase repeat token of the `repeat` and `status` verbs: `"one"`,
+/// `"queue"` or `"off"`.
+pub(crate) fn repeat_token(mode: RepeatMode) -> &'static str {
+    match mode {
+        RepeatMode::Track => "one",
+        RepeatMode::Playlist => "queue",
+        RepeatMode::None => "off",
+    }
+}
+
+/// The MPRIS `LoopStatus` for `mode`.
+pub(crate) fn mpris_loop_status(mode: RepeatMode) -> mpris_server::LoopStatus {
+    match mode {
+        RepeatMode::Track => mpris_server::LoopStatus::Track,
+        RepeatMode::Playlist => mpris_server::LoopStatus::Playlist,
+        RepeatMode::None => mpris_server::LoopStatus::None,
+    }
+}
+
+/// The transport as every surface reports it: the `status` and transport
+/// verbs, MPRIS and the tray read one derivation of the `(playing, paused)`
+/// pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportState {
+    Playing,
+    Paused,
+    Stopped,
+}
+
+impl TransportState {
+    pub fn from_flags(playing: bool, paused: bool) -> Self {
+        if playing && !paused {
+            Self::Playing
+        } else if paused {
+            Self::Paused
+        } else {
+            Self::Stopped
+        }
+    }
+
+    /// The lowercase wire token: `"playing"`, `"paused"` or `"stopped"`. The
+    /// scriptable vocabulary, distinct from the capitalized player-bar toast
+    /// labels.
+    pub fn ipc_token(self) -> &'static str {
+        match self {
+            Self::Playing => "playing",
+            Self::Paused => "paused",
+            Self::Stopped => "stopped",
+        }
+    }
+
+    pub fn mpris(self) -> mpris_server::PlaybackStatus {
+        match self {
+            Self::Playing => mpris_server::PlaybackStatus::Playing,
+            Self::Paused => mpris_server::PlaybackStatus::Paused,
+            Self::Stopped => mpris_server::PlaybackStatus::Stopped,
+        }
+    }
+}
+
+impl PlaybackState {
+    /// The transport the flags encode (see [`TransportState`]).
+    pub fn transport(&self) -> TransportState {
+        TransportState::from_flags(self.playing, self.paused)
+    }
+}
+
 impl PlaybackModes {
     /// The repeat mode the `(repeat, repeat_queue)` pair encodes. Both set
     /// is not a mode the backend reports and reads as Off.
     pub fn repeat_mode(&self) -> RepeatMode {
-        match (self.repeat, self.repeat_queue) {
-            (true, false) => RepeatMode::Track,
-            (false, true) => RepeatMode::Playlist,
-            (false, false) | (true, true) => RepeatMode::None,
-        }
+        repeat_mode_of(self.repeat, self.repeat_queue)
     }
 
     /// Write `mode` as the `(repeat, repeat_queue)` pair.
     pub fn set_repeat_mode(&mut self, mode: RepeatMode) {
         self.repeat = mode == RepeatMode::Track;
         self.repeat_queue = mode == RepeatMode::Playlist;
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    /// The `status` verb's token and MPRIS's LoopStatus come from one
+    /// RepeatMode, so they agree on every mode; both flags set is not a mode.
+    #[test]
+    fn repeat_projections_agree() {
+        for (mode, token, loop_status) in [
+            (RepeatMode::None, "off", mpris_server::LoopStatus::None),
+            (RepeatMode::Track, "one", mpris_server::LoopStatus::Track),
+            (
+                RepeatMode::Playlist,
+                "queue",
+                mpris_server::LoopStatus::Playlist,
+            ),
+        ] {
+            assert_eq!(repeat_token(mode), token);
+            assert_eq!(mpris_loop_status(mode), loop_status);
+        }
+        assert_eq!(repeat_mode_of(true, true), RepeatMode::None);
+    }
+
+    #[test]
+    fn transport_tokens_follow_the_flags() {
+        assert_eq!(
+            TransportState::from_flags(true, false).ipc_token(),
+            "playing"
+        );
+        assert_eq!(TransportState::from_flags(true, true).ipc_token(), "paused");
+        assert_eq!(
+            TransportState::from_flags(false, true).ipc_token(),
+            "paused"
+        );
+        assert_eq!(
+            TransportState::from_flags(false, false).ipc_token(),
+            "stopped"
+        );
+        assert_eq!(
+            TransportState::from_flags(false, false).mpris(),
+            mpris_server::PlaybackStatus::Stopped
+        );
     }
 }

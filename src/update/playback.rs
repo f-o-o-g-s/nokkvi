@@ -1259,23 +1259,11 @@ impl Nokkvi {
             return;
         };
 
-        // Determine playback status
-        let status = if u.playing && !u.paused {
-            mpris_server::PlaybackStatus::Playing
-        } else if u.paused {
-            mpris_server::PlaybackStatus::Paused
-        } else {
-            mpris_server::PlaybackStatus::Stopped
-        };
-
-        // Determine loop status for MPRIS
-        let loop_status = if u.repeat {
-            mpris_server::LoopStatus::Track
-        } else if u.repeat_queue {
-            mpris_server::LoopStatus::Playlist
-        } else {
-            mpris_server::LoopStatus::None
-        };
+        // One projection of the transport and of the repeat pair, shared with
+        // the `status` verb (`TransportState`, `repeat_mode_of`).
+        let status = crate::state::TransportState::from_flags(u.playing, u.paused).mpris();
+        let loop_status =
+            crate::state::mpris_loop_status(crate::state::repeat_mode_of(u.repeat, u.repeat_queue));
 
         let duration_us = i64::from(u.duration) * 1_000_000;
 

@@ -51,27 +51,12 @@
 //! because its inputs reference iced-land types. Verb catalogs published by
 //! the macro are not part of this crate's API.
 //!
-//! # Phase 0 + Phase 1 + Phase 2 verbs (informative — the wire accepts any string)
+//! # Verbs
 //!
-//! - **Phase 0:** `ping`.
-//! - **Phase 1:** `next`, `previous`, `play`, `pause`, `play-pause`, `stop`,
-//!   `seek` (arg `position: string` — `"+N"`/`"-N"` seconds relative to the
-//!   current position, or `"N"` absolute), `volume` (arg `value: string` —
-//!   `"+N"`/`"-N"` delta or `"N"` absolute 0–1), `shuffle` (toggle),
-//!   `repeat` (cycle).
-//! - **Phase 2:** `consume` (toggle), `clear-queue`, `switch-view` (arg
-//!   `view: string` — a view name; `nokkvi --help` lists the accepted ones),
-//!   `love` (toggle star on playing track), `rate` (arg
-//!   `delta: string` — `"+N"`/`"-N"` delta or `"0".."5"` absolute on
-//!   playing track), `queue-push` / `queue-pull` (server queue sync via the
-//!   OpenSubsonic indexBasedQueue extension; capability- and radio-gated),
-//!   `show` (reopen the window from the tray, or flag an open one; a bare
-//!   second `nokkvi` launch forwards it), `theater` (toggle Theater Mode;
-//!   `status` reports it as `theater`), `preset` (arg `action: string` —
-//!   next/previous/lock/unlock/favorite/unfavorite/hide, MilkDrop mode only;
-//!   `status` reports `visualizer` and `preset`).
-//!
-//! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
+//! The wire accepts any string. The verbs an instance answers, their
+//! arguments and their help are the `define_commands!` rows in the UI crate
+//! (`src/update/ipc.rs`), which also generate `nokkvi --help`; this crate
+//! keeps no copy of that list.
 
 pub mod client;
 pub mod instance_lock;

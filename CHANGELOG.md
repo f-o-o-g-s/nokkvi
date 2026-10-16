@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Scrolling a browsing tab with the mouse now fetches one full-size cover at a time, like the main view.
 - Turning Lyrics or Cover Blur off releases the frosted cover from GPU memory.
 - A library an admin adds, removes or grants now appears in the library picker without a rescan or re-login.
+- The clear-queue help line no longer claims it stops a playing radio station.
 
 ### Removed
 
