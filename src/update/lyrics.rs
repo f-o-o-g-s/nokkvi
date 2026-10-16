@@ -172,7 +172,17 @@ impl Nokkvi {
         // and then `clear()`, so clearing there would kill the crossfade
         // dissolve it just parked.
         self.lyrics.outgoing = None;
+        self.release_lyrics_backdrop();
         Task::none()
+    }
+
+    /// Drop the lyrics backdrop and the frost and sharp cover it pinned on
+    /// the GPU (`hold_lyrics_covers`). Off the lyrics surface the entry stays
+    /// (a return re-shows the frost at once); with lyrics or Cover Blur off
+    /// nothing draws it until a setting changes, and the next blur job
+    /// rebuilds it then.
+    pub(crate) fn release_lyrics_backdrop(&mut self) {
+        self.artwork.lyrics_blurred = None;
     }
 
     /// Timer for the post-song-change debounce window. Pure delay; the
@@ -430,8 +440,15 @@ impl Nokkvi {
     /// playback tick — idempotent, cheap when gated out.
     pub(crate) fn lyrics_blur_task(&mut self) -> Option<Task<Message>> {
         let level = self.settings.lyrics_backdrop_blur;
-        let sigma = level.sigma()?;
-        if !self.settings.lyrics_mode.is_active() || !self.lyrics_surface_visible() {
+        let Some(sigma) = level.sigma() else {
+            self.release_lyrics_backdrop();
+            return None;
+        };
+        if !self.settings.lyrics_mode.is_active() {
+            self.release_lyrics_backdrop();
+            return None;
+        }
+        if !self.lyrics_surface_visible() {
             return None;
         }
         let album_id = self.current_queue_song_album_id()?.to_string();

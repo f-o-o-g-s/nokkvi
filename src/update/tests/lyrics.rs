@@ -406,6 +406,7 @@ fn library_change_redrives_an_unresolved_track() {
             song_ids: vec![],
             playlist_ids: vec![],
             genre_ids: vec![],
+            library_ids: Vec::new(),
             is_wildcard: true,
         }
     }
@@ -1813,4 +1814,26 @@ fn a_settings_load_sets_the_alignment_the_lyrics_layer_draws_with() {
             align
         );
     }
+}
+
+/// Lyrics Off drops the backdrop with the frost and the sharp cover it held
+/// on the GPU: nothing draws them until a setting changes, and the next blur
+/// job rebuilds the entry then.
+#[test]
+fn lyrics_off_releases_the_pinned_backdrop() {
+    let mut app = test_app();
+    app.settings.lyrics_mode = LyricsMode::On;
+    app.artwork.lyrics_blurred = Some(crate::state::LyricsBlurredCover {
+        album_id: "al1".into(),
+        source_id: iced::widget::image::Handle::from_bytes(Vec::new()).id(),
+        level: app.settings.lyrics_backdrop_blur,
+        handle: None,
+        frosted_ready: false,
+        allocations: Vec::new(),
+    });
+
+    app.settings.lyrics_mode = LyricsMode::Off;
+    let _ = app.lyrics_mode_changed();
+
+    assert!(app.artwork.lyrics_blurred.is_none());
 }

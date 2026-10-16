@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Requests to a server that has gone away fail after eight seconds instead of about two minutes.
 - A search or sort typed while a background reload is out no longer gets replaced by the reload's unfiltered rows.
 - Scrolling a browsing tab with the mouse now fetches one full-size cover at a time, like the main view.
+- Turning Lyrics or Cover Blur off releases the frosted cover from GPU memory.
 
 ### Removed
 
