@@ -2803,19 +2803,12 @@ pub(crate) mod tests {
     async fn a_sized_file_opens_with_a_head_and_its_range_get() {
         let (url, requests) = spawn_sized_file().await;
 
-        // A sized open builds `RangeHttpReader`'s blocking reqwest client,
-        // which a debug build refuses on a runtime thread (its readiness
-        // wait drops a throwaway runtime there), so the open runs on a
-        // blocking thread with only the runtime's handle entered.
-        let runtime = tokio::runtime::Handle::current();
-        let delivery = tokio::task::spawn_blocking(move || {
-            let _entered = runtime.enter();
-            let mut decoder = AudioDecoder::default();
-            futures::executor::block_on(decoder.init(&url)).expect("the file must open");
-            decoder.delivery()
-        })
-        .await
-        .unwrap();
+        // Opened on a runtime thread, as `play()` opens every track: the
+        // reader's blocking reqwest client is built there, and a debug build
+        // used to refuse that (`RangeHttpReader::create_client`).
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the file must open");
+        let delivery = decoder.delivery();
 
         assert_eq!(
             *requests.lock(),

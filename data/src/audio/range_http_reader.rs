@@ -225,7 +225,24 @@ impl RangeHttpReader {
     }
 
     /// Create a new blocking HTTP client with optimal settings for streaming.
+    ///
+    /// Built on a thread of its own: reqwest's blocking client waits for its
+    /// own runtime thread to come up inside a throwaway tokio runtime, which
+    /// a debug build refuses on a runtime thread ("Cannot drop a runtime in a
+    /// context where blocking is not allowed"), and the first build runs on
+    /// one (`AudioDecoder::open_input` is async; the chunk reads that follow
+    /// are under `block_in_place`, which tokio allows). A release build has
+    /// no such check, so this is what lets `cargo run` play a sized track.
     fn create_client() -> reqwest::blocking::Client {
+        std::thread::scope(|scope| {
+            scope
+                .spawn(Self::build_client)
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    }
+
+    fn build_client() -> reqwest::blocking::Client {
         reqwest::blocking::Client::builder()
             // Identify as nokkvi (shared crate UA) so the server sees one player.
             .user_agent(crate::USER_AGENT)
