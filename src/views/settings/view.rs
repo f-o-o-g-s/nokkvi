@@ -17,8 +17,8 @@ use iced::{
 use nokkvi_data::utils::fuzzy;
 
 use super::{
-    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsMessage,
-    SettingsPage, SettingsTab,
+    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsFocus,
+    SettingsMessage, SettingsPage, SettingsTab,
     items::SettingsEntry,
     rendering::{
         DetailRowState, render_detail_header, render_detail_row, transparent_button_style,
@@ -203,9 +203,15 @@ impl SettingsPage {
     /// independent of the rendering path).
     fn render_sidebar_body(&self) -> Element<'_, SettingsMessage> {
         let active_index = self.sidebar_slot_list.viewport_offset;
+        let has_focus = self.focus == SettingsFocus::Sidebar;
         let mut col = column![].width(Length::Fill);
         for (idx, tab) in SettingsTab::ALL.iter().enumerate() {
-            col = col.push(render_sidebar_row(*tab, idx, idx == active_index));
+            col = col.push(render_sidebar_row(
+                *tab,
+                idx,
+                idx == active_index,
+                has_focus,
+            ));
         }
         container(col)
             .width(Length::Fill)
@@ -213,8 +219,9 @@ impl SettingsPage {
             .boxed()
     }
 
-    /// Sidebar footer: version label on the left, decorative "Esc" pill on
-    /// the right (matches the design's `.nk-sidebar-foot`).
+    /// Sidebar footer: version label on the left, "Esc" pill on the right
+    /// (matches the design's `.nk-sidebar-foot`). A click leaves Settings in
+    /// one go (`Leave`), while the Escape key it names steps back a pane first.
     fn render_sidebar_footer<'a>() -> Element<'a, SettingsMessage> {
         let sep = container(Space::new())
             .width(Length::Fill)
@@ -245,7 +252,7 @@ impl SettingsPage {
             .spacing(6)
             .align_y(Alignment::Center),
         )
-        .on_press(SettingsMessage::Escape)
+        .on_press(SettingsMessage::Leave)
         .style(|_theme: &iced::Theme, status: button::Status| {
             let is_hovered = matches!(status, button::Status::Hovered);
             button::Style {
@@ -335,6 +342,7 @@ impl SettingsPage {
     /// stays readable as the window narrows.
     fn render_narrow_strip(&self, window_width: f32) -> Element<'_, SettingsMessage> {
         let active_index = self.sidebar_slot_list.viewport_offset;
+        let has_focus = self.focus == SettingsFocus::Sidebar;
         let text_size = crate::widgets::nav_bar::tab_text_size(window_width);
         let mut chip_row = row![Space::new().width(Length::Fixed(16.0))]
             .spacing(6)
@@ -345,6 +353,7 @@ impl SettingsPage {
                 *tab,
                 idx,
                 idx == active_index,
+                has_focus,
                 text_size,
             ));
         }
@@ -415,7 +424,8 @@ impl SettingsPage {
             .boxed();
         }
 
-        let focused_index = self.slot_list.viewport_offset;
+        // No row looks focused while the keyboard drives the sidebar.
+        let focused_index = self.focused_detail_row();
         let editing_index = self.editing_index;
         let is_capturing = self.capturing_hotkey.is_some();
         let conflict_text_owned = self.conflict_label.as_ref().map(|(s, _)| s.clone());
@@ -441,7 +451,7 @@ impl SettingsPage {
                     render_detail_header(label, icon, count)
                 }
                 SettingsEntry::Item(item) => {
-                    let is_focused = idx == focused_index;
+                    let is_focused = focused_index == Some(idx);
                     let is_editing = editing_index == Some(idx);
                     let conflict_text = if is_focused && is_capturing {
                         conflict_text_owned.as_deref()
@@ -766,12 +776,15 @@ fn render_picker_modal<'a>(
 /// `FillPortion(1)` slice of the strip so all six chips span the
 /// available width together; the label scales via `text_size` from the
 /// shared `tab_text_size` curve so labels stay inside their share as
-/// the window narrows. Click emits `SidebarClickItem(idx)` — same
-/// handler as the wide-sidebar row.
+/// the window narrows. While the strip has the keyboard the active
+/// chip's border doubles, a focus ring, so the Escape that moved it there
+/// shows. Click emits `SidebarClickItem(idx)` — same handler as the
+/// wide-sidebar row.
 fn render_narrow_chip<'a>(
     tab: SettingsTab,
     idx: usize,
     is_active: bool,
+    has_focus: bool,
     text_size: f32,
 ) -> Element<'a, SettingsMessage> {
     let border_color = if is_active {
@@ -844,7 +857,7 @@ fn render_narrow_chip<'a>(
                 background: Some(bg.into()),
                 border: Border {
                     color: border_color,
-                    width: 1.0,
+                    width: if is_active && has_focus { 2.0 } else { 1.0 },
                     radius: theme::ui_radius_pill(),
                 },
                 text_color,
@@ -856,12 +869,16 @@ fn render_narrow_chip<'a>(
 
 /// Single sidebar row at the design's compact proportions: 38 px icon
 /// chip + 14 px name / 10 px blurb, 14 px / 16 px / 18 px padding,
-/// 1 px hairline bottom separator, 2 px accent left stripe + `bg1` fill
-/// on the active row. Click emits `SidebarClickItem(idx)`.
+/// 1 px hairline bottom separator, 2 px accent left stripe on the active
+/// row. The `bg1` fill marks where the keyboard is, as it does on a focused
+/// detail row, so the active row takes it only while the sidebar has focus
+/// and the highlight visibly moves between the panes. Click emits
+/// `SidebarClickItem(idx)`.
 fn render_sidebar_row<'a>(
     tab: SettingsTab,
     idx: usize,
     is_active: bool,
+    has_focus: bool,
 ) -> Element<'a, SettingsMessage> {
     let chip_bg = if is_active {
         theme::bg1()
@@ -948,7 +965,7 @@ fn render_sidebar_row<'a>(
     ]
     .align_y(Alignment::Center);
 
-    let row_bg = if is_active {
+    let row_bg = if is_active && has_focus {
         theme::bg1()
     } else {
         Color::TRANSPARENT

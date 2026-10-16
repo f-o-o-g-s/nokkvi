@@ -63,8 +63,8 @@ fn a_switch_out_of_settings_goes_where_it_was_sent() {
     }
 }
 
-/// Closing Settings (its toggle, or Escape at its top level) returns to the
-/// view it was opened from.
+/// Closing Settings (its toggle, Escape at its top level, or the Esc pill)
+/// returns to the view it was opened from.
 #[test]
 fn closing_settings_returns_to_the_view_it_was_opened_from() {
     let mut app = test_app();
@@ -73,12 +73,22 @@ fn closing_settings_returns_to_the_view_it_was_opened_from() {
     let _ = app.update(crate::app_message::Message::ToggleSettings);
     assert_eq!(app.current_view, View::Songs, "the toggle");
 
+    // Escape walks out of the rows to the sidebar, then out of Settings.
     let _ = app.handle_switch_view(View::Albums);
     let _ = app.handle_switch_view(View::Settings);
-    let _ = app.update(crate::app_message::Message::Settings(
-        crate::views::SettingsMessage::Escape,
-    ));
+    for _ in 0..2 {
+        let _ = app.update(crate::app_message::Message::Settings(
+            crate::views::SettingsMessage::Escape,
+        ));
+    }
     assert_eq!(app.current_view, View::Albums, "Escape at the top level");
+
+    let _ = app.handle_switch_view(View::Genres);
+    let _ = app.handle_switch_view(View::Settings);
+    let _ = app.update(crate::app_message::Message::Settings(
+        crate::views::SettingsMessage::Leave,
+    ));
+    assert_eq!(app.current_view, View::Genres, "the Esc pill");
 }
 
 // ============================================================================

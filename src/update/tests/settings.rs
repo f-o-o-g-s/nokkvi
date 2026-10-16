@@ -1118,7 +1118,9 @@ fn escape_then_reenter_repopulates_entries() {
     let _ = app.handle_switch_view(crate::View::Settings);
     assert!(!app.settings_page.cached_entries.is_empty());
 
-    // Top-level Escape exits Settings and clears the cache.
+    // Top-level Escape exits Settings and clears the cache. The first press
+    // only moves the keyboard from the rows to the sidebar.
+    let _ = app.handle_settings(crate::views::SettingsMessage::Escape);
     let _ = app.handle_settings(crate::views::SettingsMessage::Escape);
     assert_eq!(
         app.current_view,

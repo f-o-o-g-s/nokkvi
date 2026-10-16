@@ -326,7 +326,9 @@ impl SettingsPage {
             | SettingsMessage::SidebarDown
             | SettingsMessage::SidebarSetOffset(_, _)
             | SettingsMessage::SidebarClickItem(_)
-            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
+            | SettingsMessage::JumpToSection(_)
+            // Handled in `SettingsPage::update` before any sub-list sees it.
+            | SettingsMessage::Leave => SettingsAction::None,
         }
     }
 
@@ -397,7 +399,9 @@ impl SettingsPage {
             | SettingsMessage::SidebarDown
             | SettingsMessage::SidebarSetOffset(_, _)
             | SettingsMessage::SidebarClickItem(_)
-            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
+            | SettingsMessage::JumpToSection(_)
+            // Handled in `SettingsPage::update` before any sub-list sees it.
+            | SettingsMessage::Leave => SettingsAction::None,
         }
     }
 
@@ -468,7 +472,9 @@ impl SettingsPage {
             | SettingsMessage::SidebarDown
             | SettingsMessage::SidebarSetOffset(_, _)
             | SettingsMessage::SidebarClickItem(_)
-            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
+            | SettingsMessage::JumpToSection(_)
+            // Handled in `SettingsPage::update` before any sub-list sees it.
+            | SettingsMessage::Leave => SettingsAction::None,
         }
     }
 

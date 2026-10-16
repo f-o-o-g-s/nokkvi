@@ -56,9 +56,10 @@ fn open_subsonic_extensions_without_index_queue_stays_gated() {
 
 #[test]
 fn settings_escape_at_root_exits() {
-    use crate::views::settings::{SettingsAction, SettingsMessage};
+    use crate::views::settings::{SettingsAction, SettingsFocus, SettingsMessage};
     let mut page = crate::views::SettingsPage::new();
-    // Default state: no search, no editing — Escape exits settings.
+    // Top level: the sidebar holds the keyboard, no search, no editing.
+    page.focus = SettingsFocus::Sidebar;
 
     let data = make_settings_view_data();
     let action = page.update(SettingsMessage::Escape, &data);
@@ -70,11 +71,12 @@ fn settings_escape_at_root_exits() {
 
 #[test]
 fn settings_escape_with_stale_search_exits() {
-    use crate::views::settings::{SettingsAction, SettingsMessage};
+    use crate::views::settings::{SettingsAction, SettingsFocus, SettingsMessage};
     let mut page = crate::views::SettingsPage::new();
     // Simulate: user searched, then SlotListDown cleared search_active but kept query
     page.search_query = "scrobbl".to_string();
     page.search_active = false; // search bar is hidden — query is stale/invisible
+    page.focus = SettingsFocus::Sidebar;
 
     let data = make_settings_view_data();
     let action = page.update(SettingsMessage::Escape, &data);

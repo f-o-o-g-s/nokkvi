@@ -9,7 +9,7 @@
 
 use iced::Task;
 
-use crate::{Nokkvi, app_message::Message};
+use crate::{Nokkvi, app_message::Message, views::settings::SettingsFocus};
 
 impl Nokkvi {
     /// Build the settings view data, including the radio-scrobble connection
@@ -200,20 +200,32 @@ impl Nokkvi {
         // Keyboard nav and scrollbar seek always auto-scroll the focused row
         // into view; click auto-scrolls only when stable_viewport is off
         // (legacy scroll-on-click). With stable_viewport on, the clicked row
-        // is already visible by definition, so the view stays put.
-        let is_detail_nav = matches!(
-            msg,
-            SettingsMessage::SlotListUp
-                | SettingsMessage::SlotListDown
-                | SettingsMessage::SlotListSetOffset(..)
-        ) || (matches!(msg, SettingsMessage::SlotListClickItem(_))
-            && !self.settings.stable_viewport);
+        // is already visible by definition, so the view stays put. Up/Down
+        // step the sidebar instead while it holds the keyboard, and Enter /
+        // Right from there bring the rows' cursor back into view (the wheel
+        // may have scrolled it away).
+        let on_rows = self.settings_page.focus == SettingsFocus::Detail;
+        let is_detail_nav = (on_rows
+            && matches!(
+                msg,
+                SettingsMessage::SlotListUp | SettingsMessage::SlotListDown
+            ))
+            || (!on_rows
+                && matches!(
+                    msg,
+                    SettingsMessage::EditActivate | SettingsMessage::EditRight
+                ))
+            || matches!(msg, SettingsMessage::SlotListSetOffset(..))
+            || (matches!(msg, SettingsMessage::SlotListClickItem(_))
+                && !self.settings.stable_viewport);
 
         // Fast path: pure navigation messages don't need SettingsViewData at all
         // when entries are already cached — avoid disk I/O for arrow key nav.
         // Nothing is being edited here (both cursors are None), so a move only
-        // steps the list and snaps off section headers.
-        if !self.settings_page.cached_entries.is_empty()
+        // steps the list and snaps off section headers. With the sidebar on the
+        // keyboard, Up/Down change category instead, which needs the full path.
+        if on_rows
+            && !self.settings_page.cached_entries.is_empty()
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
             && self.settings_page.theme_sub_list.is_none()
@@ -494,6 +506,7 @@ impl Nokkvi {
 
         let target_focus = (header_idx + 1).min(entries.len() - 1);
         self.settings_page.slot_list.viewport_offset = target_focus;
+        self.settings_page.focus = SettingsFocus::Detail;
         self.settings_page.editing_index = None;
         self.settings_page.toggle_cursor = None;
 

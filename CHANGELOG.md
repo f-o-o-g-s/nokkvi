@@ -8,7 +8,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Escape in Settings now steps from the rows back to the categories, and a second Escape leaves Settings.
+
 ### Fixed
+
+- Arrow keys and Enter alone now reach the Settings categories, so a keyboard or d-pad no longer gets stuck in one category's rows.
 
 ### Removed
 

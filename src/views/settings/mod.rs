@@ -1,9 +1,14 @@
 //! Settings view — slot-list-based settings UI
 //!
-//! Displays configurable settings in a panel with drill-down navigation.
-//! Level 1: Category picker (General, Hotkeys, Theme, Visualizer)
-//! Level 2: All items within a category, grouped under auto-expanded section headers
-//! Up/Down navigates items, Enter activates edit mode, Escape goes back.
+//! Two panes: the category sidebar (General, Interface, Playback, Hotkeys,
+//! Theme, Visualizer) and the active category's rows, grouped under section
+//! headers. The keyboard works one pane at a time ([`SettingsFocus`]), so the
+//! arrows, Enter and Escape alone reach everything (a TV remote's d-pad):
+//! - rows: Up/Down move, Left/Right change the value, Enter edits, Escape
+//!   steps back out of an edit, then to the sidebar;
+//! - sidebar: Up/Down change category, Enter or Right enter its rows, Escape
+//!   leaves Settings.
+//!
 //! ColorArray items open a sub-list showing individual gradient colors.
 
 use std::time::Instant;
@@ -341,6 +346,16 @@ impl SettingsTab {
     }
 }
 
+/// Which pane the keyboard drives: the category sidebar or the active
+/// category's rows. Settings opens on the rows; Escape walks out to the
+/// sidebar, and Enter or Right walks back in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SettingsFocus {
+    Sidebar,
+    #[default]
+    Detail,
+}
+
 // ============================================================================
 // Settings Messages
 // ============================================================================
@@ -364,6 +379,9 @@ pub enum SettingsMessage {
     EditRight,
     /// Escape pressed — go back one level, exit edit mode, etc.
     Escape,
+    /// The sidebar's Esc pill clicked — leave Settings from any depth, in one
+    /// click (Escape from the rows only moves to the sidebar).
+    Leave,
     /// Hex color text input changed (typing in the inline text input)
     HexInputChanged(String),
     /// Hex color text input submitted (Enter in text input)
@@ -606,6 +624,8 @@ pub struct SettingsPage {
     /// Slot-list state for the categories sidebar (left pane). Distinct from
     /// `slot_list`, which tracks the detail pane focus.
     pub(crate) sidebar_slot_list: SlotListView,
+    /// The pane the keyboard drives (see [`SettingsFocus`]).
+    pub(crate) focus: SettingsFocus,
 }
 
 impl SettingsPage {
@@ -627,7 +647,14 @@ impl SettingsPage {
             config_dirty: true,
             active_category: SettingsTab::General,
             sidebar_slot_list: SlotListView::new(),
+            focus: SettingsFocus::Detail,
         }
+    }
+
+    /// The detail row drawn as focused: none while the keyboard drives the
+    /// sidebar, so the moving highlight shows which pane the arrows steer.
+    pub(crate) fn focused_detail_row(&self) -> Option<usize> {
+        (self.focus == SettingsFocus::Detail).then_some(self.slot_list.viewport_offset)
     }
 
     /// Restore parent slot list position after exiting a sub-list.
@@ -656,6 +683,10 @@ impl SettingsPage {
             && t.elapsed().as_secs() >= 2
         {
             self.conflict_label = None;
+        }
+
+        if matches!(message, SettingsMessage::Leave) {
+            return self.leave();
         }
 
         // ── Hotkey capture mode: intercept key events ──
@@ -812,6 +843,56 @@ impl SettingsPage {
         if self.sub_list.is_some() {
             tracing::debug!(" [SETTINGS] Sub-list active, delegating {:?}", message);
             return self.update_sub_list(message);
+        }
+
+        // ── Sidebar focus: the arrows and Enter drive the categories ──
+        if self.focus == SettingsFocus::Sidebar {
+            match message {
+                SettingsMessage::SlotListUp => {
+                    self.sidebar_step(false, data);
+                    return SettingsAction::None;
+                }
+                SettingsMessage::SlotListDown => {
+                    self.sidebar_step(true, data);
+                    return SettingsAction::None;
+                }
+                // Into the category's rows, as Enter on the old category
+                // picker drilled into them.
+                SettingsMessage::EditActivate | SettingsMessage::EditRight => {
+                    self.focus = SettingsFocus::Detail;
+                    return SettingsAction::None;
+                }
+                // Left has nowhere further to go, and Delete would reset a row
+                // the keyboard is not on.
+                SettingsMessage::EditLeft | SettingsMessage::ResetToDefault => {
+                    return SettingsAction::None;
+                }
+                // A click, a drag or typing in a row or the search box hands the
+                // keyboard to the rows, then goes on to them.
+                SettingsMessage::SlotListSetOffset(..)
+                | SettingsMessage::SlotListClickItem(_)
+                | SettingsMessage::EditSetValue(_)
+                | SettingsMessage::EditSetFraction(_)
+                | SettingsMessage::ToggleSetToggle(_)
+                | SettingsMessage::HexInputChanged(_)
+                | SettingsMessage::HexInputSubmit
+                | SettingsMessage::SearchChanged(_)
+                | SettingsMessage::JumpToSection(_)
+                // A sidebar click opens its category, as Enter does.
+                | SettingsMessage::SidebarClickItem(_)
+                | SettingsMessage::SidebarSetOffset(..) => self.focus = SettingsFocus::Detail,
+                // Escape leaves Settings from here (its chain below), Shift+Tab
+                // steps the sidebar from either pane, and `/` only focuses the
+                // search box. The capture key and the pill returned above, and
+                // the sub-list search runs only with a picker open.
+                SettingsMessage::Escape
+                | SettingsMessage::SidebarUp
+                | SettingsMessage::SidebarDown
+                | SettingsMessage::ToggleSearch
+                | SettingsMessage::HotkeyCaptured(..)
+                | SettingsMessage::SubListSearchChanged(_)
+                | SettingsMessage::Leave => {}
+            }
         }
 
         let total = self.cached_entries.len().max(1);
@@ -1104,17 +1185,14 @@ impl SettingsPage {
                     self.slot_list = SlotListView::new();
                     self.refresh_entries(data);
                     SettingsAction::None
+                } else if self.focus == SettingsFocus::Detail {
+                    // Out of the rows to the sidebar, the way Escape left a
+                    // category for the category picker before the two-pane
+                    // layout. Without it a d-pad never reaches the categories.
+                    self.focus = SettingsFocus::Sidebar;
+                    SettingsAction::None
                 } else {
-                    // Top-level Escape — reset transient state for clean
-                    // re-open. The zombie scenario (Tab cleared
-                    // search_active but left search_query populated) still
-                    // funnels through here, so both flags are reset.
-                    self.search_query.clear();
-                    self.search_active = false;
-                    self.cached_entries.clear();
-                    self.slot_list = SlotListView::new();
-                    tracing::debug!(" [SETTINGS] ExitSettings triggered!");
-                    SettingsAction::ExitSettings
+                    self.exit_settings()
                 }
             }
             SettingsMessage::HexInputChanged(new_hex) => {
@@ -1159,10 +1237,15 @@ impl SettingsPage {
                 }
                 SettingsAction::None
             }
-            // These messages are only handled in sub-list mode or capture mode
-            SettingsMessage::HotkeyCaptured(_, _) | SettingsMessage::SubListSearchChanged(_) => {
-                SettingsAction::None
-            }
+            // These messages are only handled in sub-list mode or capture mode,
+            SettingsMessage::HotkeyCaptured(_, _)
+            | SettingsMessage::SubListSearchChanged(_)
+            // the pill returned at the top,
+            | SettingsMessage::Leave
+            // and the pill strip is intercepted at the Nokkvi level in
+            // `handle_settings` so the scroll task can read `cached_entries`
+            // directly.
+            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
             SettingsMessage::SearchChanged(query) => {
                 self.search_active = !query.is_empty();
                 self.search_query = query;
@@ -1194,11 +1277,33 @@ impl SettingsPage {
                 self.sidebar_set_index(offset, data);
                 SettingsAction::None
             }
-            // Intercepted at the Nokkvi level in `handle_settings` so the
-            // scroll task can read `cached_entries` directly; this arm
-            // exists only for exhaustiveness.
-            SettingsMessage::JumpToSection(_) => SettingsAction::None,
         }
+    }
+
+    /// Leave Settings, resetting what should not survive to the next visit.
+    /// The zombie scenario (Tab cleared `search_active` but left
+    /// `search_query` populated) funnels through here too, so both reset.
+    fn exit_settings(&mut self) -> SettingsAction {
+        self.search_query.clear();
+        self.search_active = false;
+        self.cached_entries.clear();
+        self.slot_list = SlotListView::new();
+        self.focus = SettingsFocus::Detail;
+        tracing::debug!(" [SETTINGS] ExitSettings triggered!");
+        SettingsAction::ExitSettings
+    }
+
+    /// The Esc pill: drop any capture, edit or open sub-list, then leave.
+    fn leave(&mut self) -> SettingsAction {
+        self.capturing_hotkey = None;
+        self.conflict_label = None;
+        self.toggle_cursor = None;
+        self.editing_index = None;
+        self.hex_input.clear();
+        self.sub_list = None;
+        self.font_sub_list = None;
+        self.theme_sub_list = None;
+        self.exit_settings()
     }
 
     /// Advance the sidebar cursor by one row (forward = next category) and
