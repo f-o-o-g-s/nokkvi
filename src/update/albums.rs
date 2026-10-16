@@ -451,8 +451,10 @@ impl Nokkvi {
     }
 
     /// A navigation step in `source`'s list (`None`: the Similar tab, as in
-    /// [`Self::current_target_view`]) centred `target`. A step in the list
-    /// the user is steering goes through the big panel's gate
+    /// [`Self::current_target_view`]) centred `target`. A step in a list
+    /// the user is steering ([`Self::panel_art_steered`]) goes through the big
+    /// panel's gate, unless the other pane of the split view has a row
+    /// waiting there (then it loads directly and leaves that row alone)
     /// ([`crate::state::PanelArtGate`]): it loads now when no full-size cover
     /// is on its way or its own is cached, else it waits as the newest row
     /// until that cover lands. A step in any other list (a shelf or a buffer
@@ -467,7 +469,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::state::{PANEL_ART_OVERDUE, PanelArtStep};
 
-        if !self.panel_art_steered(source) {
+        if !self.panel_art_steered(source) || self.artwork.panel_gate.another_list_waits(source) {
             return self.load_panel_art(target);
         }
         let cached = self.artwork.large_artwork.contains(&target.id().to_owned());

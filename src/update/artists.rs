@@ -211,11 +211,14 @@ impl Nokkvi {
         }
 
         // The poster the rows and thumbnails share (`poster`: large, falling
-        // back to medium), from whichever held list has the artist.
+        // back to medium), from the first held row of the artist that has one:
+        // an Artists-view row loaded before the agents filled the link gives
+        // way to a Harbour row that has it.
         let external_url = self
             .held_artists()
-            .find(|(id, _, _)| *id == artist_id)
-            .and_then(|(_, _, poster)| poster.map(str::to_owned));
+            .filter(|(id, _, _)| *id == artist_id)
+            .find_map(|(_, _, poster)| poster)
+            .map(str::to_owned);
 
         // The server marked the artist's art absent (Navidrome 0.64+) and no
         // external poster is known: no request, the panel stays blank. An

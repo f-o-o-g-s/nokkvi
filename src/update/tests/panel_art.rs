@@ -85,6 +85,41 @@ fn a_browsing_tab_step_waits_for_the_cover_on_its_way() {
     assert_eq!(loading(&app), Some(second.as_str()));
 }
 
+/// Both panes steer the panel in the split view, but the gate has one waiting
+/// row: a Queue step (the mouse crossing the queue header, auto-follow on a
+/// track change) must not replace or clear the browsing tab's waiting row,
+/// or that cover is never sent. It loads directly instead.
+#[test]
+fn a_queue_step_leaves_the_tabs_waiting_row_alone() {
+    let mut app = albums_app(20);
+    app.current_view = View::Queue;
+    let mut panel = crate::views::BrowsingPanel::new();
+    panel.active_view = crate::views::BrowsingView::Albums;
+    app.browsing_panel = Some(panel);
+
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
+    let second = album_step(&mut app);
+    assert_eq!(loading(&app), Some(first.as_str()), "the tab's row waits");
+
+    let _ = app.update(Message::Artwork(ArtworkMessage::PanelArtStep {
+        source: Some(View::Queue),
+        target: PanelArt::Album("queue-row".into()),
+    }));
+    assert_eq!(
+        loading(&app),
+        Some("queue-row"),
+        "the queue's step loads directly"
+    );
+
+    land(&mut app, &first);
+    assert_eq!(
+        loading(&app),
+        Some(second.as_str()),
+        "the tab's waiting row still follows its cover"
+    );
+}
+
 #[test]
 fn a_step_with_nothing_on_its_way_fetches_at_once() {
     let mut app = albums_app(20);

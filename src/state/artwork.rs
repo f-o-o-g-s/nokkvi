@@ -205,6 +205,16 @@ impl PanelArtGate {
         }
     }
 
+    /// Whether a row from a list other than `source` is waiting. In the split
+    /// view both panes steer the panel, and a step in one must not replace or
+    /// clear the row the other has waiting (its cover would never be sent):
+    /// that step loads directly and leaves the gate alone.
+    pub fn another_list_waits(&self, source: Option<crate::View>) -> bool {
+        self.waiting
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner != source)
+    }
+
     /// A fetch for `target` went out: it is the cover on its way.
     pub fn sent(&mut self, target: PanelArt) {
         self.in_flight = Some(target);

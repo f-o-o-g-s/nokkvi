@@ -810,6 +810,7 @@ fn every_held_list_answers_the_shared_lookups() {
     app.harbour.most_played_albums = vec![album("al-most", hashed("al-most"))];
     app.harbour.random_album = Some(album("al-rand", hashed("al-rand")));
     app.artists_page.expansion.children = vec![album("al-child", hashed("al-child"))];
+    app.genres_page.expansion.children = vec![album("al-gchild", hashed("al-gchild"))];
     let mut lib_artist = artist("ar-lib", false);
     lib_artist.image.thumb_hash = Some("ar-lib-hash".into());
     app.library.artists.set_from_vec(vec![lib_artist]);
@@ -830,6 +831,7 @@ fn every_held_list_answers_the_shared_lookups() {
         "al-rand",
         "al-search",
         "al-child",
+        "al-gchild",
     ];
     for id in albums {
         assert!(app.album_image(id).is_some(), "{id} answers album_image");
