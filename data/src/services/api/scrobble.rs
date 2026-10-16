@@ -16,8 +16,9 @@ fn scrobble_request(
     song_id: &str,
     submission: bool,
 ) -> reqwest::RequestBuilder {
+    let standard = crate::services::api::subsonic::STANDARD_PARAMS;
     let url = format!(
-        "{server_url}/rest/scrobble?id={song_id}&submission={submission}&{subsonic_credential}&f=json&v=1.8.0&c=nokkvi"
+        "{server_url}/rest/scrobble?id={song_id}&submission={submission}&{subsonic_credential}&{standard}"
     );
     crate::services::api::client::with_client_unique_id(http_client.get(url))
 }

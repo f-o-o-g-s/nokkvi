@@ -258,10 +258,10 @@ impl AuthGateway {
         )
     }
 
-    /// Get the initial JWT token (as received from login or resume)
+    /// The session's current JWT (see `AuthService::get_token`).
     pub async fn get_token(&self) -> String {
         let auth_service = self.auth_service.lock().await;
-        auth_service.get_token().to_string()
+        auth_service.get_token()
     }
 
     /// Set the token refresh callback (for persisting refreshed JWT to redb)
@@ -304,10 +304,17 @@ impl AuthGateway {
         auth_service.user_id().to_string()
     }
 
-    /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint
+    /// The server version, from the Subsonic `ping` endpoint. Snapshot under
+    /// the lock, ask without it, like `fetch_open_subsonic_extensions`.
     pub async fn fetch_server_version(&self) -> Result<String> {
-        let auth_service = self.auth_service.lock().await;
-        auth_service.fetch_server_version().await
+        let session = self.key_session().await;
+        let client = session.client.context("Not authenticated")?;
+        auth_api::server_version(
+            &client.http_client(),
+            &session.server_url,
+            &session.credential,
+        )
+        .await
     }
 
     /// Fetch the server's advertised OpenSubsonic extension names
@@ -338,7 +345,7 @@ impl AuthGateway {
             server_url: auth.get_server_url().to_owned(),
             username: auth.username().to_owned(),
             user_id: auth.user_id().to_owned(),
-            token_username: crate::services::api::client::decode_jwt_sub(auth.get_token()).ok(),
+            token_username: crate::services::api::client::decode_jwt_sub(&auth.get_token()).ok(),
             credential: auth.get_subsonic_credential().to_owned(),
             client: auth.get_client().cloned(),
         }

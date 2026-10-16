@@ -81,14 +81,15 @@ pub fn build_cover_art_url_with_timestamp(
             && !final_id.contains('_')
             && !final_id.starts_with("dc-")
     });
+    let standard = crate::services::api::subsonic::STANDARD_PARAMS;
     match image_hash {
         Some(hash) => format!(
-            "{server_url}/rest/getCoverArt?id={final_id}_{hash}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi"
+            "{server_url}/rest/getCoverArt?id={final_id}_{hash}&{subsonic_credential}{size_param}&square=true&{standard}"
         ),
         None => {
             let cache_buster = updated_at.unwrap_or("");
             format!(
-                "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
+                "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&{standard}&_u={cache_buster}"
             )
         }
     }
@@ -136,9 +137,8 @@ pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &s
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
 
-    format!(
-        "{server_url}/rest/stream?id={song_id}&{subsonic_credential}&f=json&v=1.8.0&c=nokkvi&_={cache_bust}"
-    )
+    let standard = crate::services::api::subsonic::STANDARD_PARAMS;
+    format!("{server_url}/rest/stream?id={song_id}&{subsonic_credential}&{standard}&_={cache_bust}")
 }
 
 #[cfg(test)]

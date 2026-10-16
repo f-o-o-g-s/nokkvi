@@ -245,10 +245,15 @@ impl AuthService {
         &self.user_id
     }
 
-    /// Get the initial JWT token (as received from login or resume).
-    /// Note: The live token may differ if refreshed by the ApiClient interceptor.
-    pub fn get_token(&self) -> &str {
-        &self.token
+    /// The session's current JWT: the client's, which every response's
+    /// `X-ND-Authorization` rotates, or the login/resume token until a client
+    /// exists. The event stream reconnects with it and the session save
+    /// stores it; both used to read the login-time token, which a reconnect
+    /// past the token's lifetime (48 h by default) could no longer use.
+    pub fn get_token(&self) -> String {
+        self.client
+            .as_ref()
+            .map_or_else(|| self.token.clone(), ApiClient::current_token)
     }
 
     pub fn set_token_refresh_callback(
@@ -259,33 +264,40 @@ impl AuthService {
             client.set_on_token_refresh(callback);
         }
     }
+}
 
-    /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint.
-    pub async fn fetch_server_version(&self) -> Result<String> {
-        let ping_url = format!(
-            "{}/rest/ping?{}&f=json&c=nokkvi",
-            self.server_url, self.subsonic_credential
-        );
-        let client = self
-            .client
-            .as_ref()
-            .context("Not authenticated")?
-            .http_client();
-        let response = client
-            .get(&ping_url)
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            // `ping_url` carries the Subsonic credential (`s=`/`t=` or `apiKey=`)
-            // in its query string, so strip the URL from any transport error
-            // before it can reach a log sink.
-            .map_err(reqwest::Error::without_url)
-            .context("Failed to connect to server for ping")?;
+/// How long the version ping may take: it runs beside the login's other
+/// requests and gates nothing but the About box and a caps hint.
+const PING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-        let body = response.text().await.unwrap_or_default();
-        extract_server_version(&body)
-            .context("Could not extract Navidrome server version from API response")
-    }
+/// The server's version, from `ping`'s envelope. A free function so the
+/// gateway asks with its session lock released (see
+/// [`open_subsonic_extensions`]). It goes out as the shared POST with the
+/// standard params: a hand-built GET once lacked `v`, which Navidrome warns
+/// about on every login (`checkRequiredParameters`) and answers with error
+/// 10, and it carried the credential in the URL. Lenient on purpose: a failed
+/// envelope (a dead credential) still carries `serverVersion`, which is all
+/// the caller is after.
+pub(crate) async fn server_version(
+    http_client: &std::sync::Arc<reqwest::Client>,
+    server_url: &str,
+    subsonic_credential: &str,
+) -> Result<String> {
+    let (_status, body) = tokio::time::timeout(
+        PING_TIMEOUT,
+        crate::services::api::subsonic::fetch_subsonic_body(
+            http_client,
+            server_url,
+            "ping",
+            subsonic_credential,
+            &[],
+            "ping",
+        ),
+    )
+    .await
+    .context("Timed out pinging the server")??;
+    extract_server_version(&body)
+        .context("Could not extract Navidrome server version from API response")
 }
 
 /// The server's advertised OpenSubsonic extension names, via
@@ -489,6 +501,64 @@ mod tests {
                 api_key: Some(key.as_str().to_owned()),
                 ..CredentialParts::default()
             }
+        );
+    }
+
+    /// The event stream and the session save read the session's JWT through
+    /// `get_token`, so it follows the rotation the client applies on every
+    /// response instead of staying at the login-time token.
+    #[test]
+    fn get_token_follows_the_clients_rotated_jwt() {
+        let mut auth = AuthService::new().expect("new");
+        auth.resume_session(
+            "http://127.0.0.1:1".into(),
+            "foogs".into(),
+            "jwt-at-resume".into(),
+            "u=foogs&s=salt&t=tok".into(),
+        )
+        .expect("resume");
+        assert_eq!(auth.get_token(), "jwt-at-resume");
+
+        auth.get_client()
+            .expect("a resumed session has a client")
+            .apply_refreshed_token("jwt-rotated");
+
+        assert_eq!(auth.get_token(), "jwt-rotated");
+    }
+
+    /// The version ping is the shared Subsonic POST: a hand-built GET once
+    /// lacked `v` (Navidrome warns on every login and answers error 10 before
+    /// it authenticates) and carried the credential in its URL.
+    #[tokio::test]
+    async fn the_version_ping_is_the_standard_post() {
+        let server = crate::services::api::test_server::ScriptedServer::start(|r| {
+            if r.is("POST", "/rest/ping") {
+                (
+                    200,
+                    crate::services::api::test_server::subsonic_ok(r#""serverVersion":"0.64.2""#),
+                )
+            } else {
+                (404, String::new())
+            }
+        })
+        .await;
+        let client = std::sync::Arc::new(reqwest::Client::new());
+
+        let version = server_version(&client, &server.base_url, "u=foogs&s=salt&t=tok")
+            .await
+            .expect("version");
+
+        assert_eq!(version, "0.64.2");
+        let requests = server.requests();
+        let ping = requests.first().expect("one request");
+        assert!(ping.is("POST", "/rest/ping"), "{ping:?}");
+        assert_eq!(ping.form("v").as_deref(), Some("1.8.0"));
+        assert_eq!(ping.form("c").as_deref(), Some("nokkvi"));
+        assert_eq!(ping.form("t").as_deref(), Some("tok"));
+        assert!(
+            ping.query.is_empty(),
+            "the credential stays out of the URL: {}",
+            ping.query
         );
     }
 

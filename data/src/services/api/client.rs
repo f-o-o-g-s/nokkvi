@@ -309,7 +309,7 @@ impl ApiClient {
     ///
     /// Split out from `intercept_token_refresh` so the dedup + persistence
     /// policy is unit-testable without constructing a `reqwest::Response`.
-    fn apply_refreshed_token(&self, token_str: &str) {
+    pub(crate) fn apply_refreshed_token(&self, token_str: &str) {
         // Atomic dedup + swap under a single write lock. The previous
         // implementation took a read lock for the dedup check, dropped it,
         // then acquired a separate write lock — a TOCTOU race where N
@@ -581,7 +581,8 @@ impl ApiClient {
         Ok(body)
     }
 
-    #[cfg(test)]
+    /// The JWT as of the last response. `AuthService::get_token` reads it, so
+    /// the event stream and the session save follow the rotation.
     pub(crate) fn current_token(&self) -> String {
         self.token.read().clone()
     }

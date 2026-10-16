@@ -53,6 +53,13 @@ pub(crate) async fn subsonic_post(
     .with_context(|| format!("Failed to POST to Subsonic endpoint: {endpoint}"))
 }
 
+/// The parameters every Subsonic request carries beside its credential: the
+/// JSON answer, the protocol version Navidrome requires (`v`: without it the
+/// server warns and answers error 10 before it authenticates) and the client
+/// name. One copy, for the form bodies here and for the GET URLs the
+/// scrobble, cover-art and stream builders make.
+pub(crate) const STANDARD_PARAMS: &str = "f=json&v=1.8.0&c=nokkvi";
+
 /// Build (without sending) the [`subsonic_post`] request. Split out so the
 /// request's shape (body, headers) can be tested without a server.
 fn subsonic_post_request(
@@ -65,7 +72,7 @@ fn subsonic_post_request(
     let url = format!("{server_url}/rest/{endpoint}");
 
     // Build form body: credentials + standard params + extra params
-    let mut body = format!("{subsonic_credential}&f=json&v=1.8.0&c=nokkvi");
+    let mut body = format!("{subsonic_credential}&{STANDARD_PARAMS}");
     for (key, value) in extra_params {
         body.push_str(&format!(
             "&{}={}",
@@ -238,7 +245,7 @@ pub(crate) async fn subsonic_get_envelope_checked<T: serde::de::DeserializeOwned
 
 /// POST to a Subsonic endpoint and read the status and body, with `label`
 /// in the error contexts. The shared front half of the envelope readers.
-async fn fetch_subsonic_body(
+pub(crate) async fn fetch_subsonic_body(
     http_client: &Arc<reqwest::Client>,
     server_url: &str,
     endpoint: &str,

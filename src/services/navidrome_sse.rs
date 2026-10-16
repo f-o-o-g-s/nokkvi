@@ -242,7 +242,9 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                 continue;
             };
 
-            // 2. Read latest JWT (can update across reconnects if redb session is resumed)
+            // 2. The session's live JWT: the client rotates it with every
+            //    response, and a reconnect with the login-time token 401s
+            //    once that one has expired (48 h by default).
             let token = info.auth_gateway.get_token().await;
             if token.is_empty() {
                 tokio::time::sleep(Duration::from_secs(5)).await;
