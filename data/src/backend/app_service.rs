@@ -118,6 +118,31 @@ impl std::fmt::Debug for AppService {
     }
 }
 
+/// The persisted multi-library selection: the live `ACTIVE_LIBRARY_IDS` key,
+/// which a session claim parks and restores per owner (`slots::SlotPart::Libraries`).
+/// A read failure is non-fatal: the user gets the "no filter" default and a
+/// warning lands in the file log.
+fn stored_library_selection(
+    storage: &crate::services::state_storage::StateStorage,
+) -> HashSet<i32> {
+    match storage.load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS) {
+        Ok(Some(set)) => {
+            debug!(
+                " [APP SERVICE] restored {} active library IDs from storage",
+                set.len()
+            );
+            set
+        }
+        Ok(None) => HashSet::new(),
+        Err(e) => {
+            warn!(
+                "[APP SERVICE] failed to load active_library_ids ({e}); defaulting to empty selection"
+            );
+            HashSet::new()
+        }
+    }
+}
+
 impl AppService {
     pub async fn new() -> Result<Self> {
         // `main()` runs the legacy → XDG-state-dir migration
@@ -147,29 +172,11 @@ impl AppService {
         // Initialize the queue service with persisted data
         queue_service.initialize().await;
 
-        // Restore the persisted multi-library selection. A read failure
-        // is non-fatal — the user gets the "no filter" default for this
-        // session and a warning lands in the file log. The pruning step
+        // Restore the persisted multi-library selection (re-read after a
+        // session claim moves another owner's in). The pruning step
         // (validating each ID against the server's current library list)
         // happens lazily on the first `refresh_libraries` call.
-        let active_library_ids: HashSet<i32> = match storage
-            .load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS)
-        {
-            Ok(Some(set)) => {
-                debug!(
-                    " [APP SERVICE] restored {} active library IDs from storage",
-                    set.len()
-                );
-                set
-            }
-            Ok(None) => HashSet::new(),
-            Err(e) => {
-                warn!(
-                    "[APP SERVICE] failed to load active_library_ids ({e}); defaulting to empty selection"
-                );
-                HashSet::new()
-            }
-        };
+        let active_library_ids = stored_library_selection(&storage);
 
         let task_manager = Arc::new(TaskManager::new());
         let radio_scrobble_http = Arc::new(
@@ -353,6 +360,9 @@ impl AppService {
                 self.queue_service.reload_from_storage().await;
                 self.playback.resync_navigator_with_queue().await;
                 self.settings_service.set_active_playlist(playlist).await?;
+                // The selection moved with the queue (`slots::SlotPart::Libraries`);
+                // `new_with_storage` read the previous owner's.
+                *self.active_library_ids.write() = stored_library_selection(&self.storage);
                 info!(
                     " [QUEUE] {} for {}",
                     if restored {

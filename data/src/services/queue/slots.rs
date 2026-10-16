@@ -21,7 +21,7 @@ use super::{KEY_QUEUE_ORDER, KEY_QUEUE_SONGS};
 use crate::{
     services::{
         state_storage::StateStorage,
-        storage_keys::{QUEUE_OWNER, QUEUE_SLOT_PREFIX},
+        storage_keys::{ACTIVE_LIBRARY_IDS, QUEUE_OWNER, QUEUE_SLOT_PREFIX},
     },
     types::{active_playlist::ActivePlaylistRecord, queue::Queue},
 };
@@ -84,6 +84,11 @@ enum SlotPart {
     Order,
     Songs,
     Playlist,
+    /// The multi-library selection (`ACTIVE_LIBRARY_IDS`): it scopes every
+    /// list, so it belongs to the session like the queue. One global copy
+    /// scoped the next server to a library id both happened to have, or was
+    /// pruned away by it.
+    Libraries,
 }
 
 impl SlotPart {
@@ -92,6 +97,7 @@ impl SlotPart {
             Self::Order => "order",
             Self::Songs => "songs",
             Self::Playlist => "playlist",
+            Self::Libraries => "libraries",
         }
     }
 }
@@ -119,9 +125,10 @@ pub enum QueueClaim {
     /// The live queue (and the stored "Playing From" playlist) stay as they
     /// are.
     Kept,
-    /// The live keys now hold another queue: reload the queue from storage
-    /// and store `playlist` as the "Playing From" context. `restored` is
-    /// whether a parked queue came back (`false`: started empty).
+    /// The live keys now hold another queue and library selection: reload
+    /// both from storage and store `playlist` as the "Playing From" context.
+    /// `restored` is whether a parked queue came back (`false`: started
+    /// empty).
     Replaced {
         playlist: Option<ActivePlaylistRecord>,
         restored: bool,
@@ -192,6 +199,7 @@ pub fn claim(
             for (live_key, part) in [
                 (KEY_QUEUE_ORDER, SlotPart::Order),
                 (KEY_QUEUE_SONGS, SlotPart::Songs),
+                (ACTIVE_LIBRARY_IDS, SlotPart::Libraries),
             ] {
                 match storage.load_raw(live_key)? {
                     Some(bytes) => puts.push((slot_key(&live, part), bytes)),
@@ -219,11 +227,13 @@ pub fn claim(
         },
     }
 
-    // Move this owner's parked queue into the live keys, or start empty.
+    // Move this owner's parked queue and library selection into the live
+    // keys, or start empty and unfiltered.
     let mut restored = false;
     for (live_key, part) in [
         (KEY_QUEUE_ORDER, SlotPart::Order),
         (KEY_QUEUE_SONGS, SlotPart::Songs),
+        (ACTIVE_LIBRARY_IDS, SlotPart::Libraries),
     ] {
         let key = slot_key(&owner.key, part);
         match storage.load_raw(&key)? {
@@ -394,6 +404,36 @@ mod tests {
             }
         );
         assert_eq!(live_ids(&storage), ["d1"]);
+    }
+
+    /// The library selection belongs to the session like the queue: one
+    /// global copy scoped the next server to a library id both happened to
+    /// have, or was pruned away by it and lost on the way back.
+    #[test]
+    fn switching_servers_parks_the_library_selection_too() {
+        use std::collections::HashSet;
+        let selection = |storage: &StateStorage| {
+            storage
+                .load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS)
+                .expect("load")
+        };
+        let (storage, _temp) = storage();
+        stamp(&storage, &local());
+        storage
+            .save_binary(ACTIVE_LIBRARY_IDS, &HashSet::from([2]))
+            .expect("save");
+
+        claim(&storage, &demo(), None, LegacyVerdict::Unknown).expect("claim demo");
+        assert_eq!(selection(&storage), None, "the demo starts unfiltered");
+        storage
+            .save_binary(ACTIVE_LIBRARY_IDS, &HashSet::from([7]))
+            .expect("save");
+
+        claim(&storage, &local(), None, LegacyVerdict::Unknown).expect("claim local");
+        assert_eq!(selection(&storage), Some(HashSet::from([2])));
+
+        claim(&storage, &demo(), None, LegacyVerdict::Unknown).expect("claim demo again");
+        assert_eq!(selection(&storage), Some(HashSet::from([7])));
     }
 
     #[test]

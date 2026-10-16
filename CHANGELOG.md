@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Turning Lyrics or Cover Blur off releases the frosted cover from GPU memory.
 - A library an admin adds, removes or grants now appears in the library picker without a rescan or re-login.
 - The clear-queue help line no longer claims it stops a playing radio station.
+- The library selection now belongs to the server and user it was made on, like the queue.
 
 ### Removed
 
