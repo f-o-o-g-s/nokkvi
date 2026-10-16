@@ -3,7 +3,7 @@
 //! viewport was on comes back and the view stays on it, and a page asked for
 //! before the reload can't land on top of the reloaded rows.
 
-use nokkvi_data::backend::artists::ArtistUIViewData;
+use nokkvi_data::{backend::artists::ArtistUIViewData, types::paged_buffer::ReplaceTicket};
 
 use crate::{
     View,
@@ -39,7 +39,79 @@ fn reload_lands(app: &mut crate::Nokkvi, rows: Vec<ArtistUIViewData>, anchor_id:
         total_count,
         background: true,
         anchor_id,
+        replace: None,
     }));
+}
+
+/// A list-replacing load's answer lands, carrying its place in line.
+fn load_lands(
+    app: &mut crate::Nokkvi,
+    result: Result<Vec<ArtistUIViewData>, String>,
+    background: bool,
+    replace: ReplaceTicket,
+) {
+    let total_count = result.as_ref().map_or(0, Vec::len);
+    let _ = app.update(Message::ArtistsLoader(ArtistsLoaderMessage::Loaded {
+        result,
+        total_count,
+        background,
+        anchor_id: background.then(|| "r905".to_string()),
+        replace: Some(replace),
+    }));
+}
+
+/// A background reload (now up to 10,000 rows) landing after a newer,
+/// one-page search: the search's rows stand, or the user would see every
+/// artist under a filled search box and the view would jump to the old
+/// anchor.
+#[test]
+fn a_reload_landing_after_a_newer_search_is_dropped() {
+    let mut app = artists_app(917, 917, 905);
+    let reload = app.library.artists.begin_replace();
+    let search = app.library.artists.begin_replace();
+
+    load_lands(&mut app, Ok(artists(0..3)), false, search);
+    load_lands(&mut app, Ok(artists(0..917)), true, reload);
+
+    assert_eq!(
+        app.library.artists.len(),
+        3,
+        "the newer search's rows stand"
+    );
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, 0);
+}
+
+/// The same stale reload failing is dropped quietly: no toast, no end to
+/// a find chain, for rows nobody waits for.
+#[test]
+fn a_failed_stale_reload_toasts_nothing() {
+    let mut app = artists_app(917, 917, 905);
+    let reload = app.library.artists.begin_replace();
+    let search = app.library.artists.begin_replace();
+    load_lands(&mut app, Ok(artists(0..3)), false, search);
+
+    load_lands(&mut app, Err("timed out".into()), true, reload);
+
+    assert!(app.toast.toasts.is_empty());
+    assert_eq!(app.library.artists.len(), 3);
+}
+
+/// The newest load always lands, whichever order the answers arrive in.
+#[test]
+fn the_newest_load_lands_after_an_older_one() {
+    let mut app = artists_app(917, 917, 905);
+    let reload = app.library.artists.begin_replace();
+    let search = app.library.artists.begin_replace();
+
+    load_lands(&mut app, Ok(artists(0..917)), true, reload);
+    assert_eq!(
+        app.library.artists.len(),
+        917,
+        "nothing newer has landed yet"
+    );
+    load_lands(&mut app, Ok(artists(0..3)), false, search);
+
+    assert_eq!(app.library.artists.len(), 3);
 }
 
 /// The report: centred near the end of a 917-artist list, each artist

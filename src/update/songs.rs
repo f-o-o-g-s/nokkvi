@@ -47,12 +47,13 @@ impl Nokkvi {
         let (load, anchor_id) = Reload::first_rows(reload);
         self.load_paged::<SongsTarget, _, _, _>(
             load,
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::SongsLoader(crate::app_message::SongsLoaderMessage::Loaded {
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                     background,
                     anchor_id,
+                    replace: outcome.replace,
                 })
             },
             Self::fetch_songs_page,
@@ -64,11 +65,11 @@ impl Nokkvi {
         let slot = self.library.songs.page_slot(offset);
         self.load_paged::<SongsTarget, _, _, _>(
             PagedLoad::Page(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             Self::fetch_songs_page,
@@ -83,11 +84,11 @@ impl Nokkvi {
         let slot = self.library.songs.page_slot(offset);
         self.load_paged::<SongsTarget, _, _, _>(
             PagedLoad::ForcedPage(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             Self::fetch_songs_page,
@@ -109,8 +110,9 @@ impl Nokkvi {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ) -> Task<Message> {
-        self.handle_loaded_with::<SongsTarget>(result, total_count, background, anchor_id)
+        self.handle_loaded_with::<SongsTarget>(result, total_count, background, anchor_id, replace)
     }
 
     pub(crate) fn handle_song_artwork_loaded(
@@ -490,7 +492,8 @@ impl Nokkvi {
                 total_count,
                 background,
                 anchor_id,
-            } => self.handle_songs_loaded(result, total_count, background, anchor_id),
+                replace,
+            } => self.handle_songs_loaded(result, total_count, background, anchor_id, replace),
             SongsLoaderMessage::PageLoaded {
                 slot,
                 result,

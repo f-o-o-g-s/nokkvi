@@ -275,7 +275,7 @@ fn background_artists_reload_anchor_not_found_keeps_offset_in_bounds() {
         make_artist("ar7", "Eta"),
         make_artist("ar8", "Theta"),
     ];
-    let _ = app.handle_artists_loaded(Ok(new_page.clone()), 8, true, Some("ar3".to_string()));
+    let _ = app.handle_artists_loaded(Ok(new_page.clone()), 8, true, Some("ar3".to_string()), None);
     assert_eq!(
         app.artists_page.common.slot_list.viewport_offset, 2,
         "a missing anchor keeps the viewport where it was"
@@ -283,7 +283,7 @@ fn background_artists_reload_anchor_not_found_keeps_offset_in_bounds() {
 
     // Past the end of the new list, the offset is clamped into it.
     app.artists_page.common.slot_list.viewport_offset = 4;
-    let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar3".to_string()));
+    let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar3".to_string()), None);
     assert_eq!(app.artists_page.common.slot_list.viewport_offset, 2);
 }
 
@@ -305,7 +305,7 @@ fn background_artists_reload_clears_selected_offset() {
         make_artist("ar1", "Alpha"),
         make_artist("ar2", "Beta"),
     ];
-    let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar2".to_string()));
+    let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar2".to_string()), None);
 
     assert_eq!(
         app.artists_page.common.slot_list.selected_offset, None,
@@ -365,14 +365,14 @@ fn background_songs_reload_anchor_not_found_keeps_offset_in_bounds() {
         make_song("s7", "Eta", "Artist"),
         make_song("s8", "Theta", "Artist"),
     ];
-    let _ = app.handle_songs_loaded(Ok(new_page.clone()), 8, true, Some("s3".to_string()));
+    let _ = app.handle_songs_loaded(Ok(new_page.clone()), 8, true, Some("s3".to_string()), None);
     assert_eq!(
         app.songs_page.common.slot_list.viewport_offset, 2,
         "a missing anchor keeps the viewport where it was"
     );
 
     app.songs_page.common.slot_list.viewport_offset = 4;
-    let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s3".to_string()));
+    let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s3".to_string()), None);
     assert_eq!(app.songs_page.common.slot_list.viewport_offset, 2);
 }
 
@@ -394,7 +394,7 @@ fn background_songs_reload_clears_selected_offset() {
         make_song("s1", "Alpha", "Artist"),
         make_song("s2", "Beta", "Artist"),
     ];
-    let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s2".to_string()));
+    let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s2".to_string()), None);
 
     assert_eq!(
         app.songs_page.common.slot_list.selected_offset, None,
@@ -452,7 +452,7 @@ fn background_albums_reload_clears_selected_offset() {
         make_album("a1", "Alpha", "Artist"),
         make_album("a2", "Beta", "Artist"),
     ];
-    let _ = app.handle_albums_loaded(Ok(new_page), 3, true, Some("a2".to_string()));
+    let _ = app.handle_albums_loaded(Ok(new_page), 3, true, Some("a2".to_string()), None);
 
     assert_eq!(
         app.albums_page.common.slot_list.selected_offset, None,

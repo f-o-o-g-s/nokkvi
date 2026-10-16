@@ -21,6 +21,8 @@ impl Nokkvi {
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.genres.set_loading(true);
+        // This load replaces the list: a newer one outranks it when it lands.
+        let replace = Some(self.library.genres.begin_replace());
 
         self.shell_task(
             move |shell| async move {
@@ -52,10 +54,11 @@ impl Nokkvi {
                     Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
-            |(result, total_count)| {
+            move |(result, total_count)| {
                 Message::GenresLoader(crate::app_message::GenresLoaderMessage::Loaded(
                     result,
                     total_count,
+                    replace,
                 ))
             },
         )
@@ -121,8 +124,9 @@ impl Nokkvi {
         &mut self,
         result: Result<Vec<GenreUIViewData>, String>,
         total_count: usize,
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ) -> Task<Message> {
-        self.handle_loaded_with::<GenresTarget>(result, total_count, false, None)
+        self.handle_loaded_with::<GenresTarget>(result, total_count, false, None, replace)
     }
 
     pub(crate) fn handle_genres(&mut self, msg: views::GenresMessage) -> Task<Message> {
@@ -441,8 +445,8 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::app_message::GenresLoaderMessage;
         match msg {
-            GenresLoaderMessage::Loaded(result, total_count) => {
-                self.handle_genres_loaded(result, total_count)
+            GenresLoaderMessage::Loaded(result, total_count, replace) => {
+                self.handle_genres_loaded(result, total_count, replace)
             }
         }
     }

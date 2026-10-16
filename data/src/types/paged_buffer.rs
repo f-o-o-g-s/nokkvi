@@ -43,7 +43,19 @@ pub struct PagedBuffer<T> {
     /// `set_from_vec`, `clear`), never by an append or an edit: the identity
     /// of the list a page request continues ([`PageSlot`]).
     epoch: u64,
+    /// The newest request that replaces the whole list (a first load, a
+    /// sort or search, a background reload), numbered by
+    /// [`Self::begin_replace`]. Its answer lands only while it is still the
+    /// newest ([`Self::replace_is_current`]): a background reload of
+    /// thousands of rows used to land after a newer one-page search and put
+    /// the unfiltered rows under the search box.
+    replace_ticket: u64,
 }
+
+/// A list-replacing request's place in line (see
+/// [`PagedBuffer::begin_replace`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplaceTicket(u64);
 
 /// Where a page asked for now belongs: the list it continues (the buffer's
 /// epoch at the time) and the row it starts at.
@@ -71,6 +83,7 @@ impl<T> PagedBuffer<T> {
             loading_since: None,
             generation: 0,
             epoch: 0,
+            replace_ticket: 0,
         }
     }
 
@@ -102,6 +115,18 @@ impl<T> PagedBuffer<T> {
     /// is still the loaded one and the loaded rows end where it starts.
     pub fn takes_page(&self, slot: PageSlot) -> bool {
         slot.epoch == self.epoch && slot.offset == self.items.len()
+    }
+
+    /// Number a request that will replace the whole list. Its answer is
+    /// applied only while [`Self::replace_is_current`] holds for the ticket.
+    pub fn begin_replace(&mut self) -> ReplaceTicket {
+        self.replace_ticket = self.replace_ticket.wrapping_add(1);
+        ReplaceTicket(self.replace_ticket)
+    }
+
+    /// Whether no list-replacing request was made after `ticket`'s.
+    pub fn replace_is_current(&self, ticket: ReplaceTicket) -> bool {
+        ticket.0 == self.replace_ticket
     }
 
     /// Total items on the server (not just loaded items).

@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Logging in no longer leaves a missing-parameter warning in Navidrome's log.
 - A rejected server credential no longer marks every cover as missing artwork for the rest of the session.
 - Requests to a server that has gone away fail after eight seconds instead of about two minutes.
+- A search or sort typed while a background reload is out no longer gets replaced by the reload's unfiltered rows.
 
 ### Removed
 

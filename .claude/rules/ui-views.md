@@ -178,7 +178,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Cross-cutt
 ## View Data Refresh
 
 - **Manual**: the `RefreshView` hotkey (`r`) → the view's `reload_message()`; the header Refresh button → `RefreshViewData` → `handle_common_view_action`'s `reload_msg`. Both bust the cache and refetch from source
-- **Automatic**: Navidrome SSE → `update/library_refresh.rs` → background reload of every row down to the viewport, landing back on its top row (gotchas/async-state.md). Its toast is suppressed by `suppress_library_refresh_toasts`.
+- **Automatic**: Navidrome SSE → `update/library_refresh.rs` → background reload of every row down to the viewport, landing back on its centred row (gotchas/async-state.md). Its toast is suppressed by `suppress_library_refresh_toasts`.
 
 ## Modals
 

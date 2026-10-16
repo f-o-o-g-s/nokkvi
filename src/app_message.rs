@@ -1239,6 +1239,10 @@ pub enum AlbumsLoaderMessage {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        /// The load's place in line among the list-replacing loads: a newer
+        /// one makes this answer stale (`PagedBuffer::replace_is_current`).
+        /// `None` (tests) is never stale.
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     },
     PageLoaded {
         /// Where the page was asked for: it lands only there
@@ -1260,6 +1264,8 @@ pub enum ArtistsLoaderMessage {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        /// See `AlbumsLoaderMessage::Loaded::replace`.
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     },
     PageLoaded {
         /// Where the page was asked for: it lands only there
@@ -1293,6 +1299,8 @@ pub enum SongsLoaderMessage {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        /// See `AlbumsLoaderMessage::Loaded::replace`.
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     },
     PageLoaded {
         /// Where the page was asked for: it lands only there
@@ -1306,25 +1314,28 @@ pub enum SongsLoaderMessage {
 // --- Genres Loader ---------------------------------------------------------
 
 /// Genres loader results — single-shot full-list response (genres are not
-/// paged). Tuple shape `(result, total_count)` matches the existing fire site.
+/// paged). `(result, total_count, replace)`; `replace` as on
+/// `AlbumsLoaderMessage::Loaded`.
 #[derive(Debug, Clone)]
 pub enum GenresLoaderMessage {
     Loaded(
         Result<Vec<nokkvi_data::backend::genres::GenreUIViewData>, String>,
         usize,
+        Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ),
 }
 
 // --- Playlists Loader ------------------------------------------------------
 
 /// Playlists loader results — single-shot full-list response (playlists are
-/// not paged). Tuple shape `(result, total_count)` matches the existing
-/// fire site.
+/// not paged). `(result, total_count, replace)`; `replace` as on
+/// `AlbumsLoaderMessage::Loaded`.
 #[derive(Debug, Clone)]
 pub enum PlaylistsLoaderMessage {
     Loaded(
         Result<Vec<nokkvi_data::backend::playlists::PlaylistUIViewData>, String>,
         usize,
+        Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ),
 }
 

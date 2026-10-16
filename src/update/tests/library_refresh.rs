@@ -398,7 +398,7 @@ fn albums_loaded_clamps_viewport_when_anchor_missing() {
     let new_albums: Vec<_> = (0..15)
         .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
         .collect();
-    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()));
+    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()), None);
 
     assert_eq!(app.library.albums.len(), 15);
     assert!(
@@ -425,7 +425,7 @@ fn albums_loaded_clamps_viewport_when_anchor_id_none() {
     let new_albums: Vec<_> = (0..10)
         .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
         .collect();
-    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None);
+    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None, None);
 
     assert!(
         app.albums_page.common.slot_list.viewport_offset < app.library.albums.len(),
@@ -457,7 +457,7 @@ fn albums_loaded_anchor_match_takes_precedence_over_clamp() {
     new_albums
         .extend((41..50).map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist")));
 
-    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()));
+    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()), None);
 
     assert_eq!(
         app.albums_page.common.slot_list.viewport_offset, 5,
@@ -486,7 +486,7 @@ fn albums_loaded_purges_stale_selected_indices() {
     let new_albums: Vec<_> = (0..10)
         .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
         .collect();
-    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None);
+    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None, None);
 
     let stale: Vec<_> = app
         .albums_page
@@ -519,7 +519,7 @@ fn albums_loaded_total_count_matches_buffer_length() {
     let new_albums: Vec<_> = (0..30)
         .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
         .collect();
-    let _ = app.handle_albums_loaded(Ok(new_albums), 30, true, None);
+    let _ = app.handle_albums_loaded(Ok(new_albums), 30, true, None, None);
 
     assert_eq!(app.library.albums.len(), 30);
     assert_eq!(app.library.counts.albums, 30);
@@ -539,7 +539,7 @@ fn albums_loaded_background_preserves_viewport_when_safe() {
     app.library.albums.set_from_vec(albums.clone());
     app.albums_page.common.slot_list.viewport_offset = 12;
 
-    let _ = app.handle_albums_loaded(Ok(albums), 50, true, Some("a12".to_string()));
+    let _ = app.handle_albums_loaded(Ok(albums), 50, true, Some("a12".to_string()), None);
 
     assert_eq!(
         app.albums_page.common.slot_list.viewport_offset, 12,

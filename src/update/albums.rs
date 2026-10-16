@@ -51,12 +51,13 @@ impl Nokkvi {
         let (load, anchor_id) = Reload::first_rows(reload);
         self.load_paged::<AlbumsTarget, _, _, _>(
             load,
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::Loaded {
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                     background,
                     anchor_id,
+                    replace: outcome.replace,
                 })
             },
             Self::fetch_albums_page,
@@ -68,11 +69,11 @@ impl Nokkvi {
         let slot = self.library.albums.page_slot(offset);
         self.load_paged::<AlbumsTarget, _, _, _>(
             PagedLoad::Page(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             Self::fetch_albums_page,
@@ -87,11 +88,11 @@ impl Nokkvi {
         let slot = self.library.albums.page_slot(offset);
         self.load_paged::<AlbumsTarget, _, _, _>(
             PagedLoad::ForcedPage(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             Self::fetch_albums_page,
@@ -113,8 +114,9 @@ impl Nokkvi {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ) -> Task<Message> {
-        self.handle_loaded_with::<AlbumsTarget>(result, total_count, background, anchor_id)
+        self.handle_loaded_with::<AlbumsTarget>(result, total_count, background, anchor_id, replace)
     }
 
     pub(crate) fn handle_artwork_loaded(
@@ -984,7 +986,8 @@ impl Nokkvi {
                 total_count,
                 background,
                 anchor_id,
-            } => self.handle_albums_loaded(result, total_count, background, anchor_id),
+                replace,
+            } => self.handle_albums_loaded(result, total_count, background, anchor_id, replace),
             AlbumsLoaderMessage::PageLoaded {
                 slot,
                 result,

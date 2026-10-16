@@ -376,6 +376,7 @@ fn apply_viewport_on_load_background_clears_stale_multiselection() {
         3,
         /* background = */ true,
         Some("sX".into()),
+        None,
     );
 
     assert!(
@@ -409,6 +410,7 @@ fn apply_viewport_on_load_foreground_clears_anchor_index() {
         ]),
         3,
         /* background = */ false,
+        None,
         None,
     );
 

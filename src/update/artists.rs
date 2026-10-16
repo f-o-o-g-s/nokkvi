@@ -79,12 +79,13 @@ impl Nokkvi {
         debug!(album_artists_only, "LoadArtists per-call flags");
         self.load_paged::<ArtistsTarget, _, _, _>(
             load,
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::Loaded {
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                     background,
                     anchor_id,
+                    replace: outcome.replace,
                 })
             },
             move |shell, params| {
@@ -101,11 +102,11 @@ impl Nokkvi {
         let slot = self.library.artists.page_slot(offset);
         self.load_paged::<ArtistsTarget, _, _, _>(
             PagedLoad::Page(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             move |shell, params| {
@@ -123,11 +124,11 @@ impl Nokkvi {
         let slot = self.library.artists.page_slot(offset);
         self.load_paged::<ArtistsTarget, _, _, _>(
             PagedLoad::ForcedPage(offset),
-            move |(result, total_count)| {
+            move |outcome| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded {
                     slot,
-                    result,
-                    total_count,
+                    result: outcome.result,
+                    total_count: outcome.total_count,
                 })
             },
             move |shell, params| {
@@ -412,8 +413,15 @@ impl Nokkvi {
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ) -> Task<Message> {
-        self.handle_loaded_with::<ArtistsTarget>(result, total_count, background, anchor_id)
+        self.handle_loaded_with::<ArtistsTarget>(
+            result,
+            total_count,
+            background,
+            anchor_id,
+            replace,
+        )
     }
 
     pub(crate) fn handle_artists(&mut self, msg: views::ArtistsMessage) -> Task<Message> {
@@ -739,7 +747,8 @@ impl Nokkvi {
                 total_count,
                 background,
                 anchor_id,
-            } => self.handle_artists_loaded(result, total_count, background, anchor_id),
+                replace,
+            } => self.handle_artists_loaded(result, total_count, background, anchor_id, replace),
             ArtistsLoaderMessage::PageLoaded {
                 slot,
                 result,

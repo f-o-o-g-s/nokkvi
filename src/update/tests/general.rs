@@ -710,7 +710,7 @@ fn test_albums_loaded_unauthorized_triggers_logout() {
 
     // Simulate a wrapped anyhow error that was stringified with {:#}
     let err_string = "Failed to fetch albums: Unauthorized: Session expired".to_string();
-    let _ = app.handle_albums_loaded(Err(err_string), 0, false, None);
+    let _ = app.handle_albums_loaded(Err(err_string), 0, false, None, None);
 
     assert_eq!(
         app.screen,
@@ -727,12 +727,12 @@ fn genres_and_playlists_loaded_unauthorized_trigger_logout() {
 
     let mut app = test_app();
     app.screen = crate::Screen::Home;
-    let _ = app.handle_genres_loaded(Err(err()), 0);
+    let _ = app.handle_genres_loaded(Err(err()), 0, None);
     assert_eq!(app.screen, crate::Screen::Login, "genres");
 
     let mut app = test_app();
     app.screen = crate::Screen::Home;
-    let _ = app.handle_playlists_loaded(Err(err()), 0);
+    let _ = app.handle_playlists_loaded(Err(err()), 0, None);
     assert_eq!(app.screen, crate::Screen::Login, "playlists");
 }
 
@@ -752,6 +752,7 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
     let _ = app.handle_genres_loaded(
         Err("API GET /api/genre failed with status 500: boom".into()),
         0,
+        None,
     );
     assert_eq!(app.screen, crate::Screen::Home);
     assert_eq!(app.library.genres.len(), 1, "the genre rows stay");
@@ -778,6 +779,7 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
     let _ = app.handle_playlists_loaded(
         Err("API GET /api/playlist failed with status 500: boom".into()),
         0,
+        None,
     );
     assert_eq!(app.library.playlists.len(), 1, "the playlist rows stay");
     assert_eq!(app.library.counts.playlists, 1);

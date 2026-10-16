@@ -18,7 +18,7 @@ use std::future::Future;
 use iced::Task;
 use nokkvi_data::{
     backend::app_service::AppService,
-    types::paged_buffer::{PageSlot, PagedBuffer},
+    types::paged_buffer::{PageSlot, PagedBuffer, ReplaceTicket},
 };
 use tracing::{debug, error};
 
@@ -67,6 +67,16 @@ impl Reload {
             None => (PagedLoad::First, None),
         }
     }
+}
+
+/// What a paged fetch hands its message constructor: the rows (or the
+/// error), the server's total and, for a load that replaces the list (a
+/// first load, a sort or search, a background reload), its ticket, which
+/// `handle_loaded_with` checks before it applies the answer.
+pub(crate) struct PagedOutcome<I> {
+    pub result: Result<Vec<I>, String>,
+    pub total_count: usize,
+    pub replace: Option<ReplaceTicket>,
 }
 
 /// Most rows a background reload fetches. A view scrolled deeper keeps its
@@ -121,8 +131,8 @@ pub(crate) trait LoaderTarget {
     // ── Defaulted: viewport ───────────────────────────────────────────────
     /// Apply viewport state after initial load. Default implements anchor-based
     /// preservation for paged views (Albums / Artists / Songs): on a background
-    /// reload the viewport's top row is found again by id (the reload fetched
-    /// every row down to it, `reload_rows`), keeping the user's position in
+    /// reload the viewport's centred row (its anchor) is found again by id
+    /// (the reload fetched every row down to it, `reload_rows`), keeping the user's position in
     /// large libraries; a row gone from the list leaves the viewport at the
     /// same offset, clamped to the new length. `GenresTarget` and
     /// `PlaylistsTarget` override to reset to 0 unconditionally because these
@@ -588,7 +598,7 @@ impl Nokkvi {
         T: LoaderTarget,
         F: FnOnce(AppService, PaginatedFetch) -> Fut + Send + 'static,
         Fut: Future<Output = (Result<Vec<T::Item>, String>, usize)> + Send + 'static,
-        M: FnOnce((Result<Vec<T::Item>, String>, usize)) -> Message + Send + 'static,
+        M: FnOnce(PagedOutcome<T::Item>) -> Message + Send + 'static,
     {
         let page_size = self.settings.library_page_size.to_usize();
         let viewport_offset = T::page_common(self).slot_list.viewport_offset;
@@ -597,6 +607,10 @@ impl Nokkvi {
             PagedLoad::Reload(rows) => (0, rows),
             PagedLoad::Page(offset) | PagedLoad::ForcedPage(offset) => (offset, page_size),
         };
+        // A load that replaces the list takes its place in line, so a newer
+        // one (the user's search or sort) outranks it when it lands.
+        let replace = matches!(load, PagedLoad::First | PagedLoad::Reload(_))
+            .then(|| T::library_mut(self).begin_replace());
         // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
         // pass needs_fetch. Catches duplicate dispatches that race past
         // the upstream needs_fetch check at the action site. Initial
@@ -624,7 +638,16 @@ impl Nokkvi {
 
         T::library_mut(self).set_loading(true);
 
-        self.shell_task(move |shell| fetch(shell, params), msg_ctor)
+        self.shell_task(
+            move |shell| fetch(shell, params),
+            move |(result, total_count)| {
+                msg_ctor(PagedOutcome {
+                    result,
+                    total_count,
+                    replace,
+                })
+            },
+        )
     }
 
     /// Re-pin the slot-list highlight after a `set_children`-triggering load
@@ -700,13 +723,28 @@ impl Nokkvi {
         tasks
     }
 
+    /// `replace` is the load's place in line (`PagedBuffer::begin_replace`):
+    /// an answer a newer list-replacing load has outrun is dropped whole,
+    /// rows, count, viewport and error alike, so a background reload of
+    /// thousands of rows can't land on top of the search or sort the user
+    /// made while it was out. `None` (tests) is never stale.
     pub(crate) fn handle_loaded_with<T: LoaderTarget>(
         &mut self,
         result: Result<Vec<T::Item>, String>,
         total_count: usize,
         background: bool,
         anchor_id: Option<String>,
+        replace: Option<ReplaceTicket>,
     ) -> Task<Message> {
+        if let Some(ticket) = replace
+            && !T::library(self).replace_is_current(ticket)
+        {
+            debug!(
+                " Stale {} load dropped: a newer load replaced the list",
+                T::entity_label()
+            );
+            return Task::none();
+        }
         match result {
             Ok(items) => {
                 // The header count follows the rows: a failed reload keeps

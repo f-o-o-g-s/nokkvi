@@ -512,7 +512,7 @@ mod background_reload {
 
     fn reload(app: &mut crate::Nokkvi, rows: Vec<AlbumUIViewData>) -> Vec<String> {
         let n = rows.len();
-        let _ = app.handle_albums_loaded(Ok(rows), n, true, Some("a1".into()));
+        let _ = app.handle_albums_loaded(Ok(rows), n, true, Some("a1".into()), None);
         planned(app)
     }
 
@@ -574,6 +574,7 @@ mod background_reload {
             2,
             true,
             Some("r1".into()),
+            None,
         );
         let ids: Vec<String> = app
             .artist_minis_to_fetch()

@@ -184,6 +184,8 @@ impl Nokkvi {
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.playlists.set_loading(true);
+        // This load replaces the list: a newer one outranks it when it lands.
+        let replace = Some(self.library.playlists.begin_replace());
 
         self.shell_task(
             move |shell| async move {
@@ -217,10 +219,11 @@ impl Nokkvi {
                     Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
-            |(result, total_count)| {
+            move |(result, total_count)| {
                 Message::PlaylistsLoader(crate::app_message::PlaylistsLoaderMessage::Loaded(
                     result,
                     total_count,
+                    replace,
                 ))
             },
         )
@@ -230,8 +233,10 @@ impl Nokkvi {
         &mut self,
         result: Result<Vec<PlaylistUIViewData>, String>,
         total_count: usize,
+        replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
     ) -> Task<Message> {
-        let task = self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None);
+        let task =
+            self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None, replace);
         // The restored banner context can be stale (persisted at last play);
         // re-sync it against the freshly loaded metadata so count / duration /
         // updated-date / visibility always reflect the server.
@@ -734,8 +739,8 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::app_message::PlaylistsLoaderMessage;
         match msg {
-            PlaylistsLoaderMessage::Loaded(result, total_count) => {
-                self.handle_playlists_loaded(result, total_count)
+            PlaylistsLoaderMessage::Loaded(result, total_count, replace) => {
+                self.handle_playlists_loaded(result, total_count, replace)
             }
         }
     }

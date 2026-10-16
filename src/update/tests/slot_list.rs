@@ -68,7 +68,7 @@ fn albums_loaded_error_clears_loading() {
     app.library.albums.set_loading(true);
     assert!(app.library.albums.is_loading());
 
-    let _ = app.handle_albums_loaded(Err("network error".to_string()), 0, false, None);
+    let _ = app.handle_albums_loaded(Err("network error".to_string()), 0, false, None, None);
     assert!(
         !app.library.albums.is_loading(),
         "loading flag should be cleared on error"
@@ -81,7 +81,7 @@ fn artists_loaded_error_clears_loading() {
     app.library.artists.set_loading(true);
     assert!(app.library.artists.is_loading());
 
-    let _ = app.handle_artists_loaded(Err("network error".to_string()), 0, false, None);
+    let _ = app.handle_artists_loaded(Err("network error".to_string()), 0, false, None, None);
     assert!(
         !app.library.artists.is_loading(),
         "loading flag should be cleared on error"
@@ -94,7 +94,7 @@ fn songs_loaded_error_clears_loading() {
     app.library.songs.set_loading(true);
     assert!(app.library.songs.is_loading());
 
-    let _ = app.handle_songs_loaded(Err("network error".to_string()), 0, false, None);
+    let _ = app.handle_songs_loaded(Err("network error".to_string()), 0, false, None, None);
     assert!(
         !app.library.songs.is_loading(),
         "loading flag should be cleared on error"
@@ -107,7 +107,7 @@ fn genres_loaded_error_clears_loading() {
     app.library.genres.set_loading(true);
     assert!(app.library.genres.is_loading());
 
-    let _ = app.handle_genres_loaded(Err("network error".to_string()), 0);
+    let _ = app.handle_genres_loaded(Err("network error".to_string()), 0, None);
     assert!(
         !app.library.genres.is_loading(),
         "loading flag should be cleared on error"
@@ -120,7 +120,7 @@ fn playlists_loaded_error_clears_loading() {
     app.library.playlists.set_loading(true);
     assert!(app.library.playlists.is_loading());
 
-    let _ = app.handle_playlists_loaded(Err("network error".to_string()), 0);
+    let _ = app.handle_playlists_loaded(Err("network error".to_string()), 0, None);
     assert!(
         !app.library.playlists.is_loading(),
         "loading flag should be cleared on error"
@@ -408,7 +408,7 @@ fn albums_foreground_reload_clears_the_click_marker() {
     // back to 0, so a kept marker at 30 would put the ring off-screen, and
     // `get_effective_center_index` prefers the marker, so Enter / Shift+Q would
     // act on row 30 instead of the centered row.
-    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None);
+    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None, None);
 
     let sl = &app.albums_page.common.slot_list;
     assert_eq!(sl.viewport_offset, 0, "a foreground load starts at the top");
@@ -429,7 +429,7 @@ fn albums_foreground_reload_still_pins_a_pending_find_and_expand() {
     app.current_view = View::Albums;
     arm_pending_album(&mut app, "a12");
 
-    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None);
+    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None, None);
 
     let sl = &app.albums_page.common.slot_list;
     assert_eq!(
