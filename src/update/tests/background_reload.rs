@@ -238,3 +238,22 @@ fn a_page_lands_right_after_the_rows_it_follows() {
     assert_eq!(app.library.artists.len(), 917);
     assert_eq!(app.library.artists[500].id, "r500");
 }
+
+/// A clear outranks every list load still out: a library toggle clears the
+/// buffers while a scrobble's background reloads are out under the old
+/// filter, and only the current view refetches. The others' reloads used
+/// to land in the cleared buffers with the old library's rows.
+#[test]
+fn a_reload_landing_after_a_clear_is_dropped() {
+    let mut app = artists_app(917, 917, 905);
+    let reload = app.library.artists.begin_replace();
+
+    app.library.artists.clear();
+    load_lands(&mut app, Ok(artists(0..917)), true, reload);
+
+    assert!(
+        app.library.artists.is_empty(),
+        "the cleared list stays empty"
+    );
+    assert!(!app.library.artists.is_loading());
+}

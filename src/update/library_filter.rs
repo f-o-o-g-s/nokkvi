@@ -123,9 +123,10 @@ impl Nokkvi {
         }
 
         // Invalidate every paged buffer so the next visit refetches
-        // with the new active-library filter. `clear()` bumps each
-        // buffer's generation so any in-flight fetch result discards
-        // itself when it lands (paged_buffer.rs:158).
+        // with the new active-library filter. `clear()` also moves each
+        // buffer's replace ticket, so a list load out under the old filter
+        // (a background reload) is dropped when it lands
+        // (`handle_loaded_with`).
         self.library.albums.clear();
         self.library.artists.clear();
         self.library.songs.clear();

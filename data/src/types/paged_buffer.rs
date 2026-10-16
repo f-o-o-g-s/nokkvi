@@ -103,6 +103,15 @@ impl<T> PagedBuffer<T> {
         self.epoch = self.epoch.wrapping_add(1);
     }
 
+    /// A replacement made by no request (a clear, a seeded list) outranks
+    /// every list load still out: they were asked for the list that is gone
+    /// (a library toggle's clear, with background reloads out under the old
+    /// filter).
+    #[inline]
+    fn outrank_pending_loads(&mut self) {
+        self.replace_ticket = self.replace_ticket.wrapping_add(1);
+    }
+
     /// The slot a page starting at `offset`, asked for now, fills.
     pub fn page_slot(&self, offset: usize) -> PageSlot {
         PageSlot {
@@ -124,7 +133,8 @@ impl<T> PagedBuffer<T> {
         ReplaceTicket(self.replace_ticket)
     }
 
-    /// Whether no list-replacing request was made after `ticket`'s.
+    /// Whether no list-replacing request was made, and no `clear` or
+    /// `set_from_vec` happened, after `ticket`'s.
     pub fn replace_is_current(&self, ticket: ReplaceTicket) -> bool {
         ticket.0 == self.replace_ticket
     }
@@ -240,6 +250,7 @@ impl<T> PagedBuffer<T> {
         self.loading_since = None;
         self.bump_generation();
         self.replace_list();
+        self.outrank_pending_loads();
     }
 
     /// Get a mutable reference to an item by index. Bumps the generation
@@ -297,6 +308,7 @@ impl<T> PagedBuffer<T> {
         self.loading_since = None;
         self.bump_generation();
         self.replace_list();
+        self.outrank_pending_loads();
     }
 }
 
