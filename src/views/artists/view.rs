@@ -356,17 +356,18 @@ impl ArtistsPage {
                         bio_col = bio_col.push(read_more_btn.boxed());
                     }
 
-                    // Similar artists (ListenBrainz), once their list has landed
-                    // and has anyone in it.
-                    if let Some(recs) = data
-                        .artist_recs
-                        .get(&artist.id)
-                        .filter(|recs| !recs.is_empty())
-                    {
-                        col = col.push(similar_artists_block(recs));
-                    }
-
                     col = col.push(bio_col.boxed());
+                }
+
+                // Similar artists (ListenBrainz) under the biography, once
+                // their list has landed and has anyone in it; an artist with
+                // no biography gets them too.
+                if let Some(recs) = data
+                    .artist_recs
+                    .get(&artist.id)
+                    .filter(|recs| !recs.is_empty())
+                {
+                    col = col.push(similar_artists_block(recs));
                 }
 
                 col.boxed()
