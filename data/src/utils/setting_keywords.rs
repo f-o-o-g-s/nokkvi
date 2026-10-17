@@ -298,6 +298,14 @@ keyword_table! {
             "words",
         ],
         "general.lyrics_fetch_online" => &["lrclib", "lyrics download", "internet", "fetch"],
+        "general.similar_artists_online" => &[
+            "listenbrainz",
+            "recommendations",
+            "discover",
+            "related artists",
+            "internet",
+            "musicbrainz",
+        ],
         "general.lyrics_backdrop_blur" => &["blur", "frost", "frosted", "backdrop", "cover blur"],
         "general.lyrics_word_highlight" => &[
             "karaoke",

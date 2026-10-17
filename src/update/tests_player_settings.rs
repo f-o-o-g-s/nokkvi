@@ -299,6 +299,10 @@ fn live_controls_start_at_their_persisted_defaults() {
     );
     assert_eq!(app.settings.seek_step_secs, persisted.seek_step_secs);
     assert_eq!(app.settings.lyrics_mode, persisted.lyrics_mode);
+    assert_eq!(
+        app.settings.similar_artists_online,
+        persisted.similar_artists_online
+    );
 }
 
 /// The Interface rows read their values back from the theme atomics, and only

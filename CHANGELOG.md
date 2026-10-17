@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The Artists panel lists similar artists from ListenBrainz under the biography: those in your library jump to that artist, the rest open on ListenBrainz.
+- A new General setting, Similar Artists: ListenBrainz, turns that list off and sends nothing.
 ### Changed
 
 ### Fixed

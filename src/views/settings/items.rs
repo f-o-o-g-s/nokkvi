@@ -567,6 +567,7 @@ mod tests {
                 "general.library_page_size",
                 "general.artwork_resolution",
                 "general.show_album_artists_only",
+                "general.similar_artists_online",
                 "general.start_view",
                 "general.suppress_library_refresh_toasts",
                 "general.enter_behavior",

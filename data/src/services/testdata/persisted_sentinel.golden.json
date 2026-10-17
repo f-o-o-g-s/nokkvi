@@ -121,6 +121,7 @@
   "library_page_size": "massive",
   "artwork_resolution": "original",
   "show_album_artists_only": false,
+  "similar_artists_online": false,
   "suppress_library_refresh_toasts": true,
   "queue_show_stars": false,
   "queue_show_album": false,

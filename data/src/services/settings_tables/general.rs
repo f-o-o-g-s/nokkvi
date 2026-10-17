@@ -3,6 +3,7 @@
 //! Migrated keys: Application (start_view, enter_behavior, enter_shuffle,
 //! harbour_expandable_shelves, library_page_size,
 //! suppress_library_refresh_toasts, artwork_resolution, show_album_artists_only,
+//! similar_artists_online,
 //! local_music_path, verbose_config), Mouse Behavior (stable_viewport,
 //! auto_follow_playing), System Tray (show_tray_icon, close_to_tray), and the
 //! Theme-tab `light_mode` toggle (its persistence is config-file-only — the
@@ -299,6 +300,26 @@ define_settings! {
                 ),
                 default: true,
                 read_field: |d| d.show_album_artists_only,
+            },
+        },
+        SimilarArtistsOnline {
+            key: "general.similar_artists_online",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_similar_artists_online(v),
+            toml_apply: |ts, p| p.similar_artists_online = ts.similar_artists_online,
+            read: |src, out| out.similar_artists_online = src.similar_artists_online,
+            write: |ps, ts| ts.similar_artists_online = ps.similar_artists_online,
+            ui_meta: {
+                label: "Similar Artists: ListenBrainz",
+                category: "Application",
+                subtitle: Some(
+                    "Under the centred artist's biography in Artists, list the artists \
+                     ListenBrainz finds similar: those in your library jump to that artist, \
+                     the rest open their ListenBrainz page. Sends the artist's MusicBrainz \
+                     id to listenbrainz.org. Off shows no list and sends nothing.",
+                ),
+                default: true,
+                read_field: |d| d.similar_artists_online,
             },
         },
         ArtworkResolutionKey {
@@ -772,6 +793,7 @@ mod tests {
             library_page_size: "Default (500)".into(),
             artwork_resolution: "Default (1000px)".into(),
             show_album_artists_only: true,
+            similar_artists_online: true,
             suppress_library_refresh_toasts: false,
             show_tray_icon: false,
             close_to_tray: false,
@@ -779,13 +801,13 @@ mod tests {
     }
 
     /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
-    /// 15 of the 16 declared keys carry ui_meta — light_mode does not (it
-    /// renders on the Theme tab, not General), so the helper emits 15 rows.
+    /// 16 of the 17 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 16 rows.
     #[test]
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 15);
+        assert_eq!(entries.len(), 16);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -902,6 +924,7 @@ mod tests {
             library_page_size: live.library_page_size.as_label().into(),
             artwork_resolution: live.artwork_resolution.as_label().into(),
             show_album_artists_only: live.show_album_artists_only,
+            similar_artists_online: live.similar_artists_online,
             suppress_library_refresh_toasts: live.suppress_library_refresh_toasts,
             show_tray_icon: live.show_tray_icon,
             close_to_tray: live.close_to_tray,

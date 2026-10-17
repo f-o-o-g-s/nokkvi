@@ -8,6 +8,7 @@ pub mod api;
 pub mod api_key;
 pub mod auth;
 pub mod font_discovery;
+pub mod listenbrainz_similar;
 pub mod lyrics_source;
 pub mod milkdrop_presets;
 pub mod navidrome_events;

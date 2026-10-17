@@ -52,6 +52,7 @@ impl Nokkvi {
             library_page_size: self.settings.library_page_size.as_label().into(),
             artwork_resolution: self.settings.artwork_resolution.as_label().into(),
             show_album_artists_only: self.settings.show_album_artists_only,
+            similar_artists_online: self.settings.similar_artists_online,
             suppress_library_refresh_toasts: self.settings.suppress_library_refresh_toasts,
             show_tray_icon: self.settings.show_tray_icon,
             close_to_tray: self.settings.close_to_tray,

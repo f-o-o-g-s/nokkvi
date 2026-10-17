@@ -1284,8 +1284,17 @@ pub enum ArtistsLoaderMessage {
         artist_id: String,
         result: Result<nokkvi_data::types::artist::ArtistInfo, String>,
     },
-    /// An artist's settle timer fired; the info is asked for only if it is
-    /// still the artist centred last.
+    /// The similar artists ListenBrainz lists for `artist_id`, each checked
+    /// against the library, fetched when the artist was centred. Same
+    /// `generation` rule as `InfoLoaded`; a rejected session is routed to
+    /// `Message::SessionExpired` before it gets here.
+    RecsLoaded {
+        generation: u64,
+        artist_id: String,
+        result: Result<Vec<nokkvi_data::types::artist_recs::ArtistRec>, String>,
+    },
+    /// An artist's settle timer fired; its info and similar artists are
+    /// asked for only if it is still the artist centred last.
     InfoSettled(String),
 }
 

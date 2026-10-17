@@ -9,7 +9,10 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{Row, container},
 };
-use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
+    types::artist_recs::ArtistRec,
+};
 
 use super::{super::expansion::SlotListEntry, ArtistsMessage, ArtistsPage, ArtistsViewData};
 use crate::widgets::{
@@ -351,6 +354,16 @@ impl ArtistsPage {
                             }
                         });
                         bio_col = bio_col.push(read_more_btn.boxed());
+                    }
+
+                    // Similar artists (ListenBrainz), once their list has landed
+                    // and has anyone in it.
+                    if let Some(recs) = data
+                        .artist_recs
+                        .get(&artist.id)
+                        .filter(|recs| !recs.is_empty())
+                    {
+                        col = col.push(similar_artists_block(recs));
                     }
 
                     col = col.push(bio_col.boxed());
@@ -696,6 +709,96 @@ pub(crate) fn bio_link_label(url: &str) -> String {
         .unwrap_or_else(|| "Read more".to_string())
 }
 
+/// The pill's "Similar artists" row: ListenBrainz's picks for the centred
+/// artist, a chip each. A chip for an artist the library has reads in the
+/// accent and finds that artist; one for an artist it lacks reads dimmer,
+/// carries a globe, and opens the artist's ListenBrainz page.
+pub(crate) fn similar_artists_block<'a>(recs: &'a [ArtistRec]) -> Element<'a, ArtistsMessage> {
+    use iced::widget::{column, text};
+
+    use crate::theme;
+
+    let mut chips = Row::new().spacing(4).align_y(iced::Alignment::Center);
+    for rec in recs {
+        chips = chips.push(similar_artist_chip(rec));
+    }
+    column![
+        text("Similar artists")
+            .size(11)
+            .color(theme::fg3())
+            .font(theme::ui_font()),
+        chips
+            .wrap()
+            .vertical_spacing(2)
+            .align_x(iced::alignment::Horizontal::Center),
+    ]
+    .spacing(2)
+    .align_x(iced::Alignment::Center)
+    .boxed()
+}
+
+fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
+    use iced::widget::{button, row, text};
+
+    use crate::theme;
+
+    let in_library = rec.library_id().is_some();
+    let ink = if in_library {
+        theme::accent_bright()
+    } else {
+        theme::fg3()
+    };
+    let mut label = row![text(rec.name.as_str()).size(12).font(theme::ui_font())]
+        .spacing(3)
+        .align_y(iced::Alignment::Center);
+    if !in_library {
+        label = label.push(
+            crate::embedded_svg::svg_widget("assets/icons/globe.svg")
+                .width(10)
+                .height(10)
+                .style(move |_, _| iced::widget::svg::Style { color: Some(ink) })
+                .boxed(),
+        );
+    }
+    button(label)
+        .on_press(similar_artist_message(rec))
+        .padding(iced::Padding {
+            top: 1.0,
+            bottom: 1.0,
+            left: 5.0,
+            right: 5.0,
+        })
+        .style(move |_theme, status| {
+            let mut color = ink;
+            if matches!(
+                status,
+                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+            ) {
+                color.a = 0.75;
+            }
+            iced::widget::button::Style {
+                background: None,
+                border: iced::Border {
+                    width: 0.0,
+                    ..Default::default()
+                },
+                text_color: color,
+                ..Default::default()
+            }
+        })
+        .boxed()
+}
+
+/// What a click on a similar artist does: find and expand the artist when
+/// the library has it, else open its ListenBrainz page, where the list came
+/// from and which has a page for every artist in it.
+pub(crate) fn similar_artist_message(rec: &ArtistRec) -> ArtistsMessage {
+    match rec.library_id() {
+        Some(artist_id) => ArtistsMessage::NavigateAndExpandArtist(artist_id.to_string()),
+        None => ArtistsMessage::OpenExternalUrl(rec.listenbrainz_url()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nokkvi_data::types::artist::ArtistInfo;
@@ -781,5 +884,41 @@ mod tests {
             "Read more on isissemajhall.com"
         );
         assert_eq!(bio_link_label("not a url"), "Read more");
+    }
+}
+
+#[cfg(test)]
+mod similar_artist_tests {
+    use nokkvi_data::types::artist_recs::{ArtistRec, LibraryMatch};
+
+    use super::*;
+
+    fn rec(library: LibraryMatch) -> ArtistRec {
+        ArtistRec {
+            mbid: "9c9f1380-2516-4fc9-a3e6-f9f61941d090".into(),
+            name: "Muse".into(),
+            comment: None,
+            score: 1,
+            library,
+        }
+    }
+
+    /// An artist the library has is found and expanded; one it lacks, or
+    /// one whose lookup failed, opens its ListenBrainz page.
+    #[test]
+    fn a_library_artist_is_expanded_and_the_rest_open_listenbrainz() {
+        assert!(matches!(
+            similar_artist_message(&rec(LibraryMatch::Found {
+                artist_id: "ar1".into()
+            })),
+            ArtistsMessage::NavigateAndExpandArtist(ref id) if id == "ar1"
+        ));
+        for library in [LibraryMatch::Missing, LibraryMatch::Unknown] {
+            assert!(matches!(
+                similar_artist_message(&rec(library)),
+                ArtistsMessage::OpenExternalUrl(ref url)
+                    if url == "https://listenbrainz.org/artist/9c9f1380-2516-4fc9-a3e6-f9f61941d090/"
+            ));
+        }
     }
 }

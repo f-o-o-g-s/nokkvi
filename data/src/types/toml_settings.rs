@@ -45,6 +45,8 @@ pub struct TomlSettings {
     pub library_page_size: LibraryPageSize,
     pub artwork_resolution: ArtworkResolution,
     pub show_album_artists_only: bool,
+    /// Similar artists from ListenBrainz under the centred artist's biography.
+    pub similar_artists_online: bool,
     pub suppress_library_refresh_toasts: bool,
     /// Per-view column-visibility toggles — flattened so every
     /// `<view>_show_<col>` key stays a TOP-LEVEL `[settings]` key (pinned by
@@ -347,6 +349,7 @@ impl Default for TomlSettings {
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,
+            similar_artists_online: true,
             suppress_library_refresh_toasts: true,
             view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,

@@ -3,7 +3,11 @@
 use iced::{Task, widget::image};
 use nokkvi_data::{
     backend::artists::ArtistUIViewData,
-    types::{ItemKind, paged_buffer::PageSlot},
+    types::{
+        ItemKind,
+        artist_recs::{ARTIST_RECS_SHOWN, ArtistRec},
+        paged_buffer::PageSlot,
+    },
 };
 use tracing::debug;
 
@@ -320,9 +324,14 @@ impl Nokkvi {
         Task::batch([artwork, self.artist_info_settle_task(artist_id)])
     }
 
-    /// Start the info settle timer for a newly centred artist.
+    /// Start the settle timer for a newly centred artist, when its info or
+    /// its similar artists (with that setting on) are still to be asked for.
+    /// One timer serves both: they are asked for at the same moment.
     fn artist_info_settle_task(&mut self, artist_id: String) -> Task<Message> {
-        if self.artist_info.centre(&artist_id) && self.app_service.is_some() {
+        let info_wanted = self.artist_info.centre(&artist_id);
+        let recs_wanted =
+            self.settings.similar_artists_online && self.artist_recs.centre(&artist_id);
+        if (info_wanted || recs_wanted) && self.app_service.is_some() {
             Task::perform(tokio::time::sleep(ARTIST_INFO_SETTLE), move |()| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoSettled(
                     artist_id,
@@ -333,14 +342,20 @@ impl Nokkvi {
         }
     }
 
-    /// An artist's settle timer fired: ask about it if it is still the one
-    /// centred last.
+    /// An artist's settle timer fired: ask for its info and its similar
+    /// artists, each if it is still the one that cache centred last.
     pub(crate) fn handle_artist_info_settled(&mut self, artist_id: String) -> Task<Message> {
-        if self.artist_info.settled(&artist_id) {
-            self.artist_info_task(artist_id)
+        let info = if self.artist_info.settled(&artist_id) {
+            self.artist_info_task(artist_id.clone())
         } else {
             Task::none()
-        }
+        };
+        let recs = if self.artist_recs.settled(&artist_id) {
+            self.artist_recs_task(artist_id)
+        } else {
+            Task::none()
+        };
+        Task::batch([info, recs])
     }
 
     /// The artist whose panel the Artists view shows: the effective centre
@@ -398,8 +413,112 @@ impl Nokkvi {
                 None
             }
         };
+        let landed = info.is_some();
         if !self.artist_info.finish(generation, artist_id, info) {
             debug!("getArtistInfo2 for {artist_id} landed after logout; dropped");
+            return Task::none();
+        }
+        // Similar artists waiting on this answer's MusicBrainz id: ask now,
+        // or settle on none when the answer has no id either. A failed
+        // answer ends the wait; the next centring asks for both again.
+        if self.artist_recs.take_awaiting(artist_id) && landed {
+            return self.artist_recs_task(artist_id.to_string());
+        }
+        Task::none()
+    }
+
+    /// The MusicBrainz id known for `artist_id`: the native row's (a library
+    /// tagged with one), else the fetched info's (Navidrome's agents look
+    /// one up). Empty strings count as none.
+    fn artist_mbid(&self, artist_id: &str) -> Option<String> {
+        let present = |id: Option<&String>| id.filter(|m| !m.trim().is_empty()).cloned();
+        let from_row = self
+            .library
+            .artists
+            .iter()
+            .find(|a| a.id == artist_id)
+            .and_then(|a| present(a.mbz_artist_id.as_ref()));
+        from_row.or_else(|| {
+            self.artist_info
+                .cache
+                .peek(&artist_id.to_string())
+                .and_then(|info| present(info.musicbrainz_id.as_ref()))
+        })
+    }
+
+    /// Fetch the centred artist's similar artists (ListenBrainz, each checked
+    /// against the library) unless the setting is off, the list is cached or
+    /// a fetch is in flight. The fetch needs the artist's MusicBrainz id:
+    /// without one, the ask waits for the info fetch when that is still out
+    /// (`handle_artist_info_loaded` resumes it), and settles on an empty
+    /// list when neither the row nor the info has one.
+    pub(crate) fn artist_recs_task(&mut self, artist_id: String) -> Task<Message> {
+        if !self.settings.similar_artists_online
+            || self.artist_recs.is_cached(&artist_id)
+            || self.artist_recs.is_pending(&artist_id)
+        {
+            return Task::none();
+        }
+        let Some(mbid) = self.artist_mbid(&artist_id) else {
+            if self.artist_info.is_pending(&artist_id) {
+                self.artist_recs.wait_for_mbid(&artist_id);
+            } else {
+                debug!("no MusicBrainz id for {artist_id}; no similar artists asked for");
+                self.artist_recs.settle_with(&artist_id, Vec::new());
+            }
+            return Task::none();
+        };
+        let Some(generation) = self.artist_recs.begin(&artist_id) else {
+            return Task::none();
+        };
+        let id = artist_id.clone();
+        self.shell_task(
+            move |shell| async move { shell.similar_artists(&mbid, ARTIST_RECS_SHOWN).await },
+            move |result| Self::artist_recs_result_message(generation, id, result),
+        )
+    }
+
+    /// The message a finished similar-artists fetch sends: a rejected
+    /// session (a library lookup refused) goes to the login screen, anything
+    /// else lands in [`Self::handle_artist_recs_loaded`].
+    pub(crate) fn artist_recs_result_message(
+        generation: u64,
+        artist_id: String,
+        result: anyhow::Result<Vec<ArtistRec>>,
+    ) -> Message {
+        if let Err(e) = &result
+            && let Some(msg) = super::components::session_expired_message(e)
+        {
+            return msg;
+        }
+        Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::RecsLoaded {
+            generation,
+            artist_id,
+            result: result.map_err(|e| format!("{e:#}")),
+        })
+    }
+
+    /// Land a similar-artists answer: cache it, or on failure release the
+    /// artist so the next centring asks again. Not toasted, like the
+    /// biography: the list is a garnish, and ListenBrainz being unreachable
+    /// would otherwise toast once per centred artist.
+    pub(crate) fn handle_artist_recs_loaded(
+        &mut self,
+        generation: u64,
+        artist_id: &str,
+        result: Result<Vec<ArtistRec>, String>,
+    ) -> Task<Message> {
+        let recs = match result {
+            Ok(recs) => Some(recs),
+            Err(e) => {
+                debug!(
+                    "similar artists for {artist_id} failed (asked again on next centring): {e}"
+                );
+                None
+            }
+        };
+        if !self.artist_recs.finish(generation, artist_id, recs) {
+            debug!("similar artists for {artist_id} landed after logout; dropped");
         }
         Task::none()
     }
@@ -730,6 +849,7 @@ impl Nokkvi {
             | ArtistsAction::CenterOnPlaying
             | ArtistsAction::NavigateAndFilter(..)
             | ArtistsAction::NavigateAndExpandAlbum(_)
+            | ArtistsAction::NavigateAndExpandArtist(_)
             | ArtistsAction::None => {}
         }
 
@@ -763,6 +883,11 @@ impl Nokkvi {
                 artist_id,
                 result,
             } => self.handle_artist_info_loaded(generation, &artist_id, result),
+            ArtistsLoaderMessage::RecsLoaded {
+                generation,
+                artist_id,
+                result,
+            } => self.handle_artist_recs_loaded(generation, &artist_id, result),
             ArtistsLoaderMessage::InfoSettled(artist_id) => {
                 self.handle_artist_info_settled(artist_id)
             }

@@ -39,8 +39,10 @@
 //! `NonZeroUsize` capacities at compile time.
 
 mod artist_info;
+mod artist_recs;
 mod artwork;
 mod audio;
+mod centred_fetch;
 mod dynamic_accent;
 mod harbour;
 mod library;
@@ -66,6 +68,7 @@ mod waveform;
 mod window;
 
 pub(crate) use artist_info::*;
+pub(crate) use artist_recs::*;
 pub(crate) use artwork::*;
 pub(crate) use audio::*;
 pub(crate) use dynamic_accent::*;

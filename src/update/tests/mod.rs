@@ -19,6 +19,7 @@
 pub(super) static SSE_SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 mod artist_info;
+mod artist_recs;
 mod artwork;
 mod artwork_064;
 mod artwork_drag;

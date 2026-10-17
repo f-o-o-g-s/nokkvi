@@ -73,6 +73,9 @@ pub struct ArtistsViewData<'a> {
     /// `getArtistInfo2` answers by artist id; the pill's biography and link
     /// prefer them over the native row's fields.
     pub artist_info: &'a HashMap<String, nokkvi_data::types::artist::ArtistInfo>,
+    /// ListenBrainz's similar artists by artist id, each stamped with its
+    /// library standing; the pill lists them under the biography.
+    pub artist_recs: &'a HashMap<String, Vec<nokkvi_data::types::artist_recs::ArtistRec>>,
     pub window_width: f32,
     pub window_height: f32,
     /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
@@ -136,6 +139,11 @@ pub enum ArtistsMessage {
 
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
 
+    /// Click on a similar artist the library has: find and expand that
+    /// artist, as an artist-text click does in any other view. Bubbles up as
+    /// `ArtistsAction::NavigateAndExpandArtist`.
+    NavigateAndExpandArtist(String),
+
     // Open external URL
     OpenExternalUrl(String),
 
@@ -173,6 +181,9 @@ pub enum ArtistsAction {
     /// Switch to Albums view and prime the named album for inline expansion.
     /// Carries the album id so the root can route to top vs browsing pane.
     NavigateAndExpandAlbum(String),
+    /// Find and expand another artist of this view (a similar-artist chip).
+    /// Routed by `handle_common_view_action`, which picks the pane.
+    NavigateAndExpandArtist(String),
     LoadPage(usize),       // offset - trigger fetch of next page
     SearchChanged(String), // trigger reload
     SortModeChanged(crate::widgets::view_header::SortMode), // trigger reload
@@ -203,7 +214,8 @@ pub enum ArtistsAction {
 }
 
 super::impl_has_common_action!(ArtistsAction {
-    NavigateAndExpandAlbum
+    NavigateAndExpandAlbum,
+    NavigateAndExpandArtist
 });
 
 impl Default for ArtistsPage {

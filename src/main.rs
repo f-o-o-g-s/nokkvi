@@ -224,6 +224,9 @@ pub struct Nokkvi {
     /// The `getArtistInfo2` answers fetched this session (the Artists
     /// view's biography and link), keyed by artist id.
     pub artist_info: crate::state::ArtistInfoState,
+    /// The similar artists ListenBrainz listed this session for the artists
+    /// the Artists view centred, keyed by artist id.
+    pub artist_recs: crate::state::ArtistRecsState,
 
     /// Harbour home view state — discovery shelves + whole-library
     /// search results. Populated on first visit / library-filter change.
@@ -489,6 +492,7 @@ impl Default for Nokkvi {
             similar_songs_generation: crate::state::StaleDropGen::default(),
             session_generation: crate::state::StaleDropGen::default(),
             artist_info: crate::state::ArtistInfoState::default(),
+            artist_recs: crate::state::ArtistRecsState::default(),
             harbour: crate::state::HarbourState::default(),
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every scalar
@@ -508,6 +512,7 @@ impl Default for Nokkvi {
                 start_view: "Harbour".to_string(),
                 stable_viewport: true,
                 auto_follow_playing: true,
+                similar_artists_online: true,
                 volume: 1.0,
                 sfx_volume: 0.68,
                 seek_step_secs: nokkvi_data::types::player_settings::SEEK_STEP_DEFAULT_SECS,

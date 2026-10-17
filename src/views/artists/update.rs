@@ -187,6 +187,10 @@ impl ArtistsPage {
                     Task::none(),
                     ArtistsAction::NavigateAndExpandAlbum(album_id),
                 ),
+                ArtistsMessage::NavigateAndExpandArtist(artist_id) => (
+                    Task::none(),
+                    ArtistsAction::NavigateAndExpandArtist(artist_id),
+                ),
 
                 ArtistsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), ArtistsAction::NavigateAndFilter(view, filter))

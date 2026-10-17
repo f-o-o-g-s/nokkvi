@@ -375,6 +375,12 @@ crate::player_settings_schema! {
     /// Whether the Artists view shows only album artists
     #[serde(default = "default_true")]
     same show_album_artists_only: bool = default_true(),
+    /// Whether the Artists view lists similar artists from ListenBrainz under
+    /// the centred artist's biography (default: on). The lookup sends the
+    /// artist's MusicBrainz id to listenbrainz.org; off, nothing is sent and
+    /// no list shows.
+    #[serde(default = "default_true")]
+    same similar_artists_online: bool = default_true(),
     /// Whether to suppress the toast notification shown when Navidrome
     /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]

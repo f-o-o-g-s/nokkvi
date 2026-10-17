@@ -1777,6 +1777,93 @@ impl AppService {
     // Whole-library search
     // =========================================================================
 
+    /// The artists ListenBrainz finds similar to the one with MusicBrainz id
+    /// `mbid`, most similar first, at most `limit` of them, each stamped with
+    /// its standing in the library: the server is searched for every name
+    /// (its name search, scoped to the active libraries) and the match is
+    /// made on the MusicBrainz id first, then the exact name
+    /// (`artist_recs::match_library`).
+    ///
+    /// A failed ListenBrainz fetch is an error. A failed server lookup leaves
+    /// that one artist [`LibraryMatch::Unknown`], except a rejected session,
+    /// which fails the whole call so the UI drops to login. Lookups run a few
+    /// at a time (a semaphore), so one answer costs a short burst, not a
+    /// flood; each owns its inputs, so the whole future can cross to the UI's
+    /// task.
+    ///
+    /// [`LibraryMatch::Unknown`]: crate::types::artist_recs::LibraryMatch::Unknown
+    pub async fn similar_artists(
+        &self,
+        mbid: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::types::artist_recs::ArtistRec>> {
+        use crate::types::artist_recs::{LibraryMatch, match_library};
+
+        /// Candidates asked of the server per name. Its search matches
+        /// substrings and sorts by name, so a short name ("Low") needs
+        /// room for the artists it sits inside.
+        const CANDIDATES: usize = 25;
+        /// Lookups in flight at once.
+        const CONCURRENCY: usize = 4;
+
+        let mut recs = crate::services::listenbrainz_similar::fetch_similar_artists(mbid).await?;
+        recs.truncate(limit);
+        if recs.is_empty() {
+            return Ok(recs);
+        }
+
+        let svc = Arc::new(self.artists_api().await?);
+        let library_ids = Arc::new(self.active_library_ids_vec());
+        let gate = Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
+        let lookups = futures::future::join_all(recs.iter().map(|rec| {
+            let svc = Arc::clone(&svc);
+            let library_ids = Arc::clone(&library_ids);
+            let gate = Arc::clone(&gate);
+            let mbid = rec.mbid.clone();
+            let name = rec.name.clone();
+            async move {
+                let _permit = gate
+                    .acquire()
+                    .await
+                    .context("similar-artist lookup gate closed")?;
+                let query = LibraryQuery {
+                    sort_mode: "name",
+                    sort_order: "ASC",
+                    search_query: Some(&name),
+                    library_ids: &library_ids,
+                    ..Default::default()
+                };
+                let (artists, _total) = svc
+                    .load_artists(&query, false, Some(0), Some(CANDIDATES))
+                    .await?;
+                Ok::<_, anyhow::Error>(match_library(
+                    &mbid,
+                    &name,
+                    artists
+                        .iter()
+                        .map(|a| (a.id.as_str(), a.name.as_str(), a.mbz_artist_id.as_deref())),
+                ))
+            }
+        }))
+        .await;
+
+        for (rec, lookup) in recs.iter_mut().zip(lookups) {
+            rec.library = match lookup {
+                Ok(Some(artist_id)) => LibraryMatch::Found { artist_id },
+                Ok(None) => LibraryMatch::Missing,
+                Err(e) if crate::types::error::NokkviError::is_unauthorized(&e) => return Err(e),
+                Err(e) => {
+                    debug!(
+                        "library lookup for similar artist {:?} failed: {e:#}",
+                        rec.name
+                    );
+                    LibraryMatch::Unknown
+                }
+            };
+        }
+        Ok(recs)
+    }
+
     /// Search the entire library across all five entity types at once and
     /// return them as separate typed groups.
     ///
