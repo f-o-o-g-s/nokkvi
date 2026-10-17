@@ -1976,6 +1976,7 @@ fn search_warm_album_ids_covers_albums_and_songs_only() {
 /// Minimal raw `Artist` for search-result tests (no Default derive on the type).
 fn search_artist(id: &str, name: &str) -> nokkvi_data::types::artist::Artist {
     nokkvi_data::types::artist::Artist {
+        stats: Default::default(),
         id: id.to_string(),
         name: name.to_string(),
         album_count: None,

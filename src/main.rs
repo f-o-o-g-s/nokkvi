@@ -282,6 +282,9 @@ pub struct Nokkvi {
     /// Default-playlist picker overlay state. `Some` = picker is open.
     pub default_playlist_picker:
         Option<crate::widgets::default_playlist_picker::DefaultPlaylistPickerState>,
+    /// Similar Artists modal state. `Some` = the modal is open.
+    pub similar_artists_modal:
+        Option<crate::widgets::similar_artists_modal::SimilarArtistsModalState>,
     /// Trawl mix builder: the modal, the persistent crate and the search
     /// stale-drop generation.
     pub trawl: crate::state::TrawlState,
@@ -570,6 +573,7 @@ impl Default for Nokkvi {
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
             eq_modal: crate::widgets::eq_modal::EqModalState::default(),
             default_playlist_picker: None,
+            similar_artists_modal: None,
             trawl: crate::state::TrawlState::default(),
             open_menu: None,
             roulette: None,

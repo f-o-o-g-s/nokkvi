@@ -1839,9 +1839,14 @@ impl AppService {
                 Ok::<_, anyhow::Error>(match_library(
                     &mbid,
                     &name,
-                    artists
-                        .iter()
-                        .map(|a| (a.id.as_str(), a.name.as_str(), a.mbz_artist_id.as_deref())),
+                    artists.iter().map(|a| {
+                        (
+                            a.id.as_str(),
+                            a.name.as_str(),
+                            a.mbz_artist_id.as_deref(),
+                            a.is_album_artist(),
+                        )
+                    }),
                 ))
             }
         }))
@@ -1849,7 +1854,7 @@ impl AppService {
 
         for (rec, lookup) in recs.iter_mut().zip(lookups) {
             rec.library = match lookup {
-                Ok(Some(artist_id)) => LibraryMatch::Found { artist_id },
+                Ok(Some(artist)) => LibraryMatch::Found(artist),
                 Ok(None) => LibraryMatch::Missing,
                 Err(e) if crate::types::error::NokkviError::is_unauthorized(&e) => return Err(e),
                 Err(e) => {

@@ -37,6 +37,7 @@ pub(crate) mod scroll_into_view;
 pub(crate) mod search_bar;
 pub(crate) mod settings_slider;
 pub(crate) mod side_nav_bar;
+pub(crate) mod similar_artists_modal;
 pub(crate) mod sizes;
 pub(crate) mod slider_drag;
 pub(crate) mod slot_list;

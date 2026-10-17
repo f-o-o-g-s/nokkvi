@@ -46,6 +46,21 @@ pub struct Artist {
     /// Navidrome 0.64 image info (six flat keys; default on older servers).
     #[serde(flatten)]
     pub image: crate::types::image_info::ImageInfo,
+    /// Per-role counts (`albumartist`, `artist`, `composer`, ...; Navidrome
+    /// 0.56+, empty on older servers). `album_count` above sums every role,
+    /// so a featured-only artist still counts the albums they appear on;
+    /// `stats["albumartist"]` is what says they have albums of their own.
+    #[serde(default)]
+    pub stats: std::collections::HashMap<String, ArtistRoleStats>,
+}
+
+/// One role's counts for an artist (`Artist::stats`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArtistRoleStats {
+    #[serde(rename = "albumCount", default)]
+    pub album_count: u32,
+    #[serde(rename = "songCount", default)]
+    pub song_count: u32,
 }
 
 /// Similar artist reference
@@ -67,6 +82,16 @@ impl Artist {
             .into_iter()
             .filter_map(|link| link.as_deref())
             .find(|link| !link.is_empty())
+    }
+
+    /// Whether the artist has albums of their own (the album-artist role),
+    /// which is what the Artists view lists and expands. On a server that
+    /// sends no per-role stats, any album counts.
+    pub fn is_album_artist(&self) -> bool {
+        match self.stats.get("albumartist") {
+            Some(role) => role.album_count > 0,
+            None => self.stats.is_empty() && self.get_album_count() > 0,
+        }
     }
 
     /// Get display name for the artist

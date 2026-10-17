@@ -83,6 +83,7 @@ pub(crate) mod rules_editor;
 mod scrobbling;
 pub(crate) mod settings;
 mod similar;
+mod similar_artists_modal;
 mod slot_list;
 mod songs;
 #[cfg(test)]
@@ -735,6 +736,7 @@ impl Nokkvi {
             // Trawl Mix Builder (Harbour row → modal overlay)
             // -----------------------------------------------------------------
             Message::TrawlModal(msg) => self.handle_trawl_modal(msg),
+            Message::SimilarArtistsModal(msg) => self.handle_similar_artists_modal(msg),
 
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)

@@ -1,18 +1,31 @@
-//! Similar artists for the Artists view: who ListenBrainz's listeners play in
-//! the same sessions as the centred artist, each checked against the library.
+//! Similar artists for the Artists view and the Similar Artists modal: who
+//! ListenBrainz's listeners play in the same sessions as an artist, each
+//! checked against the library.
 //!
 //! The list comes from ListenBrainz's similar-artists data
 //! (`services::listenbrainz_similar`), keyed on the artist's MusicBrainz id, so
 //! it names artists the library does not have as readily as ones it does.
 //! `AppService::similar_artists` then looks each name up on the server and
-//! stamps the outcome on the row, so the view can link an artist the library
+//! stamps the outcome on the row, so a view can link an artist the library
 //! has and send the rest to their ListenBrainz page.
+
+/// A library artist a recommendation matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryArtist {
+    /// The artist's Navidrome id.
+    pub id: String,
+    /// Whether the artist has albums of their own, so the Artists view lists
+    /// and expands them. A featured-only artist (guest verses, a remix) is in
+    /// the library through other artists' albums: their songs are what to
+    /// show.
+    pub album_artist: bool,
+}
 
 /// Where a recommended artist stands against the library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryMatch {
-    /// The library has the artist, under this Navidrome id.
-    Found { artist_id: String },
+    /// The library has the artist.
+    Found(LibraryArtist),
     /// The library has no artist by that MusicBrainz id or name.
     Missing,
     /// The lookup failed, so nothing is known about the library.
@@ -41,37 +54,46 @@ impl ArtistRec {
         format!("https://listenbrainz.org/artist/{}/", self.mbid)
     }
 
-    /// The library's id for the artist, when it has it.
-    pub fn library_id(&self) -> Option<&str> {
+    /// The library artist this is, when the library has it.
+    pub fn library_artist(&self) -> Option<&LibraryArtist> {
         match &self.library {
-            LibraryMatch::Found { artist_id } => Some(artist_id),
+            LibraryMatch::Found(artist) => Some(artist),
             LibraryMatch::Missing | LibraryMatch::Unknown => None,
         }
     }
+
+    /// The library's id for the artist, when it has it.
+    pub fn library_id(&self) -> Option<&str> {
+        self.library_artist().map(|artist| artist.id.as_str())
+    }
 }
 
-/// How many similar artists the Artists view shows for one artist, out of
-/// the hundred ListenBrainz sends. Each one shown costs a server lookup.
+/// How many similar artists are shown for one artist, out of the hundred
+/// ListenBrainz sends. Each one shown costs a server lookup.
 pub const ARTIST_RECS_SHOWN: usize = 10;
 
 /// Pick the library artist that is `rec_mbid` / `rec_name` out of a name
-/// search's candidates `(id, name, MusicBrainz id)`: the one whose MusicBrainz
-/// id matches, else the first whose name matches exactly, ignoring case and
-/// surrounding whitespace. Navidrome's name search matches substrings
-/// ("Muse" finds "Musetta"), so the exact comparison is what keeps a
-/// recommendation from linking to a different artist.
+/// search's candidates `(id, name, MusicBrainz id, album artist)`: the one
+/// whose MusicBrainz id matches, else the first whose name matches exactly,
+/// ignoring case and surrounding whitespace. Navidrome's name search matches
+/// substrings ("Muse" finds "Musetta"), so the exact comparison is what keeps
+/// a recommendation from linking to a different artist.
 pub fn match_library<'a>(
     rec_mbid: &str,
     rec_name: &str,
-    candidates: impl IntoIterator<Item = (&'a str, &'a str, Option<&'a str>)>,
-) -> Option<String> {
+    candidates: impl IntoIterator<Item = (&'a str, &'a str, Option<&'a str>, bool)>,
+) -> Option<LibraryArtist> {
     let mut by_name = None;
-    for (id, name, mbid) in candidates {
+    for (id, name, mbid, album_artist) in candidates {
+        let found = LibraryArtist {
+            id: id.to_string(),
+            album_artist,
+        };
         if mbid.is_some_and(|m| m.eq_ignore_ascii_case(rec_mbid)) {
-            return Some(id.to_string());
+            return Some(found);
         }
         if by_name.is_none() && same_artist_name(name, rec_name) {
-            by_name = Some(id.to_string());
+            by_name = Some(found);
         }
     }
     by_name
@@ -89,6 +111,13 @@ fn same_artist_name(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn found(id: &str) -> LibraryMatch {
+        LibraryMatch::Found(LibraryArtist {
+            id: id.into(),
+            album_artist: true,
+        })
+    }
 
     fn rec(library: LibraryMatch) -> ArtistRec {
         ArtistRec {
@@ -110,13 +139,7 @@ mod tests {
 
     #[test]
     fn only_a_found_artist_has_a_library_id() {
-        assert_eq!(
-            rec(LibraryMatch::Found {
-                artist_id: "ar1".into()
-            })
-            .library_id(),
-            Some("ar1")
-        );
+        assert_eq!(rec(found("ar1")).library_id(), Some("ar1"));
         assert_eq!(rec(LibraryMatch::Missing).library_id(), None);
         assert_eq!(rec(LibraryMatch::Unknown).library_id(), None);
     }
@@ -126,11 +149,12 @@ mod tests {
     #[test]
     fn a_musicbrainz_id_match_outranks_a_name_match() {
         let candidates = [
-            ("ar1", "Nirvana", None),
+            ("ar1", "Nirvana", None, true),
             (
                 "ar2",
                 "Nirvana (UK)",
                 Some("5B11F4CE-a62d-471e-81fc-a69a8278c7da"),
+                false,
             ),
         ];
         assert_eq!(
@@ -139,7 +163,10 @@ mod tests {
                 "Nirvana",
                 candidates
             ),
-            Some("ar2".to_string())
+            Some(LibraryArtist {
+                id: "ar2".into(),
+                album_artist: false
+            })
         );
     }
 
@@ -148,18 +175,18 @@ mod tests {
     #[test]
     fn a_name_matches_exactly_or_not_at_all() {
         let candidates = [
-            ("ar1", "Musetta", Some("other")),
-            ("ar2", " muse ", None),
-            ("ar3", "Muse", None),
+            ("ar1", "Musetta", Some("other"), true),
+            ("ar2", " muse ", None, true),
+            ("ar3", "Muse", None, true),
         ];
         assert_eq!(
-            match_library("9c9f1380", "Muse", candidates),
+            match_library("9c9f1380", "Muse", candidates).map(|a| a.id),
             Some("ar2".to_string())
         );
         assert_eq!(
-            match_library("9c9f1380", "Muse", [("ar1", "Musetta", None)]),
+            match_library("9c9f1380", "Muse", [("ar1", "Musetta", None, true)]),
             None
         );
-        assert_eq!(match_library("x", "", [("ar1", "", None)]), None);
+        assert_eq!(match_library("x", "", [("ar1", "", None, true)]), None);
     }
 }

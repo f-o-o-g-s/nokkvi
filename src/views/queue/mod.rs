@@ -257,6 +257,8 @@ pub enum QueueContextEntry {
     ShowInFolder,
     FindSimilar,
     TopSongs,
+    /// The row's artist's similar artists (ListenBrainz), in a modal.
+    SimilarArtists,
 }
 
 /// The two hover zones of the queue toolbar's playlist identity.
@@ -398,6 +400,7 @@ pub enum QueueAction {
     Milkdrop(crate::app_message::MilkdropControl), // a MilkDrop preset control
     FindSimilar(usize),     // Open Find Similar panel for queue index
     TopSongs(usize),        // Open Top Songs panel for queue index
+    SimilarArtists(usize),  // Open the Similar Artists modal for the row's artist
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand

@@ -907,6 +907,7 @@ impl QueuePage {
                     QueueContextEntry::ShowInFolder,
                     QueueContextEntry::FindSimilar,
                     QueueContextEntry::TopSongs,
+                    QueueContextEntry::SimilarArtists,
                 ];
 
                 let cm_id = crate::app_message::ContextMenuId::QueueRow(item_idx);
@@ -997,6 +998,14 @@ impl QueuePage {
                             Some("assets/icons/star.svg"),
                             "Top Songs",
                             QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
+                        ),
+                        QueueContextEntry::SimilarArtists => menu_button(
+                            Some("assets/icons/compass.svg"),
+                            "Similar Artists",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::SimilarArtists,
+                            ),
                         ),
                     },
                     cm_open,

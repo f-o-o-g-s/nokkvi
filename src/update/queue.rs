@@ -777,6 +777,17 @@ impl Nokkvi {
                     }));
                 }
             }
+            QueueAction::SimilarArtists(index) => {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                let artist = rows
+                    .get(index)
+                    .map(|song| (song.artist_id.clone(), song.artist.clone()));
+                if let Some((artist_id, artist_name)) = artist {
+                    return self.open_similar_artists_modal(artist_id, artist_name);
+                }
+            }
             QueueAction::TopSongs(index) => {
                 let rows = filtered_owned
                     .as_deref()

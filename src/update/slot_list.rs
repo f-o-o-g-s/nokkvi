@@ -96,6 +96,24 @@ impl Nokkvi {
                     _ => Task::none(),
                 }
             }
+            // The keys step the list, Enter acts on the centered artist.
+            ActiveModal::SimilarArtists => {
+                use crate::widgets::similar_artists_modal::SimilarArtistsModalMessage;
+                match msg {
+                    SlotListMessage::NavigateUp => {
+                        self.handle_similar_artists_modal(SimilarArtistsModalMessage::SlotListUp)
+                    }
+                    SlotListMessage::NavigateDown => {
+                        self.handle_similar_artists_modal(SimilarArtistsModalMessage::SlotListDown)
+                    }
+                    SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => {
+                        self.handle_similar_artists_modal(
+                            SimilarArtistsModalMessage::ActivateCenter,
+                        )
+                    }
+                    _ => Task::none(),
+                }
+            }
             // The keys step (and so preview) the list, Enter chooses.
             // Ctrl+Enter has no shuffle meaning here.
             ActiveModal::MilkdropPicker => {

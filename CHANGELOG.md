@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - The Artists panel lists similar artists from ListenBrainz under the biography: those in your library jump to that artist, the rest open on ListenBrainz.
 - A new General setting, Similar Artists: ListenBrainz, turns that list off and sends nothing.
+- A queue row's right-click menu gains Similar Artists, a searchable popup of the same list for that track's artist.
+- A similar artist you have only on other artists' albums opens their songs instead of an "artist not found" message.
 ### Changed
 
 ### Fixed

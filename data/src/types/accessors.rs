@@ -163,6 +163,7 @@ mod tests {
     #[test]
     fn named_returns_expected_display_name_for_artist() {
         let artist = Artist {
+            stats: Default::default(),
             id: "ar1".to_string(),
             name: "My Artist".to_string(),
             album_count: None,
@@ -301,6 +302,7 @@ mod tests {
         assert!(album.is_starred());
 
         let mut artist = Artist {
+            stats: Default::default(),
             id: "a".to_string(),
             name: "n".to_string(),
             album_count: None,

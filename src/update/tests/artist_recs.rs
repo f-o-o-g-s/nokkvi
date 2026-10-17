@@ -64,7 +64,7 @@ fn land_recs(app: &mut Nokkvi, generation: u64, id: &str, result: Result<Vec<Art
     }));
 }
 
-fn rec(name: &str) -> ArtistRec {
+pub(super) fn rec(name: &str) -> ArtistRec {
     ArtistRec {
         mbid: format!("mbid-{name}"),
         name: name.to_string(),

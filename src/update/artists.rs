@@ -421,8 +421,11 @@ impl Nokkvi {
         // Similar artists waiting on this answer's MusicBrainz id: ask now,
         // or settle on none when the answer has no id either. A failed
         // answer ends the wait; the next centring asks for both again.
-        if self.artist_recs.take_awaiting(artist_id) && landed {
-            return self.artist_recs_task(artist_id.to_string());
+        if self.artist_recs.take_awaiting(artist_id) {
+            if landed {
+                return self.artist_recs_task(artist_id.to_string());
+            }
+            self.sync_similar_artists_modal(artist_id, false);
         }
         Task::none()
     }
@@ -430,7 +433,7 @@ impl Nokkvi {
     /// The MusicBrainz id known for `artist_id`: the native row's (a library
     /// tagged with one), else the fetched info's (Navidrome's agents look
     /// one up). Empty strings count as none.
-    fn artist_mbid(&self, artist_id: &str) -> Option<String> {
+    pub(crate) fn artist_mbid(&self, artist_id: &str) -> Option<String> {
         let present = |id: Option<&String>| id.filter(|m| !m.trim().is_empty()).cloned();
         let from_row = self
             .library
@@ -465,12 +468,14 @@ impl Nokkvi {
             } else {
                 debug!("no MusicBrainz id for {artist_id}; no similar artists asked for");
                 self.artist_recs.settle_with(&artist_id, Vec::new());
+                self.sync_similar_artists_modal(&artist_id, true);
             }
             return Task::none();
         };
         let Some(generation) = self.artist_recs.begin(&artist_id) else {
             return Task::none();
         };
+        debug!("asking ListenBrainz for artists similar to {artist_id} (mbid {mbid})");
         let id = artist_id.clone();
         self.shell_task(
             move |shell| async move { shell.similar_artists(&mbid, ARTIST_RECS_SHOWN).await },
@@ -509,7 +514,14 @@ impl Nokkvi {
         result: Result<Vec<ArtistRec>, String>,
     ) -> Task<Message> {
         let recs = match result {
-            Ok(recs) => Some(recs),
+            Ok(recs) => {
+                let in_library = recs.iter().filter(|r| r.library_id().is_some()).count();
+                debug!(
+                    "{} similar artists for {artist_id}, {in_library} in the library",
+                    recs.len()
+                );
+                Some(recs)
+            }
             Err(e) => {
                 debug!(
                     "similar artists for {artist_id} failed (asked again on next centring): {e}"
@@ -517,9 +529,12 @@ impl Nokkvi {
                 None
             }
         };
+        let landed = recs.is_some();
         if !self.artist_recs.finish(generation, artist_id, recs) {
             debug!("similar artists for {artist_id} landed after logout; dropped");
+            return Task::none();
         }
+        self.sync_similar_artists_modal(artist_id, landed);
         Task::none()
     }
 

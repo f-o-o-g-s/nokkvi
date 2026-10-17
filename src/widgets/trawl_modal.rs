@@ -1258,6 +1258,7 @@ mod tests {
 
     fn data_artist(id: &str, name: &str) -> nokkvi_data::types::artist::Artist {
         nokkvi_data::types::artist::Artist {
+            stats: Default::default(),
             id: id.to_string(),
             name: name.to_string(),
             album_count: Some(3),

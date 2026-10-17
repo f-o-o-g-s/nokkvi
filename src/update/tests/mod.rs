@@ -64,6 +64,7 @@ mod session;
 mod settings;
 mod settings_sidebar;
 mod settings_slider;
+mod similar_artists_modal;
 mod slot_list;
 mod split_view;
 mod star_rating;

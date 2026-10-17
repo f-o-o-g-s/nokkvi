@@ -1848,6 +1848,8 @@ pub enum Message {
     DefaultPlaylistPicker(crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage),
     /// Trawl mix-builder (modal overlay opened from the Harbour row)
     TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage),
+    /// Similar Artists (modal overlay opened from a queue row's menu)
+    SimilarArtistsModal(crate::widgets::similar_artists_modal::SimilarArtistsModalMessage),
 
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),

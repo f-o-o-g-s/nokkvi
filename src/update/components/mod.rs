@@ -1818,6 +1818,7 @@ impl Nokkvi {
             about_modal: _,
             eq_modal: _,
             default_playlist_picker: _,
+            similar_artists_modal: _,
             open_menu: _,
             browsing_panel: _,
             pane_focus: _,
@@ -2093,5 +2094,13 @@ impl Nokkvi {
         let focus_task = Task::done(Message::Login(crate::views::LoginMessage::FocusFirstField));
 
         Task::batch([exit_theater, stop_task, mpris_art_clear_task, focus_task])
+    }
+}
+
+/// Hand `url` to the desktop's opener (`xdg-open`). A failure is logged, not
+/// toasted: the link was the user's own click, and the log names the URL.
+pub(crate) fn open_external_url(url: &str) {
+    if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        tracing::warn!("Failed to open URL '{url}': {e}");
     }
 }

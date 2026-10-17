@@ -372,6 +372,9 @@ impl QueuePage {
                     (Task::none(), QueueAction::FindSimilar(clicked_idx))
                 }
                 QueueContextEntry::TopSongs => (Task::none(), QueueAction::TopSongs(clicked_idx)),
+                QueueContextEntry::SimilarArtists => {
+                    (Task::none(), QueueAction::SimilarArtists(clicked_idx))
+                }
             },
             QueueMessage::EditPlaylist => (Task::none(), QueueAction::EditPlaylist),
             QueueMessage::QuickSavePlaylist => (Task::none(), QueueAction::SaveAsPlaylist),

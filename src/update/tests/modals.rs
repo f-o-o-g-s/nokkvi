@@ -22,6 +22,15 @@ pub(super) fn open_modal(app: &mut Nokkvi, modal: ActiveModal) {
                 None,
             ),
         ),
+        ActiveModal::SimilarArtists => {
+            app.similar_artists_modal = Some(
+                crate::widgets::similar_artists_modal::SimilarArtistsModalState::new(
+                    "a1".into(),
+                    "Artist 1".into(),
+                    crate::widgets::similar_artists_modal::SimilarArtistsStatus::Loading,
+                ),
+            );
+        }
         ActiveModal::DefaultPlaylistPicker => {
             app.default_playlist_picker =
                 Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[]));
@@ -62,6 +71,7 @@ fn stack_order_is_pinned() {
             ActiveModal::Eq,
             ActiveModal::About,
             ActiveModal::Info,
+            ActiveModal::SimilarArtists,
             ActiveModal::DefaultPlaylistPicker,
             ActiveModal::MilkdropPicker,
             ActiveModal::Trawl,
@@ -96,6 +106,7 @@ fn the_highest_open_modal_is_top() {
             ActiveModal::Eq => app.eq_modal.open = false,
             ActiveModal::About => app.about_modal.visible = false,
             ActiveModal::Info => app.info_modal.visible = false,
+            ActiveModal::SimilarArtists => app.similar_artists_modal = None,
             ActiveModal::DefaultPlaylistPicker => app.default_playlist_picker = None,
             ActiveModal::MilkdropPicker => app.milkdrop.picker = None,
             ActiveModal::Trawl => app.trawl.modal = None,

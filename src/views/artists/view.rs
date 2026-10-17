@@ -791,11 +791,22 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
 }
 
 /// What a click on a similar artist does: find and expand the artist when
-/// the library has it, else open its ListenBrainz page, where the list came
-/// from and which has a page for every artist in it.
+/// the library has their albums; show their songs in Songs when they only
+/// appear on other artists' albums (the Artists view has no row to expand
+/// for them); else open their ListenBrainz page, where the list came from
+/// and which has a page for every artist in it.
 pub(crate) fn similar_artist_message(rec: &ArtistRec) -> ArtistsMessage {
-    match rec.library_id() {
-        Some(artist_id) => ArtistsMessage::NavigateAndExpandArtist(artist_id.to_string()),
+    match rec.library_artist() {
+        Some(artist) if artist.album_artist => {
+            ArtistsMessage::NavigateAndExpandArtist(artist.id.clone())
+        }
+        Some(artist) => ArtistsMessage::NavigateAndFilter(
+            crate::View::Songs,
+            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                id: artist.id.clone(),
+                name: rec.name.clone(),
+            },
+        ),
         None => ArtistsMessage::OpenExternalUrl(rec.listenbrainz_url()),
     }
 }
@@ -904,15 +915,28 @@ mod similar_artist_tests {
         }
     }
 
-    /// An artist the library has is found and expanded; one it lacks, or
-    /// one whose lookup failed, opens its ListenBrainz page.
+    /// An artist with albums in the library is found and expanded; one the
+    /// library has only on other artists' albums shows their songs; one it
+    /// lacks, or one whose lookup failed, opens their ListenBrainz page.
     #[test]
     fn a_library_artist_is_expanded_and_the_rest_open_listenbrainz() {
+        use nokkvi_data::types::{artist_recs::LibraryArtist, filter::LibraryFilter};
         assert!(matches!(
-            similar_artist_message(&rec(LibraryMatch::Found {
-                artist_id: "ar1".into()
-            })),
+            similar_artist_message(&rec(LibraryMatch::Found(LibraryArtist {
+                id: "ar1".into(),
+                album_artist: true
+            }))),
             ArtistsMessage::NavigateAndExpandArtist(ref id) if id == "ar1"
+        ));
+        assert!(matches!(
+            similar_artist_message(&rec(LibraryMatch::Found(LibraryArtist {
+                id: "ar1".into(),
+                album_artist: false
+            }))),
+            ArtistsMessage::NavigateAndFilter(
+                crate::View::Songs,
+                LibraryFilter::ArtistId { ref id, ref name }
+            ) if id == "ar1" && name == "Muse"
         ));
         for library in [LibraryMatch::Missing, LibraryMatch::Unknown] {
             assert!(matches!(

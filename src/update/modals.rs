@@ -21,8 +21,8 @@ use crate::{
     widgets::{
         EqModalMessage, about_modal::AboutModalMessage,
         default_playlist_picker::DefaultPlaylistPickerMessage, info_modal::InfoModalMessage,
-        milkdrop_picker::MilkdropPickerMessage, text_input_dialog::TextInputDialogMessage,
-        trawl_modal::TrawlModalMessage,
+        milkdrop_picker::MilkdropPickerMessage, similar_artists_modal::SimilarArtistsModalMessage,
+        text_input_dialog::TextInputDialogMessage, trawl_modal::TrawlModalMessage,
     },
 };
 
@@ -36,6 +36,8 @@ pub(crate) enum ActiveModal {
     About,
     /// Get Info.
     Info,
+    /// Similar Artists (ListenBrainz) for a row's artist.
+    SimilarArtists,
     DefaultPlaylistPicker,
     MilkdropPicker,
     /// The Trawl mix builder.
@@ -52,11 +54,12 @@ impl ActiveModal {
     /// whatever the user opened meanwhile, and a future flow that opens a
     /// small surface from a big one (say, Get Info from inside Trawl) needs
     /// no reordering.
-    pub(crate) const STACK: [Self; 7] = [
+    pub(crate) const STACK: [Self; 8] = [
         Self::TextInputDialog,
         Self::Eq,
         Self::About,
         Self::Info,
+        Self::SimilarArtists,
         Self::DefaultPlaylistPicker,
         Self::MilkdropPicker,
         Self::Trawl,
@@ -78,7 +81,7 @@ impl ActiveModal {
             HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
         );
         match self {
-            Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key,
+            Self::MilkdropPicker | Self::DefaultPlaylistPicker | Self::SimilarArtists => list_key,
             Self::Trawl => {
                 list_key
                     || matches!(
@@ -122,6 +125,7 @@ impl Nokkvi {
             ActiveModal::Eq => self.eq_modal.open,
             ActiveModal::About => self.about_modal.visible,
             ActiveModal::Info => self.info_modal.visible,
+            ActiveModal::SimilarArtists => self.similar_artists_modal.is_some(),
             ActiveModal::DefaultPlaylistPicker => self.default_playlist_picker.is_some(),
             ActiveModal::MilkdropPicker => self.milkdrop.picker.is_some(),
             ActiveModal::Trawl => self.trawl.modal.is_some(),
@@ -154,6 +158,9 @@ impl Nokkvi {
             ActiveModal::Eq => self.handle_eq_modal(EqModalMessage::Close),
             ActiveModal::About => self.handle_about_modal(AboutModalMessage::Close),
             ActiveModal::Info => self.handle_info_modal(InfoModalMessage::Close),
+            ActiveModal::SimilarArtists => {
+                self.handle_similar_artists_modal(SimilarArtistsModalMessage::Close)
+            }
             ActiveModal::DefaultPlaylistPicker => {
                 self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Close)
             }
@@ -183,6 +190,7 @@ impl Nokkvi {
             ActiveModal::Info => {
                 self.info_modal = crate::widgets::info_modal::InfoModalState::default();
             }
+            ActiveModal::SimilarArtists => self.similar_artists_modal = None,
             ActiveModal::DefaultPlaylistPicker => self.default_playlist_picker = None,
             ActiveModal::MilkdropPicker => self.milkdrop_picker_discard(),
             ActiveModal::Trawl => self.trawl.modal = None,

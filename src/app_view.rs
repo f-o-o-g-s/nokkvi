@@ -1436,6 +1436,14 @@ impl Nokkvi {
             .map(|overlay| overlay.map(Message::AboutModal).boxed()),
             ActiveModal::Info => crate::widgets::info_modal::info_modal_overlay(&self.info_modal)
                 .map(|overlay| overlay.map(Message::InfoModal).boxed()),
+            ActiveModal::SimilarArtists => self.similar_artists_modal.as_ref().map(|state| {
+                crate::widgets::similar_artists_modal::similar_artists_modal_overlay(
+                    state,
+                    self.window.height,
+                )
+                .map(Message::SimilarArtistsModal)
+                .boxed()
+            }),
             ActiveModal::DefaultPlaylistPicker => {
                 self.default_playlist_picker.as_ref().map(|picker_state| {
                     crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
