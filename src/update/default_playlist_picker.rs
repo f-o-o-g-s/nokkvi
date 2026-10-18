@@ -59,7 +59,7 @@ impl Nokkvi {
                 let center_index = self.default_playlist_picker.as_ref().and_then(|s| {
                     s.list
                         .slot_list
-                        .get_center_item_index(s.list.filtered.len())
+                        .get_effective_center_index(s.list.filtered.len())
                 });
                 if let Some(idx) = center_index {
                     self.select_picker_index(idx)

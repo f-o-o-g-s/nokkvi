@@ -104,11 +104,8 @@ impl Nokkvi {
                         tasks.extend(prefetch);
 
                         // Load large artwork for center song
-                        if let Some(center_idx) = self
-                            .queue_page
-                            .common
-                            .slot_list
-                            .get_center_item_index(total)
+                        if let Some(center_idx) =
+                            self.queue_page.common.get_center_item_index(total)
                             && let Some(song) = self.library.queue_songs.get(center_idx)
                         {
                             tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
@@ -974,11 +971,7 @@ impl Nokkvi {
             tasks.extend(prefetch);
 
             // Load large artwork for center song
-            if let Some(center_idx) = self
-                .queue_page
-                .common
-                .slot_list
-                .get_center_item_index(total)
+            if let Some(center_idx) = self.queue_page.common.get_center_item_index(total)
                 && let Some(song) = rows.get(center_idx)
             {
                 // A step: through the big panel's gate, cached rows included,

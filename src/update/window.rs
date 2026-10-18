@@ -253,11 +253,7 @@ impl Nokkvi {
         match view {
             View::Albums => {
                 let total = self.library.albums.len();
-                let center_idx = self
-                    .albums_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)?;
+                let center_idx = self.albums_page.common.get_center_item_index(total)?;
                 let album_id = self.library.albums.get(center_idx)?.id.clone();
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;
@@ -268,11 +264,7 @@ impl Nokkvi {
             }
             View::Songs => {
                 let total = self.library.songs.len();
-                let center_idx = self
-                    .songs_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)?;
+                let center_idx = self.songs_page.common.get_center_item_index(total)?;
                 let album_id = self.library.songs.get(center_idx)?.album_id.clone()?;
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;
@@ -288,11 +280,7 @@ impl Nokkvi {
                 // `load_queue_viewport_artwork`'s unconditional dispatch).
                 let songs = self.filter_queue_songs();
                 let total = songs.len();
-                let center_idx = self
-                    .queue_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)?;
+                let center_idx = self.queue_page.common.get_center_item_index(total)?;
                 let album_id = songs.get(center_idx)?.album_id.clone();
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;

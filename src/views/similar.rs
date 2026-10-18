@@ -395,7 +395,7 @@ impl SimilarPage {
         let songs = data.songs;
         let song_artwork = data.album_art;
         let placeholders = data.placeholders;
-        let center_index = self.common.slot_list.get_center_item_index(songs.len());
+        let center_index = self.common.get_center_item_index(songs.len());
         let open_menu_for_rows = data.overlay.open_menu;
         let column_visibility = self.column_visibility;
 

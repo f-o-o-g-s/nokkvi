@@ -604,8 +604,10 @@ impl SlotListPageState {
         }
     }
 
-    /// Get the currently centered item index.
-    /// If `selected_offset` is set (click-to-focus), returns that instead.
+    /// The focused row: the highlighted one when a click or a find-and-expand
+    /// pin left it off the centre, else the viewport's centre
+    /// ([`SlotListView::get_effective_center_index`]). Every key, Enter and the
+    /// artwork panel act on this row.
     pub fn get_center_item_index(&self, total_items: usize) -> Option<usize> {
         self.slot_list.get_effective_center_index(total_items)
     }

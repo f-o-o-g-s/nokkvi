@@ -1049,7 +1049,6 @@ impl QueuePage {
         });
         let centered_song = self
             .common
-            .slot_list
             .get_center_item_index(queue_songs.len())
             .and_then(|center_idx| queue_songs.get(center_idx));
         let center_artwork_handle: Option<&iced::widget::image::Handle> =
@@ -1077,7 +1076,6 @@ impl QueuePage {
         }
         .or_else(|| {
             self.common
-                .slot_list
                 .get_center_item_index(queue_songs.len())
                 .and_then(|center_idx| queue_songs.get(center_idx))
                 .map(|song| song.album_id.clone())

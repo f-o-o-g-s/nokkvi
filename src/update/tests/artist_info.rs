@@ -117,7 +117,6 @@ fn a_clicked_row_off_centre_is_the_artist_asked_about() {
     let viewport_centre = app
         .artists_page
         .common
-        .slot_list
         .get_center_item_index(app.library.artists.len())
         .expect("a viewport centre");
     let clicked = viewport_centre + 2;

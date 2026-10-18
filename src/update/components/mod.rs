@@ -10,7 +10,7 @@
 //! These helpers translate bubbled-up page actions into app-level Tasks.
 //! They must remain thin routing layers:
 //!
-//! - **No viewport math** — use `slot_list.indices_to_prefetch()` or `slot_list.get_center_item_index()`
+//! - **No viewport math** — use `slot_list.indices_to_prefetch()`, and `common.get_center_item_index()` for the focused row
 //! - **No async orchestration** — delegate to `AppService` methods
 //! - **No cache inspection loops** — use `prefetch_album_artwork_tasks()` or similar helpers
 //! - **Handlers schedule tasks only** — they don't define "how", just "what"

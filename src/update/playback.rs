@@ -1451,7 +1451,6 @@ impl Nokkvi {
         let selected_index = self
             .queue_page
             .common
-            .slot_list
             .get_center_item_index(self.library.queue_songs.len())
             .unwrap_or(0);
         let selected_entry_id = self

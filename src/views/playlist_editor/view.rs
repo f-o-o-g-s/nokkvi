@@ -290,7 +290,6 @@ impl PlaylistEditorState {
         // editor (no open-menu wiring needed for it).
         let center_handle: Option<&iced::widget::image::Handle> = self
             .common
-            .slot_list
             .get_center_item_index(songs.len())
             .and_then(|idx| songs.get(idx))
             .and_then(|song| {

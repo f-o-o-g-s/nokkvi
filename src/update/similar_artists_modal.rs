@@ -67,7 +67,7 @@ impl Nokkvi {
                     state
                         .list
                         .slot_list
-                        .get_center_item_index(state.list.filtered.len())
+                        .get_effective_center_index(state.list.filtered.len())
                 });
                 match centered {
                     Some(index) => self.act_on_similar_artist(index),

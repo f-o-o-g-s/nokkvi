@@ -953,7 +953,7 @@ impl SettingsPage {
                     return SettingsAction::None;
                 }
 
-                if let Some(center_idx) = self.slot_list.get_center_item_index(total) {
+                if let Some(center_idx) = self.slot_list.get_effective_center_index(total) {
                     match self.cached_entries.get(center_idx) {
                         Some(SettingsEntry::Header { .. }) => {
                             // Detail-pane headers are section separators —
@@ -1108,7 +1108,7 @@ impl SettingsPage {
             }
             SettingsMessage::ToggleSetToggle(toggle_key) => {
                 // Find the center item and flip the matching toggle badge
-                if let Some(center_idx) = self.slot_list.get_center_item_index(total)
+                if let Some(center_idx) = self.slot_list.get_effective_center_index(total)
                     && let Some(SettingsEntry::Item(item)) = self.cached_entries.get_mut(center_idx)
                     && let SettingValue::ToggleSet(ref mut items) = item.value
                     && let Some(entry) = items.iter_mut().find(|(_, k, _)| k == &toggle_key)
@@ -1126,7 +1126,7 @@ impl SettingsPage {
             SettingsMessage::ResetToDefault => {
                 // Hotkey items: reset single binding
                 if self.active_category == SettingsTab::Hotkeys
-                    && let Some(center_idx) = self.slot_list.get_center_item_index(total)
+                    && let Some(center_idx) = self.slot_list.get_effective_center_index(total)
                     && let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx)
                     && matches!(item.value, SettingValue::Hotkey(_))
                     && let Some(action) = items::key_to_hotkey_action(&item.key)
@@ -1370,7 +1370,7 @@ impl SettingsPage {
             return; // Already editing
         }
         let total = self.cached_entries.len();
-        if let Some(center_idx) = self.slot_list.get_center_item_index(total)
+        if let Some(center_idx) = self.slot_list.get_effective_center_index(total)
             && let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx)
             && item.value.is_editable()
         {
@@ -1381,7 +1381,7 @@ impl SettingsPage {
     /// Check whether the center item is a ToggleSet.
     fn center_item_is_toggle_set(&self) -> bool {
         let total = self.cached_entries.len();
-        if let Some(center_idx) = self.slot_list.get_center_item_index(total)
+        if let Some(center_idx) = self.slot_list.get_effective_center_index(total)
             && let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx)
         {
             matches!(item.value, SettingValue::ToggleSet(_))
@@ -1394,7 +1394,7 @@ impl SettingsPage {
     /// Initializes cursor on first press; wraps around at boundaries.
     fn toggle_set_cursor_move(&mut self, forward: bool) -> SettingsAction {
         let total = self.cached_entries.len();
-        let Some(center_idx) = self.slot_list.get_center_item_index(total) else {
+        let Some(center_idx) = self.slot_list.get_effective_center_index(total) else {
             return SettingsAction::None;
         };
         let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx) else {
@@ -1429,7 +1429,7 @@ impl SettingsPage {
     /// Used by Up (enable) and Down (disable).
     fn toggle_set_cursor_set(&mut self, cursor_idx: usize, enabled: bool) -> SettingsAction {
         let total = self.cached_entries.len();
-        let Some(center_idx) = self.slot_list.get_center_item_index(total) else {
+        let Some(center_idx) = self.slot_list.get_effective_center_index(total) else {
             return SettingsAction::None;
         };
         let Some(SettingsEntry::Item(item)) = self.cached_entries.get_mut(center_idx) else {

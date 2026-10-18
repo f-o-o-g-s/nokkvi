@@ -31,6 +31,7 @@ mod cross_pane_drag;
 mod default_playlist_picker;
 mod dynamic_accent;
 mod editor;
+mod focused_row;
 mod general;
 mod harbour;
 mod hotkeys;

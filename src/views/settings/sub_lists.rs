@@ -265,7 +265,7 @@ impl SettingsPage {
                     // Exit hex editing
                     sub.editing_color_index = None;
                     sub.hex_input.clear();
-                } else if let Some(center_idx) = sub.slot_list.get_center_item_index(total) {
+                } else if let Some(center_idx) = sub.slot_list.get_effective_center_index(total) {
                     // Enter hex editing for this color
                     if let Some(color) = sub.colors.get(center_idx) {
                         sub.editing_color_index = Some(center_idx);
@@ -356,7 +356,7 @@ impl SettingsPage {
             }
             SettingsMessage::EditActivate => {
                 // Select the center font
-                if let Some(center_idx) = fsw.slot_list.get_center_item_index(total)
+                if let Some(center_idx) = fsw.slot_list.get_effective_center_index(total)
                     && let Some(font_name) = fsw.filtered_fonts.get(center_idx).cloned()
                 {
                     let parent_offset = fsw.parent_offset;
@@ -433,7 +433,7 @@ impl SettingsPage {
             SettingsMessage::EditActivate => {
                 // Apply the centered theme by stem — read straight from the
                 // filtered row, so search filtering can't misroute the choice.
-                if let Some(center_idx) = tsw.slot_list.get_center_item_index(total)
+                if let Some(center_idx) = tsw.slot_list.get_effective_center_index(total)
                     && let Some(row) = tsw.filtered_rows.get(center_idx)
                 {
                     let stem = row.stem.clone();

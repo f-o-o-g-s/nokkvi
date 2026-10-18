@@ -26,6 +26,10 @@ All notable changes to this project will be documented in this file.
 - The clear-queue help line no longer claims it stops a playing radio station.
 - The library selection now belongs to the server and user it was made on, like the queue.
 - A queue-replacing play that fails while a station streams hands radio mode back from every view, not only from Albums.
+- The star, rating, Get Info, Ctrl+D and Shift+arrow keys act on the highlighted row, not on the row at the list's center.
+- `nokkvi selection` and the `nokkvi add-to-queue` reply name the highlighted row, the one Shift+A adds.
+- Play with nothing loaded starts the highlighted queue row, as Enter does.
+- The Queue, Songs and Similar artwork panels show the highlighted row's cover, like the other views.
 
 ### Removed
 

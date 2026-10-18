@@ -249,11 +249,7 @@ impl LoaderTarget for AlbumsTarget {
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
         let total = app.library.albums.len();
-        let center_idx = app
-            .albums_page
-            .common
-            .slot_list
-            .get_center_item_index(total)?;
+        let center_idx = app.albums_page.common.get_center_item_index(total)?;
         let album_id = app.library.albums.get(center_idx)?.id.clone();
         Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
             album_id,
@@ -384,11 +380,7 @@ impl LoaderTarget for SongsTarget {
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
         let total = app.library.songs.len();
-        let center_idx = app
-            .songs_page
-            .common
-            .slot_list
-            .get_center_item_index(total)?;
+        let center_idx = app.songs_page.common.get_center_item_index(total)?;
         let album_id = app
             .library
             .songs

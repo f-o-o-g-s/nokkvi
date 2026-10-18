@@ -1655,3 +1655,77 @@ fn trawl_verbs_follow_the_key_gate() {
         }
     }
 }
+
+/// The `selection` record and the `add-to-queue` reply name the highlighted
+/// row, the one Shift+A enqueues. A click under Stable Viewport highlights a
+/// row off the viewport's centre, and a find-and-expand pins its target to the
+/// top slot, where the arrow keys then walk it; both replies used to name the
+/// viewport's centre instead (2026-10-16: the reply said "DJ Smokey" while the
+/// queue got the pinned row three above it).
+#[test]
+fn selection_and_the_add_reply_name_the_highlighted_row() {
+    use crate::{test_helpers::make_artist, views::ArtistsMessage, widgets::SlotListPageMessage};
+
+    const ROWS: usize = 20;
+    let artists: Vec<_> = (0..ROWS)
+        .map(|i| make_artist(&format!("a{i}"), &format!("Artist {i}")))
+        .collect();
+    let slot = |app: &mut Nokkvi, msg: SlotListPageMessage| {
+        let _ = app.update(Message::Artists(ArtistsMessage::SlotList(msg)));
+    };
+    let check = |app: &mut Nokkvi, row: usize, case: &str| {
+        let name = format!("Artist {row}");
+        let selection = drive_on(app, "selection").data;
+        assert_eq!(
+            selection.as_ref().and_then(|d| d.get("name")),
+            Some(&json!(name)),
+            "{case}: selection"
+        );
+        assert_eq!(
+            app.artists_page.common.get_queue_target_indices(ROWS),
+            vec![row],
+            "{case}: Shift+A adds the highlighted row"
+        );
+        assert_eq!(
+            drive_on(app, "add-to-queue").data,
+            Some(json!({ "added": name })),
+            "{case}: the add reply"
+        );
+    };
+
+    // A click two rows below the viewport's centre.
+    let mut app = test_app();
+    app.current_view = crate::View::Artists;
+    app.library.artists.set_from_vec(artists.clone());
+    slot(&mut app, SlotListPageMessage::NavigateDown);
+    let centre = app
+        .artists_page
+        .common
+        .get_center_item_index(ROWS)
+        .expect("a viewport centre");
+    let clicked = centre + 2;
+    slot(
+        &mut app,
+        SlotListPageMessage::SetOffset(clicked, iced::keyboard::Modifiers::default()),
+    );
+    check(&mut app, clicked, "click");
+
+    // A find-and-expand pin on row 10 (the viewport sits below it, the
+    // target in the top slot), walked up two rows by the arrow keys.
+    let mut app = test_app();
+    app.current_view = crate::View::Artists;
+    app.library.artists.set_from_vec(artists);
+    let list = &mut app.artists_page.common.slot_list;
+    list.set_offset(13, ROWS);
+    list.pin_selected(10, ROWS);
+    slot(&mut app, SlotListPageMessage::NavigateUp);
+    slot(&mut app, SlotListPageMessage::NavigateUp);
+    let highlighted = app
+        .artists_page
+        .common
+        .slot_list
+        .selected_offset
+        .expect("the pin walks with the viewport");
+    assert_eq!(highlighted, 8);
+    check(&mut app, highlighted, "pin");
+}

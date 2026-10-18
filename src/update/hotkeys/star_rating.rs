@@ -111,7 +111,6 @@ impl Nokkvi {
                 let filtered = self.filter_queue_songs();
                 self.queue_page
                     .common
-                    .slot_list
                     .get_center_item_index(filtered.len())
                     .and_then(|idx| filtered.get(idx).cloned())
                     .map(|song| {
@@ -152,7 +151,6 @@ impl Nokkvi {
             View::Songs => self
                 .songs_page
                 .common
-                .slot_list
                 .get_center_item_index(self.library.songs.len())
                 .and_then(|idx| self.library.songs.get(idx))
                 .map(|song| {

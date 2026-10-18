@@ -149,7 +149,7 @@ impl SongsPage {
         let song_artwork = data.album_art;
         let placeholders = data.placeholders;
         let current_sort_mode = self.common.current_sort_mode;
-        let center_index = self.common.slot_list.get_center_item_index(songs.len());
+        let center_index = self.common.get_center_item_index(songs.len());
         let open_menu_for_rows = data.overlay.open_menu;
 
         // Render slot list using generic component with item renderer closure

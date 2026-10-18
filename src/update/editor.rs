@@ -457,7 +457,7 @@ impl Nokkvi {
             return Task::none();
         };
         let total = editor.songs.len();
-        let Some(center_idx) = editor.common.slot_list.get_center_item_index(total) else {
+        let Some(center_idx) = editor.common.get_center_item_index(total) else {
             return Task::none();
         };
 
@@ -479,7 +479,9 @@ impl Nokkvi {
         let insert_at = if from < to { to - 1 } else { to };
         editor.songs.insert(insert_at, item);
 
-        // The highlight follows the moved row.
+        // The highlight follows the moved row. The one-row selection a click
+        // left names another row after the reorder, so it goes.
+        editor.common.slot_list.clear_multi_selection();
         editor.common.slot_list.set_offset(insert_at, total);
 
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Tab);
@@ -547,7 +549,6 @@ impl Nokkvi {
         // Large artwork for the centered row, so the artwork panel fills too.
         let center_album = editor
             .common
-            .slot_list
             .get_center_item_index(editor.songs.len())
             .and_then(|center_idx| editor.songs.get(center_idx))
             .map(|song| song.album_id.clone());

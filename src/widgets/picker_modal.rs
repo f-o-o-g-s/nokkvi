@@ -51,7 +51,7 @@ impl<T: Clone + PartialEq> PickerList<T> {
     /// The entry on the centered row.
     pub(crate) fn centered(&self) -> Option<&T> {
         self.slot_list
-            .get_center_item_index(self.filtered.len())
+            .get_effective_center_index(self.filtered.len())
             .and_then(|i| self.filtered.get(i))
     }
 

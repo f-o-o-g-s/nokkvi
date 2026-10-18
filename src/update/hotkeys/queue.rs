@@ -70,7 +70,6 @@ impl Nokkvi {
         let center_idx = match self
             .queue_page
             .common
-            .slot_list
             .get_center_item_index(filtered_queue.len())
         {
             Some(idx) => idx,
@@ -81,13 +80,12 @@ impl Nokkvi {
             }
         };
 
-        // Dispatch directly to the Queue view's context menu handler which
-        // implements all the multi-selection batch resolution logic.
-        Task::done(Message::Queue(
-            crate::views::QueueMessage::ContextMenuAction(
-                center_idx,
-                crate::views::queue::QueueContextEntry::RemoveFromQueue,
-            ),
+        // Run the Queue view's context menu handler, which implements all the
+        // multi-selection batch resolution logic, in this same update: a
+        // queue reload landing in between would re-point `center_idx`.
+        self.handle_queue(crate::views::QueueMessage::ContextMenuAction(
+            center_idx,
+            crate::views::queue::QueueContextEntry::RemoveFromQueue,
         ))
     }
 
@@ -292,12 +290,7 @@ impl Nokkvi {
         }
 
         let queue_len = self.library.queue_songs.len();
-        let center_idx = match self
-            .queue_page
-            .common
-            .slot_list
-            .get_center_item_index(queue_len)
-        {
+        let center_idx = match self.queue_page.common.get_center_item_index(queue_len) {
             Some(idx) => idx,
             None => return Task::none(),
         };
@@ -329,11 +322,12 @@ impl Nokkvi {
         let insert_at = if from < to { to - 1 } else { to };
         self.library.queue_songs.insert(insert_at, item);
 
-        // Move the slot list cursor to follow the item
-        self.queue_page
-            .common
-            .slot_list
-            .set_offset(insert_at, queue_len);
+        // Move the slot list cursor to follow the item. The one-row selection
+        // a click left (and any multi-selection) names other rows after the
+        // reorder, so it goes, as on the queue's other reorders.
+        let list = &mut self.queue_page.common.slot_list;
+        list.clear_multi_selection();
+        list.set_offset(insert_at, queue_len);
 
         // Play tab SFX for feedback
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Tab);

@@ -192,7 +192,7 @@ impl<C: Clone> ExpansionState<C> {
         id_fn: impl Fn(&P) -> &str,
     ) -> Option<SlotListEntry<&'a P, &'a C>> {
         let total = self.flattened_len(parents);
-        let idx = common.slot_list.get_center_item_index(total)?;
+        let idx = common.get_center_item_index(total)?;
         self.get_entry_at(idx, parents, id_fn)
     }
 

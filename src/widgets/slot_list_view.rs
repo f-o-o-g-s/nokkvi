@@ -423,18 +423,29 @@ impl SlotListView {
         }
     }
 
-    /// Get the center item index using the current dynamic slot count.
-    pub fn get_center_item_index(&self, total_items: usize) -> Option<usize> {
+    /// The item at the viewport's centre slot: where the list is scrolled,
+    /// which is not always the row the user is on. A click under Stable
+    /// Viewport highlights a row in place, and a find-and-expand pins its
+    /// target to the top slot; the renderer then draws `selected_offset` as
+    /// the focused row. Private so that every reader of the row the keys,
+    /// Enter and the artwork panel act on goes through
+    /// [`Self::get_effective_center_index`] (or
+    /// `SlotListPageState::get_center_item_index`): reading this one instead
+    /// once made the star, rating, Get Info, Ctrl+D and Shift+arrow keys act
+    /// on a row that was not highlighted.
+    fn viewport_center_index(&self, total_items: usize) -> Option<usize> {
         let center_slot = self.slot_count / 2;
         self.get_slot_item_index_with_center(center_slot, total_items, center_slot)
     }
 
-    /// Get the effective center item index — returns `selected_offset` if set,
-    /// otherwise falls back to the viewport center.
+    /// The focused row: `selected_offset` when a row is highlighted off the
+    /// centre (a click under Stable Viewport, or a find-and-expand pin),
+    /// otherwise the viewport's centre. It is the row the renderer draws as
+    /// focused, so every key and the artwork panel read this one.
     pub fn get_effective_center_index(&self, total_items: usize) -> Option<usize> {
         self.selected_offset
             .filter(|&s| s < total_items)
-            .or_else(|| self.get_center_item_index(total_items))
+            .or_else(|| self.viewport_center_index(total_items))
     }
 
     /// Minimum extra items beyond the visible viewport to prefetch.
@@ -593,7 +604,7 @@ mod tests {
         assert_eq!(sl.get_effective_center_index(20), Some(12));
 
         // viewport_offset is still 5
-        assert_eq!(sl.get_center_item_index(20), Some(5));
+        assert_eq!(sl.viewport_center_index(20), Some(5));
 
         // Out-of-range selected_offset falls back to center
         sl.selected_offset = Some(25); // beyond total_items

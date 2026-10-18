@@ -80,7 +80,6 @@ impl Nokkvi {
         let center = self
             .similar_page
             .common
-            .slot_list
             .get_center_item_index(songs.len())?;
         songs.get(center)
     }
@@ -148,7 +147,6 @@ impl Nokkvi {
                 let center_idx = self
                     .songs_page
                     .common
-                    .slot_list
                     .get_center_item_index(self.library.songs.len());
                 if let Some(song) = center_idx.and_then(|idx| self.library.songs.get(idx)) {
                     let item = InfoModalItem::from_song_view_data(song);
@@ -162,11 +160,7 @@ impl Nokkvi {
                     .albums_page
                     .expansion
                     .flattened_len(&self.library.albums);
-                let center_idx = self
-                    .albums_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total);
+                let center_idx = self.albums_page.common.get_center_item_index(total);
                 if let Some(entry) = center_idx.and_then(|idx| {
                     self.albums_page
                         .expansion
@@ -205,11 +199,7 @@ impl Nokkvi {
                     .playlists_page
                     .expansion
                     .flattened_len(&self.library.playlists);
-                let center_idx = self
-                    .playlists_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total);
+                let center_idx = self.playlists_page.common.get_center_item_index(total);
                 if let Some(entry) = center_idx.and_then(|idx| {
                     self.playlists_page
                         .expansion
@@ -229,11 +219,7 @@ impl Nokkvi {
             View::Queue => {
                 // Queue uses async API re-fetch for full Song field coverage
                 let filtered = self.filter_queue_songs();
-                let center_idx = self
-                    .queue_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(filtered.len());
+                let center_idx = self.queue_page.common.get_center_item_index(filtered.len());
                 if let Some(song_id) =
                     center_idx.and_then(|idx| filtered.get(idx).map(|s| s.id.clone()))
                 {
