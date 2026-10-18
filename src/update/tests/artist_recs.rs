@@ -300,3 +300,20 @@ fn a_similar_artist_chip_bubbles_find_and_expand() {
         ArtistsAction::NavigateAndExpandArtist(ref id) if id == "ar9"
     ));
 }
+
+/// Turning the setting off hides the lists already fetched this session, as
+/// its subtitle promises ("Off shows no list"); turning it back on shows them.
+#[test]
+fn the_setting_off_hides_lists_already_fetched() {
+    let mut app = app_with_artists(3, true);
+    app.artist_recs.settle_with("a0", vec![rec("Muse")]);
+    assert_eq!(
+        app.shown_artist_recs().len(),
+        1,
+        "on: the cached list shows"
+    );
+    app.settings.similar_artists_online = false;
+    assert!(app.shown_artist_recs().is_empty(), "off: no list shows");
+    app.settings.similar_artists_online = true;
+    assert_eq!(app.shown_artist_recs().len(), 1, "back on: it shows again");
+}

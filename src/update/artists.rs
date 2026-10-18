@@ -430,6 +430,19 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// The similar-artist lists the Artists panel shows, by artist id: none
+    /// while the Similar Artists setting is off, so lists fetched before it
+    /// went off stop showing too (the cache keeps them for when it is back).
+    pub(crate) fn shown_artist_recs(&self) -> &std::collections::HashMap<String, Vec<ArtistRec>> {
+        static NONE: std::sync::LazyLock<std::collections::HashMap<String, Vec<ArtistRec>>> =
+            std::sync::LazyLock::new(std::collections::HashMap::new);
+        if self.settings.similar_artists_online {
+            &self.artist_recs.cache.snapshot
+        } else {
+            &NONE
+        }
+    }
+
     /// The MusicBrainz id known for `artist_id`: the native row's (a library
     /// tagged with one), else the fetched info's (Navidrome's agents look
     /// one up). Empty strings count as none.

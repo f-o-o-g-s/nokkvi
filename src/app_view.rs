@@ -1652,7 +1652,7 @@ impl Nokkvi {
             placeholders: &self.artwork.placeholders.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
             artist_info: &self.artist_info.cache.snapshot,
-            artist_recs: &self.artist_recs.cache.snapshot,
+            artist_recs: self.shown_artist_recs(),
             window_width: chrome.pane_width,
             window_height: chrome.pane_height,
             chrome,
