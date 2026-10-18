@@ -192,6 +192,7 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::GetInfo => Message::Hotkey(HotkeyMessage::GetInfo),
         HotkeyAction::FindSimilar => Message::Hotkey(HotkeyMessage::FindSimilar),
         HotkeyAction::FindTopSongs => Message::Hotkey(HotkeyMessage::FindTopSongs),
+        HotkeyAction::SimilarArtists => Message::Hotkey(HotkeyMessage::SimilarArtists),
         // Queue reorder
         HotkeyAction::MoveTrackUp => Message::Hotkey(HotkeyMessage::MoveTrackUp),
         HotkeyAction::MoveTrackDown => Message::Hotkey(HotkeyMessage::MoveTrackDown),

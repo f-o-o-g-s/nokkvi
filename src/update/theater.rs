@@ -195,6 +195,7 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::IncreaseRating
         | A::DecreaseRating
         | A::GetInfo
+        | A::SimilarArtists
         | A::MoveTrackUp
         | A::MoveTrackDown
         | A::TrawlSaveAsPlaylist

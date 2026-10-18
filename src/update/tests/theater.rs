@@ -243,6 +243,7 @@ fn policy_table_is_pinned() {
         A::IncreaseRating,
         A::DecreaseRating,
         A::GetInfo,
+        A::SimilarArtists,
         A::MoveTrackUp,
         A::MoveTrackDown,
         A::TrawlSaveAsPlaylist,

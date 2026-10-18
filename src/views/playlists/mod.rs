@@ -267,6 +267,8 @@ pub enum PlaylistsAction {
     ResetCustomArtwork(String, String),
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
     /// Bubble to root: enter the drop-into-editor create flow (no modal).
@@ -280,7 +282,8 @@ pub enum PlaylistsAction {
 super::impl_has_common_action!(
     PlaylistsAction,
     no_center {
-        NavigateAndExpandArtist
+        NavigateAndExpandArtist,
+        SimilarArtists
     }
 );
 

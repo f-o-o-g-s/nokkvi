@@ -160,6 +160,8 @@ pub enum SongsAction {
     RefreshArtwork(String),           // album_id - refresh artwork from server
     FindSimilar(String, String),      // (id, title) - Find similar to this song
     TopSongs(String, Option<String>), // (artist, artist_id) - Find top songs by artist
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album
@@ -173,6 +175,7 @@ super::impl_has_common_action!(SongsAction {
     NavigateAndExpandAlbum,
     NavigateAndExpandArtist,
     NavigateAndExpandGenre,
+    SimilarArtists,
 });
 
 impl Default for SongsPage {

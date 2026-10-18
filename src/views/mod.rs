@@ -172,10 +172,37 @@ pub(crate) enum CommonViewAction {
     /// filter set. Dispatched by genre-text clicks in Songs/Albums/Queue
     /// dynamic columns when the user has chosen Genre sort.
     NavigateAndExpandGenre(String),
+    /// Open the Similar Artists modal for this artist: a row menu's Similar
+    /// Artists entry, from any library view.
+    SimilarArtists(ArtistRef),
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.
     ViewSpecific,
+}
+
+/// The library artist a row names, by id and display name: what a row
+/// menu's Similar Artists entry and the Similar Artists key ask about. The
+/// id is empty when the server sent the row without one (a song's
+/// `artistId` is optional); opening the modal for it toasts instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtistRef {
+    pub id: String,
+    pub name: String,
+}
+
+impl ArtistRef {
+    pub(crate) fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+        }
+    }
+
+    /// A song's artist, whose id the server may leave out.
+    pub(crate) fn of_song(artist_id: Option<&String>, artist: &str) -> Self {
+        Self::new(artist_id.cloned().unwrap_or_default(), artist)
+    }
 }
 
 /// Trait for Action enums that can classify themselves as a `CommonViewAction`.

@@ -81,7 +81,9 @@ impl ActiveModal {
             HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
         );
         match self {
-            Self::MilkdropPicker | Self::DefaultPlaylistPicker | Self::SimilarArtists => list_key,
+            Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key,
+            // Its own key closes it again, as Get Info's does.
+            Self::SimilarArtists => list_key || action == HotkeyAction::SimilarArtists,
             Self::Trawl => {
                 list_key
                     || matches!(

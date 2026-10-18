@@ -178,6 +178,13 @@ impl SongsPage {
                                 (Task::none(), SongsAction::None)
                             }
                         }
+                        LibraryContextEntry::SimilarArtists => (
+                            Task::none(),
+                            SongsAction::SimilarArtists(crate::views::ArtistRef::of_song(
+                                song.artist_id.as_ref(),
+                                &song.artist,
+                            )),
+                        ),
                         LibraryContextEntry::AddToMix => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
                             let seeds =

@@ -94,6 +94,9 @@ impl Nokkvi {
                     artist_id,
                 }))
             }
+            SimilarAction::SimilarArtists(artist) => {
+                self.open_similar_artists_modal(artist.id, artist.name)
+            }
             SimilarAction::ColumnVisibilityChanged(col, value) => {
                 self.persist_column_visibility(col, value)
             }

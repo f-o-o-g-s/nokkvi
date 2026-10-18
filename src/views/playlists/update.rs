@@ -103,10 +103,19 @@ impl PlaylistsPage {
                     None => PlaylistsAction::None,
                 }
             }
+            (Entry::SimilarArtists, Some(SlotListEntry::Child(song, _))) => {
+                PlaylistsAction::SimilarArtists(crate::views::ArtistRef::of_song(
+                    song.artist_id.as_ref(),
+                    &song.artist,
+                ))
+            }
             // Playlist rows use `playlist_menu_action`; track rows here offer
             // neither a folder nor Find Similar / Top Songs, and the rest are
             // other views' entries.
-            (Entry::GetInfo | Entry::RemoveFromPlaylist, Some(SlotListEntry::Parent(_)) | None)
+            (
+                Entry::GetInfo | Entry::RemoveFromPlaylist | Entry::SimilarArtists,
+                Some(SlotListEntry::Parent(_)) | None,
+            )
             | (
                 Entry::ShowInFolder
                 | Entry::FindSimilar
@@ -197,6 +206,7 @@ impl PlaylistsPage {
                     | Entry::ShowInFolder
                     | Entry::FindSimilar
                     | Entry::TopSongs
+                    | Entry::SimilarArtists
                     | Entry::RemoveFromPlaylist
                     | Entry::ReplaceQueueWithAllFound
                     | Entry::AddAllFoundToQueue

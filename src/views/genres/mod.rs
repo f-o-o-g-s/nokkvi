@@ -169,6 +169,8 @@ pub enum GenresAction {
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
     /// Persist a column-visibility toggle change. Root forwards to the
     /// settings service so the new value survives across launches.
     ColumnVisibilityChanged(GenresColumn, bool),
@@ -177,7 +179,8 @@ pub enum GenresAction {
 
 super::impl_has_common_action!(GenresAction {
     NavigateAndExpandArtist,
-    NavigateAndExpandAlbum
+    NavigateAndExpandAlbum,
+    SimilarArtists
 });
 
 impl Default for GenresPage {

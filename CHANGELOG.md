@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 - A new General setting, Similar Artists: ListenBrainz, turns that list off and sends nothing.
 - A queue row's right-click menu gains Similar Artists, a searchable popup of the same list for that track's artist.
 - A similar artist you have only on other artists' albums opens their songs instead of an "artist not found" message.
+- Album, song and artist rows across the library get the Similar Artists menu entry the queue has.
+- Shift+R opens Similar Artists for the highlighted row's artist, and pressing it again closes it.
+- Hovering a similar artist in the Artists panel shows MusicBrainz's note on them and whether you have them.
 ### Changed
 
 ### Fixed

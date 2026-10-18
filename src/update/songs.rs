@@ -431,6 +431,7 @@ impl Nokkvi {
             | SongsAction::NavigateAndFilter(..)
             | SongsAction::NavigateAndExpandAlbum(_)
             | SongsAction::NavigateAndExpandArtist(_)
+            | SongsAction::SimilarArtists(_)
             | SongsAction::NavigateAndExpandGenre(_)
             | SongsAction::None => {}
         }

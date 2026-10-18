@@ -761,7 +761,7 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
                 .boxed(),
         );
     }
-    button(label)
+    let chip = button(label)
         .on_press(similar_artist_message(rec))
         .padding(iced::Padding {
             top: 1.0,
@@ -786,7 +786,19 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
                 text_color: color,
                 ..Default::default()
             }
-        })
+        });
+    // Hover names who they are (MusicBrainz's note) and where they stand.
+    let note = iced::widget::container(
+        text(crate::widgets::similar_artists_modal::similar_artist_note(
+            rec,
+        ))
+        .size(11.0)
+        .font(theme::ui_font()),
+    )
+    .padding(4);
+    iced::widget::tooltip(chip, note, iced::widget::tooltip::Position::Top)
+        .gap(4)
+        .style(theme::container_tooltip)
         .boxed()
 }
 

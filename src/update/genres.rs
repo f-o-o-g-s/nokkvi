@@ -423,6 +423,7 @@ impl Nokkvi {
             | GenresAction::CenterOnPlaying
             | GenresAction::NavigateAndFilter(..)
             | GenresAction::NavigateAndExpandArtist(_)
+            | GenresAction::SimilarArtists(_)
             | GenresAction::NavigateAndExpandAlbum(_)
             | GenresAction::None => {}
         }

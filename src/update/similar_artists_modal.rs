@@ -27,6 +27,9 @@ impl Nokkvi {
         msg: SimilarArtistsModalMessage,
     ) -> Task<Message> {
         match msg {
+            SimilarArtistsModalMessage::Open(artist) => {
+                self.open_similar_artists_modal(artist.id, artist.name)
+            }
             SimilarArtistsModalMessage::Close => {
                 self.similar_artists_modal = None;
                 Task::none()
@@ -87,6 +90,23 @@ impl Nokkvi {
         }
     }
 
+    /// The Similar Artists key: open the modal for the focused row's artist,
+    /// or close it when it is the modal on top (the key gate admits its own
+    /// key there, as Get Info's does).
+    pub(crate) fn handle_similar_artists_hotkey(&mut self) -> Task<Message> {
+        if self.modal_is_top(crate::update::modals::ActiveModal::SimilarArtists) {
+            self.similar_artists_modal = None;
+            return Task::none();
+        }
+        match self.focused_artist() {
+            Some(artist) => self.open_similar_artists_modal(artist.id, artist.name),
+            None => {
+                self.toast_warn(NO_ARTIST_TOAST);
+                Task::none()
+            }
+        }
+    }
+
     /// Open the modal for `artist_id` (a row's menu). A cached list shows at
     /// once; otherwise the artist's info and list are asked for, and the
     /// modal fills when they land. With the setting off nothing is asked and
@@ -97,7 +117,7 @@ impl Nokkvi {
         artist_name: String,
     ) -> Task<Message> {
         if artist_id.is_empty() {
-            self.toast_warn("This track names no artist to look up");
+            self.toast_warn(NO_ARTIST_TOAST);
             return Task::none();
         }
         let status = if self.settings.similar_artists_online {
@@ -205,6 +225,11 @@ impl Nokkvi {
         }
     }
 }
+
+/// What the Similar Artists entry and key say about a row that names no
+/// library artist (a playlist or genre, a radio station, a song the server
+/// sent without an artist id).
+pub(crate) const NO_ARTIST_TOAST: &str = "No artist to look up on this row";
 
 /// Keep typing in the search field: a press on a row's globe takes focus
 /// off it, and Backspace would then step the list.

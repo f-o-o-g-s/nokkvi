@@ -886,6 +886,11 @@ impl Nokkvi {
                     },
                 ))))
             }
+            views::CommonViewAction::SimilarArtists(artist) => {
+                Some(Task::done(Message::SimilarArtistsModal(
+                    crate::widgets::similar_artists_modal::SimilarArtistsModalMessage::Open(artist),
+                )))
+            }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }
     }

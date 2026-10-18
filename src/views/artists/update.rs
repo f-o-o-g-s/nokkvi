@@ -97,11 +97,30 @@ impl ArtistsPage {
             (Entry::TopSongs, Some(SlotListEntry::Parent(artist))) => {
                 ArtistsAction::TopSongs(artist.name.clone(), Some(artist.id.clone()))
             }
+            (Entry::SimilarArtists, Some(SlotListEntry::Parent(artist))) => {
+                ArtistsAction::SimilarArtists(crate::views::ArtistRef::new(
+                    &artist.id,
+                    &artist.name,
+                ))
+            }
+            (Entry::SimilarArtists, Some(SlotListEntry::Child(album, _))) => {
+                ArtistsAction::SimilarArtists(crate::views::ArtistRef::new(
+                    &album.artist_id,
+                    &album.artist,
+                ))
+            }
             // An artist has no folder of its own, and album rows don't offer
             // Top Songs; the rest are other views' entries.
             (Entry::ShowInFolder, Some(SlotListEntry::Parent(_)))
             | (Entry::TopSongs, Some(SlotListEntry::Child(..)))
-            | (Entry::GetInfo | Entry::ShowInFolder | Entry::FindSimilar | Entry::TopSongs, None)
+            | (
+                Entry::GetInfo
+                | Entry::ShowInFolder
+                | Entry::FindSimilar
+                | Entry::TopSongs
+                | Entry::SimilarArtists,
+                None,
+            )
             | (
                 Entry::Separator
                 | Entry::RemoveFromPlaylist

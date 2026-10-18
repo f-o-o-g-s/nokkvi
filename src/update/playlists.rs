@@ -724,6 +724,7 @@ impl Nokkvi {
             | views::PlaylistsAction::SortOrderChanged(_)
             | views::PlaylistsAction::RefreshViewData
             | views::PlaylistsAction::NavigateAndExpandArtist(_)
+            | views::PlaylistsAction::SimilarArtists(_)
             | views::PlaylistsAction::None => {}
         }
 

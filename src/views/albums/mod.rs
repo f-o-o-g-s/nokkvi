@@ -189,14 +189,17 @@ pub enum AlbumsAction {
     TopSongs(String, Option<String>), // (artist_name, artist_id) - open similar tab for top songs
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
-    NavigateAndExpandGenre(String),  // genre name - navigate to Genres and auto-expand
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
+    NavigateAndExpandGenre(String), // genre name - navigate to Genres and auto-expand
     ColumnVisibilityChanged(AlbumsColumn, bool),
     None,
 }
 
 super::impl_has_common_action!(AlbumsAction {
     NavigateAndExpandArtist,
-    NavigateAndExpandGenre
+    NavigateAndExpandGenre,
+    SimilarArtists
 });
 
 impl Default for AlbumsPage {

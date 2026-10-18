@@ -94,6 +94,8 @@ impl SimilarArtistsModalState {
 /// Modal messages.
 #[derive(Debug, Clone)]
 pub enum SimilarArtistsModalMessage {
+    /// Open for this artist: a library row menu's Similar Artists entry.
+    Open(crate::views::ArtistRef),
     /// Escape, the X, or a click on the backdrop.
     Close,
     SearchChanged(String),
@@ -150,13 +152,35 @@ pub(crate) fn similar_artists_modal_overlay<'a>(
     )
 }
 
-/// Where the artist stands against the library, as the row says it.
-fn standing(rec: &ArtistRec) -> (&'static str, iced::Color) {
+/// Where the artist stands against the library, in words.
+fn standing_label(rec: &ArtistRec) -> &'static str {
     match &rec.library {
-        LibraryMatch::Found(artist) if artist.album_artist => ("In your library", theme::accent()),
-        LibraryMatch::Found(_) => ("In your library, on other artists' albums", theme::accent()),
-        LibraryMatch::Missing => ("Not in your library", theme::fg3()),
-        LibraryMatch::Unknown => ("Library lookup failed", theme::fg3()),
+        LibraryMatch::Found(artist) if artist.album_artist => "In your library",
+        LibraryMatch::Found(_) => "In your library, on other artists' albums",
+        LibraryMatch::Missing => "Not in your library",
+        LibraryMatch::Unknown => "Library lookup failed",
+    }
+}
+
+/// Where the artist stands against the library, as the row says it: the
+/// label, in the accent for an artist the library has.
+fn standing(rec: &ArtistRec) -> (&'static str, iced::Color) {
+    let color = if rec.library_id().is_some() {
+        theme::accent()
+    } else {
+        theme::fg3()
+    };
+    (standing_label(rec), color)
+}
+
+/// What a similar artist's hover note says (the Artists panel's chips):
+/// MusicBrainz's note on them when there is one, then where they stand
+/// against the library, the same words the modal's row uses.
+pub(crate) fn similar_artist_note(rec: &ArtistRec) -> String {
+    let standing = standing_label(rec);
+    match &rec.comment {
+        Some(comment) => format!("{comment} · {standing}"),
+        None => standing.to_string(),
     }
 }
 
@@ -262,4 +286,43 @@ fn render_row<'a>(
         .on_press(SimilarArtistsModalMessage::ClickItem(item_index))
         .interaction(iced::mouse::Interaction::Pointer)
         .boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use nokkvi_data::types::artist_recs::LibraryArtist;
+
+    use super::*;
+
+    fn rec(comment: Option<&str>, library: LibraryMatch) -> ArtistRec {
+        ArtistRec {
+            mbid: "m".into(),
+            name: "Muse".into(),
+            comment: comment.map(str::to_string),
+            score: 1,
+            library,
+        }
+    }
+
+    #[test]
+    fn the_note_leads_with_musicbrainz_then_the_library_standing() {
+        assert_eq!(
+            similar_artist_note(&rec(Some("UK rock band"), LibraryMatch::Missing)),
+            "UK rock band · Not in your library"
+        );
+        assert_eq!(
+            similar_artist_note(&rec(
+                None,
+                LibraryMatch::Found(LibraryArtist {
+                    id: "a".into(),
+                    album_artist: false,
+                })
+            )),
+            "In your library, on other artists' albums"
+        );
+        assert_eq!(
+            similar_artist_note(&rec(None, LibraryMatch::Unknown)),
+            "Library lookup failed"
+        );
+    }
 }

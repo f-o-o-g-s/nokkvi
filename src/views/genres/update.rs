@@ -89,10 +89,20 @@ impl GenresPage {
             (Entry::FindSimilar, Some(SlotListEntry::Child(album, _))) => {
                 GenresAction::FindSimilar(album.id.clone(), album.name.clone())
             }
+            (Entry::SimilarArtists, Some(SlotListEntry::Child(album, _))) => {
+                GenresAction::SimilarArtists(crate::views::ArtistRef::new(
+                    &album.artist_id,
+                    &album.artist,
+                ))
+            }
             // A genre has no info modal, folder or similar-songs seed, and
             // album rows don't offer Top Songs; the rest are other views' entries.
             (
-                Entry::GetInfo | Entry::ShowInFolder | Entry::FindSimilar | Entry::TopSongs,
+                Entry::GetInfo
+                | Entry::ShowInFolder
+                | Entry::FindSimilar
+                | Entry::TopSongs
+                | Entry::SimilarArtists,
                 Some(SlotListEntry::Parent(_)) | None,
             )
             | (Entry::TopSongs, Some(SlotListEntry::Child(..)))

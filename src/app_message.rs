@@ -453,6 +453,9 @@ pub enum HotkeyMessage {
     FindSimilar,
     /// Show Top Songs for the currently playing track's artist (Shift+T)
     FindTopSongs,
+    /// Open Similar Artists for the focused row's artist (Shift+R); again
+    /// closes it.
+    SimilarArtists,
     /// Settings edit value up (enable) or down (disable)
     EditValue(bool),
     /// Settings sidebar category motion: true = next, false = previous

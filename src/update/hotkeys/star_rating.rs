@@ -53,6 +53,10 @@ pub(in crate::update) struct CenterItemInfo {
     pub id: String,
     pub name: String,
     pub artist: String,
+    /// The id of the artist `artist` names: a song's or an album's artist.
+    /// `None` for an artist row (the row is the artist) and for a song the
+    /// server sent without one.
+    pub artist_id: Option<String>,
     pub starred: bool,
     pub rating: u32,
     pub kind: ItemKind,
@@ -100,6 +104,7 @@ impl Nokkvi {
                     id: song.id.clone(),
                     name: song.title.clone(),
                     artist: song.artist.clone(),
+                    artist_id: song.artist_id.clone(),
                     starred: song.starred,
                     rating: song.rating.unwrap_or(0),
                     kind: ItemKind::Song,
@@ -118,6 +123,7 @@ impl Nokkvi {
                             id: song.id.clone(),
                             name: song.title.clone(),
                             artist: song.artist.clone(),
+                            artist_id: Some(song.artist_id.clone()).filter(|id| !id.is_empty()),
                             starred: song.starred,
                             rating: song.rating.unwrap_or(0),
                             kind: ItemKind::Song,
@@ -134,6 +140,7 @@ impl Nokkvi {
                             id: song.id.clone(),
                             name: song.title.clone(),
                             artist: song.artist.clone(),
+                            artist_id: song.artist_id.clone(),
                             starred: song.is_starred,
                             rating: song.rating.unwrap_or(0),
                             kind: ItemKind::Song,
@@ -142,6 +149,7 @@ impl Nokkvi {
                             id: album.id.clone(),
                             name: album.name.clone(),
                             artist: album.artist.clone(),
+                            artist_id: Some(album.artist_id.clone()),
                             starred: album.is_starred,
                             rating: album.rating.unwrap_or(0),
                             kind: ItemKind::Album,
@@ -158,6 +166,7 @@ impl Nokkvi {
                         id: song.id.clone(),
                         name: song.title.clone(),
                         artist: song.artist.clone(),
+                        artist_id: song.artist_id.clone(),
                         starred: song.is_starred,
                         rating: song.rating.unwrap_or(0),
                         kind: ItemKind::Song,
@@ -173,6 +182,7 @@ impl Nokkvi {
                             id: album.id.clone(),
                             name: album.name.clone(),
                             artist: album.artist.clone(),
+                            artist_id: Some(album.artist_id.clone()),
                             starred: album.is_starred,
                             rating: album.rating.unwrap_or(0),
                             kind: ItemKind::Album,
@@ -181,6 +191,7 @@ impl Nokkvi {
                             id: artist.id.clone(),
                             name: artist.name.clone(),
                             artist: String::new(),
+                            artist_id: None,
                             starred: artist.is_starred,
                             rating: artist.rating.unwrap_or(0),
                             kind: ItemKind::Artist,
@@ -198,6 +209,7 @@ impl Nokkvi {
                         id: song.id.clone(),
                         name: song.title.clone(),
                         artist: song.artist.clone(),
+                        artist_id: song.artist_id.clone(),
                         starred: song.is_starred,
                         rating: song.rating.unwrap_or(0),
                         kind: ItemKind::Song,
@@ -214,6 +226,7 @@ impl Nokkvi {
                         id: album.id.clone(),
                         name: album.name.clone(),
                         artist: album.artist.clone(),
+                        artist_id: Some(album.artist_id.clone()),
                         starred: album.is_starred,
                         rating: album.rating.unwrap_or(0),
                         kind: ItemKind::Album,
@@ -247,6 +260,62 @@ impl Nokkvi {
             HarbourRow::ShelfPlay { id, .. } => has_shelf_pick(&self.harbour, id)
                 .then(|| shelf_title(id, ShelfStyle::OnePress).to_string()),
             HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
+        }
+    }
+
+    /// The artist the focused row names, for the Similar Artists key: the
+    /// row itself when it is an artist, else its song's or album's artist.
+    /// On Harbour, an artist or song item row. `None` for a row that names
+    /// no artist (a playlist or genre parent, a radio station, a shelf or
+    /// album row on Harbour). An artist id the server left out comes back
+    /// empty; opening the modal for it toasts.
+    pub(in crate::update) fn focused_artist(&self) -> Option<crate::views::ArtistRef> {
+        use crate::views::ArtistRef;
+        if self.current_target_view() == Some(View::Harbour) {
+            return self.harbour_center_artist();
+        }
+        match self.center_item()? {
+            CenterItem::Rateable(info) => match info.kind {
+                ItemKind::Artist => Some(ArtistRef::new(info.id, info.name)),
+                ItemKind::Album | ItemKind::Song => Some(ArtistRef::new(
+                    info.artist_id.unwrap_or_default(),
+                    info.artist,
+                )),
+                // No list centres a playlist as a rateable row.
+                ItemKind::Playlist => None,
+            },
+            CenterItem::Named(_) => None,
+        }
+    }
+
+    /// The artist of the centred Harbour row: an artist item, or a song
+    /// item's artist. Album rows carry only the album id.
+    fn harbour_center_artist(&self) -> Option<crate::views::ArtistRef> {
+        use nokkvi_data::types::batch::BatchItem;
+
+        use crate::views::{
+            ArtistRef,
+            harbour::{HarbourRow, PlayTarget},
+        };
+
+        let rows = self.harbour_rows();
+        let center = self.harbour_page.common.get_center_item_index(rows.len())?;
+        match rows.into_iter().nth(center)? {
+            HarbourRow::Item {
+                title,
+                play: PlayTarget::Item(BatchItem::Artist(id)),
+                ..
+            } => Some(ArtistRef::new(id, title)),
+            HarbourRow::Item {
+                play: PlayTarget::Item(BatchItem::Song(song)),
+                ..
+            } => Some(ArtistRef::of_song(song.artist_id.as_ref(), &song.artist)),
+            HarbourRow::Item { .. }
+            | HarbourRow::RandomPlay { .. }
+            | HarbourRow::ShelfPlay { .. }
+            | HarbourRow::Section { .. }
+            | HarbourRow::Trawl { .. }
+            | HarbourRow::Hint(_) => None,
         }
     }
 

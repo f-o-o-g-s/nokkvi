@@ -111,6 +111,8 @@ pub enum SimilarAction {
     FindSimilar(String, String),
     /// Top Songs for an artist (artist name), triggered from within similar results
     FindTopSongs(String, Option<String>), // (artist_name, artist_id)
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
     /// User toggled a similar column's visibility — persist to config.toml.
     ColumnVisibilityChanged(SimilarColumn, bool),
     None,
@@ -264,6 +266,13 @@ impl SimilarPage {
                                 song.artist.clone(),
                                 song.artist_id.clone(),
                             ),
+                        ),
+                        LibraryContextEntry::SimilarArtists => (
+                            Task::none(),
+                            SimilarAction::SimilarArtists(crate::views::ArtistRef::of_song(
+                                song.artist_id.as_ref(),
+                                &song.artist,
+                            )),
                         ),
                         LibraryContextEntry::AddToMix => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);

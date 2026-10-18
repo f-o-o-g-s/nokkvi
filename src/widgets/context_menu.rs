@@ -54,6 +54,8 @@ pub enum LibraryContextEntry {
     FindSimilar,
     /// Open Top Songs panel for this artist
     TopSongs,
+    /// Open the Similar Artists modal for the row's artist (ListenBrainz).
+    SimilarArtists,
     /// Remove this track (by playlist position) from its parent playlist.
     /// Emitted only on child rows under a NON-smart playlist parent — the
     /// server rejects track mutations on smart playlists.
@@ -85,6 +87,7 @@ pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::Separator,
         LibraryContextEntry::GetInfo,
         LibraryContextEntry::ShowInFolder,
+        LibraryContextEntry::SimilarArtists,
     ]
 }
 
@@ -100,6 +103,7 @@ pub(crate) fn playlist_child_entries(parent_is_smart: bool) -> Vec<LibraryContex
         LibraryContextEntry::AddToMix,
         LibraryContextEntry::Separator,
         LibraryContextEntry::GetInfo,
+        LibraryContextEntry::SimilarArtists,
     ];
     if !parent_is_smart {
         entries.push(LibraryContextEntry::Separator);
@@ -121,6 +125,7 @@ pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::ShowInFolder,
         LibraryContextEntry::FindSimilar,
         LibraryContextEntry::TopSongs,
+        LibraryContextEntry::SimilarArtists,
     ]
 }
 
@@ -136,6 +141,7 @@ pub(crate) fn artist_entries() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::GetInfo,
         LibraryContextEntry::FindSimilar,
         LibraryContextEntry::TopSongs,
+        LibraryContextEntry::SimilarArtists,
     ]
 }
 
@@ -154,6 +160,7 @@ pub(crate) fn similar_entries() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::ShowInFolder,
         LibraryContextEntry::FindSimilar,
         LibraryContextEntry::TopSongs,
+        LibraryContextEntry::SimilarArtists,
     ]
 }
 
@@ -209,6 +216,11 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/sparkles.svg"),
             "Top Songs",
             on_action(LibraryContextEntry::TopSongs),
+        ),
+        LibraryContextEntry::SimilarArtists => menu_button(
+            Some("assets/icons/compass.svg"),
+            "Similar Artists",
+            on_action(LibraryContextEntry::SimilarArtists),
         ),
         LibraryContextEntry::ReplaceQueueWithAllFound => menu_button(
             Some("assets/icons/circle-play.svg"),

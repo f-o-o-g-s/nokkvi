@@ -237,3 +237,211 @@ fn another_artists_list_does_not_fill_the_modal() {
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Loading);
     assert!(modal(&app).list.all.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// The Similar Artists key (Shift+R) and the library row menus
+// ---------------------------------------------------------------------------
+
+fn press_similar_artists_key(app: &mut Nokkvi) {
+    let _ = app.update(Message::Hotkey(
+        crate::app_message::HotkeyMessage::SimilarArtists,
+    ));
+}
+
+fn opened_for(app: &Nokkvi) -> Option<(String, String)> {
+    app.similar_artists_modal
+        .as_ref()
+        .map(|state| (state.artist_id.clone(), state.artist_name.clone()))
+}
+
+/// A song row: the key asks about the song's artist.
+#[test]
+fn the_key_opens_the_focused_songs_artist() {
+    let mut app = test_app();
+    app.current_view = crate::View::Songs;
+    let mut song = make_song("s1", "Song", "Muse");
+    song.artist_id = Some("ar-muse".to_string());
+    app.library.songs.set_from_vec(vec![song]);
+    press_similar_artists_key(&mut app);
+    assert_eq!(
+        opened_for(&app),
+        Some(("ar-muse".to_string(), "Muse".to_string()))
+    );
+}
+
+/// An artist row is the artist; an album row asks about its album artist.
+#[test]
+fn the_key_on_an_artist_or_album_row_asks_about_that_artist() {
+    let mut app = test_app();
+    app.current_view = crate::View::Artists;
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Burial")]);
+    press_similar_artists_key(&mut app);
+    assert_eq!(
+        opened_for(&app),
+        Some(("ar1".to_string(), "Burial".to_string()))
+    );
+
+    let mut app = test_app();
+    app.current_view = crate::View::Albums;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("al1", "Untrue", "Burial")]);
+    press_similar_artists_key(&mut app);
+    assert_eq!(
+        opened_for(&app),
+        Some(("artist_al1".to_string(), "Burial".to_string())),
+        "make_album's artist id"
+    );
+}
+
+/// The key acts on the highlighted queue row (a click under Stable
+/// Viewport), like the other keys.
+#[test]
+fn the_key_follows_the_highlighted_queue_row() {
+    use crate::widgets::SlotListPageMessage;
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.library.queue_songs = (0..20)
+        .map(|i| make_queue_song(&format!("s{i}"), "Song", &format!("Artist {i}"), "Album"))
+        .collect();
+    let _ = app.update(Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::NavigateDown,
+    )));
+    let centre = app
+        .queue_page
+        .common
+        .get_center_item_index(20)
+        .expect("a centre");
+    let clicked = centre + 2;
+    let _ = app.update(Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::SetOffset(clicked, iced::keyboard::Modifiers::default()),
+    )));
+    press_similar_artists_key(&mut app);
+    assert_eq!(
+        opened_for(&app).map(|(_, name)| name),
+        Some(format!("Artist {clicked}"))
+    );
+}
+
+/// Pressed again with the modal on top, the key closes it, and the key gate
+/// admits it there (as Get Info's own key).
+#[test]
+fn the_key_again_closes_the_modal() {
+    use nokkvi_data::types::hotkey_config::HotkeyAction;
+
+    use crate::update::modals::ActiveModal;
+
+    assert!(ActiveModal::SimilarArtists.takes_action(HotkeyAction::SimilarArtists));
+    let mut app = app_with_queue();
+    press_similar_artists_key(&mut app);
+    assert!(app.similar_artists_modal.is_some());
+    press_similar_artists_key(&mut app);
+    assert!(app.similar_artists_modal.is_none());
+}
+
+/// A row that names no artist (a playlist) toasts and opens nothing; so
+/// does a song the server sent without an artist id.
+#[test]
+fn a_row_without_an_artist_toasts() {
+    use crate::update::similar_artists_modal::NO_ARTIST_TOAST;
+
+    let mut app = test_app();
+    app.current_view = crate::View::Playlists;
+    app.library
+        .playlists
+        .set_from_vec(vec![make_playlist("p1", "Road Trip")]);
+    press_similar_artists_key(&mut app);
+    assert!(app.similar_artists_modal.is_none());
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.message.as_str()),
+        Some(NO_ARTIST_TOAST)
+    );
+
+    let mut app = test_app();
+    app.current_view = crate::View::Songs;
+    app.library
+        .songs
+        .set_from_vec(vec![make_song("s1", "Song", "Someone")]);
+    press_similar_artists_key(&mut app);
+    assert!(app.similar_artists_modal.is_none(), "no artist id, no ask");
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.message.as_str()),
+        Some(NO_ARTIST_TOAST)
+    );
+}
+
+/// A Songs row's menu entry hands the row's artist on; the modal's Open
+/// message, which the common route sends, opens it for that artist.
+#[test]
+fn a_songs_row_menu_entry_opens_the_rows_artist() {
+    use crate::{
+        views::{ArtistRef, SongsAction, SongsMessage},
+        widgets::{
+            context_menu::LibraryContextEntry, similar_artists_modal::SimilarArtistsModalMessage,
+        },
+    };
+
+    let mut app = test_app();
+    let mut song = make_song("s1", "Song", "Muse");
+    song.artist_id = Some("ar-muse".to_string());
+    let songs = vec![song];
+    let (_, action) = app.songs_page.update(
+        SongsMessage::ContextMenuAction(0, LibraryContextEntry::SimilarArtists),
+        &songs,
+    );
+    let SongsAction::SimilarArtists(artist) = action else {
+        panic!("the entry hands the artist on, got {action:?}");
+    };
+    assert_eq!(artist, ArtistRef::new("ar-muse", "Muse"));
+
+    let _ = app.update(Message::SimilarArtistsModal(
+        SimilarArtistsModalMessage::Open(artist),
+    ));
+    assert_eq!(
+        opened_for(&app),
+        Some(("ar-muse".to_string(), "Muse".to_string()))
+    );
+}
+
+/// Harbour: an artist item row asks about that artist.
+#[test]
+fn the_key_on_a_harbour_artist_row_asks_about_that_artist() {
+    use nokkvi_data::types::batch::BatchItem;
+
+    use crate::views::harbour::{HarbourRow, HarbourSectionId, PlayTarget};
+
+    let mut app = test_app();
+    app.current_view = crate::View::Harbour;
+    app.settings.harbour_expandable_shelves = true;
+    // A Most Played shelf hides when its top item has no plays.
+    let mut artist = super::harbour::search_artist("ar9", "Actress");
+    artist.play_count = Some(5);
+    app.harbour.most_played_artists = vec![artist];
+    app.harbour_page
+        .collapsed
+        .remove(&HarbourSectionId::MostPlayedArtists);
+    let rows = app.harbour_rows();
+    let item = rows
+        .iter()
+        .position(|r| {
+            matches!(
+                r,
+                HarbourRow::Item {
+                    play: PlayTarget::Item(BatchItem::Artist(_)),
+                    ..
+                }
+            )
+        })
+        .expect("the artist item row");
+    app.harbour_page
+        .common
+        .slot_list
+        .set_offset(item, rows.len());
+    press_similar_artists_key(&mut app);
+    assert_eq!(
+        opened_for(&app),
+        Some(("ar9".to_string(), "Actress".to_string()))
+    );
+}

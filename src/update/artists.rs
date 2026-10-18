@@ -865,6 +865,7 @@ impl Nokkvi {
             | ArtistsAction::NavigateAndFilter(..)
             | ArtistsAction::NavigateAndExpandAlbum(_)
             | ArtistsAction::NavigateAndExpandArtist(_)
+            | ArtistsAction::SimilarArtists(_)
             | ArtistsAction::None => {}
         }
 

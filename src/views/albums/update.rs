@@ -103,9 +103,28 @@ impl AlbumsPage {
                     AlbumsAction::TopSongs(song.artist.clone(), song.artist_id.clone())
                 }
             }
+            (Entry::SimilarArtists, Some(SlotListEntry::Parent(album))) => {
+                AlbumsAction::SimilarArtists(crate::views::ArtistRef::new(
+                    &album.artist_id,
+                    &album.artist,
+                ))
+            }
+            (Entry::SimilarArtists, Some(SlotListEntry::Child(song, _))) => {
+                AlbumsAction::SimilarArtists(crate::views::ArtistRef::of_song(
+                    song.artist_id.as_ref(),
+                    &song.artist,
+                ))
+            }
             // Album rows don't offer Top Songs; the rest are other views' entries.
             (Entry::TopSongs, Some(SlotListEntry::Parent(_)))
-            | (Entry::GetInfo | Entry::ShowInFolder | Entry::FindSimilar | Entry::TopSongs, None)
+            | (
+                Entry::GetInfo
+                | Entry::ShowInFolder
+                | Entry::FindSimilar
+                | Entry::TopSongs
+                | Entry::SimilarArtists,
+                None,
+            )
             | (
                 Entry::Separator
                 | Entry::RemoveFromPlaylist

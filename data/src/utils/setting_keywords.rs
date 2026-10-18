@@ -160,6 +160,12 @@ keyword_table! {
         "hotkey.clear_queue" => &["empty", "wipe", "reset queue"],
         "hotkey.increase_rating" | "hotkey.decrease_rating" => &["stars", "rate"],
         "hotkey.get_info" => &["properties", "details", "metadata", "tags"],
+        "hotkey.similar_artists" => &[
+            "listenbrainz",
+            "related artists",
+            "recommendations",
+            "discover",
+        ],
         "hotkey.find_similar" => &["related", "more like this", "recommendations", "discover"],
         "hotkey.find_top_songs" => &["best of", "popular", "greatest hits", "most played"],
         "hotkey.move_track_up" | "hotkey.move_track_down" => &["reorder", "rearrange", "shift"],

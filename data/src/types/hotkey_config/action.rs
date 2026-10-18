@@ -485,6 +485,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.find_top_songs",
             default: KeyCombo::shift(KeyCode::Char('t')),
         },
+        SimilarArtists {
+            display: "Similar Artists",
+            description: "Show similar artists for the focused item's artist",
+            category: "Item Actions",
+            toml_key: "similar_artists",
+            settings_key: "hotkey.similar_artists",
+            default: KeyCombo::shift(KeyCode::Char('r')),
+        },
         MoveTrackUp {
             display: "Move Track Up",
             description: "Move centered track up in queue",

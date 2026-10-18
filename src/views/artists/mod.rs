@@ -198,6 +198,8 @@ pub enum ArtistsAction {
     ShowSongInFolder(String),  // song path - open containing folder directly
     FindSimilar(String, String), // (entity_id, seed_name) - open similar tab
     TopSongs(String, Option<String>), // (artist_name, artist_id) - open similar tab for top songs
+    /// The row's artist, for the Similar Artists modal (a row menu entry).
+    SimilarArtists(crate::views::ArtistRef),
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     ColumnVisibilityChanged(ArtistsColumn, bool),
@@ -215,7 +217,8 @@ pub enum ArtistsAction {
 
 super::impl_has_common_action!(ArtistsAction {
     NavigateAndExpandAlbum,
-    NavigateAndExpandArtist
+    NavigateAndExpandArtist,
+    SimilarArtists
 });
 
 impl Default for ArtistsPage {

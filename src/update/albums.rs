@@ -960,6 +960,7 @@ impl Nokkvi {
             | AlbumsAction::CenterOnPlaying
             | AlbumsAction::NavigateAndFilter(..)
             | AlbumsAction::NavigateAndExpandArtist(_)
+            | AlbumsAction::SimilarArtists(_)
             | AlbumsAction::NavigateAndExpandGenre(_)
             | AlbumsAction::None => {}
         }
