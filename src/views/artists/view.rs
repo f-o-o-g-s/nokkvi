@@ -710,48 +710,88 @@ pub(crate) fn bio_link_label(url: &str) -> String {
         .unwrap_or_else(|| "Read more".to_string())
 }
 
-/// The pill's "Similar artists" row: ListenBrainz's picks for the centred
-/// artist, a chip each. A chip for an artist the library has reads in the
-/// accent and finds that artist; one for an artist it lacks reads dimmer,
-/// carries a globe, and opens the artist's ListenBrainz page.
+/// How strongly the accent tints the hairlines either side of the "SIMILAR
+/// ARTISTS" header. The theme's `border()` is a dark groove on the artwork
+/// panel and all but vanishes there; the accent at this strength reads, and
+/// follows the cover accent like the tags under it.
+const SIMILAR_RULE_ALPHA: f32 = 0.45;
+
+/// The pill's similar-artists section: a "SIMILAR ARTISTS" header between two
+/// accent hairlines over ListenBrainz's picks, a tag each. An artist the
+/// library has is a filled accent tag and finds that artist; one it lacks is
+/// an outlined tag with a globe and opens the artist's ListenBrainz page.
 pub(crate) fn similar_artists_block<'a>(recs: &'a [ArtistRec]) -> Element<'a, ArtistsMessage> {
-    use iced::widget::{column, text};
+    use iced::widget::{Space, column, text};
 
     use crate::theme;
 
-    let mut chips = Row::new().spacing(4).align_y(iced::Alignment::Center);
+    let rule = || {
+        let mut color = theme::accent_fill();
+        color.a = SIMILAR_RULE_ALPHA;
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(move |_| container::Style {
+                background: Some(color.into()),
+                ..Default::default()
+            })
+            .boxed()
+    };
+    let header = Row::new()
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .push(rule())
+        .push(
+            text("SIMILAR ARTISTS")
+                .size(10.5)
+                .font(theme::weighted_ui_font(iced::font::Weight::Bold))
+                .color(theme::fg3())
+                .boxed(),
+        )
+        .push(rule());
+    let mut tags = Row::new().spacing(6).align_y(Alignment::Center);
     for rec in recs {
-        chips = chips.push(similar_artist_chip(rec));
+        tags = tags.push(similar_artist_chip(rec));
     }
     column![
-        text("Similar artists")
-            .size(11)
-            .color(theme::fg3())
-            .font(theme::ui_font()),
-        chips
-            .wrap()
-            .vertical_spacing(2)
-            .align_x(iced::alignment::Horizontal::Center),
+        Space::new().height(Length::Fixed(6.0)).boxed(),
+        header.boxed(),
+        tags.wrap()
+            .vertical_spacing(6)
+            .align_x(iced::alignment::Horizontal::Center)
+            .boxed(),
     ]
-    .spacing(2)
-    .align_x(iced::Alignment::Center)
+    .spacing(7)
+    .align_x(Alignment::Center)
     .boxed()
 }
 
 fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
-    use iced::widget::{button, row, text};
+    use iced::widget::{mouse_area, row, text};
 
-    use crate::theme;
+    use crate::{theme, widgets::hover_overlay::HoverOverlay};
 
     let in_library = rec.library_id().is_some();
-    let ink = if in_library {
-        theme::accent_bright()
+    // A library artist is a filled accent tag, with the ink every filled
+    // accent surface takes; the rest are outlined in the dim ink, with a
+    // globe for "opens on ListenBrainz".
+    let (fill, edge, ink) = if in_library {
+        (
+            Some(theme::accent_fill()),
+            theme::accent_fill(),
+            theme::on_accent_fill(),
+        )
     } else {
-        theme::fg3()
+        (None, theme::fg4(), theme::fg3())
     };
-    let mut label = row![text(rec.name.as_str()).size(12).font(theme::ui_font())]
-        .spacing(3)
-        .align_y(iced::Alignment::Center);
+    let mut label = row![
+        text(rec.name.as_str())
+            .size(12)
+            .font(theme::ui_font())
+            .color(ink)
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center);
     if !in_library {
         label = label.push(
             crate::embedded_svg::svg_widget("assets/icons/globe.svg")
@@ -761,34 +801,26 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
                 .boxed(),
         );
     }
-    let chip = button(label)
-        .on_press(similar_artist_message(rec))
-        .padding(iced::Padding {
-            top: 1.0,
-            bottom: 1.0,
-            left: 5.0,
-            right: 5.0,
-        })
-        .style(move |_theme, status| {
-            let mut color = ink;
-            if matches!(
-                status,
-                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
-            ) {
-                color.a = 0.75;
-            }
-            iced::widget::button::Style {
-                background: None,
-                border: iced::Border {
-                    width: 0.0,
-                    ..Default::default()
-                },
-                text_color: color,
-                ..Default::default()
-            }
+    let tag = container(label)
+        .padding([2, 7])
+        .style(move |_| container::Style {
+            background: fill.map(Into::into),
+            border: iced::Border {
+                color: edge,
+                width: 1.0,
+                radius: theme::ui_radius_sm(),
+            },
+            ..Default::default()
         });
+    let chip = mouse_area(
+        HoverOverlay::new(tag)
+            .on_accent_surface(in_library)
+            .border_radius(theme::ui_radius_sm()),
+    )
+    .on_press(similar_artist_message(rec))
+    .interaction(iced::mouse::Interaction::Pointer);
     // Hover names who they are (MusicBrainz's note) and where they stand.
-    let note = iced::widget::container(
+    let note = container(
         text(crate::widgets::similar_artists_modal::similar_artist_note(
             rec,
         ))
