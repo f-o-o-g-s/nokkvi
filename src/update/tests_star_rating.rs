@@ -288,7 +288,7 @@ fn background_artists_reload_anchor_not_found_keeps_offset_in_bounds() {
 }
 
 #[test]
-fn background_artists_reload_clears_selected_offset() {
+fn background_artists_reload_keeps_the_highlight_on_its_artist() {
     let mut app = test_app();
 
     app.library.artists.set_from_vec(vec![
@@ -307,9 +307,16 @@ fn background_artists_reload_clears_selected_offset() {
     ];
     let _ = app.handle_artists_loaded(Ok(new_page), 3, true, Some("ar2".to_string()), None);
 
+    // The highlight follows its row to the new index: the old index now
+    // names another artist, and dropping the highlight instead moved the
+    // panel off a row the user had just jumped to.
+    let highlighted = app.artists_page.common.slot_list.selected_offset;
+    assert_eq!(highlighted, Some(2));
     assert_eq!(
-        app.artists_page.common.slot_list.selected_offset, None,
-        "background reload must clear selected_offset — stale index maps to wrong artist after re-ordering"
+        highlighted
+            .and_then(|i| app.library.artists.get(i))
+            .map(|x| x.id.as_str()),
+        Some("ar2")
     );
 }
 
@@ -377,7 +384,7 @@ fn background_songs_reload_anchor_not_found_keeps_offset_in_bounds() {
 }
 
 #[test]
-fn background_songs_reload_clears_selected_offset() {
+fn background_songs_reload_keeps_the_highlight_on_its_song() {
     let mut app = test_app();
 
     app.library.songs.set_from_vec(vec![
@@ -396,9 +403,16 @@ fn background_songs_reload_clears_selected_offset() {
     ];
     let _ = app.handle_songs_loaded(Ok(new_page), 3, true, Some("s2".to_string()), None);
 
+    // The highlight follows its row to the new index: the old index now
+    // names another song, and dropping the highlight instead moved the
+    // panel off a row the user had just jumped to.
+    let highlighted = app.songs_page.common.slot_list.selected_offset;
+    assert_eq!(highlighted, Some(2));
     assert_eq!(
-        app.songs_page.common.slot_list.selected_offset, None,
-        "background reload must clear selected_offset — stale index maps to wrong song after re-ordering"
+        highlighted
+            .and_then(|i| app.library.songs.get(i))
+            .map(|x| x.id.as_str()),
+        Some("s2")
     );
 }
 
@@ -435,7 +449,7 @@ fn song_rating_update_does_not_move_songs_viewport() {
 // ══════════════════════════════════════════════════════════════════════
 
 #[test]
-fn background_albums_reload_clears_selected_offset() {
+fn background_albums_reload_keeps_the_highlight_on_its_album() {
     let mut app = test_app();
 
     app.library.albums.set_from_vec(vec![
@@ -454,9 +468,16 @@ fn background_albums_reload_clears_selected_offset() {
     ];
     let _ = app.handle_albums_loaded(Ok(new_page), 3, true, Some("a2".to_string()), None);
 
+    // The highlight follows its row to the new index: the old index now
+    // names another album, and dropping the highlight instead moved the
+    // panel off a row the user had just jumped to.
+    let highlighted = app.albums_page.common.slot_list.selected_offset;
+    assert_eq!(highlighted, Some(2));
     assert_eq!(
-        app.albums_page.common.slot_list.selected_offset, None,
-        "background reload must clear selected_offset — stale index maps to wrong album after re-ordering"
+        highlighted
+            .and_then(|i| app.library.albums.get(i))
+            .map(|x| x.id.as_str()),
+        Some("a2")
     );
 }
 

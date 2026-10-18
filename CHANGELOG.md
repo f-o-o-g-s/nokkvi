@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - `nokkvi selection` and the `nokkvi add-to-queue` reply name the highlighted row, the one Shift+A adds.
 - Play with nothing loaded starts the highlighted queue row, as Enter does.
 - The Queue, Songs and Similar artwork panels show the highlighted row's cover, like the other views.
+- After a jump to an artist, the highlight and artwork panel stay on that artist instead of sliding to the middle row.
 
 ### Removed
 

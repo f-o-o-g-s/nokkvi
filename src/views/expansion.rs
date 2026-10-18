@@ -142,6 +142,28 @@ impl<C: Clone> ExpansionState<C> {
         flat_index.saturating_sub(self.count_children_before(flat_index, parents, id_fn))
     }
 
+    /// The flattened index of the parent at `index` in `parents`: past the
+    /// expanded parent, its children sit in between. The inverse of
+    /// [`Self::parent_index_at`] for parent rows.
+    pub fn flat_index_of_parent<P>(
+        &self,
+        index: usize,
+        parents: &[P],
+        id_fn: impl Fn(&P) -> &str,
+    ) -> usize {
+        let expanded_above = self.expanded_id.as_deref().is_some_and(|expanded| {
+            parents
+                .iter()
+                .position(|p| id_fn(p) == expanded)
+                .is_some_and(|at| at < index)
+        });
+        if expanded_above {
+            index + self.children.len()
+        } else {
+            index
+        }
+    }
+
     /// The index in `parents` of the row at flattened `flat_index`, or of its
     /// parent when the row is an expanded child. Views that load artwork by
     /// parent index resolve the centered row through this.

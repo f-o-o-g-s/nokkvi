@@ -104,6 +104,16 @@ pub(crate) fn reload_rows(slot_list: &SlotListView, page_size: usize) -> Option<
 ///
 /// All methods are associated functions (no `&self`) so the generic body can
 /// call them sequentially without double-borrowing `&mut Nokkvi`.
+/// A highlighted row by identity rather than index ([`LoaderTarget::focused_row`]):
+/// the id of its parent row in the library buffer, how many rows below that
+/// parent it sits (an expanded child), and whether it is a find-and-expand pin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FocusedRow {
+    id: String,
+    below: usize,
+    pinned: bool,
+}
+
 pub(crate) trait LoaderTarget {
     type Item: Send + 'static;
 
@@ -167,8 +177,77 @@ pub(crate) trait LoaderTarget {
             // would silently target the wrong songs. Matches the foreground
             // branch and the queue precedent (gotchas/queue.md "Stale
             // multi-selection across refreshes"). The anchor-id VIEWPORT
-            // relocation above is preserved.
+            // relocation above is preserved. The highlighted row is then put
+            // back by id (`refocus`, from `handle_loaded_with`), so a reload
+            // the server's artist refresh triggers no longer drops the row a
+            // jump just landed on.
             sl.clear_selection_for_refresh();
+        }
+    }
+
+    // ── Defaulted: the highlighted row across a background reload ─────────
+    /// The row flattened slot-list index `flat` shows, as (index in
+    /// [`Self::library`], rows below that parent): 0 for the parent row, n for
+    /// its n-th expanded child. `None` past the end. Default: a view without
+    /// inline expansion, where the two indices are the same.
+    fn flat_to_parent(app: &Nokkvi, flat: usize) -> Option<(usize, usize)> {
+        (flat < Self::library(app).len()).then_some((flat, 0))
+    }
+
+    /// The flattened index of the row at `parent` in [`Self::library`].
+    /// Default: the same index (no inline expansion).
+    fn parent_to_flat(_app: &Nokkvi, parent: usize) -> usize {
+        parent
+    }
+
+    /// The flattened row count. Default: [`Self::library`]'s length.
+    fn flattened_len(app: &Nokkvi) -> usize {
+        Self::library(app).len()
+    }
+
+    /// The highlighted row (the focus marker a click or a find-and-expand pin
+    /// leaves), in terms a reload can find again: its parent row's id and its
+    /// place under that parent. Read before a background reload replaces the
+    /// rows, whose indices it is relative to.
+    fn focused_row(app: &Nokkvi) -> Option<FocusedRow> {
+        let list = &Self::page_common(app).slot_list;
+        let flat = list.selected_offset?;
+        let (parent, below) = Self::flat_to_parent(app, flat)?;
+        let id = Self::item_id(Self::library(app).get(parent)?).to_owned();
+        Some(FocusedRow {
+            id,
+            below,
+            pinned: list.selected_offset_pinned,
+        })
+    }
+
+    /// Put the highlight back on `row` after a background reload. Nothing is
+    /// restored when the parent is gone, when an expanded child no longer sits
+    /// at the same place under it, or when the row is no longer on screen: an
+    /// off-screen highlight would steer Enter and the keys without the user
+    /// seeing it.
+    fn refocus(app: &mut Nokkvi, row: &FocusedRow) {
+        let Some(parent) = Self::library(app)
+            .iter()
+            .position(|item| Self::item_id(item) == row.id)
+        else {
+            return;
+        };
+        let flat = Self::parent_to_flat(app, parent) + row.below;
+        if Self::flat_to_parent(app, flat) != Some((parent, row.below)) {
+            return;
+        }
+        let total = Self::flattened_len(app);
+        let list = Self::slot_list_mut(app);
+        let on_screen =
+            (0..list.slot_count).any(|slot| list.slot_to_item_index(slot, total) == Some(flat));
+        if !on_screen {
+            return;
+        }
+        if row.pinned {
+            list.pin_selected(flat, total);
+        } else {
+            list.set_selected(flat, total);
         }
     }
 
@@ -224,6 +303,24 @@ impl LoaderTarget for AlbumsTarget {
 
     fn item_id(item: &Self::Item) -> &str {
         &item.id
+    }
+
+    fn flat_to_parent(app: &Nokkvi, flat: usize) -> Option<(usize, usize)> {
+        let expansion = &app.albums_page.expansion;
+        let parents = &app.library.albums;
+        let parent = expansion.owning_parent_index(flat, parents, |x| &x.id)?;
+        let below = flat.checked_sub(expansion.flat_index_of_parent(parent, parents, |x| &x.id))?;
+        Some((parent, below))
+    }
+
+    fn parent_to_flat(app: &Nokkvi, parent: usize) -> usize {
+        app.albums_page
+            .expansion
+            .flat_index_of_parent(parent, &app.library.albums, |x| &x.id)
+    }
+
+    fn flattened_len(app: &Nokkvi) -> usize {
+        app.albums_page.expansion.flattened_len(&app.library.albums)
     }
 
     fn entity_label() -> &'static str {
@@ -294,6 +391,26 @@ impl LoaderTarget for ArtistsTarget {
 
     fn item_id(item: &Self::Item) -> &str {
         &item.id
+    }
+
+    fn flat_to_parent(app: &Nokkvi, flat: usize) -> Option<(usize, usize)> {
+        let expansion = &app.artists_page.expansion;
+        let parents = &app.library.artists;
+        let parent = expansion.owning_parent_index(flat, parents, |x| &x.id)?;
+        let below = flat.checked_sub(expansion.flat_index_of_parent(parent, parents, |x| &x.id))?;
+        Some((parent, below))
+    }
+
+    fn parent_to_flat(app: &Nokkvi, parent: usize) -> usize {
+        app.artists_page
+            .expansion
+            .flat_index_of_parent(parent, &app.library.artists, |x| &x.id)
+    }
+
+    fn flattened_len(app: &Nokkvi) -> usize {
+        app.artists_page
+            .expansion
+            .flattened_len(&app.library.artists)
     }
 
     fn entity_label() -> &'static str {
@@ -748,8 +865,18 @@ impl Nokkvi {
                     T::entity_label(),
                     total_count
                 );
+                // The highlighted row's identity, read while its indices
+                // still name the old rows (background reloads only).
+                let focused = if background {
+                    T::focused_row(self)
+                } else {
+                    None
+                };
                 T::library_mut(self).set_first_page(items, total_count);
                 T::apply_viewport_on_load(self, background, anchor_id.as_deref());
+                if let Some(row) = &focused {
+                    T::refocus(self, row);
+                }
                 T::post_load_ok_hook(self);
 
                 let mut tasks: Vec<Task<Message>> = T::prefetch_artwork_tasks(self);

@@ -239,3 +239,115 @@ fn a_rejected_session_routes_to_login() {
         "got: {msg:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The highlight across a background reload
+// ---------------------------------------------------------------------------
+
+/// The reload the server's artist refresh triggers, with the same rows: the
+/// anchor is the row at the viewport, as `background_reload` sends it.
+fn refresh_reload(app: &mut Nokkvi) {
+    let artists: Vec<_> = app.library.artists.iter().cloned().collect();
+    let total = artists.len();
+    let anchor = app
+        .library
+        .artists
+        .get(app.artists_page.common.slot_list.viewport_offset)
+        .map(|a| a.id.clone());
+    let _ = app.handle_artists_loaded(Ok(artists), total, true, anchor, None);
+}
+
+/// A jump to an artist (a link or a similar-artist chip) pins it to the top
+/// slot, expanded; its first info fetch makes the server announce an artist
+/// change, and the reload that follows dropped the pin, so the panel moved to
+/// the row in the middle (2026-10-17: Vaperror to vecher 1998, Mare Cognitum
+/// to Markus Guentner).
+#[test]
+fn a_jumped_to_artist_keeps_the_highlight_through_the_refresh_reload() {
+    let mut app = app_with_artists(20);
+    expand_artists_with(
+        &mut app,
+        "a5",
+        vec![
+            make_album("al1", "One", "Artist 5"),
+            make_album("al2", "Two", "Artist 5"),
+        ],
+    );
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    let list = &mut app.artists_page.common.slot_list;
+    list.set_offset(9, total);
+    list.pin_selected(5, total);
+    assert_eq!(app.centred_artist_id().as_deref(), Some("a5"));
+
+    refresh_reload(&mut app);
+    let list = &app.artists_page.common.slot_list;
+    assert_eq!(list.selected_offset, Some(5), "the pin stays on the artist");
+    assert!(list.selected_offset_pinned, "still a pin");
+    assert_eq!(
+        app.centred_artist_id().as_deref(),
+        Some("a5"),
+        "the panel stays"
+    );
+}
+
+/// A highlighted album row under the expanded artist stays highlighted too.
+#[test]
+fn a_highlighted_album_under_the_expanded_artist_survives_the_reload() {
+    let mut app = app_with_artists(20);
+    expand_artists_with(
+        &mut app,
+        "a5",
+        vec![
+            make_album("al1", "One", "Artist 5"),
+            make_album("al2", "Two", "Artist 5"),
+        ],
+    );
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    let list = &mut app.artists_page.common.slot_list;
+    list.set_offset(7, total);
+    list.set_selected(7, total); // "Two", the second album under a5
+
+    refresh_reload(&mut app);
+    assert_eq!(app.artists_page.common.slot_list.selected_offset, Some(7));
+}
+
+/// A highlighted row the reload no longer holds is dropped, as before.
+#[test]
+fn a_highlighted_artist_gone_from_the_reload_is_dropped() {
+    let mut app = app_with_artists(20);
+    let list = &mut app.artists_page.common.slot_list;
+    list.set_offset(6, 20);
+    list.set_selected(5, 20);
+    let without_a5: Vec<_> = app
+        .library
+        .artists
+        .iter()
+        .filter(|a| a.id != "a5")
+        .cloned()
+        .collect();
+    let _ = app.handle_artists_loaded(Ok(without_a5), 19, true, Some("a6".into()), None);
+    assert_eq!(app.artists_page.common.slot_list.selected_offset, None);
+}
+
+/// A highlighted row the reload pushes off screen (rows arrived between it
+/// and the viewport's anchor) is dropped: an unseen highlight would steer
+/// Enter and the keys.
+#[test]
+fn a_highlight_pushed_off_screen_by_the_reload_is_dropped() {
+    let mut app = app_with_artists(30);
+    let list = &mut app.artists_page.common.slot_list;
+    list.set_offset(15, 30);
+    list.set_selected(17, 30);
+    let mut rows: Vec<_> = app.library.artists.iter().cloned().collect();
+    let arrivals = (0..10).map(|i| make_artist(&format!("n{i}"), &format!("New {i}")));
+    rows.splice(16..16, arrivals);
+    let _ = app.handle_artists_loaded(Ok(rows), 40, true, Some("a15".into()), None);
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, 15);
+    assert_eq!(app.artists_page.common.slot_list.selected_offset, None);
+}
