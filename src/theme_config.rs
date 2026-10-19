@@ -122,7 +122,8 @@ macro_rules! resolved_palette {
 /// colors (`theme/dynamic_accent.rs`). Without it each role IS a theme color,
 /// derived on read by its accessor: `accent_fill` = `accent_bright`,
 /// `accent_fill_calm` = `accent`, `on_accent_fill` = `bg0_hard`, `rating` =
-/// `star_bright`, `love` = `danger_bright`.
+/// `star_bright`, `love` = `danger_bright`, `lyrics` = `accent_bright` kept
+/// legible on `bg0_hard` (`theme::resolve_lyrics_accent`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct AccentRoles {
     /// Loud accent for FILLED surfaces: active tabs, mode toggles, pills, the
@@ -137,6 +138,8 @@ pub(crate) struct AccentRoles {
     pub rating: Color,
     /// Filled love hearts.
     pub love: Color,
+    /// The active lyric line and its sung words.
+    pub lyrics: Color,
 }
 
 // `accent.now_playing` / `accent.selected` are not resolved into the theme:

@@ -268,6 +268,22 @@ fn lyric_halo_ink_contrasts_bg0_hard_on_every_theme() {
     }
 }
 
+/// Every shipped theme marks its active lyric line by hue (its accent is no
+/// lighter than the dimmed lines around it). A cover too grey to do that
+/// hands the line back to this accent, so every theme must clear the floor.
+#[test]
+fn every_theme_marks_the_lyric_line_by_hue() {
+    for (name, mode, t) in all_builtin_palettes() {
+        let ink = resolve_lyrics_accent(t.accent_bright, t.bg0_hard);
+        let separation = hue_separation(ink, t.fg0);
+        assert!(
+            separation >= LYRICS_HUE_SEPARATION,
+            "{name}/{mode} lyric accent sits only {separation:.3} from fg0 in hue \
+             (floor {LYRICS_HUE_SEPARATION})"
+        );
+    }
+}
+
 /// `legible_against` is bidirectional: too-dark text on a dark surface is
 /// LIFTED (the old `darken_until_legible` could not), and too-light text on
 /// a light surface is darkened — both reaching WCAG AA.
@@ -791,6 +807,47 @@ fn dynamic_accent_leaves_the_base_dark_palette_alone() {
         base
     );
     set_dynamic_accent(None);
+}
+
+/// A black-and-white cover greys the accent, but the active lyric line keeps
+/// the theme's own (grey would read as a dimmed line), in both modes; a
+/// colored cover takes the line with it.
+#[test]
+fn a_grey_cover_leaves_the_lyric_line_on_the_theme_accent() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+    set_dynamic_accent(None);
+    let grey = AccentSeed {
+        lightness: 0.6,
+        chroma: 0.0,
+        hue: 0.0,
+    };
+
+    for light in [false, true] {
+        set_light_mode(light);
+        let own = lyrics_accent();
+
+        set_dynamic_accent(Some(grey));
+        assert!(
+            accent_bright().into_oklch().c < 0.01,
+            "light={light}: fixture: the accent goes grey"
+        );
+        assert_eq!(
+            lyrics_accent(),
+            own,
+            "light={light}: the line keeps the theme's"
+        );
+
+        set_dynamic_accent(Some(cover_seed()));
+        assert_eq!(
+            lyrics_accent(),
+            resolve_lyrics_accent(accent_bright(), bg0_hard()),
+            "light={light}: a colored cover takes the line"
+        );
+        set_dynamic_accent(None);
+    }
+
+    UI_MODE.light_mode.store(saved, Ordering::Relaxed);
 }
 
 /// A change advances the theme generation (theme-derived caches rebuild);

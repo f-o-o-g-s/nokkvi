@@ -10,7 +10,10 @@
 
 use iced::{Color, color::Oklch};
 
-use super::{LEGIBLE_TEXT_CONTRAST, SELECTION_RING_MIN_CONTRAST, contrast_ratio, legible_text_on};
+use super::{
+    LEGIBLE_TEXT_CONTRAST, SELECTION_RING_MIN_CONTRAST, contrast_ratio, legible_text_on,
+    resolve_cover_lyrics_accent,
+};
 use crate::theme_config::{AccentRoles, ResolvedDualTheme, ResolvedTheme};
 
 // ============================================================================
@@ -299,10 +302,17 @@ pub(super) fn fit_accent(seed: AccentSeed, palette: &ResolvedTheme) -> FittedAcc
 /// backgrounds, so a light/dark toggle needs no refit. Stars and hearts take
 /// the text shade, so they match the accent on the chrome rows instead of
 /// clashing with it (on the loud-fill rows they take the row's ink; see
-/// `slot_list`).
+/// `slot_list`). The active lyric line takes it only when it has a hue to
+/// mark the line with (see `resolve_cover_lyrics_accent`).
 pub(super) fn apply(seed: AccentSeed, theme: &mut ResolvedDualTheme) {
     for palette in [&mut theme.dark, &mut theme.light] {
         let fitted = fit_accent(seed, palette);
+        let lyrics = resolve_cover_lyrics_accent(
+            fitted.accent_bright,
+            palette.accent_bright,
+            palette.fg0,
+            palette.bg0_hard,
+        );
         palette.accent = fitted.accent;
         palette.accent_bright = fitted.accent_bright;
         palette.accent_border_light = fitted.accent_border_light;
@@ -312,6 +322,7 @@ pub(super) fn apply(seed: AccentSeed, theme: &mut ResolvedDualTheme) {
             on_accent_fill: fitted.on_accent_fill,
             rating: fitted.accent_bright,
             love: fitted.accent_bright,
+            lyrics,
         });
     }
 }
@@ -655,7 +666,10 @@ pub(crate) fn palette_from_encoded(bytes: &[u8]) -> Option<CoverPalette> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{relative_luminance, resolve_highlight_fills, tests::all_builtin_palettes};
+    use crate::theme::{
+        LYRICS_HUE_SEPARATION, hue_separation, relative_luminance, resolve_highlight_fills,
+        resolve_lyrics_accent, tests::all_builtin_palettes,
+    };
 
     fn rgb(r: u8, g: u8, b: u8) -> Color {
         Color::from_rgb8(r, g, b)
@@ -1031,6 +1045,11 @@ mod tests {
             let roles = after.roles.expect("the overlay sets the roles");
             assert_eq!(roles.rating, after.accent_bright, "stars follow the accent");
             assert_eq!(roles.love, after.accent_bright, "hearts follow the accent");
+            assert_eq!(
+                roles.lyrics,
+                resolve_lyrics_accent(after.accent_bright, after.bg0_hard),
+                "the lyric line follows a colored cover"
+            );
             assert_eq!(before.bg0_hard, after.bg0_hard);
             assert_eq!(before.fg0, after.fg0);
             assert_eq!(before.danger, after.danger);
@@ -1038,6 +1057,66 @@ mod tests {
             assert_eq!(before.warning, after.warning);
             assert_eq!(before.star_bright, after.star_bright);
             assert_eq!(before.border, after.border);
+        }
+    }
+
+    /// The active lyric line is marked by hue on every theme, so a cover that
+    /// has none to give (black, white, grey, or a tint too faint to read)
+    /// hands the line back to the theme's accent, in both modes, while the
+    /// rest of the accent stays the cover's. Still legible on the glyph halo.
+    #[test]
+    fn the_lyric_line_keeps_a_hue_on_every_cover() {
+        let mut seeds: Vec<AccentSeed> = [0.0, 0.2, 0.4, 0.6, 0.8, 0.95, 1.0]
+            .into_iter()
+            .map(|lightness| AccentSeed {
+                lightness,
+                chroma: 0.0,
+                hue: 0.0,
+            })
+            .collect();
+        for hue in [0.5_f32, 1.2, 2.5, 3.5, 4.4, 5.5] {
+            for lightness in [0.3, 0.6, 0.9] {
+                for chroma in [0.01, 0.02, 0.04, 0.15] {
+                    seeds.push(AccentSeed {
+                        lightness,
+                        chroma,
+                        hue,
+                    });
+                }
+            }
+        }
+        for (name, mode, palette) in all_builtin_palettes() {
+            for seed in &seeds {
+                let mut themed = ResolvedDualTheme {
+                    dark: palette.clone(),
+                    light: palette.clone(),
+                };
+                apply(*seed, &mut themed);
+                let after = &themed.dark;
+                let lyrics = after.roles.expect("the overlay sets the roles").lyrics;
+                let separation = hue_separation(lyrics, after.fg0);
+                assert!(
+                    separation >= LYRICS_HUE_SEPARATION,
+                    "{name}/{mode} {seed:?}: lyric line only {separation:.3} from fg0 in hue"
+                );
+                assert!(
+                    contrast_ratio(lyrics, after.bg0_hard) >= SELECTION_RING_MIN_CONTRAST - 1e-3,
+                    "{name}/{mode} {seed:?}: lyric line under the halo floor"
+                );
+                let cover = resolve_lyrics_accent(after.accent_bright, after.bg0_hard);
+                if hue_separation(cover, after.fg0) >= LYRICS_HUE_SEPARATION {
+                    assert_eq!(
+                        lyrics, cover,
+                        "{name}/{mode} {seed:?}: a hued cover keeps it"
+                    );
+                } else {
+                    assert_eq!(
+                        lyrics,
+                        resolve_lyrics_accent(palette.accent_bright, palette.bg0_hard),
+                        "{name}/{mode} {seed:?}: a hueless cover hands it to the theme"
+                    );
+                }
+            }
         }
     }
 

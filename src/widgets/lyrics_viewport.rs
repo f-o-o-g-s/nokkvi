@@ -1036,7 +1036,8 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         };
 
         // Contrast-assured against the glyph halo's `bg0_hard` surface — the
-        // raw `accent_bright` is under-floor on some light themes.
+        // raw `accent_bright` is under-floor on some light themes — and apart
+        // from `base` by hue: a grey cover accent leaves the theme's here.
         let accent = theme::lyrics_accent();
         let base = theme::fg0();
         // Cross-blend: while the previous sheet dissolves out, the incoming

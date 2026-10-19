@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- With Accent From Album Art on, the current lyric line now stands out on black, white and grey covers.
+
 ### Removed
 
 ## v0.27.0 — 2026-10-17

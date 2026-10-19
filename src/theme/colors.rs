@@ -472,11 +472,58 @@ pub(super) fn resolve_lyrics_accent(accent_bright: Color, bg0_hard: Color) -> Co
     legible_against(accent_bright, bg0_hard, SELECTION_RING_MIN_CONTRAST)
 }
 
-/// Live-theme [`resolve_lyrics_accent`]: the contrast-assured active-line ink
-/// for the lyric viewport.
+/// The active lyric line's ink: [`resolve_lyrics_accent`] of the theme's
+/// accent, or the cover's while the accent follows it.
 #[inline]
 pub(crate) fn lyrics_accent() -> Color {
-    resolve_lyrics_accent(accent_bright(), bg0_hard())
+    read_color(|t| {
+        t.roles.map_or_else(
+            || resolve_lyrics_accent(t.accent_bright, t.bg0_hard),
+            |r| r.lyrics,
+        )
+    })
+}
+
+/// Least hue separation ([`hue_separation`]) the active lyric line keeps from
+/// the lyric ink, `fg0`. Every shipped theme marks that line by hue, not by
+/// lightness: its accent sits at or below the lightness of the dimmed lines
+/// around it. The weakest of the 46 variants is Svalbard's muted teal (0.033
+/// light, 0.035 dark). The accent from a black, white or grey cover separates
+/// by under 0.01, and its active line reads as a dimmed one.
+pub(super) const LYRICS_HUE_SEPARATION: f32 = 0.03;
+
+/// The active lyric line's ink while the accent follows the cover: the
+/// cover's own `cover_bright` when it keeps [`LYRICS_HUE_SEPARATION`] from
+/// `fg0`, else the theme's own `theme_bright`, so a cover with no hue to give
+/// (black, white, grey, a faint tint) leaves the line marked. A custom theme
+/// whose accent separates even less keeps the cover's. Both go through
+/// [`resolve_lyrics_accent`] first.
+pub(super) fn resolve_cover_lyrics_accent(
+    cover_bright: Color,
+    theme_bright: Color,
+    fg0: Color,
+    bg0_hard: Color,
+) -> Color {
+    let cover = resolve_lyrics_accent(cover_bright, bg0_hard);
+    let cover_separation = hue_separation(cover, fg0);
+    if cover_separation >= LYRICS_HUE_SEPARATION {
+        return cover;
+    }
+    let theme = resolve_lyrics_accent(theme_bright, bg0_hard);
+    if hue_separation(theme, fg0) > cover_separation {
+        theme
+    } else {
+        cover
+    }
+}
+
+/// How far apart two colors' hue and chroma are, lightness aside: their
+/// distance in the Oklab a/b plane.
+pub(super) fn hue_separation(a: Color, b: Color) -> f32 {
+    let (a, b) = (a.into_oklch(), b.into_oklch());
+    let (a_sin, a_cos) = a.h.sin_cos();
+    let (b_sin, b_cos) = b.h.sin_cos();
+    (a.c * a_cos - b.c * b_cos).hypot(a.c * a_sin - b.c * b_sin)
 }
 
 /// Resolve the `(now_playing, selected)` fill pair from the accent tokens,
