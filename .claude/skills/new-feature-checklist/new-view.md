@@ -26,7 +26,7 @@ Steps to add a new slot-list-based view, in order. Supporting file of the `new-f
    - Register the message type with `impl_view_chrome!({Name}Message { ... })` in `src/update/chrome.rs` and start `handle_{name}` with the mandatory prologue `dispatch_view_chrome(self, &msg, View::{Name})` (see `src/update/albums.rs::handle_albums`). This prologue carries the shared SetOpenMenu/roulette/SFX/artwork-drag handling — skipping it compiles fine but silently drops that chrome for the new view
    - In `handle_{name}`, map the `{Name}Action` returned by the page's `update()` to side effects
 
-6. If the view has a paginated/async loader, add a typed loader inbox (Phase 2 pattern — see Albums/Songs/Artists/Genres/Playlists/Queue):
+6. If the view has a paginated/async loader, add a typed loader inbox (see Albums/Songs/Artists/Genres/Playlists/Queue):
    - Define `{Name}LoaderMessage` in `src/app_message.rs` with `Loaded { ... }` / `PageLoaded(result, total_count)` variants for each loader result shape
    - Add `Message::{Name}Loader({Name}LoaderMessage)` to the root `Message`
    - Route in `src/update/mod.rs`: `Message::{Name}Loader(msg) => self.dispatch_{name}_loader(msg)`
@@ -45,7 +45,7 @@ Steps to add a new slot-list-based view, in order. Supporting file of the `new-f
 
 11. Context menu: wrap rows in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry`. Resolve batch targets via `evaluate_context_menu()` and `get_batch_target_indices()` / `get_queue_target_indices()`. Build payloads via `expansion::build_batch_payload()`.
 
-12. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it. Every new `ViewColumns` field also gets declared in the `view_columns:` fields list of the consolidated `define_settings!` invocation in `data/src/services/settings_tables/columns.rs` — its exhaustive destructure turns an omission into a compile error (settings system: `.claude/rules/settings-view.md`; the per-view `define_view_columns!` dropdown side: `.claude/rules/ui-views.md`).
+12. Multi-selection: route clicks through `handle_slot_click()`; clear the selection before dispatching a batch (`clear_selection_indices_only()` ahead of `play_batch_task`, as `AlbumsAction::PlayBatch` in `src/update/albums.rs` does; `get_batch_target_indices()` clears as it resolves a context-menu batch). Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it. Every new `ViewColumns` field also gets declared in the `view_columns:` fields list of the consolidated `define_settings!` invocation in `data/src/services/settings_tables/columns.rs` — its exhaustive destructure turns an omission into a compile error (settings system: `.claude/rules/settings-view.md`; the per-view `define_view_columns!` dropdown side: `.claude/rules/ui-views.md`).
 
 13. Toasts: `toast_success()` / `toast_error()` / `toast_warn()` / `toast_info()`.
 

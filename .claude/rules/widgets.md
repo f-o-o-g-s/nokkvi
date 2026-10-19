@@ -155,4 +155,4 @@ Every icon follows the set through `get_svg`; the boat's drop-anchor sprite is a
 
 ## HoverOverlay + native buttons
 
-`HoverOverlay::new(button)` works in some places — e.g. `player_control_button` (`player_bar.rs`) actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern still applies for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.
+`HoverOverlay::new(button)` works where a native `button` is needed: `player_control_button` (`player_bar.rs`) wraps one, and the hover/press visual fires because `HoverOverlay::update` calls `shell.request_redraw()`. Clickable cells (slot rows, header icons, modal-icon buttons) keep the canonical `mouse_area(HoverOverlay(container))` chassis.
