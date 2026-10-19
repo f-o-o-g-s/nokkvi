@@ -790,8 +790,8 @@ impl Nokkvi {
 
         // Rules-session grammar: view-gated keys for the smart-playlist
         // rules editor. Intercepted before any SFX/toolbar arms could fire
-        // on the resolved actions (the ui-views.md gate-placement
-        // invariant), but AFTER the no-modal check — the session is
+        // on the resolved actions (ui-queue.md "Gate placement"), but
+        // AFTER the no-modal check — the session is
         // view-hosted, and its own sub-pickers get their modal-grade key
         // ownership inside the intercept.
         // Theater Mode hides the editor, so its grammar stands down there.
