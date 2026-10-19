@@ -3,12 +3,12 @@ description: Commit your authored files this session, refreshing the changelog i
 argument-hint: [optional hint about commit message focus]
 ---
 
-Commit only the files you (Claude) directly Edited or Wrote in this conversation, and fold any needed `## [Unreleased]` changelog update into that same commit. Leave everything else alone — pre-existing modifications, files the user changed, files from other agents, untracked files you didn't create.
+Commit only the files you (Claude) changed yourself in this conversation, whether with Edit, Write, or a shell command (sed, a heredoc, a script that rewrites a file), and fold any needed `## [Unreleased]` changelog update into that same commit. Leave everything else alone — pre-existing modifications, files the user changed, files from other agents, untracked files you didn't create.
 
 ## Steps
 
 1. Run `git status` and `git diff` in parallel to see all working-tree changes.
-2. Build a list of files you touched in this session by scanning your own prior `Edit` and `Write` tool calls. That exact set is what you stage. New files created via `Write` belong on the list; files modified by anyone else stay off it.
+2. Build a list of files you touched in this session by scanning your own prior `Edit` and `Write` calls and the Bash commands you ran that wrote to files. That exact set is what you stage. New files you created belong on the list; files modified by anyone else stay off it.
 3. If your set is empty, say so and stop — leave the working tree alone. (`CHANGELOG.md` edited below counts as authored this session, so it joins the set.)
 4. If your set touches Rust code or Cargo files, confirm the four CI gates (`CLAUDE.md` → Common commands) are green for the code you're committing; run them now if you haven't since your last edit. `cargo +nightly fmt --all` may reformat your files — re-stage them by name. Docs/config-only commits skip this step.
 5. Match this repo's existing commit style: run `git log --oneline -10` and follow whatever convention you see (e.g. Conventional Commits `type(scope): description`, lowercase, imperative, no trailing period; breaking changes add `!` after the scope). For nokkvi the allowed types and scopes are listed in `CLAUDE.md`. Draft the message focused on **why**, not what — the diff is the what. One subject line + a short body if non-obvious.
