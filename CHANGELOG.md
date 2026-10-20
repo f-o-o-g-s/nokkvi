@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- A new off-by-default setting, Similar Artists: Deezer, adds Deezer's related artists to the similar artists list.
+- The similar artists list now adds Deezer's related artists; Settings > General > Similar Artists: Deezer turns them off.
 
 ### Changed
 

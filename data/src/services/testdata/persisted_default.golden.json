@@ -107,7 +107,7 @@
   "track_artwork": "album_cover",
   "show_album_artists_only": true,
   "similar_artists_online": true,
-  "similar_artists_deezer": false,
+  "similar_artists_deezer": true,
   "suppress_library_refresh_toasts": true,
   "queue_show_stars": true,
   "queue_show_album": true,

@@ -149,11 +149,13 @@ fn an_untagged_artist_waits_for_the_info_and_asks_with_its_id() {
     );
 }
 
-/// When neither the row nor the info has an id, the artist settles on an
-/// empty list and is not asked about again this session.
+/// With Deezer off, when neither the row nor the info has an id, the
+/// artist settles on an empty list and is not asked about again this
+/// session.
 #[test]
 fn an_artist_with_no_id_anywhere_settles_on_no_list() {
     let mut app = app_with_artists(20, false);
+    sources(&mut app, true, false);
     let info_generation = app.artist_info.session_generation();
     let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
     settle(&mut app, &first);
@@ -169,10 +171,12 @@ fn an_artist_with_no_id_anywhere_settles_on_no_list() {
     assert!(!app.artist_recs.is_pending(&first), "not asked again");
 }
 
-/// A failed info fetch ends the wait; the next centring asks for both again.
+/// With Deezer off, a failed info fetch ends the wait; the next centring
+/// asks for both again.
 #[test]
 fn a_failed_info_fetch_ends_the_wait_until_the_next_centring() {
     let mut app = app_with_artists(20, false);
+    sources(&mut app, true, false);
     let info_generation = app.artist_info.session_generation();
     let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
     settle(&mut app, &first);
@@ -199,12 +203,12 @@ fn a_failed_info_fetch_ends_the_wait_until_the_next_centring() {
     assert!(app.artist_info.is_pending(&first));
 }
 
-/// With the setting off nothing is asked of ListenBrainz and nothing waits,
-/// while the info is still asked for.
+/// With both sources off nothing is asked and nothing waits, while the info
+/// is still asked for.
 #[test]
-fn with_the_setting_off_nothing_is_asked() {
+fn with_both_sources_off_nothing_is_asked() {
     let mut app = app_with_artists(20, true);
-    app.settings.similar_artists_online = false;
+    sources(&mut app, false, false);
     let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
     settle(&mut app, &first);
     assert!(!app.artist_recs.is_pending(&first));
@@ -309,10 +313,10 @@ fn a_similar_artist_chip_bubbles_find_and_expand() {
     ));
 }
 
-/// Turning the setting off hides the lists already fetched this session, as
-/// its subtitle promises ("Off shows no list"); turning it back on shows them.
+/// Turning both sources off hides the lists already fetched this session;
+/// turning one back on shows them.
 #[test]
-fn the_setting_off_hides_lists_already_fetched() {
+fn both_sources_off_hides_lists_already_fetched() {
     let mut app = app_with_artists(3, true);
     app.artist_recs.settle_with("a0", vec![rec("Muse")]);
     assert_eq!(
@@ -320,9 +324,9 @@ fn the_setting_off_hides_lists_already_fetched() {
         1,
         "on: the cached list shows"
     );
-    app.settings.similar_artists_online = false;
+    sources(&mut app, false, false);
     assert!(app.shown_artist_recs().is_empty(), "off: no list shows");
-    app.settings.similar_artists_online = true;
+    sources(&mut app, true, false);
     assert_eq!(app.shown_artist_recs().len(), 1, "back on: it shows again");
 }
 
@@ -392,9 +396,9 @@ fn a_change_of_sources_drops_the_lists_and_asks_again() {
         "same sources: the lists stay"
     );
 
-    let mut deezer_on = app.settings.clone();
-    deezer_on.similar_artists_deezer = true;
-    let _ = app.handle_player_settings_loaded(deezer_on);
+    let mut deezer_off = app.settings.clone();
+    deezer_off.similar_artists_deezer = false;
+    let _ = app.handle_player_settings_loaded(deezer_off);
     assert_eq!(cached_names(&app, "a9"), None, "the old mix is dropped");
     assert!(
         app.artist_recs.is_pending(&centred),

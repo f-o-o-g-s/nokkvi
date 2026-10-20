@@ -385,10 +385,10 @@ crate::player_settings_schema! {
     #[serde(default = "default_true")]
     same similar_artists_online: bool = default_true(),
     /// Whether the similar-artists list also asks Deezer, blended with
-    /// ListenBrainz's (default: off). The lookup sends the artist's name to
+    /// ListenBrainz's (default: on). The lookup sends the artist's name to
     /// api.deezer.com; off, nothing is sent there.
-    #[serde(default)]
-    same similar_artists_deezer: bool = false,
+    #[serde(default = "default_true")]
+    same similar_artists_deezer: bool = default_true(),
     /// Whether to suppress the toast notification shown when Navidrome
     /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]

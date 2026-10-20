@@ -516,7 +516,7 @@ impl Default for Nokkvi {
                 stable_viewport: true,
                 auto_follow_playing: true,
                 similar_artists_online: true,
-                similar_artists_deezer: false,
+                similar_artists_deezer: true,
                 volume: 1.0,
                 sfx_volume: 0.68,
                 seek_step_secs: nokkvi_data::types::player_settings::SEEK_STEP_DEFAULT_SECS,

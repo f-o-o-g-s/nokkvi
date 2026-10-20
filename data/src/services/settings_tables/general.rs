@@ -340,7 +340,7 @@ define_settings! {
                      the artist's name to api.deezer.com, with no account or key. Off \
                      sends nothing there.",
                 ),
-                default: false,
+                default: true,
                 read_field: |d| d.similar_artists_deezer,
             },
         },
@@ -837,7 +837,7 @@ mod tests {
             track_artwork: "Album Cover".into(),
             show_album_artists_only: true,
             similar_artists_online: true,
-            similar_artists_deezer: false,
+            similar_artists_deezer: true,
             suppress_library_refresh_toasts: false,
             show_tray_icon: false,
             close_to_tray: false,

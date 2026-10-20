@@ -1556,7 +1556,7 @@ mod sentinel_roundtrip_tests {
             enter_shuffle: true,              // default false
             harbour_expandable_shelves: true, // default false
             similar_artists_online: false,    // default true
-            similar_artists_deezer: true,     // default false
+            similar_artists_deezer: false,    // default true
             local_music_path: "/tmp/sentinel/music".to_string(),
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top

@@ -354,7 +354,7 @@ impl Default for TomlSettings {
             track_artwork: TrackArtwork::default(),
             show_album_artists_only: true,
             similar_artists_online: true,
-            similar_artists_deezer: false,
+            similar_artists_deezer: true,
             suppress_library_refresh_toasts: true,
             view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,

@@ -133,6 +133,8 @@ fn a_cached_list_opens_ready() {
     assert!(!app.artist_recs.is_pending(ARTIST_ID));
 }
 
+/// With Deezer off (it would ask by name and fill the gap), a missing id
+/// reads as such and a failed info fetch as a failure.
 #[test]
 fn a_failed_ask_reads_as_failed_and_a_missing_id_as_no_id() {
     let mut app = app_with_queue();
@@ -142,20 +144,23 @@ fn a_failed_ask_reads_as_failed_and_a_missing_id_as_no_id() {
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Failed);
 
     let mut app = app_with_queue();
+    app.settings.similar_artists_deezer = false;
     open_from_row(&mut app);
     land_info(&mut app, Ok(ArtistInfo::default()));
     assert_eq!(modal(&app).status, SimilarArtistsStatus::NoMbid);
 
     let mut app = app_with_queue();
+    app.settings.similar_artists_deezer = false;
     open_from_row(&mut app);
     land_info(&mut app, Err("HTTP 500".to_string()));
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Failed);
 }
 
 #[test]
-fn with_the_setting_off_the_modal_says_so_and_asks_nothing() {
+fn with_both_sources_off_the_modal_says_so_and_asks_nothing() {
     let mut app = app_with_queue();
     app.settings.similar_artists_online = false;
+    app.settings.similar_artists_deezer = false;
     open_from_row(&mut app);
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Off);
     assert!(!app.artist_info.is_pending(ARTIST_ID));
@@ -472,9 +477,9 @@ fn a_change_of_sources_asks_again_for_the_open_modal() {
     open_from_row(&mut app);
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Ready);
 
-    let mut deezer_on = app.settings.clone();
-    deezer_on.similar_artists_deezer = true;
-    let _ = app.handle_player_settings_loaded(deezer_on);
+    let mut deezer_off = app.settings.clone();
+    deezer_off.similar_artists_deezer = false;
+    let _ = app.handle_player_settings_loaded(deezer_off);
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Loading);
     assert!(
         app.artist_info.is_pending(ARTIST_ID),
