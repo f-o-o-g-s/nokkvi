@@ -162,7 +162,9 @@ fn send_raw_key(
     modifiers: iced::keyboard::Modifiers,
     status: iced::event::Status,
 ) -> iced::Task<crate::Message> {
-    app.update(crate::Message::RawKeyEvent(key, modifiers, status, false))
+    app.update(crate::Message::RawKeyEvent(
+        key, None, modifiers, status, false,
+    ))
 }
 
 #[test]

@@ -669,13 +669,23 @@ impl Nokkvi {
         // keyboard::listen() filters for Status::Ignored, which means focused
         // text_input widgets silently swallow Escape/Enter before our hotkey
         // system ever sees them.
+        //
+        // A TV remote's OK and Back become Enter and Escape here, before any
+        // handler reads the key (`hotkeys::remote_key_alias`).
         let keyboard = event::listen_with(|event, status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
+                physical_key,
                 modifiers,
                 repeat,
                 ..
-            }) => Some(Message::RawKeyEvent(key, modifiers, status, repeat)),
+            }) => {
+                let key = hotkeys::remote_key_alias(key, &physical_key);
+                let unnamed = hotkeys::unnamed_key_code(&key, &physical_key);
+                Some(Message::RawKeyEvent(
+                    key, unnamed, modifiers, status, repeat,
+                ))
+            }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }

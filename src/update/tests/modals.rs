@@ -139,6 +139,7 @@ fn each_open_modal_draws_its_own_overlay_and_no_other() {
 fn escape(app: &mut Nokkvi) {
     let _ = app.update(crate::Message::RawKeyEvent(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        None,
         iced::keyboard::Modifiers::empty(),
         iced::event::Status::Ignored,
         false,
@@ -264,6 +265,7 @@ fn list_keys_stay_with_a_modal_above_the_picker() {
 
     let _ = app.update(crate::Message::RawKeyEvent(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        None,
         iced::keyboard::Modifiers::empty(),
         iced::event::Status::Ignored,
         false,
@@ -384,6 +386,7 @@ fn discarding_eq_drops_the_typed_preset_name() {
 fn press(app: &mut Nokkvi, ch: &str, modifiers: iced::keyboard::Modifiers) {
     let _ = app.update(crate::Message::RawKeyEvent(
         iced::keyboard::Key::Character(ch.into()),
+        None,
         modifiers,
         iced::event::Status::Ignored,
         false,
@@ -498,10 +501,11 @@ fn trawl_routes_leave_a_hidden_trawl_alone() {
     );
 }
 
-/// Trawl takes `TRAWL_TRAY_ACTIONS` plus exactly the list keys, Ctrl+Enter
-/// and `/`. Those five stay out of the tray list on purpose: the tray list is
-/// also what a Captured key may not do a second time, and a captured `/` or
-/// list key has already been dropped (or, for Tab, is never captured).
+/// Trawl takes `TRAWL_TRAY_ACTIONS` plus exactly the list keys (the bare
+/// arrows among them), Ctrl+Enter, `/` and the media keys every modal takes.
+/// Those stay out of the tray list on purpose: the tray list is also what a
+/// Captured key may not do a second time, and a captured `/` or list key has
+/// already been dropped (or, for Tab, is never captured).
 #[test]
 fn trawl_takes_the_tray_keys_plus_the_list_keys_and_search() {
     use nokkvi_data::types::hotkey_config::HotkeyAction as A;
@@ -517,9 +521,16 @@ fn trawl_takes_the_tray_keys_plus_the_list_keys_and_search() {
     let expected = [
         A::SlotListUp,
         A::SlotListDown,
+        A::EditUp,
+        A::EditDown,
         A::Activate,
         A::ShufflePlay,
         A::FocusSearch,
+        A::MediaPlayPause,
+        A::MediaPause,
+        A::MediaStop,
+        A::MediaNextTrack,
+        A::MediaPreviousTrack,
     ];
     assert!(
         beyond_tray.len() == expected.len() && expected.iter().all(|a| beyond_tray.contains(a)),

@@ -1126,3 +1126,105 @@ fn a_swap_is_blocked_when_more_than_one_other_action_claims_the_combo() {
         "a swap would leave Refresh View on a key Move Track Down still wins, got {plan:?}",
     );
 }
+
+// ====================================================================
+// Remote-control and media keys
+// ====================================================================
+
+/// Every remote and media key, as shown in Settings, parses back to itself,
+/// alone and under a modifier (so it survives a `config.toml` round trip).
+#[test]
+fn remote_and_media_key_names_round_trip() {
+    let keys = [
+        KeyCode::Menu,
+        KeyCode::HomePage,
+        KeyCode::Search,
+        KeyCode::Favorites,
+        KeyCode::Forward,
+        KeyCode::Refresh,
+        KeyCode::MediaPlayPause,
+        KeyCode::MediaPause,
+        KeyCode::MediaStop,
+        KeyCode::MediaNext,
+        KeyCode::MediaPrevious,
+        KeyCode::MediaRewind,
+        KeyCode::MediaFastForward,
+        KeyCode::VolumeUp,
+        KeyCode::VolumeDown,
+        KeyCode::VolumeMute,
+        KeyCode::Native(582),
+    ];
+    for key in keys {
+        let name = key.to_string();
+        assert_eq!(KeyCode::from_name(&name), Ok(key.clone()), "{name}");
+        let combo = KeyCombo::shift(key);
+        let parsed: KeyCombo = combo
+            .display()
+            .parse()
+            .unwrap_or_else(|e| panic!("'{}': {e}", combo.display()));
+        assert_eq!(parsed, combo);
+    }
+}
+
+#[test]
+fn an_unnamed_key_reads_as_its_linux_code() {
+    assert_eq!(KeyCode::Native(582).to_string(), "Key 582");
+    assert_eq!(KeyCode::from_name("key 582"), Ok(KeyCode::Native(582)));
+    assert_eq!(KeyCode::from_name("KEY  582"), Ok(KeyCode::Native(582)));
+    assert!(KeyCode::from_name("key").is_err());
+    assert!(KeyCode::from_name("key x").is_err());
+    assert!(KeyCode::from_name("key -1").is_err());
+}
+
+/// The media keys and the remote's Home key fire their fixed actions out of
+/// the box, and a capture can't take one of those keys for another action.
+#[test]
+fn media_keys_resolve_to_their_fixed_actions() {
+    let config = HotkeyConfig::default();
+    let cases = [
+        (KeyCode::MediaPlayPause, HotkeyAction::MediaPlayPause),
+        (KeyCode::MediaPause, HotkeyAction::MediaPause),
+        (KeyCode::MediaStop, HotkeyAction::MediaStop),
+        (KeyCode::MediaNext, HotkeyAction::MediaNextTrack),
+        (KeyCode::MediaPrevious, HotkeyAction::MediaPreviousTrack),
+        (KeyCode::HomePage, HotkeyAction::GoHome),
+    ];
+    for (key, action) in cases {
+        assert_eq!(config.lookup(&key, false, false, false), Some(action));
+        assert!(HotkeyAction::RESERVED.contains(&action), "{action:?}");
+        assert_eq!(
+            config.plan_capture(&HotkeyAction::ToggleRandom, &KeyCombo::key(key)),
+            CapturePlan::Blocked { by: action },
+        );
+    }
+}
+
+/// The remote keys with no fixed meaning start unbound, free to capture.
+#[test]
+fn the_other_remote_keys_start_unbound() {
+    let config = HotkeyConfig::default();
+    for key in [
+        KeyCode::Menu,
+        KeyCode::Search,
+        KeyCode::VolumeUp,
+        KeyCode::Native(582),
+    ] {
+        assert_eq!(config.lookup(&key, false, false, false), None, "{key}");
+    }
+}
+
+#[test]
+fn an_unnamed_key_binding_survives_the_toml_round_trip() {
+    let mut config = HotkeyConfig::default();
+    config.set_binding(
+        HotkeyAction::TogglePlay,
+        KeyCombo::key(KeyCode::Native(582)),
+    );
+    let map = config.to_toml_map(false);
+    assert_eq!(map.get("toggle_play").map(String::as_str), Some("Key 582"));
+    let reloaded = HotkeyConfig::from_toml_map(&map);
+    assert_eq!(
+        reloaded.lookup(&KeyCode::Native(582), false, false, false),
+        Some(HotkeyAction::TogglePlay)
+    );
+}

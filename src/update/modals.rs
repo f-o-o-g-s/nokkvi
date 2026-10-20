@@ -74,12 +74,23 @@ impl ActiveModal {
     /// Trawl takes them too, plus Ctrl+Enter (`ShufflePlay`, which plays the
     /// mix), `/` and [`TRAWL_TRAY_ACTIONS`]; they are admitted for Trawl only,
     /// on purpose: the other modals must keep swallowing the same keys. EQ and
-    /// Get Info take the key that opened them, which closes them again.
+    /// Get Info take the key that opened them, which closes them again. The
+    /// bare Up/Down arrows (`EditUp` / `EditDown`) are list keys too: outside
+    /// Settings they move the list, which is how a TV remote's D-pad scrolls.
+    ///
+    /// Every modal lets the media keys through ([`MEDIA_KEY_ACTIONS`]).
     pub(crate) fn takes_action(self, action: HotkeyAction) -> bool {
         let list_key = matches!(
             action,
-            HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
+            HotkeyAction::SlotListUp
+                | HotkeyAction::SlotListDown
+                | HotkeyAction::EditUp
+                | HotkeyAction::EditDown
+                | HotkeyAction::Activate
         );
+        if MEDIA_KEY_ACTIONS.contains(&action) {
+            return true;
+        }
         match self {
             Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key,
             // Its own key closes it again, as Get Info's does.
@@ -98,6 +109,18 @@ impl ActiveModal {
         }
     }
 }
+
+/// The media keys' actions (play/pause, pause, stop, next, previous). They
+/// steer playback and nothing on screen, so no modal swallows them, just as
+/// MPRIS's commands act under any modal. A press can't be meant for the modal
+/// either: no text field types one.
+pub(crate) const MEDIA_KEY_ACTIONS: &[HotkeyAction] = &[
+    HotkeyAction::MediaPlayPause,
+    HotkeyAction::MediaPause,
+    HotkeyAction::MediaStop,
+    HotkeyAction::MediaNextTrack,
+    HotkeyAction::MediaPreviousTrack,
+];
 
 /// The Trawl modal's keys beyond the list keys, Ctrl+Enter and `/`: the
 /// tray-controls focus ring (Shift+Tab / Shift+Backspace), the value arrows

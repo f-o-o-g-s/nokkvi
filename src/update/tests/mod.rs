@@ -57,6 +57,7 @@ mod playlists;
 mod queue;
 mod radio_artwork;
 mod redesign_chrome;
+mod remote;
 mod roulette;
 mod row_menus;
 mod rules_editor;

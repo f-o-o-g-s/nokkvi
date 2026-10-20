@@ -1816,9 +1816,12 @@ pub enum Message {
     /// The `Status` field indicates whether a widget (e.g. text_input) has already
     /// captured this event. Used to suppress hotkeys while typing in search fields.
     ///
-    /// The trailing `bool` is winit's key-repeat flag (a held key).
+    /// The `Option<u32>` is the Linux input-event code of a key iced has no
+    /// name for (`hotkeys::unnamed_key_code`), so it can still be bound. The
+    /// trailing `bool` is winit's key-repeat flag (a held key).
     RawKeyEvent(
         iced::keyboard::Key,
+        Option<u32>,
         iced::keyboard::Modifiers,
         iced::event::Status,
         bool,

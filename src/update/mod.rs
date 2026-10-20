@@ -678,11 +678,11 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Raw Keyboard Events → HotkeyConfig dispatch (see hotkeys/mod.rs)
             // -----------------------------------------------------------------
-            Message::RawKeyEvent(key, modifiers, status, repeat) => {
-                if self.is_repeated_theater_toggle(&key, modifiers, repeat) {
+            Message::RawKeyEvent(key, unnamed, modifiers, status, repeat) => {
+                if self.is_repeated_theater_toggle(&key, unnamed, modifiers, repeat) {
                     return Task::none();
                 }
-                self.handle_raw_key_event(key, modifiers, status)
+                self.handle_raw_key_event(key, unnamed, modifiers, status)
             }
             Message::ModifiersChanged(modifiers) => self.handle_modifiers_changed(modifiers),
 

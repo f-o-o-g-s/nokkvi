@@ -389,7 +389,9 @@ pub enum SettingsMessage {
     /// Reset current value to default (R key in edit mode)
     ResetToDefault,
     /// Raw key event forwarded during hotkey capture mode
-    HotkeyCaptured(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// A key press while a hotkey row is capturing; the `Option<u32>` is the
+    /// Linux code of a key iced has no name for (`KeyCode::Native`).
+    HotkeyCaptured(iced::keyboard::Key, Option<u32>, iced::keyboard::Modifiers),
     /// Sub-list search query changed (typing in the font OR theme picker
     /// sub-list search box). Only one sub-list is open at a time, so the active
     /// sub-list handler owns the meaning.
@@ -690,7 +692,7 @@ impl SettingsPage {
         }
 
         // ── Hotkey capture mode: intercept key events ──
-        if let SettingsMessage::HotkeyCaptured(ref key, modifiers) = message {
+        if let SettingsMessage::HotkeyCaptured(ref key, unnamed, modifiers) = message {
             if let Some(action) = self.capturing_hotkey.take() {
                 // Escape cancels capture mode
                 if matches!(
@@ -717,7 +719,7 @@ impl SettingsPage {
                     action
                 );
                 // Convert iced key event to our KeyCombo
-                if let Some(keycode) = crate::hotkeys::iced_key_to_keycode(key) {
+                if let Some(keycode) = crate::hotkeys::key_press_to_keycode(key, unnamed) {
                     let combo = nokkvi_data::types::hotkey_config::KeyCombo {
                         key: keycode,
                         shift: modifiers.shift(),
@@ -1238,7 +1240,7 @@ impl SettingsPage {
                 SettingsAction::None
             }
             // These messages are only handled in sub-list mode or capture mode,
-            SettingsMessage::HotkeyCaptured(_, _)
+            SettingsMessage::HotkeyCaptured(..)
             | SettingsMessage::SubListSearchChanged(_)
             // the pill returned at the top,
             | SettingsMessage::Leave

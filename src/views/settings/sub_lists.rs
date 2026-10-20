@@ -317,7 +317,7 @@ impl SettingsPage {
             | SettingsMessage::EditSetValue(_)
             | SettingsMessage::EditSetFraction(_)
             | SettingsMessage::ResetToDefault
-            | SettingsMessage::HotkeyCaptured(_, _)
+            | SettingsMessage::HotkeyCaptured(..)
             | SettingsMessage::SubListSearchChanged(_)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
@@ -391,7 +391,7 @@ impl SettingsPage {
             | SettingsMessage::ResetToDefault
             | SettingsMessage::HexInputChanged(_)
             | SettingsMessage::HexInputSubmit
-            | SettingsMessage::HotkeyCaptured(_, _)
+            | SettingsMessage::HotkeyCaptured(..)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
             | SettingsMessage::ToggleSetToggle(_)
@@ -464,7 +464,7 @@ impl SettingsPage {
             | SettingsMessage::ResetToDefault
             | SettingsMessage::HexInputChanged(_)
             | SettingsMessage::HexInputSubmit
-            | SettingsMessage::HotkeyCaptured(_, _)
+            | SettingsMessage::HotkeyCaptured(..)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
             | SettingsMessage::ToggleSetToggle(_)

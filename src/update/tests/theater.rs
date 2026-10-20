@@ -24,7 +24,7 @@ fn home_app() -> crate::Nokkvi {
 }
 
 fn press(app: &mut crate::Nokkvi, key: Key, modifiers: Modifiers) {
-    let _ = app.handle_raw_key_event(key, modifiers, Status::Ignored);
+    let _ = app.handle_raw_key_event(key, None, modifiers, Status::Ignored);
 }
 
 fn press_f11(app: &mut crate::Nokkvi) {
@@ -160,6 +160,7 @@ fn captured_escape_is_swallowed_in_theater() {
     let _ = app.enter_theater();
     let _ = app.handle_raw_key_event(
         Key::Named(Named::Escape),
+        None,
         Modifiers::default(),
         Status::Captured,
     );
@@ -208,6 +209,11 @@ fn policy_table_is_pinned() {
         A::SeekForward,
         A::ToggleTheater,
         A::Escape,
+        A::MediaPlayPause,
+        A::MediaPause,
+        A::MediaStop,
+        A::MediaNextTrack,
+        A::MediaPreviousTrack,
     ];
     let exit_then_perform = [
         A::SwitchToQueue,
@@ -218,6 +224,7 @@ fn policy_table_is_pinned() {
         A::SwitchToPlaylists,
         A::SwitchToRadios,
         A::SwitchToHarbour,
+        A::GoHome,
         A::SwitchToSettings,
         A::FocusSearch,
         A::ToggleBrowsingPanel,
@@ -896,6 +903,7 @@ mod r1 {
         let raw = |repeat| {
             crate::Message::RawKeyEvent(
                 Key::Named(Named::F11),
+                None,
                 Modifiers::default(),
                 iced::event::Status::Ignored,
                 repeat,
@@ -910,6 +918,7 @@ mod r1 {
         // A held seek key still repeats (bare Right seeks, stays in theater).
         let _ = app.update(crate::Message::RawKeyEvent(
             Key::Named(Named::Escape),
+            None,
             Modifiers::default(),
             iced::event::Status::Ignored,
             true,

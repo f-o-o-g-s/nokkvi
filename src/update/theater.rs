@@ -163,7 +163,12 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::SeekBackward
         | A::SeekForward
         | A::ToggleTheater
-        | A::Escape => P::Passthrough,
+        | A::Escape
+        | A::MediaPlayPause
+        | A::MediaPause
+        | A::MediaStop
+        | A::MediaNextTrack
+        | A::MediaPreviousTrack => P::Passthrough,
         A::SwitchToQueue
         | A::SwitchToAlbums
         | A::SwitchToArtists
@@ -172,6 +177,7 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::SwitchToPlaylists
         | A::SwitchToRadios
         | A::SwitchToHarbour
+        | A::GoHome
         | A::SwitchToSettings
         | A::FocusSearch
         | A::ToggleBrowsingPanel
@@ -426,11 +432,12 @@ impl Nokkvi {
     pub(crate) fn is_repeated_theater_toggle(
         &self,
         key: &iced::keyboard::Key,
+        unnamed: Option<u32>,
         modifiers: iced::keyboard::Modifiers,
         repeat: bool,
     ) -> bool {
         repeat
-            && crate::hotkeys::resolve_action(key, modifiers, &self.hotkey_config)
+            && crate::hotkeys::resolve_action(key, unnamed, modifiers, &self.hotkey_config)
                 == Some(HotkeyAction::ToggleTheater)
     }
 

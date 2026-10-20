@@ -92,10 +92,34 @@ pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
             key::Named::F10 => Some(KeyCode::F10),
             key::Named::F11 => Some(KeyCode::F11),
             key::Named::F12 => Some(KeyCode::F12),
+            key::Named::ContextMenu => Some(KeyCode::Menu),
+            key::Named::BrowserHome | key::Named::GoHome => Some(KeyCode::HomePage),
+            key::Named::BrowserSearch => Some(KeyCode::Search),
+            key::Named::BrowserFavorites => Some(KeyCode::Favorites),
+            key::Named::BrowserForward => Some(KeyCode::Forward),
+            key::Named::BrowserRefresh => Some(KeyCode::Refresh),
+            // winit's Linux backend reports the usual play/pause key
+            // (`XF86AudioPlay`) as MediaPlay.
+            key::Named::MediaPlay | key::Named::MediaPlayPause => Some(KeyCode::MediaPlayPause),
+            key::Named::MediaPause => Some(KeyCode::MediaPause),
+            key::Named::MediaStop => Some(KeyCode::MediaStop),
+            key::Named::MediaTrackNext => Some(KeyCode::MediaNext),
+            key::Named::MediaTrackPrevious => Some(KeyCode::MediaPrevious),
+            key::Named::MediaRewind => Some(KeyCode::MediaRewind),
+            key::Named::MediaFastForward => Some(KeyCode::MediaFastForward),
+            key::Named::AudioVolumeUp => Some(KeyCode::VolumeUp),
+            key::Named::AudioVolumeDown => Some(KeyCode::VolumeDown),
+            key::Named::AudioVolumeMute => Some(KeyCode::VolumeMute),
             _ => None,
         },
         keyboard::Key::Unidentified => None,
     }
+}
+
+/// [`iced_key_to_keycode`], plus a key iced has no name for, bound by its Linux
+/// input-event code (`unnamed`, from [`super::unnamed_key_code`]).
+pub(crate) fn key_press_to_keycode(key: &keyboard::Key, unnamed: Option<u32>) -> Option<KeyCode> {
+    iced_key_to_keycode(key).or_else(|| unnamed.map(KeyCode::Native))
 }
 
 /// Convert a `HotkeyAction` to the corresponding `Message`.
@@ -123,13 +147,19 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::SwitchToRadios => {
             Message::Navigation(NavigationMessage::SwitchView(View::Radios))
         }
-        HotkeyAction::SwitchToHarbour => {
-            Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
-        }
+        HotkeyAction::SwitchToHarbour
+        // A remote's Home key: Harbour is nokkvi's home view.
+        | HotkeyAction::GoHome => Message::Navigation(NavigationMessage::SwitchView(View::Harbour)),
         HotkeyAction::SwitchToSettings => Message::ToggleSettings,
         HotkeyAction::ToggleTheater => Message::Theater(crate::app_message::TheaterMessage::Toggle),
         // Playback
-        HotkeyAction::TogglePlay => Message::Playback(PlaybackMessage::TogglePlay),
+        HotkeyAction::TogglePlay
+        // The media keys' play/pause, fixed beside the configurable key.
+        | HotkeyAction::MediaPlayPause => Message::Playback(PlaybackMessage::TogglePlay),
+        HotkeyAction::MediaPause => Message::Playback(PlaybackMessage::Pause),
+        HotkeyAction::MediaStop => Message::Playback(PlaybackMessage::Stop),
+        HotkeyAction::MediaNextTrack => Message::Playback(PlaybackMessage::NextTrack),
+        HotkeyAction::MediaPreviousTrack => Message::Playback(PlaybackMessage::PrevTrack),
         HotkeyAction::ToggleRandom => Message::Playback(PlaybackMessage::ToggleRandom),
         HotkeyAction::ToggleRepeat => Message::Playback(PlaybackMessage::ToggleRepeat),
         HotkeyAction::ToggleConsume => Message::Playback(PlaybackMessage::ToggleConsume),
@@ -236,19 +266,21 @@ pub(crate) fn handle_hotkey(
     modifiers: keyboard::Modifiers,
     config: &HotkeyConfig,
 ) -> Option<Message> {
-    resolve_action(&key, modifiers, config).map(action_to_message)
+    resolve_action(&key, None, modifiers, config).map(action_to_message)
 }
 
 /// The `HotkeyAction` a key event resolves to under the user's bindings, or
 /// `None` when the key is unbindable or unbound. [`handle_hotkey`] maps it to a
 /// `Message`; the raw-key handler also reads the action itself (Theater Mode's
-/// key policy classifies actions, not messages).
+/// key policy classifies actions, not messages). `unnamed` is the Linux code of
+/// a key iced has no name for ([`key_press_to_keycode`]).
 pub(crate) fn resolve_action(
     key: &keyboard::Key,
+    unnamed: Option<u32>,
     modifiers: keyboard::Modifiers,
     config: &HotkeyConfig,
 ) -> Option<HotkeyAction> {
-    let keycode = iced_key_to_keycode(key)?;
+    let keycode = key_press_to_keycode(key, unnamed)?;
     config.lookup(
         &keycode,
         modifiers.shift(),
@@ -441,6 +473,84 @@ mod tests {
                 "Named key {named:?} should map to {expected:?}"
             );
         }
+    }
+
+    #[test]
+    fn remote_and_media_keys_mapped() {
+        use keyboard::key;
+
+        let cases = vec![
+            (key::Named::ContextMenu, KeyCode::Menu),
+            (key::Named::BrowserHome, KeyCode::HomePage),
+            (key::Named::BrowserSearch, KeyCode::Search),
+            (key::Named::BrowserFavorites, KeyCode::Favorites),
+            (key::Named::BrowserForward, KeyCode::Forward),
+            (key::Named::BrowserRefresh, KeyCode::Refresh),
+            // winit's Linux XF86AudioPlay, the usual play/pause key.
+            (key::Named::MediaPlay, KeyCode::MediaPlayPause),
+            (key::Named::MediaPlayPause, KeyCode::MediaPlayPause),
+            (key::Named::MediaPause, KeyCode::MediaPause),
+            (key::Named::MediaStop, KeyCode::MediaStop),
+            (key::Named::MediaTrackNext, KeyCode::MediaNext),
+            (key::Named::MediaTrackPrevious, KeyCode::MediaPrevious),
+            (key::Named::MediaRewind, KeyCode::MediaRewind),
+            (key::Named::MediaFastForward, KeyCode::MediaFastForward),
+            (key::Named::AudioVolumeUp, KeyCode::VolumeUp),
+            (key::Named::AudioVolumeDown, KeyCode::VolumeDown),
+            (key::Named::AudioVolumeMute, KeyCode::VolumeMute),
+        ];
+        for (named, expected) in cases {
+            assert_eq!(
+                iced_key_to_keycode(&keyboard::Key::Named(named)),
+                Some(expected.clone()),
+                "{named:?} should map to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unnamed_key_maps_by_its_linux_code() {
+        assert_eq!(
+            key_press_to_keycode(&keyboard::Key::Unidentified, Some(582)),
+            Some(KeyCode::Native(582))
+        );
+        assert_eq!(
+            key_press_to_keycode(&keyboard::Key::Unidentified, None),
+            None
+        );
+        // A named key keeps its name.
+        assert_eq!(
+            key_press_to_keycode(&keyboard::Key::Named(keyboard::key::Named::Enter), None),
+            Some(KeyCode::Enter)
+        );
+    }
+
+    #[test]
+    fn media_and_remote_home_actions_dispatch() {
+        use crate::app_message::PlaybackMessage as P;
+
+        let playback = |action| match action_to_message(action) {
+            Message::Playback(msg) => Some(msg),
+            _ => None,
+        };
+        assert!(matches!(
+            playback(HotkeyAction::MediaPlayPause),
+            Some(P::TogglePlay)
+        ));
+        assert!(matches!(playback(HotkeyAction::MediaPause), Some(P::Pause)));
+        assert!(matches!(playback(HotkeyAction::MediaStop), Some(P::Stop)));
+        assert!(matches!(
+            playback(HotkeyAction::MediaNextTrack),
+            Some(P::NextTrack)
+        ));
+        assert!(matches!(
+            playback(HotkeyAction::MediaPreviousTrack),
+            Some(P::PrevTrack)
+        ));
+        assert!(matches!(
+            action_to_message(HotkeyAction::GoHome),
+            Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
+        ));
     }
 
     #[test]

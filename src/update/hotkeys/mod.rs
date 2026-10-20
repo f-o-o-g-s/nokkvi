@@ -353,6 +353,7 @@ impl Nokkvi {
     fn rules_session_key_intercept(
         &mut self,
         key: &iced::keyboard::Key,
+        unnamed: Option<u32>,
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
         resolved: &Option<Message>,
@@ -506,7 +507,8 @@ impl Nokkvi {
                 // flips mode to Cursor, so this arm can't re-fire.
                 _ => {
                     let commit = self.update(Message::RulesEditor(R::CommitEditing));
-                    let navigate = self.handle_raw_key_event(key.clone(), modifiers, status);
+                    let navigate =
+                        self.handle_raw_key_event(key.clone(), unnamed, modifiers, status);
                     Some(Task::batch([commit, navigate]))
                 }
             };
@@ -676,9 +678,12 @@ impl Nokkvi {
     /// `HotkeyConfig`, or forward it to settings when hotkey-capture mode
     /// is active. Suppresses dispatch when a widget has captured the key
     /// event (typing into a text input), with Escape/Tab/Ctrl+key exceptions.
+    /// `unnamed` is the Linux code of a key iced has no name for (bindable as
+    /// `KeyCode::Native`).
     pub(super) fn handle_raw_key_event(
         &mut self,
         key: iced::keyboard::Key,
+        unnamed: Option<u32>,
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
     ) -> Task<Message> {
@@ -699,7 +704,7 @@ impl Nokkvi {
         // instead of dispatching it as a normal hotkey action
         if self.settings_page.capturing_hotkey.is_some() {
             return self.handle_settings(crate::views::SettingsMessage::HotkeyCaptured(
-                key, modifiers,
+                key, unnamed, modifiers,
             ));
         }
 
@@ -739,6 +744,17 @@ impl Nokkvi {
             return Task::none();
         }
 
+        // Name what an unusual key reads as in the log, so a remote's odd
+        // button can be identified (and bound, as "Key <code>" when it has no
+        // name) without a key tester.
+        match unnamed {
+            Some(code) => debug!(" [HOTKEY] Key with no name pressed: bind it as \"Key {code}\""),
+            None if crate::hotkeys::key_press_to_keycode(&key, None).is_none() => {
+                debug!(" [HOTKEY] Unbindable key pressed: {key:?}");
+            }
+            None => {}
+        }
+
         // Escape always reaches the dispatcher: it closes overlays / clears
         // search. Hoisted (with Tab) so the guard blocks below can read them.
         let is_escape = matches!(
@@ -776,7 +792,8 @@ impl Nokkvi {
 
         // Look up the key event against the user's hotkey config once — reused
         // by the modal-open guard below and the final dispatch.
-        let resolved_action = crate::hotkeys::resolve_action(&key, modifiers, &self.hotkey_config);
+        let resolved_action =
+            crate::hotkeys::resolve_action(&key, unnamed, modifiers, &self.hotkey_config);
         let resolved = resolved_action.map(crate::hotkeys::action_to_message);
 
         // The modal on top owns the keyboard (`ActiveModal::STACK`). One
@@ -797,7 +814,8 @@ impl Nokkvi {
         // Theater Mode hides the editor, so its grammar stands down there.
         if top_modal.is_none()
             && !self.theater.active
-            && let Some(task) = self.rules_session_key_intercept(&key, modifiers, status, &resolved)
+            && let Some(task) =
+                self.rules_session_key_intercept(&key, unnamed, modifiers, status, &resolved)
         {
             return task;
         }
@@ -873,7 +891,10 @@ impl Nokkvi {
                     // arrows) applies exactly as it would without theater.
                     // Cannot loop: theater is off by the second pass.
                     let exit = self.exit_theater();
-                    return Task::batch([exit, self.handle_raw_key_event(key, modifiers, status)]);
+                    return Task::batch([
+                        exit,
+                        self.handle_raw_key_event(key, unnamed, modifiers, status),
+                    ]);
                 }
                 Some(crate::update::theater::TheaterKeyPolicy::Passthrough) | None => {}
             }

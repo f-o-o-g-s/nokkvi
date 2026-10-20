@@ -38,6 +38,29 @@ pub enum KeyCode {
     F10,
     F11,
     F12,
+    // Remote-control and media keys: what a TV remote's USB dongle and a
+    // keyboard's media row send. A remote's OK and Back are not here: they
+    // arrive as Enter and Escape (`src/hotkeys/remote.rs`).
+    Menu,
+    HomePage,
+    Search,
+    Favorites,
+    Forward,
+    Refresh,
+    MediaPlayPause,
+    MediaPause,
+    MediaStop,
+    MediaNext,
+    MediaPrevious,
+    MediaRewind,
+    MediaFastForward,
+    VolumeUp,
+    VolumeDown,
+    VolumeMute,
+    /// A key with no name, by its Linux input-event code (the `KEY_*` number
+    /// `evtest` prints), so a remote's odd button (its voice key is
+    /// `KEY_VOICECOMMAND`, 582) can still be bound.
+    Native(u32),
 }
 
 impl fmt::Display for KeyCode {
@@ -80,6 +103,23 @@ impl fmt::Display for KeyCode {
             KeyCode::F10 => write!(f, "F10"),
             KeyCode::F11 => write!(f, "F11"),
             KeyCode::F12 => write!(f, "F12"),
+            KeyCode::Menu => write!(f, "Menu"),
+            KeyCode::HomePage => write!(f, "Home Page"),
+            KeyCode::Search => write!(f, "Search"),
+            KeyCode::Favorites => write!(f, "Favorites"),
+            KeyCode::Forward => write!(f, "Forward"),
+            KeyCode::Refresh => write!(f, "Refresh"),
+            KeyCode::MediaPlayPause => write!(f, "Play/Pause"),
+            KeyCode::MediaPause => write!(f, "Media Pause"),
+            KeyCode::MediaStop => write!(f, "Media Stop"),
+            KeyCode::MediaNext => write!(f, "Next Track"),
+            KeyCode::MediaPrevious => write!(f, "Previous Track"),
+            KeyCode::MediaRewind => write!(f, "Rewind"),
+            KeyCode::MediaFastForward => write!(f, "Fast Forward"),
+            KeyCode::VolumeUp => write!(f, "Volume Up"),
+            KeyCode::VolumeDown => write!(f, "Volume Down"),
+            KeyCode::VolumeMute => write!(f, "Mute"),
+            KeyCode::Native(code) => write!(f, "Key {code}"),
         }
     }
 }
@@ -125,7 +165,27 @@ impl KeyCode {
             "f10" => Ok(KeyCode::F10),
             "f11" => Ok(KeyCode::F11),
             "f12" => Ok(KeyCode::F12),
-            _ => Err(format!("unknown key: {s}")),
+            "menu" | "context menu" => Ok(KeyCode::Menu),
+            "home page" | "homepage" => Ok(KeyCode::HomePage),
+            "search" => Ok(KeyCode::Search),
+            "favorites" | "favourites" => Ok(KeyCode::Favorites),
+            "forward" => Ok(KeyCode::Forward),
+            "refresh" => Ok(KeyCode::Refresh),
+            "play/pause" | "play" => Ok(KeyCode::MediaPlayPause),
+            "media pause" => Ok(KeyCode::MediaPause),
+            "media stop" => Ok(KeyCode::MediaStop),
+            "next track" => Ok(KeyCode::MediaNext),
+            "previous track" | "prev track" => Ok(KeyCode::MediaPrevious),
+            "rewind" => Ok(KeyCode::MediaRewind),
+            "fast forward" => Ok(KeyCode::MediaFastForward),
+            "volume up" => Ok(KeyCode::VolumeUp),
+            "volume down" => Ok(KeyCode::VolumeDown),
+            "mute" | "volume mute" => Ok(KeyCode::VolumeMute),
+            other => other
+                .strip_prefix("key ")
+                .and_then(|code| code.trim().parse().ok())
+                .map(KeyCode::Native)
+                .ok_or_else(|| format!("unknown key: {s}")),
         }
     }
 }

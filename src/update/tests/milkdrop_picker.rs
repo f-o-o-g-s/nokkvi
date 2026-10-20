@@ -32,6 +32,7 @@ fn centered(app: &Nokkvi) -> Option<String> {
 fn key(app: &mut Nokkvi, named: iced::keyboard::key::Named) {
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(named),
+        None,
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Ignored,
     );

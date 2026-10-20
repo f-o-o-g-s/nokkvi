@@ -587,7 +587,7 @@ define_hotkey_actions! {
         // --- Settings edit ---
         EditUp {
             display: "Edit Value Up",
-            description: "Toggle setting on · enable field",
+            description: "Toggle setting on · enable field · elsewhere, move up the list",
             category: "Settings Edit",
             toml_key: "edit_up",
             settings_key: "hotkey.edit_up",
@@ -595,7 +595,7 @@ define_hotkey_actions! {
         },
         EditDown {
             display: "Edit Value Down",
-            description: "Toggle setting off · disable field",
+            description: "Toggle setting off · disable field · elsewhere, move down the list",
             category: "Settings Edit",
             toml_key: "edit_down",
             settings_key: "hotkey.edit_down",
@@ -632,6 +632,52 @@ define_hotkey_actions! {
             toml_key: "reset_to_default",
             settings_key: "hotkey.reset_to_default",
             default: KeyCombo::key(KeyCode::Delete),
+        },
+        // The media keys and a remote's Home key. Each has one meaning, so
+        // they're fixed like Escape. A desktop that binds the media keys
+        // itself (Plasma, GNOME, a compositor keybind) keeps them, and nokkvi
+        // gets the press through MPRIS instead.
+        MediaPlayPause {
+            display: "Play / Pause (media key)",
+            description: "Toggle playback from a media keyboard or remote",
+            toml_key: "media_play_pause",
+            settings_key: "hotkey.media_play_pause",
+            default: KeyCombo::key(KeyCode::MediaPlayPause),
+        },
+        MediaPause {
+            display: "Pause (media key)",
+            description: "Pause playback from a media keyboard or remote",
+            toml_key: "media_pause",
+            settings_key: "hotkey.media_pause",
+            default: KeyCombo::key(KeyCode::MediaPause),
+        },
+        MediaStop {
+            display: "Stop (media key)",
+            description: "Stop playback from a media keyboard or remote",
+            toml_key: "media_stop",
+            settings_key: "hotkey.media_stop",
+            default: KeyCombo::key(KeyCode::MediaStop),
+        },
+        MediaNextTrack {
+            display: "Next Track (media key)",
+            description: "Skip to the next track from a media keyboard or remote",
+            toml_key: "media_next_track",
+            settings_key: "hotkey.media_next_track",
+            default: KeyCombo::key(KeyCode::MediaNext),
+        },
+        MediaPreviousTrack {
+            display: "Previous Track (media key)",
+            description: "Go to the previous track from a media keyboard or remote",
+            toml_key: "media_previous_track",
+            settings_key: "hotkey.media_previous_track",
+            default: KeyCombo::key(KeyCode::MediaPrevious),
+        },
+        GoHome {
+            display: "Home (remote)",
+            description: "Go to Harbour from a remote's Home key",
+            toml_key: "go_home",
+            settings_key: "hotkey.go_home",
+            default: KeyCombo::key(KeyCode::HomePage),
         },
     ]
 }

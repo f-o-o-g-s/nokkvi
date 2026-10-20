@@ -62,6 +62,10 @@ Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` va
 - Clickable star ratings + clickable hearts on every slot via `mouse_area`.
 - Scrollbar timers carry the target `View` so seek messages route correctly between panes.
 
+### Vertical arrows
+
+Bare Up/Down (`EditUp` / `EditDown`) edit the focused Settings row; everywhere else they move the list exactly like Tab / Backspace (`handle_edit_value` dispatches the same `SlotListMessage::NavigateUp/Down`), including into a list-taking modal over Settings. Shift+Up/Down stay Move Track. See gotchas/hotkeys.md for the remote-control keys.
+
 ### Horizontal arrows (seek vs sort)
 
 Bare Left/Right are Seek Backward / Seek Forward; Shift+Left/Right cycle the sort mode. Both actions call `Nokkvi::horizontal_arrow_context` (`update/hotkeys/navigation.rs`) as their FIRST statement, so wherever the arrows already EDIT something the edit wins whichever pair was pressed: the Trawl tray while its modal is on top (`modal_is_top(ActiveModal::Trawl)`, as in every Trawl-first route), `EditLeft`/`EditRight` in Settings. Everywhere else the sort cycle plays its SFX and reveals the toolbar, while a seek does neither — a held key repeats ~25x/s, so both would be stranded. The pure `horizontal_arrow_owner()` names the owning context and is what tests assert. The smart-playlist rules editor and its date picker take LITERAL arrows for `CycleCell` before any binding lookup, so bare arrows never seek there (a rebound seek key does).

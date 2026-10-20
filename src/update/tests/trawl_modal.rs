@@ -47,6 +47,7 @@ fn send_raw_key(
 ) -> iced::Task<crate::Message> {
     app.update(crate::Message::RawKeyEvent(
         key,
+        None,
         modifiers,
         iced::event::Status::Ignored,
         false,
@@ -728,6 +729,7 @@ fn send_raw_key_captured(
 ) -> iced::Task<crate::Message> {
     app.update(crate::Message::RawKeyEvent(
         key,
+        None,
         modifiers,
         iced::event::Status::Captured,
         false,

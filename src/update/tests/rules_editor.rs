@@ -522,6 +522,7 @@ fn sub_picker_swallows_non_nav_hotkeys() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Character("t".into()),
+        None,
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Ignored,
     );
@@ -991,6 +992,7 @@ fn resolved_save_action_remaps_to_rules_save() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Character("s".into()),
+        None,
         iced::keyboard::Modifiers::CTRL,
         iced::event::Status::Ignored,
     );
@@ -1016,6 +1018,7 @@ fn shift_tab_hops_panes() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        None,
         iced::keyboard::Modifiers::SHIFT,
         iced::event::Status::Ignored,
     );
@@ -1023,6 +1026,7 @@ fn shift_tab_hops_panes() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        None,
         iced::keyboard::Modifiers::SHIFT,
         iced::event::Status::Ignored,
     );
@@ -1055,6 +1059,7 @@ fn bare_shift_while_editing_name_keeps_editing() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+        None,
         iced::keyboard::Modifiers::SHIFT,
         iced::event::Status::Ignored,
     );
@@ -1076,6 +1081,7 @@ fn bare_capslock_while_editing_keeps_editing() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::CapsLock),
+        None,
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Ignored,
     );
@@ -1092,6 +1098,7 @@ fn bare_control_while_editing_keeps_editing() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Control),
+        None,
         iced::keyboard::Modifiers::CTRL,
         iced::event::Status::Ignored,
     );
@@ -1109,6 +1116,7 @@ fn tab_while_editing_still_commits() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        None,
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Ignored,
     );
@@ -1585,6 +1593,7 @@ fn modal_over_rules_session_owns_the_keyboard() {
 
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        None,
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Ignored,
     );

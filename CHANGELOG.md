@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- On Wayland, a TV remote's OK button now works like Enter, so a G20S-style air mouse can play the focused item.
+- A TV remote's Back button now works like Escape.
+- The bare Up and Down arrows now move through lists outside Settings, as Tab and Backspace do.
+- The media keys now play, pause, stop and skip tracks when your desktop passes them to nokkvi.
+- The media keys work even while a popup like the equalizer is open.
+- A remote's Home button (the Home Page key) now opens Harbour.
+- Remote and media keys such as Menu, Search, Rewind and Volume Up can now be bound to actions.
+- A remote button with no key name can now be bound by its key number, shown as "Key 582".
+
 ### Changed
 
 ### Fixed

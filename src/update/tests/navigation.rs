@@ -1524,6 +1524,7 @@ fn press_arrow(app: &mut crate::Nokkvi, right: bool, shift: bool) {
     };
     let _ = app.update(crate::Message::RawKeyEvent(
         iced::keyboard::Key::Named(named),
+        None,
         modifiers,
         iced::event::Status::Ignored,
         false,

@@ -6,7 +6,7 @@ use tracing::{debug, trace};
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, SplitViewMessage},
+    app_message::{Message, SlotListMessage, SplitViewMessage},
     update::modals::ActiveModal,
     views, widgets,
 };
@@ -127,17 +127,23 @@ impl Nokkvi {
     ///
     /// In Settings, routes to `SlotListUp`/`SlotListDown` which the toggle-cursor
     /// logic intercepts to enable/disable the cursored ToggleSet badge.
-    /// In other views this is a no-op (arrow up/down are dedicated to MoveTrack
-    /// via Shift+Arrow).
-    pub(crate) fn handle_edit_value(&self, up: bool) -> Task<Message> {
-        if self.current_view == View::Settings {
+    /// Everywhere else the arrows move the list, as Tab / Backspace do, so a TV
+    /// remote's D-pad (arrows and OK, no Tab) can scroll the library. A modal on
+    /// top takes them even over Settings: the key gate only lets them through
+    /// for a list-taking modal, and the slot-list routing hands them to it.
+    pub(crate) fn handle_edit_value(&mut self, up: bool) -> Task<Message> {
+        if self.current_view == View::Settings && self.top_modal().is_none() {
             return if up {
                 Task::done(Message::Settings(views::SettingsMessage::SlotListUp))
             } else {
                 Task::done(Message::Settings(views::SettingsMessage::SlotListDown))
             };
         }
-        Task::none()
+        self.handle_slot_list_message(if up {
+            SlotListMessage::NavigateUp
+        } else {
+            SlotListMessage::NavigateDown
+        })
     }
 
     /// Reveal the current view's auto-hide toolbar (pane-aware). Called by

@@ -298,6 +298,7 @@ fn a_release_never_covers_a_later_load() {
 pub(super) fn press(app: &mut Nokkvi, c: &str, modifiers: iced::keyboard::Modifiers) {
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Character(c.into()),
+        None,
         modifiers,
         iced::event::Status::Ignored,
     );
