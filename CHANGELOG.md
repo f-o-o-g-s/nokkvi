@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Similar artists you don't have now come first in the Artists panel and the Similar Artists popup.
+- Similar artists both ListenBrainz and Deezer name now come before those only one of them names.
 - A similar artist's hover note and popup row now name the service that listed them.
 
 ### Fixed

@@ -5,8 +5,9 @@
 //! ListenBrainz's list (`services::listenbrainz_similar`) is keyed on the
 //! artist's MusicBrainz id, Deezer's (`services::deezer_similar`) on the
 //! artist's name, since Deezer has no MusicBrainz ids. Both name artists the
-//! library lacks as readily as ones it has. [`blend`] interleaves the two,
-//! each name once; `AppService::similar_artists` then looks each name up on
+//! library lacks as readily as ones it has. [`blend`] puts the artists both
+//! name first and interleaves the rest, each name once;
+//! `AppService::similar_artists` then looks each name up on
 //! the server, stamps the outcome on the row and puts the artists the library
 //! lacks first ([`unowned_first`]), so a view leads with artists to discover,
 //! links an artist the library has and sends the rest to the page of the
@@ -155,21 +156,29 @@ impl RecSources {
 /// server lookup.
 pub const ARTIST_RECS_SHOWN: usize = 10;
 
-/// Interleave ListenBrainz's list and Deezer's, ListenBrainz first, keeping
-/// the first `limit` names: each service's best picks lead, neither list
-/// crowds out the other, and a list that runs short leaves its room to the
-/// other. An artist both list is kept once, at their first place, with both
-/// services' keys and ListenBrainz's comment; the rest of both lists is still
-/// read for that, past the limit. Names are the only key the two services
-/// share, so two artists who share a name are taken for one.
+/// How far down each service's list [`blend`] reads: Deezer sends twenty,
+/// and ListenBrainz's picks past its twentieth (of a hundred) are too loose
+/// a match to lead the list, or to take a place in it.
+pub const BLEND_DEPTH: usize = 20;
+
+/// Blend ListenBrainz's list and Deezer's into the first `limit` names. The
+/// artists both services name lead: two services that count listening
+/// differently agreeing on an artist is the strongest sign there is. The rest
+/// follow taking turns, ListenBrainz first, so each service's best picks come
+/// early, neither list crowds out the other, and a list that runs short leaves
+/// its room to the other. Each group keeps the order the turns reached its
+/// names in. An artist both name is kept once, with both services' keys and
+/// ListenBrainz's comment. Only the first [`BLEND_DEPTH`] picks of each list
+/// are read. Names are the only key the two services share, so two artists
+/// who share a name are taken for one.
 pub fn blend(listenbrainz: Vec<ArtistRec>, deezer: Vec<ArtistRec>, limit: usize) -> Vec<ArtistRec> {
-    let mut kept: Vec<ArtistRec> = Vec::with_capacity(limit);
-    let mut listenbrainz = listenbrainz.into_iter();
-    let mut deezer = deezer.into_iter();
+    let mut kept: Vec<ArtistRec> = Vec::with_capacity(2 * BLEND_DEPTH);
+    let mut listenbrainz = listenbrainz.into_iter().take(BLEND_DEPTH);
+    let mut deezer = deezer.into_iter().take(BLEND_DEPTH);
     loop {
         let pair = [listenbrainz.next(), deezer.next()];
         if pair.iter().all(Option::is_none) {
-            return kept;
+            break;
         }
         for rec in pair.into_iter().flatten() {
             if let Some(same) = kept
@@ -180,11 +189,14 @@ pub fn blend(listenbrainz: Vec<ArtistRec>, deezer: Vec<ArtistRec>, limit: usize)
                 if same.comment.is_none() {
                     same.comment = rec.comment;
                 }
-            } else if kept.len() < limit {
+            } else {
                 kept.push(rec);
             }
         }
     }
+    kept.sort_by_key(|rec| !matches!(rec.source, RecSource::Both { .. }));
+    kept.truncate(limit);
+    kept
 }
 
 /// Put the artists the library lacks ahead of the ones it has, each group in
@@ -329,26 +341,62 @@ mod tests {
         assert_eq!(names(&blended), ["A", "X", "B", "C"]);
     }
 
-    /// An artist both list is kept once, at their first place, with both
-    /// keys and ListenBrainz's note, whichever list named them first, and
-    /// even when the second naming falls past the limit.
+    /// An artist both list is kept once, with both keys and ListenBrainz's
+    /// note, whichever list named them first.
     #[test]
     fn an_artist_both_list_is_kept_once_with_both_keys() {
         let blended = blend(
             vec![lb("A"), lb("B"), lb("Blur")],
             vec![dz("blur", 743), dz("Y", 2)],
-            3,
+            10,
         );
-        assert_eq!(names(&blended), ["A", "blur", "B"]);
+        let blur = blended
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case("blur"))
+            .expect("kept");
         assert_eq!(
-            blended[1].source,
+            blended
+                .iter()
+                .filter(|r| r.name.eq_ignore_ascii_case("blur"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            blur.source,
             RecSource::Both {
                 mbid: "mbid-Blur".into(),
                 deezer_id: 743
             }
         );
-        assert_eq!(blended[1].comment.as_deref(), Some("note on Blur"));
-        assert_eq!(blended[1].source.label(), "ListenBrainz and Deezer");
+        assert_eq!(blur.comment.as_deref(), Some("note on Blur"));
+        assert_eq!(blur.source.label(), "ListenBrainz and Deezer");
+    }
+
+    /// The artists both services name lead, in the order the turns reached
+    /// them, even when one list names them late; the rest follow taking
+    /// turns.
+    #[test]
+    fn the_artists_both_name_come_first() {
+        let blended = blend(
+            vec![lb("A"), lb("B"), lb("C"), lb("Pixies"), lb("Blur")],
+            vec![dz("Blur", 743), dz("X", 1), dz("Pixies", 652), dz("Y", 2)],
+            5,
+        );
+        assert_eq!(names(&blended), ["Blur", "Pixies", "A", "B", "X"]);
+    }
+
+    /// Only the first [`BLEND_DEPTH`] picks of each list count: ListenBrainz
+    /// sends a hundred, and a name deep in that tail is too loose a match to
+    /// lead the list, or to take a place at all.
+    #[test]
+    fn a_pick_past_the_depth_neither_counts_as_agreement_nor_shows() {
+        let mut listenbrainz: Vec<ArtistRec> =
+            (0..BLEND_DEPTH).map(|i| lb(&format!("LB {i}"))).collect();
+        listenbrainz.push(lb("Blur"));
+        let blended = blend(listenbrainz, vec![dz("Blur", 743)], 40);
+        let blur = blended.iter().find(|r| r.name == "Blur").expect("Deezer's");
+        assert_eq!(blur.source, RecSource::Deezer { id: 743 });
+        assert_ne!(blended[0].name, "Blur", "no agreement to lead with");
     }
 
     #[test]
