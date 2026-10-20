@@ -10,7 +10,11 @@ use tracing::trace;
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::songs::SongsApiService,
-    types::{library_query::LibraryQuery, reactive::ReactiveInt, song::Song},
+    types::{
+        library_query::LibraryQuery,
+        reactive::ReactiveInt,
+        song::{Song, SongCover},
+    },
 };
 
 /// UI-specific view data for songs
@@ -23,6 +27,9 @@ pub struct SongUIViewData {
     pub artist_id: Option<String>,
     pub album: String,
     pub album_id: Option<String>,
+    /// The `mf-<id>` key of the art in the song's own file
+    /// ([`SongCover::own_cover`]); `None` when it has none.
+    pub own_cover: Option<String>,
     pub duration: u32,
     pub is_starred: bool,
     pub track: Option<u32>,
@@ -92,6 +99,16 @@ impl crate::backend::PlayCountable for SongUIViewData {
     }
 }
 
+impl SongCover for SongUIViewData {
+    fn own_cover(&self) -> Option<&str> {
+        self.own_cover.as_deref()
+    }
+
+    fn album_cover(&self) -> Option<&str> {
+        self.album_id.as_deref()
+    }
+}
+
 impl crate::utils::search::Searchable for SongUIViewData {
     fn matches_query(&self, query_lower: &str) -> bool {
         self.searchable_lower.contains(query_lower)
@@ -103,6 +120,7 @@ impl From<Song> for SongUIViewData {
         let participants = crate::backend::flatten_participants(song.participants.as_ref());
         let searchable_lower =
             crate::utils::search::build_searchable_lower(&[&song.title, &song.artist, &song.album]);
+        let own_cover = song.own_cover().map(str::to_string);
         Self {
             id: song.id,
             title: song.title,
@@ -110,6 +128,7 @@ impl From<Song> for SongUIViewData {
             artist_id: song.artist_id,
             album: song.album,
             album_id: song.album_id,
+            own_cover,
             duration: song.duration,
             is_starred: song.starred,
             track: song.track,
@@ -149,7 +168,8 @@ impl From<SongUIViewData> for Song {
             artist_id: ui.artist_id,
             album: ui.album,
             album_id: ui.album_id.clone(),
-            cover_art: ui.album_id, // Use album_id as cover_art fallback
+            // The song's own cover when it has one, else the album id.
+            cover_art: ui.own_cover.or(ui.album_id),
             duration: ui.duration,
             track: ui.track,
             disc: ui.disc,
@@ -293,5 +313,44 @@ impl SongsService {
             // have dedicated columns; the rest sort by data already visible.
             _ => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::player_settings::TrackArtwork;
+
+    fn song(cover_art: Option<&str>) -> Song {
+        Song {
+            cover_art: cover_art.map(str::to_string),
+            album_id: Some("a1".to_string()),
+            ..Song::test_default("s1", "Song")
+        }
+    }
+
+    /// The Songs view row keeps the song's own cover, and queueing the row
+    /// (back into a `Song`) keeps it too, so the queue shows the same art.
+    #[test]
+    fn own_cover_survives_the_view_row_round_trip() {
+        let row = SongUIViewData::from(song(Some("mf-s1_1a2b")));
+        assert_eq!(row.own_cover.as_deref(), Some("mf-s1"));
+        assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("mf-s1"));
+        assert_eq!(row.cover_key(TrackArtwork::AlbumCover), Some("a1"));
+
+        let back = Song::from(row);
+        assert_eq!(back.own_cover(), Some("mf-s1"));
+        assert_eq!(back.album_id.as_deref(), Some("a1"));
+    }
+
+    #[test]
+    fn a_row_without_its_own_cover_queues_with_the_album_cover() {
+        let row = SongUIViewData::from(song(Some("al-a1_ff")));
+        assert_eq!(row.own_cover, None);
+        assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("a1"));
+
+        let back = Song::from(row);
+        assert_eq!(back.own_cover(), None);
+        assert_eq!(back.cover_art.as_deref(), Some("a1"));
     }
 }

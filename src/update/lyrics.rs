@@ -451,7 +451,7 @@ impl Nokkvi {
         if !self.lyrics_surface_visible() {
             return None;
         }
-        let album_id = self.current_queue_song_album_id()?.to_string();
+        let album_id = self.current_queue_song_cover_key()?.to_string();
         let source = self.artwork.large_artwork.snapshot.get(&album_id)?;
         let source_id = source.id();
         if let Some(cached) = &self.artwork.lyrics_blurred
@@ -509,7 +509,7 @@ impl Nokkvi {
         if matches_pending {
             self.artwork.lyrics_blur_pending = None;
         }
-        if !matches_pending && self.current_queue_song_album_id() != Some(album_id.as_str()) {
+        if !matches_pending && self.current_queue_song_cover_key() != Some(album_id.as_str()) {
             return Task::none();
         }
         let hold = handle.as_ref().map_or_else(Task::none, |frosted| {

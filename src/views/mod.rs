@@ -842,6 +842,14 @@ impl<'a> RowCovers<'a> {
     }
 }
 
+/// The cover key a song row draws and asks for under the Track Artwork
+/// setting: its album id, or its own `mf-` cover ([`SongCover::cover_key`]).
+/// Views read the setting's mirror atomic (`theme::track_artwork`); the
+/// handlers that fetch the same key read `Nokkvi.settings`, which it mirrors.
+pub(crate) fn song_cover_key<S: nokkvi_data::types::song::SongCover>(song: &S) -> Option<&str> {
+    song.cover_key(crate::theme::track_artwork())
+}
+
 /// The picture a thumbnail slot draws for `id` (an album or artist id): its
 /// 80px cover, else the blurred stand-in decoded when that cover was sent
 /// for (Navidrome 0.64+, `Nokkvi::claim_minis`).

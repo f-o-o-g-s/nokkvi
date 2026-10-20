@@ -93,12 +93,9 @@ impl SongsPage {
                         if needs_artwork_load
                             && let Some(center_idx) = self.common.get_center_item_index(total_items)
                             && let Some(song) = songs.get(center_idx)
-                            && let Some(album_id) = &song.album_id
+                            && let Some(key) = crate::views::song_cover_key(song)
                         {
-                            return (
-                                Task::none(),
-                                SongsAction::LoadLargeArtwork(album_id.clone()),
-                            );
+                            return (Task::none(), SongsAction::LoadLargeArtwork(key.to_owned()));
                         }
                         (Task::none(), SongsAction::None)
                     }

@@ -2,8 +2,8 @@
 //!
 //! Migrated keys: Application (start_view, enter_behavior, enter_shuffle,
 //! harbour_expandable_shelves, library_page_size,
-//! suppress_library_refresh_toasts, artwork_resolution, show_album_artists_only,
-//! similar_artists_online,
+//! suppress_library_refresh_toasts, artwork_resolution, track_artwork,
+//! show_album_artists_only, similar_artists_online,
 //! local_music_path, verbose_config), Mouse Behavior (stable_viewport,
 //! auto_follow_playing), System Tray (show_tray_icon, close_to_tray), and the
 //! Theme-tab `light_mode` toggle (its persistence is config-file-only — the
@@ -20,7 +20,7 @@ use crate::{
     types::{
         player_settings::{
             ArtworkResolution, EnterBehavior, LibraryPageSize, SEEK_STEP_DEFAULT_SECS,
-            SEEK_STEP_MAX_SECS, SEEK_STEP_MIN_SECS, VerboseConfig,
+            SEEK_STEP_MAX_SECS, SEEK_STEP_MIN_SECS, TrackArtwork, VerboseConfig,
         },
         setting_def::Tab,
         settings_data::GeneralSettingsData,
@@ -343,6 +343,26 @@ define_settings! {
                 default: "Default (1000px)",
                 options: ArtworkResolution::LABELS,
                 read_field: |d| d.artwork_resolution.as_ref(),
+            },
+        },
+        TrackArtworkKey {
+            key: "general.track_artwork",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_track_artwork(TrackArtwork::from_label(&v)),
+            toml_apply: |ts, p| p.track_artwork = ts.track_artwork,
+            read: |src, out| out.track_artwork = src.track_artwork,
+            write: |ps, ts| ts.track_artwork = ps.track_artwork,
+            ui_meta: {
+                label: "Track Artwork",
+                category: "Application",
+                subtitle: Some(
+                    "Which cover songs show in the queue, song lists and now playing. Album \
+                     Cover: the album's. Track's Own Cover: the art in each file, else the \
+                     album's; fetched once per track.",
+                ),
+                default: "Album Cover",
+                options: TrackArtwork::LABELS,
+                read_field: |d| d.track_artwork.as_ref(),
             },
         },
         // The setter writes only redb (via `save_redb_only`); the UI handler
@@ -792,6 +812,7 @@ mod tests {
             verbose_config: "Clean".into(),
             library_page_size: "Default (500)".into(),
             artwork_resolution: "Default (1000px)".into(),
+            track_artwork: "Album Cover".into(),
             show_album_artists_only: true,
             similar_artists_online: true,
             suppress_library_refresh_toasts: false,
@@ -801,13 +822,13 @@ mod tests {
     }
 
     /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
-    /// 16 of the 17 declared keys carry ui_meta — light_mode does not (it
-    /// renders on the Theme tab, not General), so the helper emits 16 rows.
+    /// 17 of the 18 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 17 rows.
     #[test]
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 16);
+        assert_eq!(entries.len(), 17);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -923,6 +944,7 @@ mod tests {
             verbose_config: live.verbose_config.as_label().into(),
             library_page_size: live.library_page_size.as_label().into(),
             artwork_resolution: live.artwork_resolution.as_label().into(),
+            track_artwork: live.track_artwork.as_label().into(),
             show_album_artists_only: live.show_album_artists_only,
             similar_artists_online: live.similar_artists_online,
             suppress_library_refresh_toasts: live.suppress_library_refresh_toasts,

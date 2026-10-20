@@ -51,6 +51,7 @@ impl Nokkvi {
             verbose_config: self.settings.verbose_config.as_label().into(),
             library_page_size: self.settings.library_page_size.as_label().into(),
             artwork_resolution: self.settings.artwork_resolution.as_label().into(),
+            track_artwork: self.settings.track_artwork.as_label().into(),
             show_album_artists_only: self.settings.show_album_artists_only,
             similar_artists_online: self.settings.similar_artists_online,
             suppress_library_refresh_toasts: self.settings.suppress_library_refresh_toasts,

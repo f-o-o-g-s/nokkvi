@@ -5,14 +5,12 @@ use std::{borrow::Cow, collections::HashSet};
 use iced::Task;
 use nokkvi_data::{
     backend::queue::QueueSongUIViewData,
-    types::{ItemKind, queue::MoveBatchTarget, queue_sort_mode::QueueSortMode},
+    types::{ItemKind, queue::MoveBatchTarget, queue_sort_mode::QueueSortMode, song::SongCover},
     utils::reorder::move_block_before,
 };
 use tracing::{debug, error, trace};
 
-use super::components::{
-    ArtworkGate, duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
-};
+use super::components::{ArtworkGate, duplicates_removed_text, queue_row_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{
@@ -85,19 +83,14 @@ impl Nokkvi {
                     let total = self.library.queue_songs.len();
                     if total > 0 {
                         // Mini artwork prefetch using canonical helper
+                        let mode = self.settings.track_artwork;
                         let gate = ArtworkGate::new(&self.artwork);
-                        let (queued, prefetch) = prefetch_album_artwork_tasks(
+                        let (queued, prefetch) = queue_row_artwork_tasks(
                             &self.queue_page.common.slot_list,
                             &self.library.queue_songs,
                             &gate,
                             shell.albums().clone(),
-                            |song| {
-                                (
-                                    song.album_id.clone(),
-                                    passive_artwork_version(&song.updated_at),
-                                    song.artwork_url.clone(),
-                                )
-                            },
+                            mode,
                         );
                         drop(gate);
                         self.claim_minis(queued);
@@ -106,10 +99,14 @@ impl Nokkvi {
                         // Load large artwork for center song
                         if let Some(center_idx) =
                             self.queue_page.common.get_center_item_index(total)
-                            && let Some(song) = self.library.queue_songs.get(center_idx)
+                            && let Some(key) = self
+                                .library
+                                .queue_songs
+                                .get(center_idx)
+                                .and_then(|song| song.cover_key(mode))
                         {
                             tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                                song.album_id.clone(),
+                                key.to_owned(),
                             ))));
                         }
                     }
@@ -953,32 +950,27 @@ impl Nokkvi {
         if total > 0
             && let Some(shell) = &self.app_service
         {
+            let mode = self.settings.track_artwork;
             let gate = ArtworkGate::new(&self.artwork);
-            let (queued, prefetch) = prefetch_album_artwork_tasks(
+            let (queued, prefetch) = queue_row_artwork_tasks(
                 &self.queue_page.common.slot_list,
                 rows,
                 &gate,
                 shell.albums().clone(),
-                |song| {
-                    (
-                        song.album_id.clone(),
-                        passive_artwork_version(&song.updated_at),
-                        song.artwork_url.clone(),
-                    )
-                },
+                mode,
             );
             queued_ids = queued;
             tasks.extend(prefetch);
 
             // Load large artwork for center song
             if let Some(center_idx) = self.queue_page.common.get_center_item_index(total)
-                && let Some(song) = rows.get(center_idx)
+                && let Some(key) = rows.get(center_idx).and_then(|song| song.cover_key(mode))
             {
                 // A step: through the big panel's gate, cached rows included,
                 // so a step onto one leaves nothing waiting from before it.
                 tasks.push(Task::done(Message::Artwork(ArtworkMessage::PanelArtStep {
                     source: Some(crate::View::Queue),
-                    target: crate::state::PanelArt::Album(song.album_id.clone()),
+                    target: crate::state::PanelArt::Album(key.to_owned()),
                 })));
             }
         }

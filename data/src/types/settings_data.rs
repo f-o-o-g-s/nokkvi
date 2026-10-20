@@ -38,6 +38,8 @@ pub struct GeneralSettingsData {
     pub verbose_config: Cow<'static, str>,
     pub library_page_size: Cow<'static, str>,
     pub artwork_resolution: Cow<'static, str>,
+    /// Track Artwork label ("Album Cover" / "Track's Own Cover").
+    pub track_artwork: Cow<'static, str>,
     pub show_album_artists_only: bool,
     pub similar_artists_online: bool,
     pub suppress_library_refresh_toasts: bool,
@@ -61,6 +63,7 @@ impl Default for GeneralSettingsData {
             verbose_config: Cow::Borrowed("test-default"),
             library_page_size: Cow::Borrowed("test-default"),
             artwork_resolution: Cow::Borrowed("test-default"),
+            track_artwork: Cow::Borrowed("test-default"),
             show_album_artists_only: false,
             similar_artists_online: false,
             suppress_library_refresh_toasts: false,

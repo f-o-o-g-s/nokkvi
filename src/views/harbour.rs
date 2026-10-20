@@ -724,8 +724,8 @@ pub(crate) fn build_harbour_rows(
                 Some(s.title.clone()),
                 (!s.artist.is_empty()).then(|| s.artist.clone()),
             ]),
-            art_album_id: s.album_id.clone(),
-            art_album_ids: s.album_id.clone().into_iter().collect(),
+            art_album_id: song_cover(s),
+            art_album_ids: song_cover(s).into_iter().collect(),
             custom_playlist_id: None,
         });
         let expanded = push_search_header(
@@ -742,8 +742,8 @@ pub(crate) fn build_harbour_rows(
                 rows.push(HarbourRow::Item {
                     title: s.title.clone(),
                     subtitle: s.artist.clone(),
-                    art_album_id: s.album_id.clone(),
-                    art_album_ids: s.album_id.clone().into_iter().collect(),
+                    art_album_id: song_cover(s),
+                    art_album_ids: song_cover(s).into_iter().collect(),
                     play: PlayTarget::Item(BatchItem::Song(Box::new(s.clone()))),
                 });
             }
@@ -941,8 +941,8 @@ pub(crate) fn random_teaser(
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
                     Some(songs_label(n)),
                 ]),
-                art_album_id: s.album_id.clone(),
-                art_album_ids: s.album_id.clone().into_iter().collect(),
+                art_album_id: song_cover(s),
+                art_album_ids: song_cover(s).into_iter().collect(),
                 custom_playlist_id: None,
             }
         }),
@@ -1041,8 +1041,8 @@ fn push_song_section(
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
                     Some(songs_label(batch)),
                 ]),
-                art_album_id: s.album_id.clone(),
-                art_album_ids: s.album_id.clone().into_iter().collect(),
+                art_album_id: song_cover(s),
+                art_album_ids: song_cover(s).into_iter().collect(),
                 custom_playlist_id: None,
             });
         rows.push(HarbourRow::ShelfPlay { id, count, teaser });
@@ -1054,8 +1054,8 @@ fn push_song_section(
             (!s.artist.is_empty()).then(|| s.artist.clone()),
             song_fact(s),
         ]),
-        art_album_id: s.album_id.clone(),
-        art_album_ids: s.album_id.clone().into_iter().collect(),
+        art_album_id: song_cover(s),
+        art_album_ids: song_cover(s).into_iter().collect(),
         custom_playlist_id: None,
     });
     rows.push(HarbourRow::Section {
@@ -1075,8 +1075,8 @@ fn push_song_section(
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
                     song_fact(s),
                 ]),
-                art_album_id: s.album_id.clone(),
-                art_album_ids: s.album_id.clone().into_iter().collect(),
+                art_album_id: song_cover(s),
+                art_album_ids: song_cover(s).into_iter().collect(),
                 play: PlayTarget::Item(BatchItem::Song(Box::new(s.clone()))),
             });
         }
@@ -2340,6 +2340,12 @@ pub(crate) fn section_collage_source(
     }
 }
 
+/// A song item's cover key, owned for the row: its album id, or its own
+/// `mf-` cover under Track Artwork (`views::song_cover_key`).
+fn song_cover(song: &nokkvi_data::types::song::Song) -> Option<String> {
+    crate::views::song_cover_key(song).map(str::to_owned)
+}
+
 /// The representative album id for a section — the cover the preview panel
 /// shows. Shared by the panel and the artwork-warm path (handler) so both
 /// resolve to the SAME cover: album shelves use their top album; the Most
@@ -2349,15 +2355,11 @@ pub(crate) fn section_cover_album_id(
     id: HarbourSectionId,
 ) -> Option<String> {
     match id {
-        HarbourSectionId::RecentlyPlayed => harbour
-            .recently_played
-            .first()
-            .and_then(|s| s.album_id.clone()),
+        HarbourSectionId::RecentlyPlayed => harbour.recently_played.first().and_then(song_cover),
         HarbourSectionId::RecentlyAdded => harbour.recently_added.first().map(|a| a.id.clone()),
-        HarbourSectionId::MostPlayedTracks => harbour
-            .most_played_songs
-            .first()
-            .and_then(|s| s.album_id.clone()),
+        HarbourSectionId::MostPlayedTracks => {
+            harbour.most_played_songs.first().and_then(song_cover)
+        }
         HarbourSectionId::MostPlayedAlbums => {
             harbour.most_played_albums.first().map(|a| a.id.clone())
         }

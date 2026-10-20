@@ -94,6 +94,8 @@ pub(super) struct UiModeFlags {
     /// Cover picture or black backdrop on the now-playing panels
     /// (`ArtworkCover` discriminant)
     pub(super) artwork_cover: AtomicU8,
+    /// Which cover a song shows (`TrackArtwork` discriminant)
+    pub(super) track_artwork: AtomicU8,
     /// Artwork column width as fraction of window width (f32 bits, 0.05..=0.80)
     pub(super) artwork_column_width_pct: AtomicU32,
     /// Auto-mode max artwork size as fraction of window short axis
@@ -145,6 +147,7 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     artwork_column_mode: AtomicU8::new(ArtworkColumnMode::Auto as u8),
     artwork_column_stretch_fit: AtomicU8::new(ArtworkStretchFit::Cover as u8),
     artwork_cover: AtomicU8::new(ArtworkCover::Show as u8),
+    track_artwork: AtomicU8::new(TrackArtwork::AlbumCover as u8),
     // Initial values mirror the data-crate defaults in
     // `nokkvi_data::types::player_settings::artwork`. `f32::to_bits` is `const`
     // so the bit pattern is derived at compile time — no magic hex.
@@ -848,7 +851,7 @@ pub(crate) fn set_playlists_artwork_overlay(enabled: bool) {
 use nokkvi_data::types::player_settings::{
     ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX,
     ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_VERTICAL_HEIGHT_PCT_MAX, ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
-    ArtworkColumnMode, ArtworkCover, ArtworkStretchFit,
+    ArtworkColumnMode, ArtworkCover, ArtworkStretchFit, TrackArtwork,
 };
 
 // Encoding NOTE: the bytes are the enum's declaration discriminants and are
@@ -881,6 +884,13 @@ atomic_u8_enum! {
         HideInTheater,
         HideEverywhere,
     } default Show
+}
+
+atomic_u8_enum! {
+    TrackArtwork {
+        AlbumCover,
+        OwnCover,
+    } default AlbumCover
 }
 
 /// Returns the active artwork column display mode.
@@ -924,6 +934,20 @@ pub(crate) fn set_artwork_cover(cover: ArtworkCover) {
     UI_MODE
         .artwork_cover
         .store(cover.to_u8(), Ordering::Relaxed);
+}
+
+/// Returns the Track Artwork setting (which cover a song shows), for the
+/// views that read it without `Nokkvi`; handlers read
+/// `Nokkvi.settings.track_artwork`, which this mirrors.
+#[inline]
+pub(crate) fn track_artwork() -> TrackArtwork {
+    TrackArtwork::from_u8(UI_MODE.track_artwork.load(Ordering::Relaxed))
+}
+
+/// Set the Track Artwork setting.
+#[inline]
+pub(crate) fn set_track_artwork(mode: TrackArtwork) {
+    UI_MODE.track_artwork.store(mode.to_u8(), Ordering::Relaxed);
 }
 
 /// Returns the artwork column width fraction (0.05..=0.80).

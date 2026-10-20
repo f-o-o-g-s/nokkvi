@@ -10,7 +10,7 @@ use crate::{
             LibraryPageSize, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
             ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator,
-            TheaterControls, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            TheaterControls, TrackArtwork, TrackInfoDisplay, VerboseConfig, VisualizationMode,
             VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
@@ -372,6 +372,9 @@ crate::player_settings_schema! {
     /// Artwork resolution for the large panel (Default / High / Ultra / Original)
     #[serde(default)]
     same artwork_resolution: ArtworkResolution = ArtworkResolution::default(),
+    /// Which cover a song shows: its album's, or the art in its own file.
+    #[serde(default)]
+    same track_artwork: TrackArtwork = TrackArtwork::default(),
     /// Whether the Artists view shows only album artists
     #[serde(default = "default_true")]
     same show_album_artists_only: bool = default_true(),

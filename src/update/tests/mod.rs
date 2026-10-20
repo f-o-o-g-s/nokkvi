@@ -71,6 +71,7 @@ mod split_view;
 mod star_rating;
 mod state;
 mod theater;
+mod track_artwork;
 mod trawl_menu;
 mod trawl_modal;
 mod visualizer;

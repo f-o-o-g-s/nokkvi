@@ -292,9 +292,8 @@ impl PlaylistEditorState {
             .common
             .get_center_item_index(songs.len())
             .and_then(|idx| songs.get(idx))
-            .and_then(|song| {
-                crate::views::panel_cover(large_artwork, album_art, placeholders, &song.album_id)
-            });
+            .and_then(crate::views::song_cover_key)
+            .and_then(|key| crate::views::panel_cover(large_artwork, album_art, placeholders, key));
         let artwork_content = Some(single_artwork_panel_with_menu::<EditorMessage>(
             center_handle,
             Vec::new(),

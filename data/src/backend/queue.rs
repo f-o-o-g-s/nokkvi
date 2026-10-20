@@ -14,7 +14,7 @@ use crate::{
     types::{
         NextTrackResetEffect,
         reactive::{ReactiveInt, ReactiveVecProperty},
-        song::Song,
+        song::{Song, SongCover},
     },
     utils::artwork_url,
 };
@@ -36,6 +36,9 @@ pub struct QueueSongUIViewData {
     pub artist_id: String,
     pub album: String,
     pub album_id: String,
+    /// The `mf-<id>` key of the art in the song's own file
+    /// ([`SongCover::own_cover`]); `None` when it has none. Not persisted.
+    pub own_cover: Option<String>,
     pub artwork_url: String,
     /// Per-song `updated_at` (Subsonic per-mediafile timestamp), copied from
     /// `Song.updated_at`. It is NOT an album cover version. The passive queue
@@ -52,6 +55,16 @@ pub struct QueueSongUIViewData {
     pub play_count: Option<u32>, // For Most Played sort
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
+}
+
+impl SongCover for QueueSongUIViewData {
+    fn own_cover(&self) -> Option<&str> {
+        self.own_cover.as_deref()
+    }
+
+    fn album_cover(&self) -> Option<&str> {
+        Some(&self.album_id)
+    }
 }
 
 impl crate::backend::Starable for QueueSongUIViewData {
@@ -129,6 +142,7 @@ pub fn build_queue_song_ui_view_data(
         artist_id: song.artist_id.clone().unwrap_or_default(),
         album: song.album.clone(),
         album_id: song.album_id.clone().unwrap_or_default(),
+        own_cover: song.own_cover().map(str::to_string),
         artwork_url: artwork_url::build_song_artwork_url(song, server_url, subsonic_credential),
         updated_at: song.updated_at.clone(),
         duration: crate::utils::formatters::format_duration(song.duration),
@@ -409,6 +423,32 @@ mod tests {
         ids.iter()
             .map(|id| Song::test_default(id, &format!("Song {id}")))
             .collect()
+    }
+
+    #[test]
+    fn build_row_carries_the_songs_own_cover() {
+        use crate::types::player_settings::TrackArtwork;
+
+        let own = Song {
+            cover_art: Some("mf-s7".to_string()),
+            album_id: Some("a7".to_string()),
+            ..Song::test_default("s7", "Own")
+        };
+        let row = build_queue_song_ui_view_data(&own, 0, 1, "http://server", "cred");
+        assert_eq!(row.own_cover.as_deref(), Some("mf-s7"));
+        assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("mf-s7"));
+        assert_eq!(row.cover_key(TrackArtwork::AlbumCover), Some("a7"));
+        // The row's thumbnail URL stays the album's (the playlist strip
+        // quad reuses it under the album id).
+        assert!(row.artwork_url.contains("id=al-a7"), "{}", row.artwork_url);
+
+        let bare = Song {
+            album_id: Some("a7".to_string()),
+            ..Song::test_default("s8", "Bare")
+        };
+        let row = build_queue_song_ui_view_data(&bare, 0, 2, "http://server", "cred");
+        assert_eq!(row.own_cover, None);
+        assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("a7"));
     }
 
     #[test]

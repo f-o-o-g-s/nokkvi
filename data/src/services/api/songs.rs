@@ -16,6 +16,18 @@ pub struct SongsApiService {
     client: ApiClient,
 }
 
+/// One native song's `hasCoverArt` flag (`SongsApiService::mark_own_covers`).
+#[derive(Deserialize)]
+struct HasCoverArt {
+    #[serde(rename = "hasCoverArt", default)]
+    has_cover_art: bool,
+}
+
+#[derive(Deserialize)]
+struct HasCoverArtResponse {
+    content: Option<Vec<HasCoverArt>>,
+}
+
 impl SongsApiService {
     pub fn new(client: ApiClient) -> Self {
         Self { client }
@@ -293,14 +305,16 @@ impl SongsApiService {
         }
 
         // Try parsing as array first
-        if let Ok(songs) = serde_json::from_str::<Vec<Song>>(response_text) {
+        if let Ok(mut songs) = serde_json::from_str::<Vec<Song>>(response_text) {
+            Self::mark_own_covers::<Vec<HasCoverArt>>(response_text, &mut songs, Some);
             return Ok(songs);
         }
 
         // Try parsing as object with content array
         if let Ok(response) = serde_json::from_str::<SongResponse>(response_text)
-            && let Some(songs) = response.content
+            && let Some(mut songs) = response.content
         {
+            Self::mark_own_covers::<HasCoverArtResponse>(response_text, &mut songs, |r| r.content);
             return Ok(songs);
         }
 
@@ -308,6 +322,30 @@ impl SongsApiService {
             "Failed to parse songs response: {}",
             parse::preview(response_text)
         ))
+    }
+
+    /// Native `/api/song` says only `hasCoverArt`, never a `coverArt` id, so
+    /// a song whose file carries its own art gets `mf-<id>` here, the id
+    /// Navidrome serves that art under (`SongCover::own_cover`). Reusing
+    /// `cover_art` keeps the saved queue's bincode layout. A second, skimming
+    /// pass reads the flags (serde skips every other key), lined up with the
+    /// songs by position; a cover id the server sent itself is kept.
+    fn mark_own_covers<R: serde::de::DeserializeOwned>(
+        response_text: &str,
+        songs: &mut [Song],
+        flags_of: impl FnOnce(R) -> Option<Vec<HasCoverArt>>,
+    ) {
+        let Some(flags) = serde_json::from_str::<R>(response_text)
+            .ok()
+            .and_then(flags_of)
+        else {
+            return;
+        };
+        for (song, flag) in songs.iter_mut().zip(flags) {
+            if flag.has_cover_art && song.cover_art.is_none() {
+                song.cover_art = Some(format!("mf-{}", song.id));
+            }
+        }
     }
 
     /// Parse response with total count from headers
@@ -348,6 +386,33 @@ pub(crate) fn collect_library_id_strings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Native `/api/song` sends `hasCoverArt` and no `coverArt`: a song whose
+    /// file carries art is marked with its `mf-<id>` cover, in both response
+    /// shapes; one without keeps no cover id (it shows the album's).
+    #[test]
+    fn native_songs_with_their_own_art_get_a_mediafile_cover() {
+        let array = r#"[
+            {"id": "s1", "title": "Red", "albumId": "a1", "hasCoverArt": true},
+            {"id": "s2", "title": "Bare", "albumId": "a1", "hasCoverArt": false},
+            {"id": "s3", "title": "Old", "albumId": "a1"}
+        ]"#;
+        let songs = SongsApiService::parse_song_response(array).expect("array shape");
+        let covers: Vec<_> = songs.iter().map(|s| s.cover_art.as_deref()).collect();
+        assert_eq!(covers, [Some("mf-s1"), None, None]);
+
+        let object = r#"{"content": [{"id": "s4", "title": "Blue", "hasCoverArt": true}]}"#;
+        let songs = SongsApiService::parse_song_response(object).expect("object shape");
+        assert_eq!(songs[0].cover_art.as_deref(), Some("mf-s4"));
+    }
+
+    /// A cover id the server sent itself wins over `hasCoverArt`.
+    #[test]
+    fn a_sent_cover_id_is_kept() {
+        let json = r#"[{"id": "s1", "title": "T", "coverArt": "al-a1_ff", "hasCoverArt": true}]"#;
+        let songs = SongsApiService::parse_song_response(json).expect("parse");
+        assert_eq!(songs[0].cover_art.as_deref(), Some("al-a1_ff"));
+    }
 
     /// Empty `library_ids` slice + no `LibraryFilter::LibraryIds` means
     /// `collect_library_id_strings` produces an empty Vec, and

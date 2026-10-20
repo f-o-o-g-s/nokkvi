@@ -66,6 +66,25 @@ impl ArtworkResolution {
 }
 
 define_labeled_enum! {
+    /// Which cover a song shows: its album's, or the art embedded in its own
+    /// file. Album surfaces (Albums, Artists, Genres, playlist collages) show
+    /// the album cover either way.
+    ///
+    /// `OwnCover` keys a song with its own art as `mf-<song id>`, one cover
+    /// per track, so an album whose files all embed the same picture fetches
+    /// it once per track. A song without its own art keeps the album cover.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TrackArtwork {
+        /// Every song shows its album's cover.
+        #[default]
+        AlbumCover { label: "Album Cover", wire: "album_cover" },
+        /// A song with art embedded in its file shows that art.
+        OwnCover { label: "Track's Own Cover", wire: "own_cover" },
+    }
+}
+
+define_labeled_enum! {
     /// Artwork column display mode — controls visibility and sizing of the
     /// large artwork column rendered alongside slot lists in albums/songs/queue/
     /// artists/genres/playlists/similar views.

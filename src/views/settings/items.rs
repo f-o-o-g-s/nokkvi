@@ -566,6 +566,7 @@ mod tests {
             vec![
                 "general.library_page_size",
                 "general.artwork_resolution",
+                "general.track_artwork",
                 "general.show_album_artists_only",
                 "general.similar_artists_online",
                 "general.start_view",

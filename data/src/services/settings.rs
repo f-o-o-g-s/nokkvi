@@ -13,7 +13,7 @@ use crate::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             EnterBehavior, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            SlotRowHeight, StripClickAction, TheaterControls, TrackInfoDisplay,
+            SlotRowHeight, StripClickAction, TheaterControls, TrackArtwork, TrackInfoDisplay,
             VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
@@ -1235,6 +1235,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_track_artwork(&mut self, mode: TrackArtwork) -> Result<()> {
+        self.settings.player.track_artwork = mode;
+        self.save()
+    }
+
     pub fn set_lyrics_backdrop_blur(&mut self, blur: LyricsBackdropBlur) -> Result<()> {
         self.settings.player.lyrics_backdrop_blur = blur;
         self.save()
@@ -1631,6 +1636,7 @@ mod sentinel_roundtrip_tests {
             verbose_config: crate::types::player_settings::VerboseConfig::On, // default Clean
             library_page_size: LibraryPageSize::Massive,                      // default Default
             artwork_resolution: ArtworkResolution::Original,                  // default Default
+            track_artwork: TrackArtwork::OwnCover,                            // default AlbumCover
             show_album_artists_only: false,                                   // default true
             suppress_library_refresh_toasts: true,                            // default false
 

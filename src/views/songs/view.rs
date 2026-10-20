@@ -169,7 +169,7 @@ impl SongsPage {
                 let song_artist = song.artist.clone();
                 let song_album = song.album.clone();
                 let song_genre = song.genre.clone().unwrap_or_default();
-                let album_id = song.album_id.clone();
+                let cover_key = crate::views::song_cover_key(song);
                 let duration = song.duration;
                 let is_starred = song.is_starred;
                 let rating = song.rating.unwrap_or(0).min(5) as usize;
@@ -258,8 +258,8 @@ impl SongsPage {
                 }
                 if vis.thumbnail {
                     use crate::widgets::slot_list::slot_list_artwork_column;
-                    let artwork_handle = album_id.as_ref().and_then(|id| {
-                        crate::views::mini_or_placeholder(song_artwork, placeholders, id)
+                    let artwork_handle = cover_key.and_then(|key| {
+                        crate::views::mini_or_placeholder(song_artwork, placeholders, key)
                     });
                     content_row = content_row.push(slot_list_artwork_column(
                         artwork_handle,
@@ -474,24 +474,19 @@ impl SongsPage {
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
-        // Build artwork column component - use album artwork of centered song.
-        // Fall back to the slot-list mini when the large isn't loaded yet —
-        // see Albums view for rationale.
+        // Build artwork column component - the centered song's cover (its
+        // album's, or its own under Track Artwork). Fall back to the
+        // slot-list mini when the large isn't loaded yet — see Albums view
+        // for rationale.
         let centered_song = center_index.and_then(|idx| songs.get(idx));
-        let artwork_handle = centered_song
-            .and_then(|song| song.album_id.as_ref())
-            .and_then(|album_id| {
-                crate::views::panel_cover(
-                    data.large_artwork,
-                    data.album_art,
-                    data.placeholders,
-                    album_id,
-                )
-            });
+        let centered_key = centered_song.and_then(crate::views::song_cover_key);
+        let artwork_handle = centered_key.and_then(|key| {
+            crate::views::panel_cover(data.large_artwork, data.album_art, data.placeholders, key)
+        });
 
-        let panel_menu_entries: Vec<_> = centered_song
-            .and_then(|song| song.album_id.clone())
-            .map(|id| {
+        let panel_menu_entries: Vec<_> = centered_key
+            .map(|key| {
+                let id = key.to_owned();
                 crate::widgets::context_menu::PanelMenuEntry::refresh_artwork(
                     SongsMessage::RefreshArtwork(id),
                 )

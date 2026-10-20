@@ -1044,7 +1044,9 @@ impl QueuePage {
         };
         let playing_handle = playing_song.and_then(|song| {
             data.lyrics_blurred_cover.or_else(|| {
-                crate::views::panel_cover(large_artwork, album_art, placeholders, &song.album_id)
+                crate::views::song_cover_key(song).and_then(|key| {
+                    crate::views::panel_cover(large_artwork, album_art, placeholders, key)
+                })
             })
         });
         let centered_song = self
@@ -1053,24 +1055,23 @@ impl QueuePage {
             .and_then(|center_idx| queue_songs.get(center_idx));
         let center_artwork_handle: Option<&iced::widget::image::Handle> =
             playing_handle.or_else(|| {
-                centered_song.and_then(|song| {
-                    crate::views::panel_cover(
-                        large_artwork,
-                        album_art,
-                        placeholders,
-                        &song.album_id,
-                    )
-                })
+                centered_song
+                    .and_then(crate::views::song_cover_key)
+                    .and_then(|key| {
+                        crate::views::panel_cover(large_artwork, album_art, placeholders, key)
+                    })
             });
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu;
 
-        // Build artwork column component — determine album_id for refresh action
+        // Build artwork column component — the cover key the refresh action
+        // targets (the album id, or the song's own cover under Track Artwork)
         let center_album_id: Option<String> = if data.cover_locks_to_playing {
             current_playing_song_id
                 .as_ref()
                 .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
-                .map(|song| song.album_id.clone())
+                .and_then(crate::views::song_cover_key)
+                .map(str::to_owned)
         } else {
             None
         }
@@ -1078,7 +1079,8 @@ impl QueuePage {
             self.common
                 .get_center_item_index(queue_songs.len())
                 .and_then(|center_idx| queue_songs.get(center_idx))
-                .map(|song| song.album_id.clone())
+                .and_then(crate::views::song_cover_key)
+                .map(str::to_owned)
         });
         let mut panel_menu_entries: Vec<_> = center_album_id
             .map(|id| {
@@ -1124,8 +1126,12 @@ impl QueuePage {
         // follows the centered row, so lyrics show only centered on the
         // playing track itself.
         let playing_id = current_playing_song_id.as_deref();
-        let fallback_same_album =
-            centered_song.and_then(|cs| playing_song.map(|ps| cs.album_id == ps.album_id));
+        // Same picture: the two rows share a cover key (one album under
+        // Album Cover; under Own Cover, a track only shares its own).
+        let fallback_same_album = centered_song.and_then(|cs| {
+            playing_song
+                .map(|ps| crate::views::song_cover_key(cs) == crate::views::song_cover_key(ps))
+        });
         let centered_is_playing = playing_id.is_some()
             && centered_song.is_some_and(|cs| Some(cs.id.as_str()) == playing_id);
         let cover_is_now_playing = cover_shows_now_playing(

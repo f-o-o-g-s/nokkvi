@@ -95,13 +95,14 @@ pub fn build_cover_art_url_with_timestamp(
     }
 }
 
-/// Build the thumbnail artwork URL for a song.
+/// Build the album thumbnail artwork URL for a song (a queue row's
+/// `artwork_url`).
 ///
-/// **Invariant**: uses the song's `album_id`, NOT `song.cover_art`. The
-/// Subsonic API returns `cover_art` as `mf-{mediafile_id}` for playlist
-/// songs, but the UI's in-memory thumbnail map (the only cover cache; nothing
-/// is stored on disk) is keyed by album id. Routing through `cover_art` would
-/// miss the thumbnail the prefetch already loaded and fetch it again per song.
+/// **Invariant**: uses the song's `album_id`, NOT `song.cover_art`. A row
+/// keyed by its album fetches through this URL and the playlist strip quad
+/// reuses it under the album id, so a track's own `mf-` cover here would be
+/// cached as the album's. Under Track Artwork's Own Cover a song's own art is
+/// fetched by its cover key instead (`SongCover::cover_key`).
 ///
 /// Always uses [`THUMBNAIL_SIZE`].
 ///

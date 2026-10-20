@@ -336,6 +336,8 @@ impl QueuePage {
                                 artist_id: Some(row.artist_id.clone()),
                                 album: row.album.clone(),
                                 album_id: Some(row.album_id.clone()),
+                                // Keeps the song's own cover once queued again.
+                                cover_art: row.own_cover.clone(),
                                 duration: row.duration_seconds,
                                 genre: (!row.genre.is_empty()).then(|| row.genre.clone()),
                                 starred: row.starred,
@@ -476,6 +478,7 @@ mod tests {
             artist_id: "ai".into(),
             album: "al".into(),
             album_id: "alid".into(),
+            own_cover: None,
             artwork_url: String::new(),
             updated_at: None,
             duration: "0:00".into(),

@@ -457,20 +457,21 @@ fn preview_row<'a>(
     album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     cols: PreviewColumnVisibility,
 ) -> Element<'a, Message> {
-    let art: Element<'a, Message> = match album_art.get(&song.album_id) {
-        Some(handle) => iced::widget::image(handle.clone())
-            .width(Length::Fixed(32.0))
-            .height(Length::Fixed(32.0))
-            .boxed(),
-        None => container(Space::new())
-            .width(Length::Fixed(32.0))
-            .height(Length::Fixed(32.0))
-            .style(|_t| iced::widget::container::Style {
-                background: Some(theme::bg1().into()),
-                ..Default::default()
-            })
-            .boxed(),
-    };
+    let art: Element<'a, Message> =
+        match crate::views::song_cover_key(song).and_then(|key| album_art.get(key)) {
+            Some(handle) => iced::widget::image(handle.clone())
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0))
+                .boxed(),
+            None => container(Space::new())
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0))
+                .style(|_t| iced::widget::container::Style {
+                    background: Some(theme::bg1().into()),
+                    ..Default::default()
+                })
+                .boxed(),
+        };
     // Wrapping::None + Ellipsis::End lets iced's text layout truncate a long
     // title/artist with "…" at the (clipped, bounded) column edge instead of
     // overflowing into the trailing columns — the slot_list_text recipe.

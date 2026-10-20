@@ -249,7 +249,8 @@ pub(crate) fn build_trawl_rows(state: &TrawlModalState, mix: &TrawlCrate) -> Vec
     if !results.songs.is_empty() {
         rows.push(TrawlRow::Header("Songs"));
         for s in &results.songs {
-            let art = s.album_id.clone();
+            // The song's album cover, or its own under Track Artwork.
+            let art = crate::views::song_cover_key(s).map(str::to_owned);
             push_result(&mut rows, TrawlSeed::from_song(s.clone()), art);
         }
     }

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::player_settings::TrackArtwork;
+
 /// ReplayGain data from the Subsonic API.
 #[derive(
     Debug,
@@ -259,6 +261,47 @@ impl Song {
     }
 }
 
+/// A song's cover key: the id its thumbnail and full-size art are fetched
+/// and cached under. Every surface that shows a song's cover asks this, so
+/// the Track Artwork setting flips them all at once.
+pub trait SongCover {
+    /// The `mf-<song id>` key of the art embedded in the song's own file;
+    /// `None` when it has none or its source didn't say.
+    fn own_cover(&self) -> Option<&str>;
+
+    /// The album id the album's cover is keyed under.
+    fn album_cover(&self) -> Option<&str>;
+
+    /// The key `mode` shows: under `OwnCover` the song's own art when it has
+    /// some, else (and under `AlbumCover`) the album's.
+    fn cover_key(&self, mode: TrackArtwork) -> Option<&str> {
+        match mode {
+            TrackArtwork::AlbumCover => self.album_cover(),
+            TrackArtwork::OwnCover => self.own_cover().or_else(|| self.album_cover()),
+        }
+    }
+}
+
+impl SongCover for Song {
+    /// `cover_art` names the song's own art only as a mediafile cover id:
+    /// Navidrome's Subsonic `coverArt` is `mf-<id>[_<timestamp>]` for a file
+    /// with embedded art and an `al-` / `dc-` id otherwise, and the native
+    /// parse writes `mf-<id>` from `hasCoverArt`
+    /// (`SongsApiService::parse_song_response`). The suffix is dropped (as
+    /// Navidrome's own `ParseArtworkID` splits it) so every source keys one
+    /// track the same way.
+    fn own_cover(&self) -> Option<&str> {
+        let cover = self.cover_art.as_deref()?;
+        cover
+            .starts_with("mf-")
+            .then(|| cover.split_once('_').map_or(cover, |(id, _)| id))
+    }
+
+    fn album_cover(&self) -> Option<&str> {
+        self.album_id.as_deref()
+    }
+}
+
 impl std::fmt::Display for Song {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} - {}", self.artist, self.title)
@@ -307,6 +350,41 @@ impl crate::backend::PlayCountable for Song {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn song_with(cover_art: Option<&str>, album_id: Option<&str>) -> Song {
+        Song {
+            cover_art: cover_art.map(str::to_string),
+            album_id: album_id.map(str::to_string),
+            ..Song::test_default("s1", "Song")
+        }
+    }
+
+    /// Only a mediafile cover id names art of the song's own; Navidrome sends
+    /// `al-` / `dc-` ids for a song without one. The `_<timestamp>` suffix is
+    /// dropped so every source keys the same track the same way.
+    #[test]
+    fn own_cover_is_the_mediafile_cover_id_without_its_suffix() {
+        assert_eq!(song_with(Some("mf-s1"), None).own_cover(), Some("mf-s1"));
+        assert_eq!(
+            song_with(Some("mf-s1_18f0c3a2"), None).own_cover(),
+            Some("mf-s1")
+        );
+        assert_eq!(song_with(Some("al-a1_c12cf44e"), None).own_cover(), None);
+        assert_eq!(song_with(Some("dc-a1:2"), None).own_cover(), None);
+        assert_eq!(song_with(Some("a1"), None).own_cover(), None);
+        assert_eq!(song_with(None, Some("a1")).own_cover(), None);
+    }
+
+    #[test]
+    fn cover_key_follows_the_track_artwork_mode() {
+        let own = song_with(Some("mf-s1"), Some("a1"));
+        assert_eq!(own.cover_key(TrackArtwork::AlbumCover), Some("a1"));
+        assert_eq!(own.cover_key(TrackArtwork::OwnCover), Some("mf-s1"));
+
+        let bare = song_with(None, Some("a1"));
+        assert_eq!(bare.cover_key(TrackArtwork::AlbumCover), Some("a1"));
+        assert_eq!(bare.cover_key(TrackArtwork::OwnCover), Some("a1"));
+    }
 
     /// Subsonic endpoints like `getSimilarSongs2` may omit `path` and `size`
     /// (Go's `omitempty` drops zero-value fields). Verify deserialization

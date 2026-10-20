@@ -435,9 +435,10 @@ impl Nokkvi {
             for a in r.albums.iter().filter(|a| !a.image.image_absent) {
                 id_slices.push(vec![a.id.clone()]);
             }
+            let mode = self.settings.track_artwork;
             for s in &r.songs {
-                if let Some(id) = &s.album_id {
-                    id_slices.push(vec![id.clone()]);
+                if let Some(key) = nokkvi_data::types::song::SongCover::cover_key(s, mode) {
+                    id_slices.push(vec![key.to_owned()]);
                 }
             }
             artists = r

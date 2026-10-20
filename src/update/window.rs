@@ -1,10 +1,11 @@
 //! Window event handlers
 
 use iced::Task;
-use nokkvi_data::audio;
+use nokkvi_data::{audio, types::song::SongCover};
 
 use super::components::{
-    ArtworkGate, passive_artwork_version, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    ArtworkGate, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    queue_row_artwork_tasks, song_cover_entry,
 };
 use crate::{
     Nokkvi, View,
@@ -141,18 +142,12 @@ impl Nokkvi {
                 let albums_vm = shell.albums().clone();
                 let gate = ArtworkGate::new(&self.artwork);
                 let items = self.filter_queue_songs();
-                let (queued, mut tasks) = prefetch_album_artwork_tasks(
+                let (queued, mut tasks) = queue_row_artwork_tasks(
                     &self.queue_page.common.slot_list,
                     &items,
                     &gate,
                     albums_vm,
-                    |song| {
-                        (
-                            song.album_id.clone(),
-                            passive_artwork_version(&song.updated_at),
-                            song.artwork_url.clone(),
-                        )
-                    },
+                    self.settings.track_artwork,
                 );
                 drop(items);
                 drop(gate);
@@ -164,17 +159,14 @@ impl Nokkvi {
             }
             View::Songs => {
                 let albums_vm = shell.albums().clone();
+                let mode = self.settings.track_artwork;
                 let gate = ArtworkGate::new(&self.artwork);
                 let (queued, mut tasks) = prefetch_song_artwork_tasks(
                     &self.songs_page.common.slot_list,
                     &self.library.songs,
                     &gate,
                     albums_vm,
-                    |s| {
-                        s.album_id
-                            .as_ref()
-                            .map(|id| (id, passive_artwork_version(&s.updated_at)))
-                    },
+                    |s| song_cover_entry(s, &s.updated_at, mode),
                 );
                 drop(gate);
                 self.claim_minis(queued);
@@ -249,6 +241,7 @@ impl Nokkvi {
     /// active session.
     pub(crate) fn center_large_artwork_load_task(&mut self, view: View) -> Option<Task<Message>> {
         self.app_service.as_ref()?;
+        let mode = self.settings.track_artwork;
 
         match view {
             View::Albums => {
@@ -265,7 +258,12 @@ impl Nokkvi {
             View::Songs => {
                 let total = self.library.songs.len();
                 let center_idx = self.songs_page.common.get_center_item_index(total)?;
-                let album_id = self.library.songs.get(center_idx)?.album_id.clone()?;
+                let album_id = self
+                    .library
+                    .songs
+                    .get(center_idx)?
+                    .cover_key(mode)?
+                    .to_owned();
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;
                 }
@@ -281,7 +279,7 @@ impl Nokkvi {
                 let songs = self.filter_queue_songs();
                 let total = songs.len();
                 let center_idx = self.queue_page.common.get_center_item_index(total)?;
-                let album_id = songs.get(center_idx)?.album_id.clone();
+                let album_id = songs.get(center_idx)?.cover_key(mode)?.to_owned();
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;
                 }

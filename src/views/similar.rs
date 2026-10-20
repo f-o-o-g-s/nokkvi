@@ -180,11 +180,11 @@ impl SimilarPage {
                         if needs_artwork_load
                             && let Some(center_idx) = self.common.get_center_item_index(total_items)
                             && let Some(song) = songs.get(center_idx)
-                            && let Some(album_id) = &song.album_id
+                            && let Some(key) = crate::views::song_cover_key(song)
                         {
                             return (
                                 Task::none(),
-                                SimilarAction::LoadLargeArtwork(album_id.clone()),
+                                SimilarAction::LoadLargeArtwork(key.to_owned()),
                             );
                         }
                         (Task::none(), SimilarAction::None)
@@ -423,7 +423,7 @@ impl SimilarPage {
                 let song_title = song.title.clone();
                 let song_artist = song.artist.clone();
                 let song_album = song.album.clone();
-                let album_id = song.album_id.clone();
+                let cover_key = crate::views::song_cover_key(song);
                 let duration = song.duration;
                 let is_starred = song.starred;
 
@@ -470,8 +470,8 @@ impl SimilarPage {
                 }
                 if column_visibility.thumbnail {
                     use crate::widgets::slot_list::slot_list_artwork_column;
-                    let artwork_handle = album_id.as_ref().and_then(|id| {
-                        crate::views::mini_or_placeholder(song_artwork, placeholders, id)
+                    let artwork_handle = cover_key.and_then(|key| {
+                        crate::views::mini_or_placeholder(song_artwork, placeholders, key)
                     });
                     content_row = content_row.push(slot_list_artwork_column(
                         artwork_handle,
@@ -591,13 +591,13 @@ impl SimilarPage {
 
         let centered_song = center_index.and_then(|idx| songs.get(idx));
         let artwork_handle = centered_song
-            .and_then(|song| song.album_id.as_ref())
-            .and_then(|album_id| {
+            .and_then(crate::views::song_cover_key)
+            .and_then(|key| {
                 crate::views::panel_cover(
                     data.large_artwork,
                     data.album_art,
                     data.placeholders,
-                    album_id,
+                    key,
                 )
             });
         // No menu entries wired up for Similar artwork — pass inert

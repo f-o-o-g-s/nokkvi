@@ -69,7 +69,11 @@ use std::{
 };
 
 use nokkvi_data::{
-    types::{radio_station::RadioStation, song::Song},
+    types::{
+        player_settings::TrackArtwork,
+        radio_station::RadioStation,
+        song::{Song, SongCover},
+    },
     utils::server_url::has_http_scheme,
 };
 use tokio::sync::Mutex;
@@ -304,8 +308,8 @@ fn sanitize_cover_id(cover_id: &str) -> String {
 pub(crate) enum MprisArtItem {
     /// Nothing is loaded ("Not Playing").
     Nothing,
-    /// A queue song and the cover id it resolves to (`cover_art`, else
-    /// `album_id`).
+    /// A queue song and the cover id it resolves to: the cover key the app
+    /// shows for it (`SongCover::cover_key` under Track Artwork).
     Song { cover_id: Option<String> },
     /// A radio station: its uploaded-logo token
     /// (`RadioStation::logo_cover_art`) and the stream's current ICY
@@ -317,10 +321,12 @@ pub(crate) enum MprisArtItem {
 }
 
 impl MprisArtItem {
-    /// A queue song: its `cover_art`, else its `album_id`.
-    pub(crate) fn for_song(song: &Song) -> Self {
+    /// A queue song: the cover the app shows for it under `mode`, its
+    /// album's, or its own `mf-` cover, so the desktop's media widget and the
+    /// app never disagree.
+    pub(crate) fn for_song(song: &Song, mode: TrackArtwork) -> Self {
         Self::Song {
-            cover_id: song.cover_art.clone().or_else(|| song.album_id.clone()),
+            cover_id: song.cover_key(mode).map(str::to_owned),
         }
     }
 
@@ -1817,22 +1823,32 @@ mod tests {
     }
 
     #[test]
-    fn for_song_prefers_cover_art_then_album_id() {
+    fn for_song_follows_track_artwork() {
         let with_cover = Song {
             cover_art: Some("mf-1".to_string()),
             album_id: Some("al-1".to_string()),
             ..Song::default()
         };
-        assert_eq!(MprisArtItem::for_song(&with_cover), song("mf-1"));
+        assert_eq!(
+            MprisArtItem::for_song(&with_cover, TrackArtwork::AlbumCover),
+            song("al-1")
+        );
+        assert_eq!(
+            MprisArtItem::for_song(&with_cover, TrackArtwork::OwnCover),
+            song("mf-1")
+        );
 
         let album_only = Song {
             album_id: Some("al-1".to_string()),
             ..Song::default()
         };
-        assert_eq!(MprisArtItem::for_song(&album_only), song("al-1"));
+        assert_eq!(
+            MprisArtItem::for_song(&album_only, TrackArtwork::OwnCover),
+            song("al-1")
+        );
 
         assert_eq!(
-            MprisArtItem::for_song(&Song::default()),
+            MprisArtItem::for_song(&Song::default(), TrackArtwork::AlbumCover),
             MprisArtItem::Song { cover_id: None }
         );
     }

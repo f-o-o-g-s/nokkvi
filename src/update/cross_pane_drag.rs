@@ -18,7 +18,7 @@
 //! no stored-vs-inline `slot_count` divergence.
 
 use iced::{Task, Widget as _};
-use nokkvi_data::backend::queue::QueueSongUIViewData;
+use nokkvi_data::{backend::queue::QueueSongUIViewData, types::song::SongCover};
 use tracing::debug;
 
 use crate::{
@@ -407,6 +407,7 @@ impl Nokkvi {
         };
 
         // Extract (artwork, title, subtitle, meta) per view type
+        let mode = self.settings.track_artwork;
         let slot_data: Option<(Option<&iced::widget::image::Handle>, String, String, String)> =
             match panel.active_view {
                 views::BrowsingView::Albums => self.library.albums.get(center_idx).map(|a| {
@@ -419,9 +420,8 @@ impl Nokkvi {
                 }),
                 views::BrowsingView::Songs => self.library.songs.get(center_idx).map(|s| {
                     (
-                        s.album_id
-                            .as_ref()
-                            .and_then(|aid| self.artwork.album_art.peek(aid)),
+                        s.cover_key(mode)
+                            .and_then(|key| self.artwork.album_art.snapshot.get(key)),
                         s.title.clone(),
                         s.artist.clone(),
                         s.album.clone(),
@@ -446,9 +446,8 @@ impl Nokkvi {
                 views::BrowsingView::Similar => self.similar_songs.as_ref().and_then(|state| {
                     state.songs.get(center_idx).map(|s| {
                         (
-                            s.album_id
-                                .as_ref()
-                                .and_then(|aid| self.artwork.album_art.peek(aid)),
+                            s.cover_key(mode)
+                                .and_then(|key| self.artwork.album_art.snapshot.get(key)),
                             s.title.clone(),
                             s.artist.clone(),
                             s.album.clone(),
@@ -638,7 +637,9 @@ impl Nokkvi {
         let song = drag.ghost_song()?;
         let selection_count = drag.selection_count();
 
-        let art = self.artwork.album_art.peek(&song.album_id);
+        let art = song
+            .cover_key(self.settings.track_artwork)
+            .and_then(|key| self.artwork.album_art.snapshot.get(key));
         let row = Self::build_drag_preview_row(
             art,
             song.title.clone(),

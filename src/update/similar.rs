@@ -4,7 +4,10 @@
 //! and SimilarSongsLoaded response processing with generation counter.
 
 use iced::Task;
-use nokkvi_data::{services::api::similar::TopSongsArtist, types::ItemKind};
+use nokkvi_data::{
+    services::api::similar::TopSongsArtist,
+    types::{ItemKind, song::SongCover},
+};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -51,6 +54,7 @@ impl Nokkvi {
                     vec![self.panel_art_step(None, crate::state::PanelArt::Album(album_id))];
 
                 if let Some(shell) = &self.app_service {
+                    let mode = self.settings.track_artwork;
                     let gate = crate::update::components::ArtworkGate::new(&self.artwork);
                     if let Some(state) = &self.similar_songs {
                         let (queued, prefetch_tasks) =
@@ -60,14 +64,11 @@ impl Nokkvi {
                                 &gate,
                                 shell.albums().clone(),
                                 |s| {
-                                    s.album_id.as_ref().map(|id| {
-                                        (
-                                            id,
-                                            crate::update::components::passive_artwork_version(
-                                                &s.updated_at,
-                                            ),
-                                        )
-                                    })
+                                    crate::update::components::song_cover_entry(
+                                        s,
+                                        &s.updated_at,
+                                        mode,
+                                    )
                                 },
                             );
                         drop(gate);
@@ -249,13 +250,18 @@ impl Nokkvi {
 
                 // Select the first item (center) to seed the large artwork panel immediately
                 if let Some(state) = &self.similar_songs {
-                    if let Some(album_id) = state.songs.first().and_then(|s| s.album_id.as_ref()) {
+                    if let Some(key) = state
+                        .songs
+                        .first()
+                        .and_then(|s| s.cover_key(self.settings.track_artwork))
+                    {
                         tasks.push(Task::done(Message::Artwork(
-                            crate::app_message::ArtworkMessage::LoadLarge(album_id.clone()),
+                            crate::app_message::ArtworkMessage::LoadLarge(key.to_owned()),
                         )));
                     }
 
                     if let Some(shell) = &self.app_service {
+                        let mode = self.settings.track_artwork;
                         let gate = crate::update::components::ArtworkGate::new(&self.artwork);
                         let (queued, prefetch_tasks) =
                             crate::update::components::prefetch_song_artwork_tasks(
@@ -264,14 +270,11 @@ impl Nokkvi {
                                 &gate,
                                 shell.albums().clone(),
                                 |s| {
-                                    s.album_id.as_ref().map(|id| {
-                                        (
-                                            id,
-                                            crate::update::components::passive_artwork_version(
-                                                &s.updated_at,
-                                            ),
-                                        )
-                                    })
+                                    crate::update::components::song_cover_entry(
+                                        s,
+                                        &s.updated_at,
+                                        mode,
+                                    )
                                 },
                             );
                         drop(gate);

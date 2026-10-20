@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Settings > General > Track Artwork can show each song's own embedded cover instead of its album's cover.
+
 ### Changed
 
 ### Fixed

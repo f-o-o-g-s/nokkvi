@@ -187,6 +187,9 @@ where
         let artist = song.artist.clone();
         let album = song.album.clone();
         let album_id = song.album_id.clone();
+        // The thumbnail's key: the album id, or the song's own cover under
+        // Track Artwork. The album link keeps `album_id`.
+        let cover_key = crate::views::song_cover_key(song).map(str::to_owned);
         let duration = song.duration.clone();
         let genre = song.genre.clone();
         let starred = song.starred;
@@ -271,7 +274,9 @@ where
             if column_visibility.thumbnail {
                 use crate::widgets::slot_list::slot_list_artwork_column;
                 content_row = content_row.push(slot_list_artwork_column(
-                    crate::views::mini_or_placeholder(album_art, placeholders, &album_id),
+                    cover_key.as_deref().and_then(|key| {
+                        crate::views::mini_or_placeholder(album_art, placeholders, key)
+                    }),
                     artwork_size,
                     ctx.is_center,
                     is_current,
@@ -303,7 +308,7 @@ where
                 content_row = content_row.push(
                     (container({
                         let links_enabled = crate::theme::is_slot_text_links();
-                        let click_album = on_event(SongListRowEvent::NavAlbum(album_id.clone()));
+                        let click_album = on_event(SongListRowEvent::NavAlbum(album_id));
                         let click_genre = on_event(SongListRowEvent::NavGenre(genre.clone()));
                         let genre_label = if genre.is_empty() {
                             "Unknown".to_string()

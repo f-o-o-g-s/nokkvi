@@ -2151,16 +2151,21 @@ impl Nokkvi {
         };
         // Gate at the passive surfaces' constant `None` version, the one the
         // Loaded message below records.
+        let mode = self.settings.track_artwork;
         let gate = ArtworkGate::new(&self.artwork);
         let mut queued = std::collections::HashSet::new();
         let mut tasks = Vec::new();
         for song in session.preview.rows.iter() {
-            let id = &song.album_id;
-            if id.is_empty() || !gate.needs_fetch(id, &None) || !queued.insert(id.clone()) {
+            let Some(id) =
+                nokkvi_data::types::song::SongCover::cover_key(song, mode).map(str::to_owned)
+            else {
+                continue;
+            };
+            if id.is_empty() || !gate.needs_fetch(&id, &None) || !queued.insert(id.clone()) {
                 continue;
             }
             let albums = shell.albums().clone();
-            let album_id = id.clone();
+            let album_id = id;
             tasks.push(Task::perform(
                 async move {
                     let art = MiniArt::from_fetch(
@@ -2676,6 +2681,7 @@ fn song_to_preview_row(
         artist_id: song.artist_id.clone().unwrap_or_default(),
         album: song.album.clone(),
         album_id: song.album_id.clone().unwrap_or_default(),
+        own_cover: nokkvi_data::types::song::SongCover::own_cover(song).map(str::to_string),
         artwork_url: String::new(),
         updated_at: song.updated_at.clone(),
         duration: nokkvi_data::utils::formatters::format_time(duration_secs),

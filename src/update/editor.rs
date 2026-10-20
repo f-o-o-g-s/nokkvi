@@ -12,12 +12,11 @@ use std::collections::HashSet;
 use iced::Task;
 use nokkvi_data::{
     backend::queue::QueueSongUIViewData,
+    types::song::SongCover,
     utils::{dedupe::duplicate_entry_ids, reorder::move_block_before},
 };
 
-use super::components::{
-    ArtworkGate, duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
-};
+use super::components::{ArtworkGate, duplicates_removed_text, queue_row_artwork_tasks};
 use crate::{
     Nokkvi,
     app_message::{EditorMessage, Message},
@@ -531,19 +530,14 @@ impl Nokkvi {
             return Task::none();
         }
 
+        let mode = self.settings.track_artwork;
         let gate = ArtworkGate::new(&self.artwork);
-        let (queued, mut tasks) = prefetch_album_artwork_tasks(
+        let (queued, mut tasks) = queue_row_artwork_tasks(
             &editor.common.slot_list,
             &editor.songs,
             &gate,
             shell.albums().clone(),
-            |song| {
-                (
-                    song.album_id.clone(),
-                    passive_artwork_version(&song.updated_at),
-                    song.artwork_url.clone(),
-                )
-            },
+            mode,
         );
         drop(gate);
         // Large artwork for the centered row, so the artwork panel fills too.
@@ -551,7 +545,8 @@ impl Nokkvi {
             .common
             .get_center_item_index(editor.songs.len())
             .and_then(|center_idx| editor.songs.get(center_idx))
-            .map(|song| song.album_id.clone());
+            .and_then(|song| song.cover_key(mode))
+            .map(str::to_owned);
         self.claim_minis(queued);
         if let Some(album_id) = center_album {
             tasks.push(self.panel_art_step(

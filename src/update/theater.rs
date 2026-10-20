@@ -466,7 +466,7 @@ impl Nokkvi {
     /// be entered from any view and a song can change while it is active;
     /// without this the panel would upscale the 80 px thumbnail.
     pub(crate) fn theater_large_art_task(&self) -> Option<Task<Message>> {
-        let album_id = self.current_queue_song_album_id()?;
+        let album_id = self.current_queue_song_cover_key()?;
         if self.artwork.large_artwork.snapshot.contains_key(album_id) {
             return None;
         }
@@ -505,7 +505,7 @@ impl Nokkvi {
             &self.artwork.large_artwork.snapshot,
             &self.artwork.album_art.snapshot,
             blurred,
-            self.current_queue_song_album_id(),
+            self.current_queue_song_cover_key(),
         )
     }
 }

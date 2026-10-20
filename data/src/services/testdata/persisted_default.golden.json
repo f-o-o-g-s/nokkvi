@@ -104,6 +104,7 @@
   "verbose_config": "clean",
   "library_page_size": "default",
   "artwork_resolution": "default",
+  "track_artwork": "album_cover",
   "show_album_artists_only": true,
   "similar_artists_online": true,
   "suppress_library_refresh_toasts": true,

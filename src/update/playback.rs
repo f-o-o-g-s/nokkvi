@@ -321,6 +321,7 @@ impl Nokkvi {
         // the engine. Whatever this tick is about to observe belongs to this
         // epoch; a seek landing in the gap bumps it and the update is dropped.
         let seek_epoch = self.seek.epoch.current();
+        let track_artwork = self.settings.track_artwork;
         let radio_station = self.active_playback.radio_station().cloned();
         let station_id = radio_station.as_ref().map(|s| s.id.clone());
         let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
@@ -396,7 +397,7 @@ impl Nokkvi {
                             s.title.clone(),
                             s.artist.clone(),
                             s.album.clone(),
-                            MprisArtItem::for_song(s),
+                            MprisArtItem::for_song(s, track_artwork),
                             Some(s.id.clone()),
                             suffix,
                             br,
@@ -815,29 +816,8 @@ impl Nokkvi {
                 // routes through SongMiniLoaded, which releases the in-flight
                 // claim, never touching the centered-view
                 // `loading_large_artwork` marker.
-                if let Some(album_id) = self.now_playing_artwork_to_warm()
-                    && let Some(shell) = &self.app_service
-                {
-                    let vm = shell.albums().clone();
-                    self.claim_minis([album_id.clone()]);
-                    tasks.push(Task::perform(
-                        async move {
-                            let art = crate::app_message::MiniArt::from_fetch(
-                                vm.fetch_album_artwork(
-                                    &album_id,
-                                    Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE),
-                                    None,
-                                )
-                                .await,
-                            );
-                            (album_id, art)
-                        },
-                        |(id, art)| {
-                            Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                                id, None, art,
-                            ))
-                        },
-                    ));
+                if let Some(task) = self.now_playing_warm_task() {
+                    tasks.push(task);
                 }
 
                 // Theater Mode shows the playing cover full-window, and only
@@ -2319,6 +2299,46 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Fetch the playing song's 80px cover when neither LRU holds it
+    /// ([`Self::now_playing_artwork_to_warm`]): on a song change, and when
+    /// the Track Artwork setting switches which cover that is.
+    pub(crate) fn now_playing_warm_task(&mut self) -> Option<Task<Message>> {
+        let key = self.now_playing_artwork_to_warm()?;
+        let vm = self.app_service.as_ref()?.albums().clone();
+        self.claim_minis([key.clone()]);
+        Some(Task::perform(
+            async move {
+                let art = crate::app_message::MiniArt::from_fetch(
+                    vm.fetch_album_artwork(
+                        &key,
+                        Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE),
+                        None,
+                    )
+                    .await,
+                );
+                (key, art)
+            },
+            |(id, art)| {
+                Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
+                    id, None, art,
+                ))
+            },
+        ))
+    }
+
+    /// Track Artwork switched which cover a song shows: warm the new covers
+    /// on screen (the viewport's thumbnails and centered panel, the playing
+    /// song's, Theater's large one). The accent, MilkDrop and the lyrics
+    /// frost follow on the tick, through the new cover key.
+    pub(crate) fn track_artwork_changed(&mut self) -> Task<Message> {
+        let mut tasks = vec![self.prefetch_viewport_artwork()];
+        tasks.extend(self.now_playing_warm_task());
+        if self.theater.active {
+            tasks.extend(self.theater_large_art_task());
+        }
+        Task::batch(tasks)
+    }
+
     pub(crate) fn handle_prepare_next_for_gapless(&mut self) -> Task<Message> {
         if self.engine.gapless_preparing {
             return Task::none();
@@ -2489,11 +2509,20 @@ impl Nokkvi {
         // steps that read individual fields.
         let previous_lyrics_mode = self.settings.lyrics_mode;
         let previous_shelf_style = self.harbour_shelf_style();
+        let previous_track_artwork = self.settings.track_artwork;
         self.settings = settings.clone();
         let shelf_task = if previous_shelf_style == self.harbour_shelf_style() {
             Task::none()
         } else {
             self.harbour_shelf_style_changed()
+        };
+        // The views read the mirror atomic; set it before the planners below
+        // and the next render, so a row draws the key just fetched.
+        crate::theme::set_track_artwork(self.settings.track_artwork);
+        let track_artwork_task = if previous_track_artwork == self.settings.track_artwork {
+            Task::none()
+        } else {
+            self.track_artwork_changed()
         };
         // Lyrics switched from the Settings row or config.toml take the
         // player-bar toggle's edges (clear on off, resolve on on). The first
@@ -2719,6 +2748,7 @@ impl Nokkvi {
             active_playlist_cover_task,
             lyrics_task,
             shelf_task,
+            track_artwork_task,
         ])
     }
 

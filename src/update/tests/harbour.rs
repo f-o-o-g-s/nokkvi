@@ -6,6 +6,8 @@
 //! are on observable `Nokkvi` / `HarbourPage` state — `app_service` is `None`
 //! under `test_app()`, so `shell_task` / play helpers yield no async work.
 
+use nokkvi_data::types::player_settings::TrackArtwork;
+
 use crate::{
     View,
     app_message::{HarbourLoaderMessage, HarbourShelvesData},
@@ -1961,7 +1963,7 @@ fn search_warm_album_ids_covers_albums_and_songs_only() {
         ..Default::default()
     };
 
-    let ids = search_warm_album_ids(&results);
+    let ids = search_warm_album_ids(&results, TrackArtwork::AlbumCover);
     assert_eq!(
         ids,
         vec!["song_al".to_string()],
@@ -3434,7 +3436,7 @@ fn only_the_shown_song_rows_warm_thumbnails() {
         .map(|i| make_recent_song(&format!("s{i}"), "T", "A", &format!("al{i}")))
         .collect();
 
-    let ids = crate::update::harbour::harbour_song_mini_ids(&app.harbour);
+    let ids = crate::update::harbour::harbour_song_mini_ids(&app.harbour, TrackArtwork::AlbumCover);
 
     assert_eq!(
         ids.len(),

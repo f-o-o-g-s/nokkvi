@@ -22,6 +22,8 @@ use nokkvi_data::{
         image_info::{ArtistMini, artist_mini_entry},
         library_query::LibraryQuery,
         one_shot_shuffle::OneShotShuffle,
+        player_settings::TrackArtwork,
+        song::SongCover,
     },
 };
 
@@ -177,19 +179,26 @@ pub(crate) fn genres_needing_quad_ids(
 }
 
 /// The album ids whose 80px covers a whole-library search preview needs warmed:
-/// one per album row (its own id) and one per song row (its `album_id`, when
-/// set). Artist rows carry no cover; genre and playlist search rows have no
-/// resolved album ids, so neither contributes. Free fn so the set is
-/// unit-testable without a live `app_service`.
+/// one per album row (its own id) and one per song row (its cover key under
+/// `mode`: the `album_id`, when set, or its own `mf-` cover). Artist rows
+/// carry no cover; genre and playlist search rows have no resolved album
+/// ids, so neither contributes. Free fn so the set is unit-testable without a
+/// live `app_service`.
 pub(crate) fn search_warm_album_ids(
     results: &nokkvi_data::types::library_search::LibrarySearchResults,
+    mode: TrackArtwork,
 ) -> Vec<String> {
     results
         .albums
         .iter()
         .filter(|a| !a.image.image_absent)
         .map(|a| a.id.clone())
-        .chain(results.songs.iter().filter_map(|s| s.album_id.clone()))
+        .chain(
+            results
+                .songs
+                .iter()
+                .filter_map(|s| s.cover_key(mode).map(str::to_owned)),
+        )
         .collect()
 }
 
@@ -305,21 +314,25 @@ pub(crate) fn shape_recently_played(
     songs
 }
 
-/// The album ids whose 80px covers the song rows show: the song shelves'
-/// (Recently Played, Most Played Tracks) plus the Random Songs pick's teaser
-/// (its first song), one single-tile group each, songs with no album skipped.
+/// The cover keys whose 80px covers the song rows show (each song's album
+/// id, or its own `mf-` cover under `mode`): the song shelves' (Recently
+/// Played, Most Played Tracks) plus the Random Songs pick's teaser (its first
+/// song), one single-tile group each, songs with no album skipped.
 /// Each shelf shows at most [`HOT_PICKS_PER_SECTION`] songs, so only those warm:
 /// the shelves fetch deeper ([`SHELF_SONG_BATCH`], the tally pool) for what a
 /// press plays, and those covers never show. A free fn so the set is
 /// unit-testable without an `app_service`.
-pub(crate) fn harbour_song_mini_ids(harbour: &crate::state::HarbourState) -> Vec<Vec<String>> {
+pub(crate) fn harbour_song_mini_ids(
+    harbour: &crate::state::HarbourState,
+    mode: TrackArtwork,
+) -> Vec<Vec<String>> {
     harbour
         .recently_played
         .iter()
         .take(HOT_PICKS_PER_SECTION)
         .chain(harbour.most_played_songs.iter().take(HOT_PICKS_PER_SECTION))
         .chain(harbour.random_songs.first())
-        .filter_map(|s| s.album_id.clone())
+        .filter_map(|s| s.cover_key(mode).map(str::to_owned))
         .map(|id| vec![id])
         .collect()
 }
@@ -647,7 +660,8 @@ impl Nokkvi {
                     self.harbour
                         .random_songs
                         .first()
-                        .and_then(|s| s.album_id.clone()),
+                        .and_then(|s| s.cover_key(self.settings.track_artwork))
+                        .map(str::to_owned),
                     None,
                 ),
                 RandomKind::Genres => (
@@ -1586,7 +1600,7 @@ impl Nokkvi {
         // ids into `album_art_pending` exactly like the genre quad warmer does
         // — without this the song rows and the section preview panel would
         // show no thumbnail.
-        let song_album_ids = harbour_song_mini_ids(&self.harbour);
+        let song_album_ids = harbour_song_mini_ids(&self.harbour, self.settings.track_artwork);
         if !song_album_ids.is_empty() {
             tasks.extend(self.warm_harbour_quad_ids(&albums_vm, song_album_ids));
         }
@@ -1788,7 +1802,11 @@ impl Nokkvi {
         let mut id_slices: Vec<Vec<String>> = Vec::new();
         let mut artists: Vec<ArtistMini> = Vec::new();
         if let Some(r) = &self.harbour.search_results {
-            id_slices.extend(search_warm_album_ids(r).into_iter().map(|id| vec![id]));
+            id_slices.extend(
+                search_warm_album_ids(r, self.settings.track_artwork)
+                    .into_iter()
+                    .map(|id| vec![id]),
+            );
             for g in &r.genres {
                 if let Some(ids) = self.harbour.search_genre_album_ids.get(&g.name) {
                     id_slices.push(ids.clone());

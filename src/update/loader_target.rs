@@ -18,13 +18,16 @@ use std::future::Future;
 use iced::Task;
 use nokkvi_data::{
     backend::app_service::AppService,
-    types::paged_buffer::{PageSlot, PagedBuffer, ReplaceTicket},
+    types::{
+        paged_buffer::{PageSlot, PagedBuffer, ReplaceTicket},
+        song::SongCover,
+    },
 };
 use tracing::{debug, error};
 
 use super::components::{
-    ArtworkGate, PaginatedFetch, album_prefetch_entry, passive_artwork_version,
-    prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    ArtworkGate, PaginatedFetch, album_prefetch_entry, prefetch_album_artwork_tasks,
+    prefetch_song_artwork_tasks, song_cover_entry,
 };
 use crate::{
     Nokkvi,
@@ -478,17 +481,14 @@ impl LoaderTarget for SongsTarget {
         let Some(shell) = &app.app_service else {
             return vec![];
         };
+        let mode = app.settings.track_artwork;
         let gate = ArtworkGate::new(&app.artwork);
         let (queued, tasks) = prefetch_song_artwork_tasks(
             &app.songs_page.common.slot_list,
             &app.library.songs,
             &gate,
             shell.albums().clone(),
-            |song| {
-                song.album_id
-                    .as_ref()
-                    .map(|id| (id, passive_artwork_version(&song.updated_at)))
-            },
+            |song| song_cover_entry(song, &song.updated_at, mode),
         );
         drop(gate);
         app.claim_minis(queued);
@@ -498,16 +498,13 @@ impl LoaderTarget for SongsTarget {
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
         let total = app.library.songs.len();
         let center_idx = app.songs_page.common.get_center_item_index(total)?;
-        let album_id = app
+        let key = app
             .library
             .songs
             .get(center_idx)?
-            .album_id
-            .as_ref()?
-            .clone();
-        Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-            album_id,
-        ))))
+            .cover_key(app.settings.track_artwork)?
+            .to_owned();
+        Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(key))))
     }
 
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {

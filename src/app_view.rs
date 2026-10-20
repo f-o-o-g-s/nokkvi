@@ -6,6 +6,7 @@ use iced::{
     Element, Length, Widget as _,
     widget::{Stack, column, container},
 };
+use nokkvi_data::types::song::SongCover;
 
 use crate::{
     Nokkvi, Screen, View,
@@ -285,9 +286,10 @@ impl LibraryPage {
 /// What [`Nokkvi::playing_cover`] resolves: the playing item and whichever of
 /// its artwork handles the session caches hold.
 pub(crate) struct PlayingCover<'a> {
-    /// The album id, or `radio:<station id>`.
+    /// The playing song's cover key (its album id, or its own `mf-` cover
+    /// under Track Artwork), or `radio:<station id>`.
     pub owner: String,
-    /// The album to request a cover for; `None` during radio.
+    /// The cover key to request a cover for; `None` during radio.
     pub album_id: Option<&'a str>,
     pub large: Option<&'a iced::widget::image::Handle>,
     pub mini: Option<&'a iced::widget::image::Handle>,
@@ -345,15 +347,15 @@ impl Nokkvi {
         }
     }
 
-    /// The currently-playing queue track's `album_id`, or `None` for radio
-    /// playback / no current song / the song being absent from
-    /// `library.queue_songs`.
+    /// The currently-playing queue track's cover key
+    /// ([`SongCover::cover_key`] under the Track Artwork setting: its album
+    /// id, or its own `mf-` cover), or `None` for radio playback / no current
+    /// song / the song being absent from `library.queue_songs`.
     ///
-    /// Shared resolution root for the now-playing artwork surfaces
-    /// ([`mini_player_artwork`](Self::mini_player_artwork) and
-    /// [`now_playing_artwork_to_warm`](Self::now_playing_artwork_to_warm)) so
-    /// the two cannot drift on how "the playing album" is derived.
-    pub(crate) fn current_queue_song_album_id(&self) -> Option<&str> {
+    /// Shared resolution root for the now-playing artwork surfaces (mini
+    /// player, warm, accent, MilkDrop, Theater, the lyrics frost) so they
+    /// cannot drift on which cover "what is playing" means.
+    pub(crate) fn current_queue_song_cover_key(&self) -> Option<&str> {
         if self.active_playback.is_radio() {
             return None;
         }
@@ -362,10 +364,10 @@ impl Nokkvi {
             .queue_songs
             .iter()
             .find(|s| s.id == sid)
-            .map(|s| s.album_id.as_str())
+            .and_then(|s| s.cover_key(self.settings.track_artwork))
     }
 
-    /// The artwork of what is playing: the current queue song's album, or the
+    /// The artwork of what is playing: the current queue song's cover, or the
     /// station during radio. `None` when nothing is current. Either handle may
     /// be missing from the session caches.
     pub(crate) fn playing_cover(&self) -> Option<PlayingCover<'_>> {
@@ -378,12 +380,12 @@ impl Nokkvi {
                 mini: artwork.radio_art.snapshot.get(&station.id),
             });
         }
-        let album = self.current_queue_song_album_id()?;
+        let key = self.current_queue_song_cover_key()?;
         Some(PlayingCover {
-            owner: album.to_string(),
-            album_id: Some(album),
-            large: artwork.large_artwork.snapshot.get(album),
-            mini: artwork.album_art.snapshot.get(album),
+            owner: key.to_string(),
+            album_id: Some(key),
+            large: artwork.large_artwork.snapshot.get(key),
+            mini: artwork.album_art.snapshot.get(key),
         })
     }
 
@@ -395,7 +397,7 @@ impl Nokkvi {
     ///   wasted work — short-circuit before walking the queue).
     /// - Radio playback is active, no `scrobble.current_song_id`, or the
     ///   current song isn't in `library.queue_songs` (see
-    ///   [`current_queue_song_album_id`](Self::current_queue_song_album_id)).
+    ///   [`current_queue_song_cover_key`](Self::current_queue_song_cover_key)).
     /// - Neither the large nor the mini LRU has a cached handle for the song's
     ///   `album_id`.
     ///
@@ -418,7 +420,7 @@ impl Nokkvi {
                 .or_else(|| self.artwork.radio_art.snapshot.get(&station.id))
                 .cloned();
         }
-        let album_id = self.current_queue_song_album_id()?;
+        let album_id = self.current_queue_song_cover_key()?;
         self.artwork
             .large_artwork
             .snapshot
@@ -446,7 +448,7 @@ impl Nokkvi {
     /// leaving the strip-mode gate out keeps the warm path off the process-wide
     /// `UI_MODE` atomic.
     pub(crate) fn now_playing_artwork_to_warm(&self) -> Option<String> {
-        let album_id = self.current_queue_song_album_id()?;
+        let album_id = self.current_queue_song_cover_key()?;
         if self.artwork.large_artwork.snapshot.contains_key(album_id)
             || self.artwork.album_art.snapshot.contains_key(album_id)
             || self.artwork.album_art_pending.contains(album_id)
@@ -1080,7 +1082,7 @@ impl Nokkvi {
         let mut entries = vec![PanelMenuEntry::exit_theater(Message::Theater(
             crate::app_message::TheaterMessage::Exit,
         ))];
-        if let Some(album_id) = self.current_queue_song_album_id() {
+        if let Some(album_id) = self.current_queue_song_cover_key() {
             entries.push(PanelMenuEntry::refresh_artwork(Message::Artwork(
                 crate::app_message::ArtworkMessage::RefreshAlbumArtwork(album_id.to_string()),
             )));
@@ -1759,7 +1761,7 @@ impl Nokkvi {
         }
         let level = self.settings.lyrics_backdrop_blur;
         level.sigma()?;
-        let album_id = self.current_queue_song_album_id()?;
+        let album_id = self.current_queue_song_cover_key()?;
         let source = self.artwork.large_artwork.snapshot.get(album_id)?;
         let cached = self.artwork.lyrics_blurred.as_ref()?;
         (cached.album_id == album_id

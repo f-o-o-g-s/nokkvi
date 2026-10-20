@@ -16,8 +16,15 @@ use std::collections::{HashMap, HashSet};
 
 use iced::Task;
 use nokkvi_data::{
-    backend::albums::{AlbumUIViewData, AlbumsService},
-    types::image_info::{ArtistMini, artwork_version},
+    backend::{
+        albums::{AlbumUIViewData, AlbumsService},
+        queue::QueueSongUIViewData,
+    },
+    types::{
+        image_info::{ArtistMini, artwork_version},
+        player_settings::TrackArtwork,
+        song::SongCover,
+    },
     utils::artwork_url::THUMBNAIL_SIZE,
 };
 
@@ -287,14 +294,16 @@ pub(crate) fn shrink_poster(bytes: &[u8]) -> Option<iced::widget::image::Handle>
 
 /// Generate song artwork prefetch tasks for a slot list viewport.
 ///
-/// Variant of `prefetch_album_artwork_tasks` for songs that have
-/// `Option<album_id>`. Generic over the slice element type — Songs page
-/// passes `SongUIViewData`, Similar page passes raw `Song`. The
-/// `extract_album_id` closure returns `(album_id, version)`, where `version`
-/// feeds both the dedup gate and the fetch URL's `_u=` cache-buster.
+/// Variant of `prefetch_album_artwork_tasks` for rows fetched by their cover
+/// key rather than a prebuilt URL. Generic over the slice element type —
+/// Songs page passes `SongUIViewData`, Similar page passes raw `Song`. The
+/// `cover_key` closure returns `(key, version)`: the song's
+/// [`SongCover::cover_key`] (its album id, or its own `mf-` cover under
+/// Track Artwork's Own Cover), and `version` feeds both the dedup gate and
+/// the fetch URL's `_u=` cache-buster.
 ///
 /// These are PASSIVE song-mini surfaces (Songs page, Similar page): their rows
-/// carry only a per-song `updated_at`, which would oscillate the album_id-keyed
+/// carry only a per-song `updated_at`, which would oscillate an album-keyed
 /// gate, so they pass [`passive_artwork_version`] (a constant `None`) for the
 /// version. Id-only dedup is used here; the current cover is re-warmed on the
 /// next cold load. A `None` version also yields the documented empty-`_u=` URL
@@ -307,38 +316,81 @@ pub(crate) fn prefetch_song_artwork_tasks<T, F>(
     songs: &[T],
     gate: &ArtworkGate<'_>,
     albums_vm: AlbumsService,
-    extract_album_id: F,
+    cover_key: F,
 ) -> (Vec<String>, Vec<Task<Message>>)
 where
-    F: Fn(&T) -> Option<(&String, Option<String>)>,
+    F: Fn(&T) -> Option<(&str, Option<String>)>,
+{
+    song_mini_tasks(
+        plan_song_artwork_fetches(slot_list, songs, gate, cover_key),
+        albums_vm,
+    )
+}
+
+/// The `(cover key, version)` fetches [`prefetch_song_artwork_tasks`] would
+/// dispatch for this viewport, in prefetch order: the pure planning half.
+pub(crate) fn plan_song_artwork_fetches<T, F>(
+    slot_list: &SlotListView,
+    songs: &[T],
+    gate: &ArtworkGate<'_>,
+    cover_key: F,
+) -> Vec<(String, Option<String>)>
+where
+    F: Fn(&T) -> Option<(&str, Option<String>)>,
 {
     let total = songs.len();
     if total == 0 {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     }
 
     let mut already_queued = HashSet::new();
 
-    let planned: Vec<(String, Option<String>)> = slot_list
+    slot_list
         .prefetch_indices(total)
         .filter_map(|idx| songs.get(idx))
         .filter_map(|song| {
-            extract_album_id(song).and_then(|(id, updated_at)| {
-                if !gate.needs_fetch(id, &updated_at) || already_queued.contains(id) {
+            cover_key(song).and_then(|(id, updated_at)| {
+                let id = id.to_owned();
+                if id.is_empty()
+                    || !gate.needs_fetch(&id, &updated_at)
+                    || already_queued.contains(&id)
+                {
                     None
                 } else {
                     already_queued.insert(id.clone());
-                    Some((id.clone(), updated_at))
+                    Some((id, updated_at))
                 }
             })
         })
-        .collect();
+        .collect()
+}
+
+/// The `(cover key, version)` a song row's thumbnail is planned under in
+/// [`prefetch_song_artwork_tasks`]: its [`SongCover::cover_key`] for `mode`,
+/// at the passive surfaces' id-only version ([`passive_artwork_version`] of
+/// the row's per-song `updated_at`).
+pub(crate) fn song_cover_entry<'a, S: SongCover>(
+    song: &'a S,
+    updated_at: &Option<String>,
+    mode: TrackArtwork,
+) -> Option<(&'a str, Option<String>)> {
+    song.cover_key(mode)
+        .map(|key| (key, passive_artwork_version(updated_at)))
+}
+
+/// Dispatch planned `(cover key, version)` 80px fetches by key: an album id
+/// (`fetch_album_artwork` adds the `al-` prefix) or a song's own `mf-` cover.
+/// Each lands as `SongMiniLoaded`, which releases the claim the caller makes
+/// with the returned ids.
+fn song_mini_tasks(
+    planned: Vec<(String, Option<String>)>,
+    albums_vm: AlbumsService,
+) -> (Vec<String>, Vec<Task<Message>>) {
     let queued_ids = planned.iter().map(|(id, _)| id.clone()).collect();
     let tasks = planned
         .into_iter()
-        .map(|(album_id, updated_at)| {
+        .map(|(id, updated_at)| {
             let vm = albums_vm.clone();
-            let id = album_id;
             Task::perform(
                 async move {
                     let art = MiniArt::from_fetch(
@@ -348,14 +400,91 @@ where
                     (id, updated_at, art)
                 },
                 |(id, updated_at, art)| {
-                    Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                        id, updated_at, art,
-                    ))
+                    Message::Artwork(ArtworkMessage::SongMiniLoaded(id, updated_at, art))
                 },
             )
         })
         .collect();
     (queued_ids, tasks)
+}
+
+/// The queue's and the playlist editor's row thumbnails for one viewport,
+/// planned ([`plan_queue_row_minis`]) and dispatched. Returns
+/// `(queued_ids, tasks)` like the other planners.
+pub(crate) fn queue_row_artwork_tasks(
+    slot_list: &SlotListView,
+    rows: &[QueueSongUIViewData],
+    gate: &ArtworkGate<'_>,
+    albums_vm: AlbumsService,
+    mode: TrackArtwork,
+) -> (Vec<String>, Vec<Task<Message>>) {
+    let QueueRowMinis { by_url, by_key } = plan_queue_row_minis(slot_list, rows, gate, mode);
+    let mut queued: Vec<String> = by_url.iter().map(|(id, _, _)| id.clone()).collect();
+    let mut tasks: Vec<Task<Message>> = by_url
+        .into_iter()
+        .map(|(id, updated_at, url)| {
+            let vm = albums_vm.clone();
+            Task::perform(
+                async move {
+                    let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
+                    (id, updated_at, art)
+                },
+                |(id, updated_at, art)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art))
+                },
+            )
+        })
+        .collect();
+    let (own_queued, own_tasks) = song_mini_tasks(by_key, albums_vm);
+    queued.extend(own_queued);
+    tasks.extend(own_tasks);
+    (queued, tasks)
+}
+
+/// A queue or playlist-editor viewport's thumbnail fetches, split by how
+/// each is fetched ([`plan_queue_row_minis`]).
+#[derive(Debug)]
+pub(crate) struct QueueRowMinis {
+    /// `(album id, version, url)`: rows keyed by their album, through the
+    /// row's prebuilt `artwork_url`.
+    pub by_url: Vec<(String, Option<String>, String)>,
+    /// `(own cover key, version)`: rows keyed by their own `mf-` cover,
+    /// fetched by that key.
+    pub by_key: Vec<(String, Option<String>)>,
+}
+
+/// Plan the queue's or the playlist editor's row thumbnails under `mode`.
+/// A row keyed by its album (every row under Album Cover, one without its
+/// own art under Own Cover) goes through its prebuilt URL, exactly as before
+/// Track Artwork; a row keyed by its own cover goes by that key. The two key
+/// spaces never meet (album ids vs `mf-` ids), so the halves can't plan one
+/// cover twice. Every version is [`passive_artwork_version`]'s `None`.
+pub(crate) fn plan_queue_row_minis(
+    slot_list: &SlotListView,
+    rows: &[QueueSongUIViewData],
+    gate: &ArtworkGate<'_>,
+    mode: TrackArtwork,
+) -> QueueRowMinis {
+    // The row's own cover when `mode` shows it; `None` keys it by album.
+    fn own_key(row: &QueueSongUIViewData, mode: TrackArtwork) -> Option<&str> {
+        row.own_cover().filter(|_| mode == TrackArtwork::OwnCover)
+    }
+    let by_url = plan_album_artwork_fetches(slot_list, rows, gate, |row| {
+        if own_key(row, mode).is_some() {
+            // Fetched by key below; an empty id plans nothing here.
+            (String::new(), None, String::new())
+        } else {
+            (
+                row.album_id.clone(),
+                passive_artwork_version(&row.updated_at),
+                row.artwork_url.clone(),
+            )
+        }
+    });
+    let by_key = plan_song_artwork_fetches(slot_list, rows, gate, |row| {
+        own_key(row, mode).map(|key| (key, passive_artwork_version(&row.updated_at)))
+    });
+    QueueRowMinis { by_url, by_key }
 }
 
 /// Generate 80px quad-tile prefetch tasks for a slot list viewport.
