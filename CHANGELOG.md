@@ -6,17 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- The similar artists list now adds Deezer's related artists; Settings > General > Similar Artists: Deezer turns them off.
-
 ### Changed
-
-- Similar artists you don't have now come first in the Artists panel and the Similar Artists popup.
-- Similar artists both ListenBrainz and Deezer name now come before those only one of them names.
-- A similar artist's hover note and popup row now name the service that listed them.
 
 ### Fixed
 
 ### Removed
+
+## v0.27.2 — 2026-10-20
+
+### Added
+
+- Similar artists now include Deezer's related artists alongside ListenBrainz's.
+- Artists with no MusicBrainz id can now get similar artists from Deezer.
+- Among similar artists you have, and among those you don't, ones both ListenBrainz and Deezer list come first.
+- Similar artists you don't have that only Deezer lists open their Deezer page.
+- A new General setting, Similar Artists: Deezer, turns Deezer off so nothing is sent to Deezer.
+
+### Changed
+
+- Similar artists you don't have now come first in the Artists panel and the Similar Artists popup.
+- Turning off Similar Artists: ListenBrainz now drops only ListenBrainz's picks, not the whole similar artists list.
+- Hovering a similar artist in the Artists panel now also says whether ListenBrainz, Deezer or both listed them.
+- Each Similar Artists popup row now says whether ListenBrainz, Deezer or both listed that artist.
+- Changing a Similar Artists setting now refreshes the similar artists already on screen.
 
 ## v0.27.1 — 2026-10-19
 
