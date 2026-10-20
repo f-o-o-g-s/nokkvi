@@ -143,6 +143,23 @@ fn stored_library_selection(
     }
 }
 
+/// One similar-artists service's part of a blend: its list, or none when it
+/// was not asked or failed while the other answered (the failure is logged
+/// here, where it is finally handled).
+fn answered_or_logged(
+    service: &str,
+    answer: Option<Result<Vec<crate::types::artist_recs::ArtistRec>>>,
+) -> Vec<crate::types::artist_recs::ArtistRec> {
+    match answer {
+        Some(Ok(recs)) => recs,
+        Some(Err(e)) => {
+            debug!("{service} similar artists failed; the other service's list stands: {e:#}");
+            Vec::new()
+        }
+        None => Vec::new(),
+    }
+}
+
 impl AppService {
     pub async fn new() -> Result<Self> {
         // `main()` runs the legacy → XDG-state-dir migration
@@ -1777,27 +1794,36 @@ impl AppService {
     // Whole-library search
     // =========================================================================
 
-    /// The artists ListenBrainz finds similar to the one with MusicBrainz id
-    /// `mbid`, most similar first, at most `limit` of them, each stamped with
-    /// its standing in the library: the server is searched for every name
+    /// The artists ListenBrainz and Deezer find similar to one artist, at
+    /// most `limit` of them, each stamped with its standing in the library,
+    /// the artists the library lacks first. ListenBrainz is asked by the
+    /// artist's MusicBrainz id `mbid`, Deezer by their `name`, each when
+    /// `sources` says so and its key is known; the two lists are blended
+    /// (`artist_recs::blend`). The server is then searched for every name
     /// (its name search, scoped to the active libraries) and the match is
     /// made on the MusicBrainz id first, then the exact name
     /// (`artist_recs::match_library`).
     ///
-    /// A failed ListenBrainz fetch is an error. A failed server lookup leaves
-    /// that one artist [`LibraryMatch::Unknown`], except a rejected session,
-    /// which fails the whole call so the UI drops to login. Lookups run a few
-    /// at a time (a semaphore), so one answer costs a short burst, not a
-    /// flood; each owns its inputs, so the whole future can cross to the UI's
-    /// task.
+    /// A service that fails while the other answers leaves the list to the
+    /// other; the call fails only when every service asked failed. A failed
+    /// server lookup leaves that one artist [`LibraryMatch::Unknown`], except
+    /// a rejected session, which fails the whole call so the UI drops to
+    /// login. Lookups run a few at a time (a semaphore), so one answer costs
+    /// a short burst, not a flood; each owns its inputs, so the whole future
+    /// can cross to the UI's task.
     ///
     /// [`LibraryMatch::Unknown`]: crate::types::artist_recs::LibraryMatch::Unknown
     pub async fn similar_artists(
         &self,
-        mbid: &str,
+        mbid: Option<&str>,
+        name: Option<&str>,
+        sources: crate::types::artist_recs::RecSources,
         limit: usize,
     ) -> Result<Vec<crate::types::artist_recs::ArtistRec>> {
-        use crate::types::artist_recs::{LibraryMatch, match_library};
+        use crate::{
+            services::{deezer_similar, listenbrainz_similar},
+            types::artist_recs::{LibraryMatch, blend, match_library, unowned_first},
+        };
 
         /// Candidates asked of the server per name. Its search matches
         /// substrings and sorts by name, so a short name ("Low") needs
@@ -1806,8 +1832,33 @@ impl AppService {
         /// Lookups in flight at once.
         const CONCURRENCY: usize = 4;
 
-        let mut recs = crate::services::listenbrainz_similar::fetch_similar_artists(mbid).await?;
-        recs.truncate(limit);
+        let mbid = mbid.filter(|_| sources.listenbrainz);
+        let name = name.filter(|n| sources.deezer && !n.trim().is_empty());
+        let (listenbrainz, deezer) = tokio::join!(
+            async {
+                match mbid {
+                    Some(mbid) => Some(listenbrainz_similar::fetch_similar_artists(mbid).await),
+                    None => None,
+                }
+            },
+            async {
+                match name {
+                    Some(name) => Some(deezer_similar::fetch_similar_artists(name).await),
+                    None => None,
+                }
+            },
+        );
+        let (listenbrainz, deezer) = match (listenbrainz, deezer) {
+            (Some(Err(lb)), Some(Err(dz))) => {
+                return Err(lb.context(format!("and Deezer failed too: {dz:#}")));
+            }
+            (Some(Err(e)), None) | (None, Some(Err(e))) => return Err(e),
+            (listenbrainz, deezer) => (
+                answered_or_logged("ListenBrainz", listenbrainz),
+                answered_or_logged("Deezer", deezer),
+            ),
+        };
+        let mut recs = blend(listenbrainz, deezer, limit);
         if recs.is_empty() {
             return Ok(recs);
         }
@@ -1819,7 +1870,7 @@ impl AppService {
             let svc = Arc::clone(&svc);
             let library_ids = Arc::clone(&library_ids);
             let gate = Arc::clone(&gate);
-            let mbid = rec.mbid.clone();
+            let mbid = rec.source.mbid().map(str::to_string);
             let name = rec.name.clone();
             async move {
                 let _permit = gate
@@ -1837,7 +1888,7 @@ impl AppService {
                     .load_artists(&query, false, Some(0), Some(CANDIDATES))
                     .await?;
                 Ok::<_, anyhow::Error>(match_library(
-                    &mbid,
+                    mbid.as_deref(),
                     &name,
                     artists.iter().map(|a| {
                         (
@@ -1866,6 +1917,7 @@ impl AppService {
                 }
             };
         }
+        unowned_first(&mut recs);
         Ok(recs)
     }
 

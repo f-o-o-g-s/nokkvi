@@ -5,7 +5,7 @@ use nokkvi_data::{
     backend::artists::ArtistUIViewData,
     types::{
         ItemKind,
-        artist_recs::{ARTIST_RECS_SHOWN, ArtistRec},
+        artist_recs::{ARTIST_RECS_SHOWN, ArtistRec, RecSources},
         paged_buffer::PageSlot,
     },
 };
@@ -325,12 +325,11 @@ impl Nokkvi {
     }
 
     /// Start the settle timer for a newly centred artist, when its info or
-    /// its similar artists (with that setting on) are still to be asked for.
+    /// its similar artists (with a source on) are still to be asked for.
     /// One timer serves both: they are asked for at the same moment.
     fn artist_info_settle_task(&mut self, artist_id: String) -> Task<Message> {
         let info_wanted = self.artist_info.centre(&artist_id);
-        let recs_wanted =
-            self.settings.similar_artists_online && self.artist_recs.centre(&artist_id);
+        let recs_wanted = self.rec_sources().any() && self.artist_recs.centre(&artist_id);
         if (info_wanted || recs_wanted) && self.app_service.is_some() {
             Task::perform(tokio::time::sleep(ARTIST_INFO_SETTLE), move |()| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoSettled(
@@ -418,11 +417,13 @@ impl Nokkvi {
             debug!("getArtistInfo2 for {artist_id} landed after logout; dropped");
             return Task::none();
         }
-        // Similar artists waiting on this answer's MusicBrainz id: ask now,
-        // or settle on none when the answer has no id either. A failed
-        // answer ends the wait; the next centring asks for both again.
+        // Similar artists waiting on this answer's MusicBrainz id: ask now
+        // (Deezer by name when the answer has no id), or settle on none when
+        // there is nothing to ask with. A failed answer ends the wait; with
+        // Deezer off the next centring asks for both again, with it on
+        // Deezer is asked by name now.
         if self.artist_recs.take_awaiting(artist_id) {
-            if landed {
+            if landed || self.rec_sources().deezer {
                 return self.artist_recs_task(artist_id.to_string());
             }
             self.sync_similar_artists_modal(artist_id, false);
@@ -430,17 +431,93 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Which services the similar-artists lists ask: the two Similar
+    /// Artists settings.
+    pub(crate) fn rec_sources(&self) -> RecSources {
+        RecSources {
+            listenbrainz: self.settings.similar_artists_online,
+            deezer: self.settings.similar_artists_deezer,
+        }
+    }
+
+    /// The similar-artist sources went from `previous` to the settings' (a
+    /// Settings row, a config edit). The lists fetched for the old mix, and
+    /// any ask still out for it, are dropped, and the centred artist and the
+    /// open modal's artist are asked again, so both show the new mix now
+    /// rather than at the next centring. Unchanged sources (every hot reload
+    /// re-delivers them) keep everything.
+    pub(crate) fn rec_sources_changed(&mut self, previous: RecSources) -> Task<Message> {
+        use crate::widgets::similar_artists_modal::SimilarArtistsStatus;
+
+        let sources = self.rec_sources();
+        if sources == previous {
+            return Task::none();
+        }
+        debug!("similar-artist sources changed to {sources:?}; lists asked for again");
+        // A logout's reset is the same forgetting: lists, asks in flight
+        // (their answers are dropped by generation) and the id wait.
+        self.artist_recs.reset_for_session();
+        let modal_artist = self.similar_artists_modal.as_mut().map(|state| {
+            state.set_recs(Vec::new());
+            state.status = if sources.any() {
+                SimilarArtistsStatus::Loading
+            } else {
+                SimilarArtistsStatus::Off
+            };
+            state.artist_id.clone()
+        });
+        if !sources.any() {
+            return Task::none();
+        }
+        let artists: Vec<String> = self
+            .centred_artist_id()
+            .into_iter()
+            .chain(modal_artist)
+            .collect();
+        Task::batch(
+            artists
+                .into_iter()
+                .flat_map(|artist_id| {
+                    [
+                        self.artist_info_task(artist_id.clone()),
+                        self.artist_recs_task(artist_id),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
     /// The similar-artist lists the Artists panel shows, by artist id: none
-    /// while the Similar Artists setting is off, so lists fetched before it
-    /// went off stop showing too (the cache keeps them for when it is back).
+    /// while both Similar Artists sources are off, so lists fetched before
+    /// they went off stop showing too.
     pub(crate) fn shown_artist_recs(&self) -> &std::collections::HashMap<String, Vec<ArtistRec>> {
         static NONE: std::sync::LazyLock<std::collections::HashMap<String, Vec<ArtistRec>>> =
             std::sync::LazyLock::new(std::collections::HashMap::new);
-        if self.settings.similar_artists_online {
+        if self.rec_sources().any() {
             &self.artist_recs.cache.snapshot
         } else {
             &NONE
         }
+    }
+
+    /// The name of `artist_id`, which Deezer is asked by: the library row's,
+    /// else the open modal's when it is about that artist (a queue row's
+    /// artist the loaded Artists pages may not hold).
+    pub(crate) fn artist_name(&self, artist_id: &str) -> Option<String> {
+        let from_row = self
+            .library
+            .artists
+            .iter()
+            .find(|a| a.id == artist_id)
+            .map(|a| a.name.clone());
+        from_row
+            .or_else(|| {
+                self.similar_artists_modal
+                    .as_ref()
+                    .filter(|state| state.artist_id == artist_id)
+                    .map(|state| state.artist_name.clone())
+            })
+            .filter(|name| !name.trim().is_empty())
     }
 
     /// The MusicBrainz id known for `artist_id`: the native row's (a library
@@ -462,36 +539,50 @@ impl Nokkvi {
         })
     }
 
-    /// Fetch the centred artist's similar artists (ListenBrainz, each checked
-    /// against the library) unless the setting is off, the list is cached or
-    /// a fetch is in flight. The fetch needs the artist's MusicBrainz id:
-    /// without one, the ask waits for the info fetch when that is still out
-    /// (`handle_artist_info_loaded` resumes it), and settles on an empty
-    /// list when neither the row nor the info has one.
+    /// Fetch the centred artist's similar artists (ListenBrainz and Deezer
+    /// as their settings say, blended, each checked against the library)
+    /// unless both are off, the list is cached or a fetch is in flight.
+    /// ListenBrainz needs the artist's MusicBrainz id: without one, the ask
+    /// waits for the info fetch when that is still out
+    /// (`handle_artist_info_loaded` resumes it), so ListenBrainz can join
+    /// even when Deezer could be asked by name at once. With neither an id
+    /// for ListenBrainz nor a name for Deezer, it settles on an empty list.
     pub(crate) fn artist_recs_task(&mut self, artist_id: String) -> Task<Message> {
-        if !self.settings.similar_artists_online
+        let sources = self.rec_sources();
+        if !sources.any()
             || self.artist_recs.is_cached(&artist_id)
             || self.artist_recs.is_pending(&artist_id)
         {
             return Task::none();
         }
-        let Some(mbid) = self.artist_mbid(&artist_id) else {
-            if self.artist_info.is_pending(&artist_id) {
-                self.artist_recs.wait_for_mbid(&artist_id);
-            } else {
-                debug!("no MusicBrainz id for {artist_id}; no similar artists asked for");
-                self.artist_recs.settle_with(&artist_id, Vec::new());
-                self.sync_similar_artists_modal(&artist_id, true);
-            }
+        let mbid = self
+            .artist_mbid(&artist_id)
+            .filter(|_| sources.listenbrainz);
+        if sources.listenbrainz && mbid.is_none() && self.artist_info.is_pending(&artist_id) {
+            self.artist_recs.wait_for_mbid(&artist_id);
             return Task::none();
-        };
+        }
+        let name = self.artist_name(&artist_id).filter(|_| sources.deezer);
+        if mbid.is_none() && name.is_none() {
+            debug!("no MusicBrainz id or name to ask with for {artist_id}; no similar artists");
+            self.artist_recs.settle_with(&artist_id, Vec::new());
+            self.sync_similar_artists_modal(&artist_id, true);
+            return Task::none();
+        }
         let Some(generation) = self.artist_recs.begin(&artist_id) else {
             return Task::none();
         };
-        debug!("asking ListenBrainz for artists similar to {artist_id} (mbid {mbid})");
+        debug!(
+            "asking for artists similar to {artist_id} (ListenBrainz by mbid {mbid:?}, \
+             Deezer by name {name:?})"
+        );
         let id = artist_id.clone();
         self.shell_task(
-            move |shell| async move { shell.similar_artists(&mbid, ARTIST_RECS_SHOWN).await },
+            move |shell| async move {
+                shell
+                    .similar_artists(mbid.as_deref(), name.as_deref(), sources, ARTIST_RECS_SHOWN)
+                    .await
+            },
             move |result| Self::artist_recs_result_message(generation, id, result),
         )
     }
@@ -518,8 +609,9 @@ impl Nokkvi {
 
     /// Land a similar-artists answer: cache it, or on failure release the
     /// artist so the next centring asks again. Not toasted, like the
-    /// biography: the list is a garnish, and ListenBrainz being unreachable
-    /// would otherwise toast once per centred artist.
+    /// biography: the list is a garnish, and a source being unreachable
+    /// would otherwise toast once per centred artist. A list one source
+    /// filled while the other failed is cached like any other.
     pub(crate) fn handle_artist_recs_loaded(
         &mut self,
         generation: u64,

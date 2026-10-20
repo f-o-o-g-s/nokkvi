@@ -2510,7 +2510,9 @@ impl Nokkvi {
         let previous_lyrics_mode = self.settings.lyrics_mode;
         let previous_shelf_style = self.harbour_shelf_style();
         let previous_track_artwork = self.settings.track_artwork;
+        let previous_rec_sources = self.rec_sources();
         self.settings = settings.clone();
+        let rec_sources_task = self.rec_sources_changed(previous_rec_sources);
         let shelf_task = if previous_shelf_style == self.harbour_shelf_style() {
             Task::none()
         } else {
@@ -2749,6 +2751,7 @@ impl Nokkvi {
             lyrics_task,
             shelf_task,
             track_artwork_task,
+            rec_sources_task,
         ])
     }
 

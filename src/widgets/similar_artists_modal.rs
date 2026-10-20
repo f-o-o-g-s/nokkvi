@@ -1,14 +1,14 @@
-//! Similar Artists modal: the artists ListenBrainz finds similar to one in
-//! the library, opened from a row's menu (the queue's), so the list is
+//! Similar Artists modal: the artists ListenBrainz and Deezer find similar to
+//! one in the library, opened from a row's menu (the queue's), so the list is
 //! reachable from where the music plays and not only from the Artists
 //! view's panel. It reads the same list and library check as that panel
 //! (`Nokkvi.artist_recs`); this is their on-demand, keyboard-reachable face.
 //!
 //! The list state and modal chrome are the shared picker shell
 //! (`widgets::picker_modal`). A row names the artist, MusicBrainz's note on
-//! them and where they stand against the library; pressing it finds the
-//! artist in the library or opens their ListenBrainz page, and the globe at
-//! its end opens that page either way.
+//! them, where they stand against the library and who listed them; pressing
+//! it finds the artist in the library or opens their page on the service that
+//! listed them, and the globe at its end opens that page either way.
 //!
 //! State lives on `Nokkvi.similar_artists_modal`; the handler is
 //! `update/similar_artists_modal.rs`.
@@ -33,15 +33,15 @@ pub(crate) const SIMILAR_ARTISTS_SEARCH_INPUT_ID: &str = "similar_artists_modal_
 pub(crate) enum SimilarArtistsStatus {
     /// Asked; nothing has landed yet.
     Loading,
-    /// The list landed (an empty one means ListenBrainz knows nothing
-    /// about the artist).
+    /// The list landed (an empty one means no source knows of anyone
+    /// similar).
     Ready,
-    /// The Similar Artists setting is off, so nothing is asked.
+    /// Both Similar Artists sources are off, so nothing is asked.
     Off,
     /// Neither the library nor the server's agents know the artist's
-    /// MusicBrainz id, so ListenBrainz cannot be asked.
+    /// MusicBrainz id, so ListenBrainz cannot be asked, and Deezer is off.
     NoMbid,
-    /// ListenBrainz, or a library lookup, could not be reached.
+    /// No source could be reached, or a library lookup failed.
     Failed,
 }
 
@@ -103,12 +103,13 @@ pub enum SimilarArtistsModalMessage {
     SlotListDown,
     SlotListSetOffset(usize),
     /// A press on a row of the filtered list: find the artist in the
-    /// library, or open their ListenBrainz page.
+    /// library, or open their page on the service that listed them.
     ClickItem(usize),
     /// The same for the centered row (Enter).
     ActivateCenter,
-    /// The row's globe: the artist's ListenBrainz page, library or not.
-    OpenListenBrainz(usize),
+    /// The row's globe: the artist's page on the service that listed them,
+    /// library or not.
+    OpenArtistPage(usize),
 }
 
 /// Render the modal, meant to be stacked on top of the app.
@@ -117,15 +118,15 @@ pub(crate) fn similar_artists_modal_overlay<'a>(
     window_height: f32,
 ) -> Element<'a, SimilarArtistsModalMessage> {
     let empty_text = match state.status {
-        SimilarArtistsStatus::Loading => "Asking ListenBrainz...",
-        SimilarArtistsStatus::Ready => "ListenBrainz lists no similar artists for this one",
-        SimilarArtistsStatus::Off => {
-            "Turned off in Settings: General > Similar Artists: ListenBrainz"
-        }
+        SimilarArtistsStatus::Loading => "Looking for similar artists...",
+        SimilarArtistsStatus::Ready => "No similar artists found for this one",
+        SimilarArtistsStatus::Off => "Turned off in Settings: General > Similar Artists",
         SimilarArtistsStatus::NoMbid => {
             "No MusicBrainz id is known for this artist, so ListenBrainz cannot be asked"
         }
-        SimilarArtistsStatus::Failed => "ListenBrainz could not be reached. Close and try again.",
+        SimilarArtistsStatus::Failed => {
+            "Similar artists could not be fetched. Close and try again."
+        }
     };
     let who = text(format!("to {}", state.artist_name))
         .size(13.0)
@@ -174,13 +175,14 @@ fn standing(rec: &ArtistRec) -> (&'static str, iced::Color) {
 }
 
 /// What a similar artist's hover note says (the Artists panel's chips):
-/// MusicBrainz's note on them when there is one, then where they stand
-/// against the library, the same words the modal's row uses.
+/// MusicBrainz's note on them when there is one, where they stand against
+/// the library, then who listed them, the same words the modal's row uses.
 pub(crate) fn similar_artist_note(rec: &ArtistRec) -> String {
     let standing = standing_label(rec);
+    let source = rec.source.label();
     match &rec.comment {
-        Some(comment) => format!("{comment} · {standing}"),
-        None => standing.to_string(),
+        Some(comment) => format!("{comment} · {standing} · {source}"),
+        None => format!("{standing} · {source}"),
     }
 }
 
@@ -231,6 +233,14 @@ fn render_row<'a>(
             .wrapping(iced::widget::text::Wrapping::None)
             .boxed(),
     );
+    subtitle = subtitle.push(
+        text(format!(" · {}", rec.source.label()))
+            .size(11.0)
+            .font(theme::ui_font())
+            .color(note_color)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .boxed(),
+    );
     let text_col = column![title, subtitle].spacing(2);
 
     let globe_color = theme::fg3();
@@ -242,7 +252,7 @@ fn render_row<'a>(
                 color: Some(globe_color),
             }),
     )
-    .on_press(SimilarArtistsModalMessage::OpenListenBrainz(item_index))
+    .on_press(SimilarArtistsModalMessage::OpenArtistPage(item_index))
     .padding(6)
     .style(|_theme, status| {
         let hovered = matches!(
@@ -290,25 +300,24 @@ fn render_row<'a>(
 
 #[cfg(test)]
 mod tests {
-    use nokkvi_data::types::artist_recs::LibraryArtist;
+    use nokkvi_data::types::artist_recs::{LibraryArtist, RecSource};
 
     use super::*;
 
     fn rec(comment: Option<&str>, library: LibraryMatch) -> ArtistRec {
         ArtistRec {
-            mbid: "m".into(),
+            source: RecSource::ListenBrainz { mbid: "m".into() },
             name: "Muse".into(),
             comment: comment.map(str::to_string),
-            score: 1,
             library,
         }
     }
 
     #[test]
-    fn the_note_leads_with_musicbrainz_then_the_library_standing() {
+    fn the_note_leads_with_musicbrainz_then_the_library_standing_then_the_source() {
         assert_eq!(
             similar_artist_note(&rec(Some("UK rock band"), LibraryMatch::Missing)),
-            "UK rock band · Not in your library"
+            "UK rock band · Not in your library · ListenBrainz"
         );
         assert_eq!(
             similar_artist_note(&rec(
@@ -318,11 +327,14 @@ mod tests {
                     album_artist: false,
                 })
             )),
-            "In your library, on other artists' albums"
+            "In your library, on other artists' albums · ListenBrainz"
         );
         assert_eq!(
-            similar_artist_note(&rec(None, LibraryMatch::Unknown)),
-            "Library lookup failed"
+            similar_artist_note(&ArtistRec {
+                source: RecSource::Deezer { id: 743 },
+                ..rec(None, LibraryMatch::Unknown)
+            }),
+            "Library lookup failed · Deezer"
         );
     }
 }

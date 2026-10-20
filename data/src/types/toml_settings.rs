@@ -48,6 +48,8 @@ pub struct TomlSettings {
     pub show_album_artists_only: bool,
     /// Similar artists from ListenBrainz under the centred artist's biography.
     pub similar_artists_online: bool,
+    /// Similar artists from Deezer too, blended with ListenBrainz's.
+    pub similar_artists_deezer: bool,
     pub suppress_library_refresh_toasts: bool,
     /// Per-view column-visibility toggles — flattened so every
     /// `<view>_show_<col>` key stays a TOP-LEVEL `[settings]` key (pinned by
@@ -352,6 +354,7 @@ impl Default for TomlSettings {
             track_artwork: TrackArtwork::default(),
             show_album_artists_only: true,
             similar_artists_online: true,
+            similar_artists_deezer: false,
             suppress_library_refresh_toasts: true,
             view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,

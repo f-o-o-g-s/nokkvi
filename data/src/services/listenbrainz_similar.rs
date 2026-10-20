@@ -17,7 +17,7 @@ use anyhow::{Context as _, Result, bail};
 
 use crate::{
     backend::albums::{artwork_client_base, external_host_is_blocked},
-    types::artist_recs::{ArtistRec, LibraryMatch},
+    types::artist_recs::{ArtistRec, LibraryMatch, RecSource},
 };
 
 const LABS_URL: &str = "https://labs.api.listenbrainz.org/similar-artists/json";
@@ -117,22 +117,21 @@ pub(crate) async fn fetch_similar_artists_from(
 /// ListenBrainz list it among its own neighbours, an empty comment reads as
 /// none, and the order is by score, highest first (stable, so ties keep
 /// ListenBrainz's order).
-fn from_wire(rows: Vec<SimilarArtistWire>, seed_mbid: &str) -> Vec<ArtistRec> {
-    let mut recs: Vec<ArtistRec> = rows
-        .into_iter()
+fn from_wire(mut rows: Vec<SimilarArtistWire>, seed_mbid: &str) -> Vec<ArtistRec> {
+    rows.sort_by_key(|row| std::cmp::Reverse(row.score));
+    rows.into_iter()
         .filter(|row| {
             !row.artist_mbid.eq_ignore_ascii_case(seed_mbid) && !row.name.trim().is_empty()
         })
         .map(|row| ArtistRec {
-            mbid: row.artist_mbid,
+            source: RecSource::ListenBrainz {
+                mbid: row.artist_mbid,
+            },
             name: row.name,
             comment: row.comment.filter(|c| !c.trim().is_empty()),
-            score: row.score,
             library: LibraryMatch::Unknown,
         })
-        .collect();
-    recs.sort_by_key(|rec| std::cmp::Reverse(rec.score));
-    recs
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,13 +162,17 @@ mod tests {
                 "The Beatles"
             ]
         );
-        assert_eq!(recs[0].mbid, "5b11f4ce-a62d-471e-81fc-a69a8278c7da");
+        assert_eq!(
+            recs[0].source,
+            RecSource::ListenBrainz {
+                mbid: "5b11f4ce-a62d-471e-81fc-a69a8278c7da".into()
+            }
+        );
         assert_eq!(
             recs[0].comment.as_deref(),
             Some("1980s–1990s US grunge band")
         );
         assert_eq!(recs[1].comment, None, "an empty comment reads as none");
-        assert!(recs.windows(2).all(|w| w[0].score >= w[1].score));
         assert!(recs.iter().all(|r| r.library == LibraryMatch::Unknown));
     }
 

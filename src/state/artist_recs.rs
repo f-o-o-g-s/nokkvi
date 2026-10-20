@@ -1,4 +1,4 @@
-//! Session cache of the similar artists ListenBrainz lists for the artists
+//! Session cache of the similar artists ListenBrainz and Deezer list for the artists
 //! the Artists view centres, behind the panel's "Similar artists" row.
 
 use std::num::NonZeroUsize;

@@ -1,11 +1,12 @@
-//! The Artists view asks ListenBrainz for the centred artist's similar
-//! artists once that artist has stayed centred, once per artist, with the
+//! The Artists view asks for the centred artist's similar artists once that
+//! artist has stayed centred, once per artist: ListenBrainz with the
 //! artist's MusicBrainz id from its row or, failing that, from the
-//! `getArtistInfo2` answer. Each list is kept under its own artist id.
+//! `getArtistInfo2` answer, and Deezer (when turned on) with the artist's
+//! name. Each list is kept under its own artist id.
 
 use nokkvi_data::types::{
     artist::ArtistInfo,
-    artist_recs::{ArtistRec, LibraryMatch},
+    artist_recs::{ArtistRec, LibraryMatch, RecSource},
     error::NokkviError,
 };
 
@@ -66,12 +67,19 @@ fn land_recs(app: &mut Nokkvi, generation: u64, id: &str, result: Result<Vec<Art
 
 pub(super) fn rec(name: &str) -> ArtistRec {
     ArtistRec {
-        mbid: format!("mbid-{name}"),
+        source: RecSource::ListenBrainz {
+            mbid: format!("mbid-{name}"),
+        },
         name: name.to_string(),
         comment: None,
-        score: 1,
         library: LibraryMatch::Missing,
     }
+}
+
+/// Turn the two similar-artists sources on or off.
+fn sources(app: &mut Nokkvi, listenbrainz: bool, deezer: bool) {
+    app.settings.similar_artists_online = listenbrainz;
+    app.settings.similar_artists_deezer = deezer;
 }
 
 fn cached_names(app: &Nokkvi, id: &str) -> Option<Vec<String>> {
@@ -316,4 +324,80 @@ fn the_setting_off_hides_lists_already_fetched() {
     assert!(app.shown_artist_recs().is_empty(), "off: no list shows");
     app.settings.similar_artists_online = true;
     assert_eq!(app.shown_artist_recs().len(), 1, "back on: it shows again");
+}
+
+/// Deezer is asked by name, so with ListenBrainz off an artist with no
+/// MusicBrainz id is asked about at once, with no wait for the info.
+#[test]
+fn with_only_deezer_on_an_untagged_artist_is_asked_by_name() {
+    let mut app = app_with_artists(20, false);
+    sources(&mut app, false, true);
+    let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    settle(&mut app, &first);
+    assert!(app.artist_recs.is_pending(&first), "asked by name");
+    assert!(!app.artist_recs.is_awaiting(&first), "no id to wait for");
+}
+
+/// With both on, an untagged artist still waits for the info, so
+/// ListenBrainz can join with the id it supplies; an answer with no id, or
+/// a failed one, still lets Deezer be asked by name instead of settling on
+/// no list.
+#[test]
+fn with_both_on_an_untagged_artist_waits_then_asks_deezer_without_an_id() {
+    for info in [Ok(ArtistInfo::default()), Err("HTTP 500".to_string())] {
+        let mut app = app_with_artists(20, false);
+        sources(&mut app, true, true);
+        let info_generation = app.artist_info.session_generation();
+        let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
+        settle(&mut app, &first);
+        assert!(app.artist_recs.is_awaiting(&first), "waits for the id");
+
+        land_info(&mut app, info_generation, &first, info);
+        assert!(!app.artist_recs.is_awaiting(&first));
+        assert!(
+            app.artist_recs.is_pending(&first),
+            "Deezer is asked by name"
+        );
+    }
+}
+
+/// The lists show while either source is on.
+#[test]
+fn the_lists_show_with_only_deezer_on() {
+    let mut app = app_with_artists(3, true);
+    app.artist_recs.settle_with("a0", vec![rec("Muse")]);
+    sources(&mut app, false, true);
+    assert_eq!(app.shown_artist_recs().len(), 1);
+    sources(&mut app, false, false);
+    assert!(app.shown_artist_recs().is_empty());
+}
+
+/// Turning a source on or off changes what a list is made of: the lists
+/// fetched before are dropped and the centred artist is asked again, so the
+/// panel shows the new mix without waiting for the next centring. A reload
+/// that changes neither source (a config hot reload) keeps them.
+#[test]
+fn a_change_of_sources_drops_the_lists_and_asks_again() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = app_with_artists(20, true);
+    let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    app.artist_recs.settle_with(&centred, vec![rec("Muse")]);
+    app.artist_recs.settle_with("a9", vec![rec("Blur")]);
+
+    let same = app.settings.clone();
+    let _ = app.handle_player_settings_loaded(same);
+    assert_eq!(
+        cached_names(&app, "a9"),
+        Some(vec!["Blur".to_string()]),
+        "same sources: the lists stay"
+    );
+
+    let mut deezer_on = app.settings.clone();
+    deezer_on.similar_artists_deezer = true;
+    let _ = app.handle_player_settings_loaded(deezer_on);
+    assert_eq!(cached_names(&app, "a9"), None, "the old mix is dropped");
+    assert!(
+        app.artist_recs.is_pending(&centred),
+        "the centred artist is asked again"
+    );
 }

@@ -1,0 +1,81 @@
+{
+ "data": [
+  {
+   "id": 281527041,
+   "name": "Nirvana (UK)",
+   "link": "https://www.deezer.com/artist/281527041",
+   "picture": "https://api.deezer.com/artist/281527041/image",
+   "picture_small": "https://cdn-images.dzcdn.net/images/artist/ad67af8b0dca71d5e69f1afd8e045c4e/56x56-000000-80-0-0.jpg",
+   "picture_medium": "https://cdn-images.dzcdn.net/images/artist/ad67af8b0dca71d5e69f1afd8e045c4e/250x250-000000-80-0-0.jpg",
+   "picture_big": "https://cdn-images.dzcdn.net/images/artist/ad67af8b0dca71d5e69f1afd8e045c4e/500x500-000000-80-0-0.jpg",
+   "picture_xl": "https://cdn-images.dzcdn.net/images/artist/ad67af8b0dca71d5e69f1afd8e045c4e/1000x1000-000000-80-0-0.jpg",
+   "nb_album": 5,
+   "nb_fan": 261,
+   "radio": true,
+   "tracklist": "https://api.deezer.com/artist/281527041/top?limit=50",
+   "type": "artist"
+  },
+  {
+   "id": 415,
+   "name": "Nirvana",
+   "link": "https://www.deezer.com/artist/415",
+   "picture": "https://api.deezer.com/artist/415/image",
+   "picture_small": "https://cdn-images.dzcdn.net/images/artist/3ec5542ff520ee74e2befdaba32ef2ef/56x56-000000-80-0-0.jpg",
+   "picture_medium": "https://cdn-images.dzcdn.net/images/artist/3ec5542ff520ee74e2befdaba32ef2ef/250x250-000000-80-0-0.jpg",
+   "picture_big": "https://cdn-images.dzcdn.net/images/artist/3ec5542ff520ee74e2befdaba32ef2ef/500x500-000000-80-0-0.jpg",
+   "picture_xl": "https://cdn-images.dzcdn.net/images/artist/3ec5542ff520ee74e2befdaba32ef2ef/1000x1000-000000-80-0-0.jpg",
+   "nb_album": 26,
+   "nb_fan": 10091318,
+   "radio": true,
+   "tracklist": "https://api.deezer.com/artist/415/top?limit=50",
+   "type": "artist"
+  },
+  {
+   "id": 1429039,
+   "name": "Approaching Nirvana",
+   "link": "https://www.deezer.com/artist/1429039",
+   "picture": "https://api.deezer.com/artist/1429039/image",
+   "picture_small": "https://cdn-images.dzcdn.net/images/artist/1c7d2e357e657f89dc2e50e41dd04a92/56x56-000000-80-0-0.jpg",
+   "picture_medium": "https://cdn-images.dzcdn.net/images/artist/1c7d2e357e657f89dc2e50e41dd04a92/250x250-000000-80-0-0.jpg",
+   "picture_big": "https://cdn-images.dzcdn.net/images/artist/1c7d2e357e657f89dc2e50e41dd04a92/500x500-000000-80-0-0.jpg",
+   "picture_xl": "https://cdn-images.dzcdn.net/images/artist/1c7d2e357e657f89dc2e50e41dd04a92/1000x1000-000000-80-0-0.jpg",
+   "nb_album": 115,
+   "nb_fan": 10015,
+   "radio": true,
+   "tracklist": "https://api.deezer.com/artist/1429039/top?limit=50",
+   "type": "artist"
+  },
+  {
+   "id": 214520735,
+   "name": "Sonic Nirvana",
+   "link": "https://www.deezer.com/artist/214520735",
+   "picture": "https://api.deezer.com/artist/214520735/image",
+   "picture_small": "https://cdn-images.dzcdn.net/images/artist/1ec5f6d8d599aaae9d7d67593894bcb3/56x56-000000-80-0-0.jpg",
+   "picture_medium": "https://cdn-images.dzcdn.net/images/artist/1ec5f6d8d599aaae9d7d67593894bcb3/250x250-000000-80-0-0.jpg",
+   "picture_big": "https://cdn-images.dzcdn.net/images/artist/1ec5f6d8d599aaae9d7d67593894bcb3/500x500-000000-80-0-0.jpg",
+   "picture_xl": "https://cdn-images.dzcdn.net/images/artist/1ec5f6d8d599aaae9d7d67593894bcb3/1000x1000-000000-80-0-0.jpg",
+   "nb_album": 1,
+   "nb_fan": 0,
+   "radio": true,
+   "tracklist": "https://api.deezer.com/artist/214520735/top?limit=50",
+   "type": "artist"
+  },
+  {
+   "id": 278793911,
+   "name": "Nirvana",
+   "link": "https://www.deezer.com/artist/278793911",
+   "picture": "https://api.deezer.com/artist/278793911/image",
+   "picture_small": "https://cdn-images.dzcdn.net/images/artist//56x56-000000-80-0-0.jpg",
+   "picture_medium": "https://cdn-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg",
+   "picture_big": "https://cdn-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg",
+   "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg",
+   "nb_album": 2,
+   "nb_fan": 10,
+   "radio": true,
+   "tracklist": "https://api.deezer.com/artist/278793911/top?limit=50",
+   "type": "artist"
+  }
+ ],
+ "total": 100,
+ "next": "https://api.deezer.com/search/artist?q=Nirvana&limit=5&index=5"
+}

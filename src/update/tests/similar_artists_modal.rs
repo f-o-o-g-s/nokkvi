@@ -445,3 +445,49 @@ fn the_key_on_a_harbour_artist_row_asks_about_that_artist() {
         Some(("ar9".to_string(), "Actress".to_string()))
     );
 }
+
+/// With only Deezer on, the modal asks by the row's artist name at once,
+/// and an empty answer reads as "none found", not as a missing id.
+#[test]
+fn with_only_deezer_on_the_modal_asks_by_name() {
+    let mut app = app_with_queue();
+    app.settings.similar_artists_online = false;
+    app.settings.similar_artists_deezer = true;
+    open_from_row(&mut app);
+    assert_eq!(modal(&app).status, SimilarArtistsStatus::Loading);
+    assert!(app.artist_recs.is_pending(ARTIST_ID), "asked by name");
+
+    land_recs(&mut app, Ok(Vec::new()));
+    assert_eq!(modal(&app).status, SimilarArtistsStatus::Ready);
+}
+
+/// A change of sources while the modal is open asks again for its artist,
+/// so it shows the new mix; with both sources off it says so.
+#[test]
+fn a_change_of_sources_asks_again_for_the_open_modal() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = app_with_queue();
+    app.artist_recs
+        .settle_with(ARTIST_ID, vec![rec("Lil Peep")]);
+    open_from_row(&mut app);
+    assert_eq!(modal(&app).status, SimilarArtistsStatus::Ready);
+
+    let mut deezer_on = app.settings.clone();
+    deezer_on.similar_artists_deezer = true;
+    let _ = app.handle_player_settings_loaded(deezer_on);
+    assert_eq!(modal(&app).status, SimilarArtistsStatus::Loading);
+    assert!(
+        app.artist_info.is_pending(ARTIST_ID),
+        "the info is asked for the id"
+    );
+    assert!(
+        app.artist_recs.is_awaiting(ARTIST_ID),
+        "ListenBrainz waits on it"
+    );
+
+    let mut both_off = app.settings.clone();
+    both_off.similar_artists_online = false;
+    both_off.similar_artists_deezer = false;
+    let _ = app.handle_player_settings_loaded(both_off);
+    assert_eq!(modal(&app).status, SimilarArtistsStatus::Off);
+}

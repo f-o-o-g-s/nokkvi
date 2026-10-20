@@ -224,7 +224,7 @@ pub struct Nokkvi {
     /// The `getArtistInfo2` answers fetched this session (the Artists
     /// view's biography and link), keyed by artist id.
     pub artist_info: crate::state::ArtistInfoState,
-    /// The similar artists ListenBrainz listed this session for the artists
+    /// The similar artists ListenBrainz and Deezer listed this session for the artists
     /// the Artists view centred, keyed by artist id.
     pub artist_recs: crate::state::ArtistRecsState,
 
@@ -516,6 +516,7 @@ impl Default for Nokkvi {
                 stable_viewport: true,
                 auto_follow_playing: true,
                 similar_artists_online: true,
+                similar_artists_deezer: false,
                 volume: 1.0,
                 sfx_volume: 0.68,
                 seek_step_secs: nokkvi_data::types::player_settings::SEEK_STEP_DEFAULT_SECS,

@@ -6,7 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A new off-by-default setting, Similar Artists: Deezer, adds Deezer's related artists to the similar artists list.
+
 ### Changed
+
+- Similar artists you don't have now come first in the Artists panel and the Similar Artists popup.
+- A similar artist's hover note and popup row now name the service that listed them.
 
 ### Fixed
 

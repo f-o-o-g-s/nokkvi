@@ -73,7 +73,7 @@ pub struct ArtistsViewData<'a> {
     /// `getArtistInfo2` answers by artist id; the pill's biography and link
     /// prefer them over the native row's fields.
     pub artist_info: &'a HashMap<String, nokkvi_data::types::artist::ArtistInfo>,
-    /// ListenBrainz's similar artists by artist id, each stamped with its
+    /// ListenBrainz's and Deezer's similar artists by artist id, each stamped with its
     /// library standing; the pill lists them under the biography.
     pub artist_recs: &'a HashMap<String, Vec<nokkvi_data::types::artist_recs::ArtistRec>>,
     pub window_width: f32,

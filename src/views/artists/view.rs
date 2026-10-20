@@ -359,7 +359,7 @@ impl ArtistsPage {
                     col = col.push(bio_col.boxed());
                 }
 
-                // Similar artists (ListenBrainz) under the biography, once
+                // Similar artists (ListenBrainz, Deezer) under the biography, once
                 // their list has landed and has anyone in it; an artist with
                 // no biography gets them too.
                 if let Some(recs) = data
@@ -717,9 +717,10 @@ pub(crate) fn bio_link_label(url: &str) -> String {
 const SIMILAR_RULE_ALPHA: f32 = 0.45;
 
 /// The pill's similar-artists section: a "SIMILAR ARTISTS" header between two
-/// accent hairlines over ListenBrainz's picks, a tag each. An artist the
-/// library has is a filled accent tag and finds that artist; one it lacks is
-/// an outlined tag with a globe and opens the artist's ListenBrainz page.
+/// accent hairlines over ListenBrainz's and Deezer's picks, a tag each. An
+/// artist the library has is a filled accent tag and finds that artist; one
+/// it lacks is an outlined tag with a globe and opens the artist's page on
+/// the service that listed them.
 pub(crate) fn similar_artists_block<'a>(recs: &'a [ArtistRec]) -> Element<'a, ArtistsMessage> {
     use iced::widget::{Space, column, text};
 
@@ -774,7 +775,7 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
     let in_library = rec.library_id().is_some();
     // A library artist is a filled accent tag, with the ink every filled
     // accent surface takes; the rest are outlined in the dim ink, with a
-    // globe for "opens on ListenBrainz".
+    // globe for "opens on the web".
     let (fill, edge, ink) = if in_library {
         (
             Some(theme::accent_fill()),
@@ -819,7 +820,8 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
     )
     .on_press(similar_artist_message(rec))
     .interaction(iced::mouse::Interaction::Pointer);
-    // Hover names who they are (MusicBrainz's note) and where they stand.
+    // Hover names who they are (MusicBrainz's note), where they stand and
+    // who listed them.
     let note = container(
         text(crate::widgets::similar_artists_modal::similar_artist_note(
             rec,
@@ -837,8 +839,9 @@ fn similar_artist_chip<'a>(rec: &'a ArtistRec) -> Element<'a, ArtistsMessage> {
 /// What a click on a similar artist does: find and expand the artist when
 /// the library has their albums; show their songs in Songs when they only
 /// appear on other artists' albums (the Artists view has no row to expand
-/// for them); else open their ListenBrainz page, where the list came from
-/// and which has a page for every artist in it.
+/// for them); else open their page on the service that listed them (by
+/// MusicBrainz id on ListenBrainz, by Deezer id on Deezer), which has a page
+/// for every artist it lists.
 pub(crate) fn similar_artist_message(rec: &ArtistRec) -> ArtistsMessage {
     match rec.library_artist() {
         Some(artist) if artist.album_artist => {
@@ -851,7 +854,7 @@ pub(crate) fn similar_artist_message(rec: &ArtistRec) -> ArtistsMessage {
                 name: rec.name.clone(),
             },
         ),
-        None => ArtistsMessage::OpenExternalUrl(rec.listenbrainz_url()),
+        None => ArtistsMessage::OpenExternalUrl(rec.page_url()),
     }
 }
 
@@ -951,19 +954,21 @@ mod similar_artist_tests {
 
     fn rec(library: LibraryMatch) -> ArtistRec {
         ArtistRec {
-            mbid: "9c9f1380-2516-4fc9-a3e6-f9f61941d090".into(),
+            source: nokkvi_data::types::artist_recs::RecSource::ListenBrainz {
+                mbid: "9c9f1380-2516-4fc9-a3e6-f9f61941d090".into(),
+            },
             name: "Muse".into(),
             comment: None,
-            score: 1,
             library,
         }
     }
 
     /// An artist with albums in the library is found and expanded; one the
     /// library has only on other artists' albums shows their songs; one it
-    /// lacks, or one whose lookup failed, opens their ListenBrainz page.
+    /// lacks, or one whose lookup failed, opens their page where they were
+    /// listed: ListenBrainz's, or Deezer's for a Deezer pick.
     #[test]
-    fn a_library_artist_is_expanded_and_the_rest_open_listenbrainz() {
+    fn a_library_artist_is_expanded_and_the_rest_open_their_page() {
         use nokkvi_data::types::{artist_recs::LibraryArtist, filter::LibraryFilter};
         assert!(matches!(
             similar_artist_message(&rec(LibraryMatch::Found(LibraryArtist {
@@ -989,5 +994,13 @@ mod similar_artist_tests {
                     if url == "https://listenbrainz.org/artist/9c9f1380-2516-4fc9-a3e6-f9f61941d090/"
             ));
         }
+        let deezer_pick = ArtistRec {
+            source: nokkvi_data::types::artist_recs::RecSource::Deezer { id: 743 },
+            ..rec(LibraryMatch::Missing)
+        };
+        assert!(matches!(
+            similar_artist_message(&deezer_pick),
+            ArtistsMessage::OpenExternalUrl(ref url) if url == "https://www.deezer.com/artist/743"
+        ));
     }
 }

@@ -315,6 +315,13 @@ keyword_table! {
             "internet",
             "musicbrainz",
         ],
+        "general.similar_artists_deezer" => &[
+            "deezer",
+            "recommendations",
+            "discover",
+            "related artists",
+            "internet",
+        ],
         "general.lyrics_backdrop_blur" => &["blur", "frost", "frosted", "backdrop", "cover blur"],
         "general.lyrics_word_highlight" => &[
             "karaoke",

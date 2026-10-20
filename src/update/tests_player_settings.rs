@@ -303,6 +303,10 @@ fn live_controls_start_at_their_persisted_defaults() {
         app.settings.similar_artists_online,
         persisted.similar_artists_online
     );
+    assert_eq!(
+        app.settings.similar_artists_deezer,
+        persisted.similar_artists_deezer
+    );
 }
 
 /// The Interface rows read their values back from the theme atomics, and only

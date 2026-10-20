@@ -569,6 +569,7 @@ mod tests {
                 "general.track_artwork",
                 "general.show_album_artists_only",
                 "general.similar_artists_online",
+                "general.similar_artists_deezer",
                 "general.start_view",
                 "general.suppress_library_refresh_toasts",
                 "general.enter_behavior",

@@ -2,7 +2,7 @@
 //!
 //! Section layout (top-to-bottom):
 //!   1. Library  — library_page_size, artwork_resolution, track_artwork,
-//!      show_album_artists_only, similar_artists_online
+//!      show_album_artists_only, similar_artists_online, similar_artists_deezer
 //!   2. Display  — start_view, suppress_library_refresh_toasts
 //!   3. Behavior — enter_behavior, enter_shuffle, harbour_expandable_shelves,
 //!      stable_viewport, auto_follow_playing, seek_step
@@ -11,7 +11,7 @@
 //!   6. Account  — read-only server URL + username mirrors and the logout
 //!      dialog sentinel
 //!
-//! 16 of the 19 visible rows come from `define_settings!` via the
+//! 17 of the 20 visible rows come from `define_settings!` via the
 //! macro-emitted `build_general_tab_settings_items` helper. Section headers
 //! and the read-only Account section (server URL, username, logout dialog
 //! sentinel) stay hand-written here — the dialog row uses the special
@@ -55,6 +55,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         macro_rows.take("general.track_artwork"),
         macro_rows.take("general.show_album_artists_only"),
         macro_rows.take("general.similar_artists_online"),
+        macro_rows.take("general.similar_artists_deezer"),
         // --- Display ---
         SettingsEntry::Header {
             label: "Display",

@@ -3,7 +3,7 @@
 //! Migrated keys: Application (start_view, enter_behavior, enter_shuffle,
 //! harbour_expandable_shelves, library_page_size,
 //! suppress_library_refresh_toasts, artwork_resolution, track_artwork,
-//! show_album_artists_only, similar_artists_online,
+//! show_album_artists_only, similar_artists_online, similar_artists_deezer,
 //! local_music_path, verbose_config), Mouse Behavior (stable_viewport,
 //! auto_follow_playing), System Tray (show_tray_icon, close_to_tray), and the
 //! Theme-tab `light_mode` toggle (its persistence is config-file-only — the
@@ -314,12 +314,34 @@ define_settings! {
                 category: "Application",
                 subtitle: Some(
                     "Under the centred artist's biography in Artists, list the artists \
-                     ListenBrainz finds similar: those in your library jump to that artist, \
-                     the rest open their ListenBrainz page. Sends the artist's MusicBrainz \
-                     id to listenbrainz.org. Off shows no list and sends nothing.",
+                     ListenBrainz finds similar, those not in your library first: those in \
+                     your library jump to that artist, the rest open their ListenBrainz page. \
+                     Sends the artist's MusicBrainz id to listenbrainz.org. Off sends \
+                     nothing there.",
                 ),
                 default: true,
                 read_field: |d| d.similar_artists_online,
+            },
+        },
+        SimilarArtistsDeezer {
+            key: "general.similar_artists_deezer",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_similar_artists_deezer(v),
+            toml_apply: |ts, p| p.similar_artists_deezer = ts.similar_artists_deezer,
+            read: |src, out| out.similar_artists_deezer = src.similar_artists_deezer,
+            write: |ps, ts| ts.similar_artists_deezer = ps.similar_artists_deezer,
+            ui_meta: {
+                label: "Similar Artists: Deezer",
+                category: "Application",
+                subtitle: Some(
+                    "Add Deezer's related artists to the Similar Artists list, taking \
+                     turns with ListenBrainz's. Deezer knows more small, new and \
+                     non-English artists; the ones it adds open their Deezer page. Sends \
+                     the artist's name to api.deezer.com, with no account or key. Off \
+                     sends nothing there.",
+                ),
+                default: false,
+                read_field: |d| d.similar_artists_deezer,
             },
         },
         ArtworkResolutionKey {
@@ -815,6 +837,7 @@ mod tests {
             track_artwork: "Album Cover".into(),
             show_album_artists_only: true,
             similar_artists_online: true,
+            similar_artists_deezer: false,
             suppress_library_refresh_toasts: false,
             show_tray_icon: false,
             close_to_tray: false,
@@ -822,13 +845,13 @@ mod tests {
     }
 
     /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
-    /// 17 of the 18 declared keys carry ui_meta — light_mode does not (it
-    /// renders on the Theme tab, not General), so the helper emits 17 rows.
+    /// 18 of the 19 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 18 rows.
     #[test]
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 17);
+        assert_eq!(entries.len(), 18);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -947,6 +970,7 @@ mod tests {
             track_artwork: live.track_artwork.as_label().into(),
             show_album_artists_only: live.show_album_artists_only,
             similar_artists_online: live.similar_artists_online,
+            similar_artists_deezer: live.similar_artists_deezer,
             suppress_library_refresh_toasts: live.suppress_library_refresh_toasts,
             show_tray_icon: live.show_tray_icon,
             close_to_tray: live.close_to_tray,

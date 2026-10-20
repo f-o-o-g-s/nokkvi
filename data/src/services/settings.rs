@@ -487,6 +487,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_similar_artists_deezer(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_artists_deezer = enabled;
+        self.save()
+    }
+
     pub fn set_lyrics_fetch_online(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.lyrics_fetch_online = enabled;
         self.save()
@@ -1551,6 +1556,7 @@ mod sentinel_roundtrip_tests {
             enter_shuffle: true,              // default false
             harbour_expandable_shelves: true, // default false
             similar_artists_online: false,    // default true
+            similar_artists_deezer: true,     // default false
             local_music_path: "/tmp/sentinel/music".to_string(),
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top
