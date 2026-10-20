@@ -6,15 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Settings > General > Track Artwork can show each song's own embedded cover instead of its album's cover.
-
 ### Changed
 
 ### Fixed
 
-- With Accent From Album Art on, the current lyric line now stands out on black, white and grey covers.
-
 ### Removed
+
+## v0.27.1 — 2026-10-19
+
+### Added
+
+- Settings > General > Track Artwork can show each song's own embedded cover instead of its album's cover.
+
+### Fixed
+
+- With Accent From Album Art on, the current lyric line now stands out on black, white and grey covers.
 
 ## v0.27.0 — 2026-10-17
 
