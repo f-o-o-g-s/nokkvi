@@ -356,3 +356,110 @@ mod nav_focus {
         }
     }
 }
+
+// ============================================================================
+// A remote's Back with nothing left to back out of goes up to the tabs
+// (Plasma Bigscreen keeps the Menu key for its app switcher)
+// ============================================================================
+
+mod remote_back {
+    use iced::{
+        event::Status,
+        keyboard::{Key, Modifiers, key::Named},
+    };
+    use nokkvi_data::types::player_settings::NavLayout;
+
+    use super::home_app;
+    use crate::{
+        View,
+        widgets::nav_bar::{NavFocus, NavView},
+    };
+
+    fn with_top_nav(check: impl FnOnce()) {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::nav_layout();
+        crate::theme::set_nav_layout(NavLayout::Top);
+        check();
+        crate::theme::set_nav_layout(prior);
+    }
+
+    fn key(app: &mut crate::Nokkvi, named: Named, status: Status) {
+        let _ = app.update(crate::Message::RawKeyEvent(
+            Key::Named(named),
+            None,
+            Modifiers::default(),
+            status,
+            false,
+        ));
+    }
+
+    fn back(app: &mut crate::Nokkvi) {
+        key(app, Named::BrowserBack, Status::Ignored);
+    }
+
+    #[test]
+    fn back_at_rest_goes_up_to_the_tabs() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Albums);
+            back(&mut app);
+            assert_eq!(app.nav_focus, Some(NavFocus::Tab(NavView::Albums)));
+            // And Back again comes back down.
+            back(&mut app);
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
+    fn the_keyboards_escape_stays_put() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Albums);
+            key(&mut app, Named::Escape, Status::Ignored);
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
+    fn back_closes_a_popup_before_anything_else() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Queue);
+            app.eq_modal.open = true;
+            back(&mut app);
+            assert!(!app.eq_modal.open);
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
+    fn back_leaves_the_search_box_first() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Albums);
+            app.albums_page.common.search_input_focused = true;
+            back(&mut app);
+            assert!(!app.albums_page.common.search_input_focused);
+            assert_eq!(app.nav_focus, None);
+            back(&mut app);
+            assert_eq!(app.nav_focus, Some(NavFocus::Tab(NavView::Albums)));
+        });
+    }
+
+    #[test]
+    fn back_that_closed_a_menu_goes_no_further() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Albums);
+            key(&mut app, Named::BrowserBack, Status::Captured);
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
+    fn back_in_the_none_layout_stays_put() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::nav_layout();
+        crate::theme::set_nav_layout(NavLayout::None);
+        let mut app = home_app(View::Albums);
+        back(&mut app);
+        crate::theme::set_nav_layout(prior);
+        assert_eq!(app.nav_focus, None);
+        assert!(app.toast.toasts.is_empty(), "no toast on every Back");
+    }
+}

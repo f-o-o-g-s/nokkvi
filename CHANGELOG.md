@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - A remote button with no key name can now be bound by its key number, shown as "Key 582".
 - A remote's Menu button now highlights the view tabs, so the D-pad can switch views.
 - While the tabs are highlighted, the arrows move along them, Enter opens one and Escape returns to the list.
+- A remote's Back button now highlights the view tabs when there's nothing left to back out of.
 
 ### Changed
 

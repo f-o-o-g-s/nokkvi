@@ -392,6 +392,9 @@ pub enum ScrobbleMessage {
 #[derive(Debug, Clone)]
 pub enum HotkeyMessage {
     ClearSearch,
+    /// A TV remote's Back: `ClearSearch`, except that with nothing left to back
+    /// out of it highlights the view tabs (`Nokkvi::handle_back`).
+    RemoteBack,
     /// Highlight the nav bar's tabs for the arrow keys (a TV remote's Menu),
     /// or drop the highlight when it is already up.
     FocusNavigation,

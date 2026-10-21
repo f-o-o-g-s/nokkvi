@@ -95,6 +95,16 @@ pub(crate) enum HorizontalArrowOwner {
 
 impl Nokkvi {
     pub(crate) fn handle_clear_search(&mut self) -> Task<Message> {
+        self.handle_back(false)
+    }
+
+    /// Escape, or a TV remote's Back (`remote`): back out of the innermost
+    /// thing, one per press. With nothing left to back out of, the remote's
+    /// Back goes up to the view tabs (Focus Navigation), as a TV app's Back
+    /// does: a remote reaches them no other way when the desktop keeps the
+    /// Menu key (Plasma Bigscreen opens its app switcher on it). The keyboard's
+    /// Escape keeps reloading the view there.
+    pub(crate) fn handle_back(&mut self, remote: bool) -> Task<Message> {
         trace!(" ClearSearch (Escape) hotkey pressed - unfocusing search");
 
         // The modal on top closes first, one per press, ahead of everything
@@ -168,15 +178,22 @@ impl Nokkvi {
             {
                 return Task::done(msg);
             }
+            // A focused search field is the thing Back leaves first.
+            let was_typing = page.common().search_input_focused;
             page.common_mut().search_input_focused = false;
-            // If search is empty, reload to ensure full list is shown
-            if page.common().search_query.is_empty()
-                && let Some(msg) = page.reload_message()
-            {
-                return Task::done(msg);
+            if !(remote && !was_typing && !theme::is_none_nav()) {
+                // If search is empty, reload to ensure full list is shown
+                if page.common().search_query.is_empty()
+                    && let Some(msg) = page.reload_message()
+                {
+                    return Task::done(msg);
+                }
+                return Task::none();
             }
+        } else if !remote || theme::is_none_nav() {
+            return Task::none();
         }
-        Task::none()
+        self.handle_focus_navigation()
     }
 
     /// Focus Navigation (default: a TV remote's Menu). Highlights the current

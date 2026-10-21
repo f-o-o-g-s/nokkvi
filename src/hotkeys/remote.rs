@@ -4,10 +4,11 @@
 //! system, but two of its most-used buttons don't arrive as the keys they mean.
 //! Its OK sends `KEY_SELECT`, which iced has no name for, and its Back sends
 //! the browser Back key. [`remote_key_alias`] runs in the keyboard
-//! subscription, before any handler sees the press, so OK and Back act exactly
-//! like Enter and Escape everywhere: the modal key gate, the rules editor,
-//! Theater Mode, hotkey capture. Plasma Bigscreen, the TV desktop these remotes
-//! drive, reads them the same way.
+//! subscription, before any handler sees the press, so OK acts exactly like
+//! Enter everywhere. Back becomes Escape at the top of the raw-key handler
+//! instead ([`is_remote_back`]), which keeps knowing it came from a remote: with
+//! nothing left to back out of, it goes up to the view tabs. Plasma Bigscreen,
+//! the TV desktop these remotes drive, reads OK and Back the same way.
 //!
 //! A remote's Menu sends either the keyboard Menu key (`KEY_COMPOSE`) or the
 //! consumer Menu (`KEY_MENU`, which iced can't name); both become the one Menu.
@@ -31,12 +32,12 @@ const KEY_OK: u32 = 352;
 /// reports it as `Key::Unidentified`.
 const KEY_SELECT: u32 = 353;
 
-/// The key a press stands for: a remote's OK is Enter, its Back is Escape and
-/// its consumer Menu is the Menu key. Every other key comes back unchanged.
+/// The key a press stands for: a remote's OK is Enter and its consumer Menu
+/// is the Menu key. Every other key comes back unchanged (Back included: see
+/// [`is_remote_back`]).
 pub(crate) fn remote_key_alias(key: Key, physical: &Physical) -> Key {
     match key {
         Key::Named(Named::Select) => Key::Named(Named::Enter),
-        Key::Named(Named::BrowserBack | Named::GoBack) => Key::Named(Named::Escape),
         Key::Unidentified if matches!(linux_key_code(physical), Some(KEY_OK | KEY_SELECT)) => {
             Key::Named(Named::Enter)
         }
@@ -45,6 +46,12 @@ pub(crate) fn remote_key_alias(key: Key, physical: &Physical) -> Key {
         }
         other => other,
     }
+}
+
+/// A remote's Back (the browser Back key): Escape, plus one remote-only step
+/// when nothing is left to back out of (`Nokkvi::handle_back`).
+pub(crate) fn is_remote_back(key: &Key) -> bool {
+    matches!(key, Key::Named(Named::BrowserBack | Named::GoBack))
 }
 
 /// The Linux input-event code of a key iced has no name for, so
@@ -102,15 +109,14 @@ mod tests {
     }
 
     #[test]
-    fn a_remote_back_is_escape() {
-        assert_eq!(
-            remote_key_alias(Key::Named(Named::BrowserBack), &unidentified(158)),
-            Key::Named(Named::Escape)
-        );
-        assert_eq!(
-            remote_key_alias(Key::Named(Named::GoBack), &unidentified(158)),
-            Key::Named(Named::Escape)
-        );
+    fn a_remote_back_is_told_apart_from_escape() {
+        assert!(is_remote_back(&Key::Named(Named::BrowserBack)));
+        assert!(is_remote_back(&Key::Named(Named::GoBack)));
+        assert!(!is_remote_back(&Key::Named(Named::Escape)));
+        // The subscription leaves it alone; the raw-key handler turns it into
+        // Escape.
+        let back = Key::Named(Named::BrowserBack);
+        assert_eq!(remote_key_alias(back.clone(), &unidentified(158)), back);
     }
 
     #[test]

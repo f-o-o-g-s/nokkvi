@@ -278,6 +278,7 @@ impl Nokkvi {
     pub(super) fn dispatch_hotkey(&mut self, msg: HotkeyMessage) -> Task<Message> {
         match msg {
             HotkeyMessage::ClearSearch => self.handle_clear_search(),
+            HotkeyMessage::RemoteBack => self.handle_back(true),
             HotkeyMessage::CycleSortMode(forward) => self.handle_cycle_sort_mode(forward),
             HotkeyMessage::SeekStep(forward) => self.handle_seek_step(forward),
             HotkeyMessage::CenterOnPlaying => self.handle_center_on_playing(),
@@ -701,6 +702,17 @@ impl Nokkvi {
             return Task::none();
         }
 
+        // A TV remote's Back is Escape from here on, so every Escape check
+        // below (hotkey capture, the modal gate, the rules editor, theater)
+        // covers it. It keeps one difference, applied at the dispatch: with
+        // nothing left to back out of, it goes up to the view tabs.
+        let remote_back = crate::hotkeys::is_remote_back(&key);
+        let key = if remote_back {
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+        } else {
+            key
+        };
+
         // If settings is in hotkey capture mode, forward the raw event there
         // instead of dispatching it as a normal hotkey action
         if self.settings_page.capturing_hotkey.is_some() {
@@ -912,6 +924,16 @@ impl Nokkvi {
         }
 
         // Dispatch the resolved hotkey (Escape + allowed picker nav fall here).
+        let resolved = match resolved {
+            // A Captured Back is one an overlay menu just took to close itself:
+            // that press closed the menu and goes no further.
+            Some(Message::Hotkey(HotkeyMessage::ClearSearch))
+                if remote_back && status != iced::event::Status::Captured =>
+            {
+                Some(Message::Hotkey(HotkeyMessage::RemoteBack))
+            }
+            other => other,
+        };
         match resolved {
             Some(msg) => self.update(msg),
             None => Task::none(),
