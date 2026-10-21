@@ -682,6 +682,13 @@ impl Nokkvi {
                 if self.is_repeated_theater_toggle(&key, unnamed, modifiers, repeat) {
                     return Task::none();
                 }
+                // The highlighted tabs move one step per press. A remote's press
+                // that releases late (a slow frame on a TV box) reaches the
+                // repeat delay, and its repeats walked the highlight several
+                // tabs at once (2026-10-20, Plasma Bigscreen).
+                if repeat && self.nav_focus.is_some() {
+                    return Task::none();
+                }
                 self.handle_raw_key_event(key, unnamed, modifiers, status)
             }
             Message::ModifiersChanged(modifiers) => self.handle_modifiers_changed(modifiers),

@@ -257,6 +257,24 @@ mod nav_focus {
     }
 
     #[test]
+    fn a_held_arrow_steps_the_highlight_once() {
+        with_layout(NavLayout::Top, || {
+            let mut app = home_app(View::Albums);
+            menu(&mut app);
+            for repeat in [false, true, true, true] {
+                let _ = app.update(crate::Message::RawKeyEvent(
+                    Key::Named(Named::ArrowRight),
+                    None,
+                    iced::keyboard::Modifiers::default(),
+                    iced::event::Status::Ignored,
+                    repeat,
+                ));
+            }
+            assert_eq!(app.nav_focus, Some(NavFocus::Tab(NavView::Artists)));
+        });
+    }
+
+    #[test]
     fn menu_again_drops_the_highlight() {
         with_layout(NavLayout::Top, || {
             let mut app = home_app(View::Albums);
