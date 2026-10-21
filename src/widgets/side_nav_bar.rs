@@ -93,7 +93,8 @@ fn side_nav_tab_width() -> f32 {
 /// Data passed to the side nav bar for rendering
 pub(crate) struct SideNavBarData {
     pub current_view: NavView,
-    /// The keyboard-highlighted item (Focus Navigation), drawn with a ring.
+    /// The keyboard-highlighted item (Focus Navigation), drawn as an inverted
+    /// chip (`nav_tab_colors`).
     pub nav_focus: Option<NavFocus>,
     pub settings_open: bool,
     /// A playlist-edit session is active — render the contextual editor cell.

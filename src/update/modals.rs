@@ -75,26 +75,25 @@ impl ActiveModal {
     /// mix), `/` and [`TRAWL_TRAY_ACTIONS`]; they are admitted for Trawl only,
     /// on purpose: the other modals must keep swallowing the same keys. EQ and
     /// Get Info take the key that opened them, which closes them again. The
-    /// bare Up/Down arrows (`EditUp` / `EditDown`) are list keys too: outside
-    /// Settings they move the list, which is how a TV remote's D-pad scrolls.
+    /// pickers and Similar Artists also take the bare Up/Down arrows (`EditUp`
+    /// / `EditDown`), which move lists outside Settings (a TV remote's D-pad
+    /// scrolls with them). Trawl doesn't: its list keys leave its search field
+    /// (Tab's "exit search"), so the letters typed next would fire its keys.
     ///
     /// Every modal lets the media keys through ([`MEDIA_KEY_ACTIONS`]).
     pub(crate) fn takes_action(self, action: HotkeyAction) -> bool {
         let list_key = matches!(
             action,
-            HotkeyAction::SlotListUp
-                | HotkeyAction::SlotListDown
-                | HotkeyAction::EditUp
-                | HotkeyAction::EditDown
-                | HotkeyAction::Activate
+            HotkeyAction::SlotListUp | HotkeyAction::SlotListDown | HotkeyAction::Activate
         );
+        let arrow_key = matches!(action, HotkeyAction::EditUp | HotkeyAction::EditDown);
         if MEDIA_KEY_ACTIONS.contains(&action) {
             return true;
         }
         match self {
-            Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key,
+            Self::MilkdropPicker | Self::DefaultPlaylistPicker => list_key || arrow_key,
             // Its own key closes it again, as Get Info's does.
-            Self::SimilarArtists => list_key || action == HotkeyAction::SimilarArtists,
+            Self::SimilarArtists => list_key || arrow_key || action == HotkeyAction::SimilarArtists,
             Self::Trawl => {
                 list_key
                     || matches!(

@@ -838,8 +838,13 @@ impl Nokkvi {
         // view-hosted, and its own sub-pickers get their modal-grade key
         // ownership inside the intercept.
         // Theater Mode hides the editor, so its grammar stands down there.
+        // The media keys steer playback only, so the rules editor's pickers and
+        // dialogs, which swallow every other key, let them through.
+        let media_key =
+            resolved_action.is_some_and(|a| crate::update::modals::MEDIA_KEY_ACTIONS.contains(&a));
         if top_modal.is_none()
             && !self.theater.active
+            && !media_key
             && let Some(task) =
                 self.rules_session_key_intercept(&key, unnamed, modifiers, status, &resolved)
         {
@@ -928,8 +933,8 @@ impl Nokkvi {
 
         // Dispatch the resolved hotkey (Escape + allowed picker nav fall here).
         let resolved = match resolved {
-            // A Captured Back is one an overlay menu just took to close itself:
-            // that press closed the menu and goes no further.
+            // A Captured Back (a widget took it) acts as the keyboard's Escape;
+            // only an uncaptured one goes up to the tabs.
             Some(Message::Hotkey(HotkeyMessage::ClearSearch))
                 if remote_back && status != iced::event::Status::Captured =>
             {

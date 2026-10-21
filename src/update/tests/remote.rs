@@ -1,7 +1,8 @@
 //! A TV remote's buttons through the key handler: the D-pad's Up/Down move the
-//! lists, a button iced can't name binds by its Linux code, and the media keys
-//! get past a modal. (OK → Enter and Back → Escape happen in the keyboard
-//! subscription, before this handler; `hotkeys/remote.rs` tests them.)
+//! lists, a button iced can't name binds by its Linux code, the media keys get
+//! past a modal, and the tab highlight (Focus Navigation, a remote's Back at
+//! rest). OK → Enter happens in the keyboard subscription, before this
+//! handler; `hotkeys/remote.rs` tests it.
 
 use iced::{
     event::Status,
@@ -13,6 +14,29 @@ use crate::{View, test_helpers::*, update::modals::ActiveModal};
 
 /// KEY_VOICECOMMAND, the G20S voice button: iced has no name for it.
 const VOICE: u32 = 582;
+
+/// Holds the theme lock with the nav layout set, and puts the old layout back
+/// when dropped, a failed assertion included: the layout is app-wide state
+/// other tests read.
+struct NavLayoutGuard {
+    prior: nokkvi_data::types::player_settings::NavLayout,
+    _lock: parking_lot::MutexGuard<'static, ()>,
+}
+
+impl NavLayoutGuard {
+    fn set(layout: nokkvi_data::types::player_settings::NavLayout) -> Self {
+        let lock = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::nav_layout();
+        crate::theme::set_nav_layout(layout);
+        Self { prior, _lock: lock }
+    }
+}
+
+impl Drop for NavLayoutGuard {
+    fn drop(&mut self) {
+        crate::theme::set_nav_layout(self.prior);
+    }
+}
 
 fn home_app(view: View) -> crate::Nokkvi {
     let mut app = test_app();
@@ -32,18 +56,39 @@ fn press(app: &mut crate::Nokkvi, key: Key, unnamed: Option<u32>) {
 }
 
 #[test]
-fn the_down_arrow_moves_a_library_list() {
-    let mut app = home_app(View::Albums);
-    // Moving down the list drops the search box's focus (the Tab behavior),
-    // the one part of the move that lands synchronously.
-    app.albums_page.common.search_input_focused = true;
+fn the_arrows_move_lists_outside_settings() {
+    use crate::update::hotkeys::navigation::EditValueRoute;
 
-    press(&mut app, Key::Named(Named::ArrowDown), None);
+    let app = home_app(View::Albums);
+    assert_eq!(app.edit_value_route(), EditValueRoute::List);
+    let app = home_app(View::Queue);
+    assert_eq!(app.edit_value_route(), EditValueRoute::List);
+    let app = home_app(View::Settings);
+    assert_eq!(app.edit_value_route(), EditValueRoute::SettingsRow);
 
-    assert!(
-        !app.albums_page.common.search_input_focused,
-        "a bare Down outside Settings should move the list, not do nothing"
+    // A list-taking modal over Settings takes them.
+    let mut app = home_app(View::Settings);
+    app.library
+        .playlists
+        .append_page(vec![make_playlist("p1", "Workout")], 1);
+    let _ = app.handle_default_playlist_picker(
+        crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
     );
+    assert_eq!(app.edit_value_route(), EditValueRoute::List);
+}
+
+#[test]
+fn the_arrows_leave_a_search_field_being_typed_in_alone() {
+    use crate::update::hotkeys::navigation::EditValueRoute;
+
+    let mut app = home_app(View::Queue);
+    app.queue_page.common.search_input_focused = true;
+    assert_eq!(app.edit_value_route(), EditValueRoute::Nothing);
+
+    // Down used to run Tab's "exit search" here, and the letters typed next
+    // fired hotkeys (Shift+D clears the queue).
+    press(&mut app, Key::Named(Named::ArrowDown), None);
+    assert!(app.queue_page.common.search_input_focused);
 }
 
 #[test]
@@ -113,6 +158,26 @@ fn capturing_an_unnamed_remote_button_records_its_code() {
 }
 
 #[test]
+fn a_repeat_never_lands_in_a_hotkey_capture() {
+    let mut app = home_app(View::Settings);
+    app.settings_page.capturing_hotkey = Some(HotkeyAction::ToggleRandom);
+    // A key held into the capture repeats (Enter and Escape repeats are
+    // dropped anyway; a letter shows the capture rule itself).
+    let _ = app.update(crate::Message::RawKeyEvent(
+        Key::Character("x".into()),
+        None,
+        Modifiers::default(),
+        Status::Ignored,
+        true,
+    ));
+    assert_eq!(
+        app.settings_page.capturing_hotkey,
+        Some(HotkeyAction::ToggleRandom),
+        "the repeat was captured as the new binding"
+    );
+}
+
+#[test]
 fn the_media_keys_get_past_a_modal() {
     let mut app = home_app(View::Queue);
     app.eq_modal.open = true;
@@ -162,15 +227,10 @@ mod nav_focus {
         widgets::nav_bar::{NavFocus, NavView},
     };
 
-    /// Runs `check` with the nav layout set to `layout` under the theme lock,
-    /// putting the old layout back afterwards: it is app-wide state other tests
-    /// read.
+    /// Runs `check` with the nav layout set to `layout` (`NavLayoutGuard`).
     fn with_layout(layout: NavLayout, check: impl FnOnce()) {
-        let _guard = crate::theme::THEME_MODE_LOCK.lock();
-        let prior = crate::theme::nav_layout();
-        crate::theme::set_nav_layout(layout);
+        let _guard = super::NavLayoutGuard::set(layout);
         check();
-        crate::theme::set_nav_layout(prior);
     }
 
     fn menu(app: &mut crate::Nokkvi) {
@@ -272,6 +332,60 @@ mod nav_focus {
             }
             assert_eq!(app.nav_focus, Some(NavFocus::Tab(NavView::Artists)));
         });
+    }
+
+    #[test]
+    fn a_layout_switched_to_none_drops_the_highlight() {
+        let _guard = super::NavLayoutGuard::set(NavLayout::Top);
+        let mut app = home_app(View::Albums);
+        menu(&mut app);
+        assert!(app.nav_focus.is_some());
+        crate::theme::set_nav_layout(NavLayout::None);
+        // The bar is gone: Right is a seek again, not a walk along a hidden bar.
+        named(&mut app, Named::ArrowRight);
+        assert_eq!(app.nav_focus, None);
+    }
+
+    #[test]
+    fn a_click_drops_the_highlight() {
+        with_layout(NavLayout::Top, || {
+            let mut app = home_app(View::Albums);
+            menu(&mut app);
+            let _ = app.update(crate::Message::CrossPaneDrag(
+                crate::app_message::CrossPaneDragMessage::Pressed,
+            ));
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
+    fn logging_out_drops_the_highlight() {
+        with_layout(NavLayout::Top, || {
+            let mut app = home_app(View::Albums);
+            menu(&mut app);
+            let _ = app.reset_session_state();
+            assert_eq!(app.nav_focus, None);
+            assert!(!app.nav_press_held);
+        });
+    }
+
+    #[test]
+    fn the_highlight_outranks_the_current_tab() {
+        use crate::widgets::nav_bar::nav_tab_colors;
+
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let idle = (Some(iced::Color::BLACK), iced::Color::WHITE);
+        let chip = (Some(crate::theme::fg0()), crate::theme::bg0_hard());
+        assert_eq!(nav_tab_colors(true, true, idle.0, idle.1), chip);
+        assert_eq!(nav_tab_colors(false, true, idle.0, idle.1), chip);
+        assert_eq!(
+            nav_tab_colors(true, false, idle.0, idle.1),
+            (
+                Some(crate::theme::accent_fill()),
+                crate::theme::on_accent_fill()
+            )
+        );
+        assert_eq!(nav_tab_colors(false, false, idle.0, idle.1), idle);
     }
 
     #[test]
@@ -394,11 +508,8 @@ mod remote_back {
     };
 
     fn with_top_nav(check: impl FnOnce()) {
-        let _guard = crate::theme::THEME_MODE_LOCK.lock();
-        let prior = crate::theme::nav_layout();
-        crate::theme::set_nav_layout(NavLayout::Top);
+        let _guard = super::NavLayoutGuard::set(NavLayout::Top);
         check();
-        crate::theme::set_nav_layout(prior);
     }
 
     fn key(app: &mut crate::Nokkvi, named: Named, status: Status) {
@@ -461,7 +572,19 @@ mod remote_back {
     }
 
     #[test]
-    fn back_that_closed_a_menu_goes_no_further() {
+    fn back_closes_an_open_menu_first() {
+        with_top_nav(|| {
+            // A menu closes itself only on a literal Escape, never on Back.
+            let mut app = home_app(View::Albums);
+            app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
+            back(&mut app);
+            assert_eq!(app.open_menu, None);
+            assert_eq!(app.nav_focus, None, "closing the menu was the whole press");
+        });
+    }
+
+    #[test]
+    fn a_captured_back_acts_as_escape_only() {
         with_top_nav(|| {
             let mut app = home_app(View::Albums);
             key(&mut app, Named::BrowserBack, Status::Captured);
@@ -470,13 +593,31 @@ mod remote_back {
     }
 
     #[test]
+    fn a_held_back_acts_once() {
+        with_top_nav(|| {
+            let mut app = home_app(View::Albums);
+            back(&mut app);
+            assert!(app.nav_focus.is_some());
+            back(&mut app);
+            assert_eq!(app.nav_focus, None);
+            // A slow release repeats the press that just left the bar; the
+            // repeat must not raise it again.
+            let _ = app.update(crate::Message::RawKeyEvent(
+                Key::Named(Named::BrowserBack),
+                None,
+                Modifiers::default(),
+                Status::Ignored,
+                true,
+            ));
+            assert_eq!(app.nav_focus, None);
+        });
+    }
+
+    #[test]
     fn back_in_the_none_layout_stays_put() {
-        let _guard = crate::theme::THEME_MODE_LOCK.lock();
-        let prior = crate::theme::nav_layout();
-        crate::theme::set_nav_layout(NavLayout::None);
+        let _guard = super::NavLayoutGuard::set(NavLayout::None);
         let mut app = home_app(View::Albums);
         back(&mut app);
-        crate::theme::set_nav_layout(prior);
         assert_eq!(app.nav_focus, None);
         assert!(app.toast.toasts.is_empty(), "no toast on every Back");
     }

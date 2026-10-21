@@ -420,6 +420,9 @@ pub struct Nokkvi {
     /// The nav item the keyboard highlights (Focus Navigation, a TV remote's
     /// Menu). While set, the arrows walk the nav bar instead of the list.
     pub(crate) nav_focus: Option<crate::widgets::nav_bar::NavFocus>,
+    /// The key press now held down touched the tab highlight (it was up, or
+    /// the press raised it), so its repeats are dropped.
+    pub(crate) nav_press_held: bool,
 }
 
 // ============================================================================
@@ -582,6 +585,7 @@ impl Default for Nokkvi {
             open_menu: None,
             roulette: None,
             nav_focus: None,
+            nav_press_held: false,
         }
     }
 }
@@ -674,8 +678,9 @@ impl Nokkvi {
         // text_input widgets silently swallow Escape/Enter before our hotkey
         // system ever sees them.
         //
-        // A TV remote's OK and Back become Enter and Escape here, before any
-        // handler reads the key (`hotkeys::remote_key_alias`).
+        // A TV remote's OK and consumer Menu become Enter and Menu here, before
+        // any handler reads the key (`hotkeys::remote_key_alias`); its Back
+        // becomes Escape at the top of the raw-key handler.
         let keyboard = event::listen_with(|event, status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,

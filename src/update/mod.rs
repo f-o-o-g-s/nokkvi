@@ -682,14 +682,26 @@ impl Nokkvi {
                 if self.is_repeated_theater_toggle(&key, unnamed, modifiers, repeat) {
                     return Task::none();
                 }
-                // The highlighted tabs move one step per press. A remote's press
-                // that releases late (a slow frame on a TV box) reaches the
-                // repeat delay, and its repeats walked the highlight several
-                // tabs at once (2026-10-20, Plasma Bigscreen).
-                if repeat && self.nav_focus.is_some() {
-                    return Task::none();
+                // A remote's press that releases late (a slow frame on a TV box)
+                // reaches the repeat delay, and a repeat would act on what the
+                // first press changed. Dropped: the repeats of a press that
+                // touched the tab highlight (they walked it several tabs, and
+                // once it closed they drove the view behind it), of Enter and
+                // Escape (`acts_once_per_press`), and into a hotkey capture
+                // (it would bind the repeated key).
+                if repeat {
+                    if self.nav_press_held
+                        || crate::hotkeys::acts_once_per_press(&key)
+                        || self.settings_page.capturing_hotkey.is_some()
+                    {
+                        return Task::none();
+                    }
+                    return self.handle_raw_key_event(key, unnamed, modifiers, status);
                 }
-                self.handle_raw_key_event(key, unnamed, modifiers, status)
+                let highlighted_before = self.nav_focus.is_some();
+                let task = self.handle_raw_key_event(key, unnamed, modifiers, status);
+                self.nav_press_held = highlighted_before || self.nav_focus.is_some();
+                task
             }
             Message::ModifiersChanged(modifiers) => self.handle_modifiers_changed(modifiers),
 

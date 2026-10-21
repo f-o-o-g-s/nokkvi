@@ -7,4 +7,4 @@ mod global;
 mod remote;
 
 pub(crate) use global::{action_to_message, key_press_to_keycode, resolve_action};
-pub(crate) use remote::{is_remote_back, remote_key_alias, unnamed_key_code};
+pub(crate) use remote::{acts_once_per_press, is_remote_back, remote_key_alias, unnamed_key_code};

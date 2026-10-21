@@ -54,6 +54,17 @@ pub(crate) fn is_remote_back(key: &Key) -> bool {
     matches!(key, Key::Named(Named::BrowserBack | Named::GoBack))
 }
 
+/// Enter and Escape (a remote's OK and Back among them) act once per press.
+/// A remote's press often releases late on a busy frame and repeats, and the
+/// repeat would act on whatever the first press opened: OK on a tab opened the
+/// view, then its repeat played the row there (2026-10-20 review).
+pub(crate) fn acts_once_per_press(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::Named(Named::Enter | Named::Escape | Named::BrowserBack | Named::GoBack)
+    )
+}
+
 /// The Linux input-event code of a key iced has no name for, so
 /// `KeyCode::Native` can bind it; `None` for every key iced names.
 pub(crate) fn unnamed_key_code(key: &Key, physical: &Physical) -> Option<u32> {

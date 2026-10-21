@@ -58,6 +58,17 @@ pub(crate) fn nav_focus_key(key: Named, side_nav: bool) -> Option<NavFocusKey> {
     }
 }
 
+/// Where a bare Up/Down goes ([`Nokkvi::edit_value_route`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditValueRoute {
+    /// Edit the focused Settings row.
+    SettingsRow,
+    /// Move the list (or the list of the modal on top).
+    List,
+    /// Do nothing: the view's search field is being typed in.
+    Nothing,
+}
+
 /// The nav item that stands for `view`: its tab, the Harbour longship, or the
 /// Queue tab for the views with no item of their own (Settings, the editor).
 fn nav_focus_for(view: View) -> NavFocus {
@@ -106,6 +117,14 @@ impl Nokkvi {
     /// Escape keeps reloading the view there.
     pub(crate) fn handle_back(&mut self, remote: bool) -> Task<Message> {
         trace!(" ClearSearch (Escape) hotkey pressed - unfocusing search");
+
+        // An open overlay menu closes itself on a literal Escape
+        // (`menu_dismiss`), which a remote's Back is not: close it here, first.
+        if remote && self.open_menu.is_some() {
+            self.open_menu = None;
+            self.sfx_engine.play(audio::SfxType::Escape);
+            return Task::none();
+        }
 
         // The modal on top closes first, one per press, ahead of everything
         // under it: a roulette spin, a drag, Theater Mode, Settings' own
@@ -178,10 +197,15 @@ impl Nokkvi {
             {
                 return Task::done(msg);
             }
-            // A focused search field is the thing Back leaves first.
+            // A focused search field is the thing Back leaves first. The field
+            // lets go by itself only on a literal Escape, so a remote's Back
+            // releases it here.
             let was_typing = page.common().search_input_focused;
             page.common_mut().search_input_focused = false;
-            if !(remote && !was_typing && !theme::is_none_nav()) {
+            if remote && was_typing {
+                return crate::update::components::unfocus_all();
+            }
+            if !remote || theme::is_none_nav() {
                 // If search is empty, reload to ensure full list is shown
                 if page.common().search_query.is_empty()
                     && let Some(msg) = page.reload_message()
@@ -233,6 +257,11 @@ impl Nokkvi {
         resolved_action: Option<HotkeyAction>,
     ) -> Option<Task<Message>> {
         let focus = self.nav_focus?;
+        // A layout switched to None (Settings, a config reload) hid the bar.
+        if theme::is_none_nav() {
+            self.nav_focus = None;
+            return None;
+        }
         // Focus Navigation itself drops the highlight (its own handler).
         if resolved_action == Some(HotkeyAction::FocusNavigation) {
             return None;
@@ -282,18 +311,40 @@ impl Nokkvi {
     /// top takes them even over Settings: the key gate only lets them through
     /// for a list-taking modal, and the slot-list routing hands them to it.
     pub(crate) fn handle_edit_value(&mut self, up: bool) -> Task<Message> {
-        if self.current_view == View::Settings && self.top_modal().is_none() {
-            return if up {
-                Task::done(Message::Settings(views::SettingsMessage::SlotListUp))
+        match self.edit_value_route() {
+            EditValueRoute::SettingsRow => {
+                if up {
+                    Task::done(Message::Settings(views::SettingsMessage::SlotListUp))
+                } else {
+                    Task::done(Message::Settings(views::SettingsMessage::SlotListDown))
+                }
+            }
+            EditValueRoute::List => self.handle_slot_list_message(if up {
+                SlotListMessage::NavigateUp
             } else {
-                Task::done(Message::Settings(views::SettingsMessage::SlotListDown))
-            };
+                SlotListMessage::NavigateDown
+            }),
+            EditValueRoute::Nothing => Task::none(),
         }
-        self.handle_slot_list_message(if up {
-            SlotListMessage::NavigateUp
-        } else {
-            SlotListMessage::NavigateDown
-        })
+    }
+
+    /// Where a bare Up/Down goes. While the view's search field is focused
+    /// they do nothing, as before they moved lists: Down would run Tab's "exit
+    /// search" step, and the letters typed next would fire hotkeys (typing
+    /// "Doors" sent Shift+D, Clear Queue; 2026-10-20 review).
+    pub(crate) fn edit_value_route(&self) -> EditValueRoute {
+        let modal_on_top = self.top_modal().is_some();
+        if self.current_view == View::Settings && !modal_on_top {
+            return EditValueRoute::SettingsRow;
+        }
+        if !modal_on_top
+            && self
+                .current_view_page()
+                .is_some_and(|page| page.common().search_input_focused)
+        {
+            return EditValueRoute::Nothing;
+        }
+        EditValueRoute::List
     }
 
     /// Reveal the current view's auto-hide toolbar (pane-aware). Called by

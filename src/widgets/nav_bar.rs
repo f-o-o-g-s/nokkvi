@@ -114,7 +114,8 @@ pub(crate) fn nav_tab_colors(
 #[derive(Debug, Clone)]
 pub(crate) struct NavBarViewData {
     pub current_view: NavView,
-    /// The keyboard-highlighted item (Focus Navigation), drawn with a ring.
+    /// The keyboard-highlighted item (Focus Navigation), drawn as an inverted
+    /// chip (`nav_tab_colors`).
     pub nav_focus: Option<NavFocus>,
     /// A playlist-edit session is active — render the contextual "Editing"
     /// pill so the editor view is reachable without disturbing the Queue tab.
@@ -493,18 +494,23 @@ pub(crate) fn harbour_nav_button(
     cell: f32,
 ) -> Element<'static, NavBarMessage> {
     let icon_px = cell * 0.62;
+    // Highlighted, the boat is drawn as one silhouette in the chip's ink, as
+    // the tabs' labels are: on the `fg0` chip its own `fg0` body would vanish
+    // (the dark outline is a fraction of a pixel at this size).
     let icon = iced::widget::svg(harbour_icon_handle())
         .width(Length::Fixed(icon_px))
-        .height(Length::Fixed(icon_px));
+        .height(Length::Fixed(icon_px))
+        .style(move |_, _| iced::widget::svg::Style {
+            color: focused.then(theme::bg0_hard),
+        });
     let radius = theme::ui_radius_pill();
     let inner = container(icon)
         .width(Length::Fixed(cell))
         .height(Length::Fixed(cell))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        // The highlight is the tabs' chip. The boat's `fg0` body melts into
-        // it but its fixed dark outline holds the shape, and a ring alone on
-        // this small cell was missed from the couch (Harbour is the start view).
+        // The highlight is the tabs' chip: a ring alone on this small cell was
+        // missed from the couch (Harbour is the start view).
         .style(move |_: &iced::Theme| container::Style {
             background: nav_tab_colors(active, focused, None, theme::fg0())
                 .0

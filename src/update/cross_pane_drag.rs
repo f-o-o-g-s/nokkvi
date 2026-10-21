@@ -72,7 +72,12 @@ impl Nokkvi {
         msg: CrossPaneDragMessage,
     ) -> Task<Message> {
         match msg {
-            CrossPaneDragMessage::Pressed => self.handle_cross_pane_drag_pressed(),
+            CrossPaneDragMessage::Pressed => {
+                // Any left click ends keyboard focus on the nav bar (a click on
+                // a tab switches the view, which clears it too).
+                self.nav_focus = None;
+                self.handle_cross_pane_drag_pressed()
+            }
             CrossPaneDragMessage::Moved(pos) => self.handle_cross_pane_drag_moved(pos),
             CrossPaneDragMessage::Released => self.handle_cross_pane_drag_released(),
             CrossPaneDragMessage::Cancel => {

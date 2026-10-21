@@ -501,8 +501,9 @@ fn trawl_routes_leave_a_hidden_trawl_alone() {
     );
 }
 
-/// Trawl takes `TRAWL_TRAY_ACTIONS` plus exactly the list keys (the bare
-/// arrows among them), Ctrl+Enter, `/` and the media keys every modal takes.
+/// Trawl takes `TRAWL_TRAY_ACTIONS` plus exactly the list keys, Ctrl+Enter,
+/// `/` and the media keys every modal takes. Not the bare arrows: its list
+/// keys leave its search field, so the letters typed next would fire keys.
 /// Those stay out of the tray list on purpose: the tray list is also what a
 /// Captured key may not do a second time, and a captured `/` or list key has
 /// already been dropped (or, for Tab, is never captured).
@@ -521,8 +522,6 @@ fn trawl_takes_the_tray_keys_plus_the_list_keys_and_search() {
     let expected = [
         A::SlotListUp,
         A::SlotListDown,
-        A::EditUp,
-        A::EditDown,
         A::Activate,
         A::ShufflePlay,
         A::FocusSearch,

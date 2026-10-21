@@ -64,7 +64,7 @@ Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` va
 
 ### Vertical arrows
 
-Bare Up/Down (`EditUp` / `EditDown`) edit the focused Settings row; everywhere else they move the list exactly like Tab / Backspace (`handle_edit_value` dispatches the same `SlotListMessage::NavigateUp/Down`), including into a list-taking modal over Settings. Shift+Up/Down stay Move Track. See gotchas/hotkeys.md for the remote-control keys.
+Bare Up/Down (`EditUp` / `EditDown`) edit the focused Settings row; everywhere else they move the list exactly like Tab / Backspace (`handle_edit_value` dispatches the same `SlotListMessage::NavigateUp/Down`), including into a list-taking modal over Settings, but never while the view's search field is keyboard-focused or into Trawl (`edit_value_route`, gotchas/hotkeys.md). Shift+Up/Down stay Move Track. See gotchas/hotkeys.md for the remote-control keys.
 
 ### Horizontal arrows (seek vs sort)
 

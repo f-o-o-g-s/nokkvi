@@ -6,19 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- On Wayland, a TV remote's OK button now works like Enter, so a G20S-style air mouse can play the focused item.
-- A TV remote's Back button now works like Escape.
-- The bare Up and Down arrows now move through lists outside Settings, as Tab and Backspace do.
+- On Wayland, a TV remote's OK button now plays or opens the focused item, so a G20S-style air mouse can drive the lists.
+- A TV remote's Back button now backs out of popups, menus, searches and Theater Mode.
 - The media keys now play, pause, stop and skip tracks when your desktop passes them to nokkvi.
 - The media keys work even while a popup like the equalizer is open.
-- A remote's Home button (the Home Page key) now opens Harbour.
-- Remote and media keys such as Menu, Search, Rewind and Volume Up can now be bound to actions.
+- A remote's Home button now opens Harbour, on desktops that don't keep it for themselves.
+- Remote and media keys such as Search, Rewind and Volume Up can now be bound to actions.
 - A remote button with no key name can now be bound by its key number, shown as "Key 582".
-- A remote's Menu button now highlights the view tabs, so the D-pad can switch views.
-- While the tabs are highlighted, the arrows move along them, Enter opens one and Escape returns to the list.
 - A remote's Back button now highlights the view tabs when there's nothing left to back out of.
+- On desktops that pass it through, a remote's Menu button also highlights the view tabs.
+- While the tabs are highlighted, the arrows move the highlight along them.
+- Enter opens the highlighted tab.
+- Escape, or the arrow toward the list, takes the highlight back down to the list.
 
 ### Changed
+
+- The bare Up and Down arrows now move through lists outside Settings, except while typing in a search.
+- Holding Enter or Escape now acts once instead of repeating.
 
 ### Fixed
 

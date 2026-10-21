@@ -916,15 +916,18 @@ mod r1 {
             let _ = app.update(raw(true));
         }
         assert!(app.theater.active, "repeats of the toggle are dropped");
-        // A held seek key still repeats (bare Right seeks, stays in theater).
+        // Other held keys still repeat: a repeated `x` (Toggle Random, a
+        // passthrough) lands. Enter and Escape act once per press.
+        assert!(!app.modes.random);
         let _ = app.update(crate::Message::RawKeyEvent(
-            Key::Named(Named::Escape),
+            char_key("x"),
             None,
             Modifiers::default(),
             iced::event::Status::Ignored,
             true,
         ));
-        assert!(!app.theater.active, "other repeated keys are delivered");
+        assert!(app.modes.random, "other repeated keys are delivered");
+        assert!(app.theater.active);
     }
 
     #[test]
