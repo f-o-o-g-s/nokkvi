@@ -707,6 +707,9 @@ impl Nokkvi {
         // covers it. It keeps one difference, applied at the dispatch: with
         // nothing left to back out of, it goes up to the view tabs.
         let remote_back = crate::hotkeys::is_remote_back(&key);
+        if remote_back {
+            debug!(" [HOTKEY] Remote Back pressed ({status:?})");
+        }
         let key = if remote_back {
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
         } else {

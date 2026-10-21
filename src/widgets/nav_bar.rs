@@ -88,16 +88,33 @@ impl NavFocus {
     }
 }
 
-/// The 2 px keyboard-focus ring a highlighted nav item draws: the slot list's
-/// selection ring (`selection_ring_on`), contrast-floored against the item's
-/// own fill. No ring is a plain border at `radius`.
-pub(crate) fn nav_focus_border(
-    focused: bool,
-    fill: iced::Color,
-    radius: iced::border::Radius,
-) -> Border {
+/// A nav tab's fill and ink: the keyboard highlight, the current view, or
+/// idle (`idle_fill` / `idle_ink` differ by bar and mode). The highlight
+/// inverts the theme's text pair (`fg0` fill, `bg0_hard` ink), the chip a TV
+/// app focuses: it has to read from across a room, and on the current tab,
+/// already filled, a ring alone was missed (2026-10-20, Plasma Bigscreen).
+/// `fg0` on `bg0_hard` is every theme's body-text pair, so the label stays
+/// legible.
+pub(crate) fn nav_tab_colors(
+    is_active: bool,
+    is_focused: bool,
+    idle_fill: Option<iced::Color>,
+    idle_ink: iced::Color,
+) -> (Option<iced::Color>, iced::Color) {
+    if is_focused {
+        (Some(theme::fg0()), theme::bg0_hard())
+    } else if is_active {
+        (Some(theme::accent_fill()), theme::on_accent_fill())
+    } else {
+        (idle_fill, idle_ink)
+    }
+}
+
+/// The Harbour longship's keyboard highlight: a 3 px ring, contrast-floored
+/// against its fill (an `fg0` chip would swallow the boat's `fg0` body).
+fn harbour_focus_border(focused: bool, fill: iced::Color, radius: iced::border::Radius) -> Border {
     Border {
-        width: if focused { 2.0 } else { 0.0 },
+        width: if focused { 3.0 } else { 0.0 },
         color: theme::selection_ring_on(fill),
         radius,
     }
@@ -275,19 +292,12 @@ pub(crate) fn flat_tab_container_style(
     is_focused: bool,
 ) -> impl Fn(&iced::Theme) -> container::Style {
     move |_theme: &iced::Theme| {
-        let fill = if is_active {
-            theme::accent_fill()
-        } else {
-            theme::bg0_hard()
-        };
+        let (fill, ink) =
+            nav_tab_colors(is_active, is_focused, Some(theme::bg0_hard()), theme::fg0());
         container::Style {
-            background: Some(Background::Color(fill)),
-            text_color: Some(if is_active {
-                theme::on_accent_fill()
-            } else {
-                theme::fg0()
-            }),
-            border: nav_focus_border(is_focused, fill, 0.0.into()),
+            background: fill.map(Background::Color),
+            text_color: Some(ink),
+            border: Border::default(),
             ..Default::default()
         }
     }
@@ -300,28 +310,17 @@ fn rounded_pill_tab_style(
     is_active: bool,
     is_focused: bool,
 ) -> impl Fn(&iced::Theme) -> container::Style {
-    move |_theme: &iced::Theme| container::Style {
-        background: if is_active {
-            Some(Background::Color(theme::accent_fill()))
-        } else {
-            None
-        },
-        text_color: Some(if is_active {
-            theme::on_accent_fill()
-        } else {
-            theme::fg2()
-        }),
-        // An idle pill is see-through, so its ring reads against the tray.
-        border: nav_focus_border(
-            is_focused,
-            if is_active {
-                theme::accent_fill()
-            } else {
-                theme::bg0_hard()
+    move |_theme: &iced::Theme| {
+        let (fill, ink) = nav_tab_colors(is_active, is_focused, None, theme::fg2());
+        container::Style {
+            background: fill.map(Background::Color),
+            text_color: Some(ink),
+            border: Border {
+                radius: theme::ui_radius_pill(),
+                ..Default::default()
             },
-            theme::ui_radius_pill(),
-        ),
-        ..Default::default()
+            ..Default::default()
+        }
     }
 }
 
@@ -515,7 +514,7 @@ pub(crate) fn harbour_nav_button(
         .align_y(Alignment::Center)
         .style(move |_: &iced::Theme| container::Style {
             background: active.then(|| Background::Color(theme::accent_fill())),
-            border: nav_focus_border(
+            border: harbour_focus_border(
                 focused,
                 if active {
                     theme::accent_fill()
@@ -604,11 +603,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // from `HoverOverlay`, scoped to the pill radius so the
             // tint follows the chip outline.
             let tab_style = rounded_pill_tab_style(is_active, is_focused);
-            let text_color = if is_active {
-                theme::on_accent_fill()
-            } else {
-                theme::fg2()
-            };
+            let (_, text_color) = nav_tab_colors(is_active, is_focused, None, theme::fg2());
 
             let elem: Element<'_, NavBarMessage> = mouse_area(
                 super::hover_overlay::HoverOverlay::new(
@@ -638,11 +633,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // cell otherwise. Sided 1 px `theme::border()` rules between
             // cells handled by `tab_separator()` at the assembly level.
             let tab_style = flat_tab_container_style(is_active, is_focused);
-            let text_color = if is_active {
-                theme::on_accent_fill()
-            } else {
-                theme::fg0()
-            };
+            let (_, text_color) =
+                nav_tab_colors(is_active, is_focused, Some(theme::bg0_hard()), theme::fg0());
 
             let elem: Element<'_, NavBarMessage> = mouse_area(
                 super::hover_overlay::HoverOverlay::new(

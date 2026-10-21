@@ -22,7 +22,7 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
-use super::nav_bar::{NAV_TABS, NavBarMessage, NavFocus, NavView, colored_icon, nav_focus_border};
+use super::nav_bar::{NAV_TABS, NavBarMessage, NavFocus, NavView, colored_icon, nav_tab_colors};
 use crate::theme;
 
 /// Side-nav width (px) by chrome mode.
@@ -253,11 +253,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         // a pill so the active fill reads as a capsule (matches the top-nav
         // tab treatment); flat mode keeps square corners since cells are
         // 1-px-`border()`-separated.
-        let text_color = if is_active {
-            theme::on_accent_fill()
-        } else {
-            theme::fg0()
-        };
+        let (_, text_color) =
+            nav_tab_colors(is_active, is_focused, Some(theme::bg0_hard()), theme::fg0());
 
         let content = side_nav_tab_content(label, icon_path, display_mode, text_color);
 
@@ -278,19 +275,19 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     .height(Length::FillPortion(1))
                     .align_y(iced::Alignment::Center)
                     .style(move |_: &iced::Theme| {
-                        let fill = if is_active {
-                            theme::accent_fill()
-                        } else {
-                            theme::bg0_hard()
-                        };
+                        let (fill, ink) = nav_tab_colors(
+                            is_active,
+                            is_focused,
+                            Some(theme::bg0_hard()),
+                            theme::fg0(),
+                        );
                         container::Style {
-                            background: Some(Background::Color(fill)),
-                            text_color: Some(if is_active {
-                                theme::on_accent_fill()
-                            } else {
-                                theme::fg0()
-                            }),
-                            border: nav_focus_border(is_focused, fill, card_radius),
+                            background: fill.map(Background::Color),
+                            text_color: Some(ink),
+                            border: Border {
+                                radius: card_radius,
+                                ..Default::default()
+                            },
                             ..Default::default()
                         }
                     }),

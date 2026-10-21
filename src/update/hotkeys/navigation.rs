@@ -193,6 +193,7 @@ impl Nokkvi {
         } else if !remote || theme::is_none_nav() {
             return Task::none();
         }
+        debug!(" [NAV] Remote Back with nothing left to back out of: highlighting the tabs");
         self.handle_focus_navigation()
     }
 
@@ -202,6 +203,7 @@ impl Nokkvi {
     /// The None nav layout has no bar to highlight.
     pub(crate) fn handle_focus_navigation(&mut self) -> Task<Message> {
         if self.nav_focus.take().is_some() {
+            debug!(" [NAV] Tab highlight dropped");
             self.sfx_engine.play(audio::SfxType::Escape);
             return Task::none();
         }
@@ -210,6 +212,7 @@ impl Nokkvi {
             return Task::none();
         }
         self.nav_focus = Some(nav_focus_for(self.current_view));
+        debug!(" [NAV] Tabs highlighted on {:?}", self.nav_focus);
         self.sfx_engine.play(audio::SfxType::Tab);
         // A focused search field would keep the arrows for its caret.
         if let Some(page) = self.current_view_page_mut() {
@@ -239,9 +242,11 @@ impl Nokkvi {
             Key::Character(_) | Key::Unidentified => None,
         };
         let Some(action) = action else {
+            debug!(" [NAV] {key:?} drops the tab highlight and runs as usual");
             self.nav_focus = None;
             return None;
         };
+        debug!(" [NAV] {key:?} on the highlighted {focus:?}: {action:?}");
         match action {
             NavFocusKey::Move(forward) => {
                 let next = focus.step(forward);
