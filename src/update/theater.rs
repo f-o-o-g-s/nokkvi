@@ -188,7 +188,8 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::RefreshView
         | A::SaveQueueAsPlaylist
         | A::FindSimilar
-        | A::FindTopSongs => P::ExitThenPerform,
+        | A::FindTopSongs
+        | A::FocusNavigation => P::ExitThenPerform,
         A::SlotListUp
         | A::SlotListDown
         | A::Activate
@@ -302,6 +303,8 @@ impl Nokkvi {
         };
 
         self.open_menu = None;
+        // The nav bar it would highlight is hidden.
+        self.nav_focus = None;
         self.clear_stranded_within_list_drag();
         self.cancel_roulette_restoring_offset();
         self.cancel_cross_pane_drag();

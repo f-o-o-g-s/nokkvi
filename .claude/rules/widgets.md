@@ -124,6 +124,7 @@ The settings **font + theme pickers** are the exception: they share their own ch
 - **Top** (`nav_bar.rs`): tabs + format stats + hamburger. Metadata only when `TrackInfoDisplay::TopBar`. Progressive collapsing (album <900, artist <750, title <600) against the nav's own width, which beside the lowered artwork is the list's (ui-window.md "Artwork Bleed"). `flat_tab_container_style` paints the full-cell `accent_fill()` active fill with `on_accent_fill()` text. `NAV_TABS` is the single source of truth for which tabs render — `NAV_TABS[i] == NavView::ALL[i]` is pinned by a runtime test.
 - **Side** (`side_nav_bar.rs`): vertical sidebar. `NavDisplayMode` { TextOnly, TextAndIcons, IconsOnly }. Same active-fill recipe as the top nav.
 - **None** layout: no nav chrome — only the active page + player bar render (minimalist mode).
+- **Keyboard highlight**: both bars draw `NavBarViewData.nav_focus` / `SideNavBarData.nav_focus` (Focus Navigation, gotchas/hotkeys.md) as a 2 px `nav_focus_border` ring on the tab or the Harbour longship: the slot list's `selection_ring_on`, floored against the item's own fill. The Settings indicator and the editor pill never take it.
 
 ## Layout Constants (`slot_list.rs`)
 

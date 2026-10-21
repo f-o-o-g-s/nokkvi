@@ -236,6 +236,7 @@ fn policy_table_is_pinned() {
         A::SaveQueueAsPlaylist,
         A::FindSimilar,
         A::FindTopSongs,
+        A::FocusNavigation,
     ];
     let exit_only = [
         A::SlotListUp,

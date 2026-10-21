@@ -146,6 +146,7 @@ keyword_table! {
         "hotkey.activate" => &["enter", "play", "open", "select"],
         "hotkey.expand_center" => &["open", "unfold", "drill down", "show tracks"],
         "hotkey.shuffle_play" => &["random", "randomize", "mix"],
+        "hotkey.focus_navigation" => &["tv remote", "d-pad", "tabs", "menu button", "views"],
         "hotkey.toggle_browsing_panel" => &["split view", "side by side", "browser", "panel"],
         "hotkey.center_playing" => &["scroll to", "jump to current", "find playing", "locate"],
         "hotkey.focus_search" => &["find", "filter", "query", "type"],

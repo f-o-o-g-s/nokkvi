@@ -9,6 +9,9 @@
 //! Theater Mode, hotkey capture. Plasma Bigscreen, the TV desktop these remotes
 //! drive, reads them the same way.
 //!
+//! A remote's Menu sends either the keyboard Menu key (`KEY_COMPOSE`) or the
+//! consumer Menu (`KEY_MENU`, which iced can't name); both become the one Menu.
+//!
 //! The remote's other buttons (Home, Menu, the media and volume keys) keep
 //! their own names as bindable `KeyCode`s; a key iced can't name at all is
 //! still bindable by its Linux input-event code ([`unnamed_key_code`]).
@@ -18,6 +21,9 @@ use iced::keyboard::{
     key::{Named, NativeCode, Physical},
 };
 
+/// Linux `KEY_MENU`, a remote's Menu sent as a consumer key (HID 0x40).
+/// xkeyboard-config names it `XF86MenuKB`, which winit doesn't map.
+const KEY_MENU: u32 = 139;
 /// Linux `KEY_OK` (`linux/input-event-codes.h`), a remote's OK on some models.
 const KEY_OK: u32 = 352;
 /// Linux `KEY_SELECT`, the G20S's OK in arrow mode (HID consumer usage 0x41).
@@ -25,14 +31,17 @@ const KEY_OK: u32 = 352;
 /// reports it as `Key::Unidentified`.
 const KEY_SELECT: u32 = 353;
 
-/// The key a press stands for: a remote's OK is Enter and its Back is Escape.
-/// Every other key comes back unchanged.
+/// The key a press stands for: a remote's OK is Enter, its Back is Escape and
+/// its consumer Menu is the Menu key. Every other key comes back unchanged.
 pub(crate) fn remote_key_alias(key: Key, physical: &Physical) -> Key {
     match key {
         Key::Named(Named::Select) => Key::Named(Named::Enter),
         Key::Named(Named::BrowserBack | Named::GoBack) => Key::Named(Named::Escape),
         Key::Unidentified if matches!(linux_key_code(physical), Some(KEY_OK | KEY_SELECT)) => {
             Key::Named(Named::Enter)
+        }
+        Key::Unidentified if linux_key_code(physical) == Some(KEY_MENU) => {
+            Key::Named(Named::ContextMenu)
         }
         other => other,
     }
@@ -101,6 +110,14 @@ mod tests {
         assert_eq!(
             remote_key_alias(Key::Named(Named::GoBack), &unidentified(158)),
             Key::Named(Named::Escape)
+        );
+    }
+
+    #[test]
+    fn a_remote_consumer_menu_is_the_menu_key() {
+        assert_eq!(
+            remote_key_alias(Key::Unidentified, &unidentified(KEY_MENU)),
+            Key::Named(Named::ContextMenu)
         );
     }
 

@@ -1827,6 +1827,7 @@ impl Nokkvi {
             default_playlist_picker: _,
             similar_artists_modal: _,
             open_menu: _,
+            nav_focus: _,
             browsing_panel: _,
             pane_focus: _,
             cross_pane_drag: _,
@@ -2039,6 +2040,7 @@ impl Nokkvi {
             self.discard_modal(modal);
         }
         self.open_menu = None;
+        self.nav_focus = None;
         self.browsing_panel = None;
         // With the panel gone, focus goes back to the queue pane, as at every
         // other place the panel closes.

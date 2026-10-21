@@ -385,6 +385,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.shuffle_play",
             default: KeyCombo::ctrl(KeyCode::Enter),
         },
+        FocusNavigation {
+            display: "Focus Navigation",
+            description: "Highlight the view tabs: arrows move, Enter opens, Escape returns (a TV remote's Menu button)",
+            category: "Navigation",
+            toml_key: "focus_navigation",
+            settings_key: "hotkey.focus_navigation",
+            default: KeyCombo::key(KeyCode::Menu),
+        },
 
         // --- Browse / panel actions (category: "Navigation") ---
         ToggleBrowsingPanel {

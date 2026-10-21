@@ -312,6 +312,7 @@ impl Nokkvi {
                 self.handle_artist_rating_updated(artist_id, new_rating)
             }
             HotkeyMessage::ExpandCenter => self.handle_expand_center(),
+            HotkeyMessage::FocusNavigation => self.handle_focus_navigation(),
             HotkeyMessage::EditCenteredPlaylist => self.handle_edit_centered_playlist(),
             HotkeyMessage::TrawlSaveAsPlaylist => self.handle_trawl_save_as_playlist_hotkey(),
             HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
@@ -804,6 +805,16 @@ impl Nokkvi {
         // or discarding the dirty session under the modal) instead of
         // closing/using the modal.
         let top_modal = self.top_modal();
+
+        // The highlighted nav bar (Focus Navigation, a TV remote's Menu) takes
+        // the arrows, Enter and Escape ahead of the view under it. A modal on
+        // top owns its keys instead; theater hides the bar.
+        if top_modal.is_none()
+            && !self.theater.active
+            && let Some(task) = self.nav_focus_key_intercept(&key, resolved_action)
+        {
+            return task;
+        }
 
         // Rules-session grammar: view-gated keys for the smart-playlist
         // rules editor. Intercepted before any SFX/toolbar arms could fire

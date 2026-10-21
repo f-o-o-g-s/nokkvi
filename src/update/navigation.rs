@@ -386,6 +386,8 @@ impl Nokkvi {
         // Close any open overlay menu — its anchor (cursor position, trigger
         // bounds) is tied to the previous view's layout.
         self.open_menu = None;
+        // A tab click or number key leaves no keyboard highlight behind.
+        self.nav_focus = None;
 
         // The outgoing view's header mouse_area / sort pick_list unmount on the
         // switch, so their on_exit / on_close can't fire to clear a set

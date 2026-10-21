@@ -1199,16 +1199,16 @@ fn media_keys_resolve_to_their_fixed_actions() {
     }
 }
 
-/// The remote keys with no fixed meaning start unbound, free to capture.
+/// A remote's Menu highlights the nav bar out of the box; the remote keys with
+/// no fixed meaning start unbound, free to capture.
 #[test]
 fn the_other_remote_keys_start_unbound() {
     let config = HotkeyConfig::default();
-    for key in [
-        KeyCode::Menu,
-        KeyCode::Search,
-        KeyCode::VolumeUp,
-        KeyCode::Native(582),
-    ] {
+    assert_eq!(
+        config.lookup(&KeyCode::Menu, false, false, false),
+        Some(HotkeyAction::FocusNavigation)
+    );
+    for key in [KeyCode::Search, KeyCode::VolumeUp, KeyCode::Native(582)] {
         assert_eq!(config.lookup(&key, false, false, false), None, "{key}");
     }
 }

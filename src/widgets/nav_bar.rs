@@ -53,10 +53,62 @@ impl NavView {
 const _: [(); 7 - NavView::ALL.len()] = [];
 const _: [(); NavView::ALL.len() - 7] = [];
 
+/// The nav item the keyboard highlights (`Nokkvi.nav_focus`): how a TV remote,
+/// which has arrows and OK but no pointer or number keys, reaches the views.
+/// Focus Navigation (a remote's Menu) puts it on the current view's item; the
+/// arrows walk [`NavFocus::ORDER`], the bar's on-screen order in both layouts
+/// (the tabs, then the pinned Harbour longship).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NavFocus {
+    Tab(NavView),
+    Harbour,
+}
+
+impl NavFocus {
+    pub(crate) const ORDER: [Self; 8] = [
+        Self::Tab(NavView::Queue),
+        Self::Tab(NavView::Albums),
+        Self::Tab(NavView::Artists),
+        Self::Tab(NavView::Songs),
+        Self::Tab(NavView::Genres),
+        Self::Tab(NavView::Playlists),
+        Self::Tab(NavView::Radios),
+        Self::Harbour,
+    ];
+
+    /// The neighbouring item, stopping at either end (the bar doesn't wrap).
+    pub(crate) fn step(self, forward: bool) -> Self {
+        let i = Self::ORDER.iter().position(|f| *f == self).unwrap_or(0);
+        let next = if forward {
+            (i + 1).min(Self::ORDER.len() - 1)
+        } else {
+            i.saturating_sub(1)
+        };
+        Self::ORDER[next]
+    }
+}
+
+/// The 2 px keyboard-focus ring a highlighted nav item draws: the slot list's
+/// selection ring (`selection_ring_on`), contrast-floored against the item's
+/// own fill. No ring is a plain border at `radius`.
+pub(crate) fn nav_focus_border(
+    focused: bool,
+    fill: iced::Color,
+    radius: iced::border::Radius,
+) -> Border {
+    Border {
+        width: if focused { 2.0 } else { 0.0 },
+        color: theme::selection_ring_on(fill),
+        radius,
+    }
+}
+
 /// Pure view data passed from root for nav bar rendering
 #[derive(Debug, Clone)]
 pub(crate) struct NavBarViewData {
     pub current_view: NavView,
+    /// The keyboard-highlighted item (Focus Navigation), drawn with a ring.
+    pub nav_focus: Option<NavFocus>,
     /// A playlist-edit session is active — render the contextual "Editing"
     /// pill so the editor view is reachable without disturbing the Queue tab.
     pub editor_session_active: bool,
@@ -220,27 +272,34 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
 /// Shared between the horizontal nav bar and the vertical side nav bar.
 pub(crate) fn flat_tab_container_style(
     is_active: bool,
+    is_focused: bool,
 ) -> impl Fn(&iced::Theme) -> container::Style {
-    move |_theme: &iced::Theme| container::Style {
-        background: if is_active {
-            Some(Background::Color(theme::accent_fill()))
+    move |_theme: &iced::Theme| {
+        let fill = if is_active {
+            theme::accent_fill()
         } else {
-            Some(Background::Color(theme::bg0_hard()))
-        },
-        text_color: Some(if is_active {
-            theme::on_accent_fill()
-        } else {
-            theme::fg0()
-        }),
-        border: Border::default(),
-        ..Default::default()
+            theme::bg0_hard()
+        };
+        container::Style {
+            background: Some(Background::Color(fill)),
+            text_color: Some(if is_active {
+                theme::on_accent_fill()
+            } else {
+                theme::fg0()
+            }),
+            border: nav_focus_border(is_focused, fill, 0.0.into()),
+            ..Default::default()
+        }
     }
 }
 
 /// Rounded-mode pill-tab button style. Active = filled `accent_fill()`
 /// with `on_accent_fill()` text; idle = transparent over the tray background.
 /// The pill radius makes hover regions self-shaping inside the tray.
-fn rounded_pill_tab_style(is_active: bool) -> impl Fn(&iced::Theme) -> container::Style {
+fn rounded_pill_tab_style(
+    is_active: bool,
+    is_focused: bool,
+) -> impl Fn(&iced::Theme) -> container::Style {
     move |_theme: &iced::Theme| container::Style {
         background: if is_active {
             Some(Background::Color(theme::accent_fill()))
@@ -252,10 +311,16 @@ fn rounded_pill_tab_style(is_active: bool) -> impl Fn(&iced::Theme) -> container
         } else {
             theme::fg2()
         }),
-        border: Border {
-            radius: theme::ui_radius_pill(),
-            ..Default::default()
-        },
+        // An idle pill is see-through, so its ring reads against the tray.
+        border: nav_focus_border(
+            is_focused,
+            if is_active {
+                theme::accent_fill()
+            } else {
+                theme::bg0_hard()
+            },
+            theme::ui_radius_pill(),
+        ),
         ..Default::default()
     }
 }
@@ -433,7 +498,11 @@ fn harbour_icon_handle() -> iced::widget::svg::Handle {
 /// `cell` is the square size; the icon is inset within it. Highlights with an
 /// accent fill when Harbour is the current destination, mirroring the active
 /// nav-tab treatment.
-pub(crate) fn harbour_nav_button(active: bool, cell: f32) -> Element<'static, NavBarMessage> {
+pub(crate) fn harbour_nav_button(
+    active: bool,
+    focused: bool,
+    cell: f32,
+) -> Element<'static, NavBarMessage> {
     let icon_px = cell * 0.62;
     let icon = iced::widget::svg(harbour_icon_handle())
         .width(Length::Fixed(icon_px))
@@ -446,10 +515,15 @@ pub(crate) fn harbour_nav_button(active: bool, cell: f32) -> Element<'static, Na
         .align_y(Alignment::Center)
         .style(move |_: &iced::Theme| container::Style {
             background: active.then(|| Background::Color(theme::accent_fill())),
-            border: Border {
+            border: nav_focus_border(
+                focused,
+                if active {
+                    theme::accent_fill()
+                } else {
+                    theme::bg0_hard()
+                },
                 radius,
-                ..Default::default()
-            },
+            ),
             ..Default::default()
         });
     mouse_area(
@@ -503,93 +577,97 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // AND the contextual editor pill. `is_active` and `on_press` are supplied
     // by the caller so the builder stays message-agnostic (the editor pill
     // emits `SwitchToEditor`, not `SwitchView`).
-    let nav_tab =
-        |label: &'static str, icon_path: &'static str, is_active: bool, on_press: NavBarMessage| {
-            let is_rounded = theme::is_rounded_mode();
-            let display_mode = theme::nav_display_mode();
+    let nav_focus = data.nav_focus;
+    let nav_tab = |label: &'static str,
+                   icon_path: &'static str,
+                   is_active: bool,
+                   is_focused: bool,
+                   on_press: NavBarMessage| {
+        let is_rounded = theme::is_rounded_mode();
+        let display_mode = theme::nav_display_mode();
 
-            let tab_padding: [u16; 2] = if matches!(display_mode, NavDisplayMode::IconsOnly) {
-                [2, 6]
-            } else {
-                [2, 14]
-            };
-            let tab_width = if tabs_expand {
-                Length::FillPortion(1)
-            } else {
-                Length::Shrink
-            };
-
-            if is_rounded {
-                // Rounded mode: 32 px pill that lives inside the tray's
-                // padding. Active = filled `accent_fill()` + `on_accent_fill()`
-                // text; idle = transparent over the chrome bg. Hover comes
-                // from `HoverOverlay`, scoped to the pill radius so the
-                // tint follows the chip outline.
-                let tab_style = rounded_pill_tab_style(is_active);
-                let text_color = if is_active {
-                    theme::on_accent_fill()
-                } else {
-                    theme::fg2()
-                };
-
-                let elem: Element<'_, NavBarMessage> = mouse_area(
-                    super::hover_overlay::HoverOverlay::new(
-                        container(tab_content(
-                            label,
-                            icon_path,
-                            display_mode,
-                            text_color,
-                            text_size,
-                        ))
-                        .padding(tab_padding)
-                        .height(Length::Fixed(NAV_PILL_HEIGHT))
-                        .center_y(Length::Fixed(NAV_PILL_HEIGHT))
-                        .width(tab_width)
-                        .align_x(Alignment::Center)
-                        .style(tab_style),
-                    )
-                    .border_radius(theme::ui_radius_pill())
-                    .on_accent_surface(is_active),
-                )
-                .on_press(on_press)
-                .interaction(iced::mouse::Interaction::Pointer)
-                .boxed();
-                elem
-            } else {
-                // Flat mode: full-height accent block when active, `bg0_hard()`
-                // cell otherwise. Sided 1 px `theme::border()` rules between
-                // cells handled by `tab_separator()` at the assembly level.
-                let tab_style = flat_tab_container_style(is_active);
-                let text_color = if is_active {
-                    theme::on_accent_fill()
-                } else {
-                    theme::fg0()
-                };
-
-                let elem: Element<'_, NavBarMessage> = mouse_area(
-                    super::hover_overlay::HoverOverlay::new(
-                        container(tab_content(
-                            label,
-                            icon_path,
-                            display_mode,
-                            text_color,
-                            text_size,
-                        ))
-                        .padding(tab_padding)
-                        .height(Length::Fill)
-                        .width(tab_width)
-                        .align_x(Alignment::Center)
-                        .style(tab_style),
-                    )
-                    .border_radius(0.0.into())
-                    .on_accent_surface(is_active),
-                )
-                .on_press(on_press)
-                .interaction(iced::mouse::Interaction::Pointer)
-                .boxed();
-                elem
-            }
+        let tab_padding: [u16; 2] = if matches!(display_mode, NavDisplayMode::IconsOnly) {
+            [2, 6]
+        } else {
+            [2, 14]
         };
+        let tab_width = if tabs_expand {
+            Length::FillPortion(1)
+        } else {
+            Length::Shrink
+        };
+
+        if is_rounded {
+            // Rounded mode: 32 px pill that lives inside the tray's
+            // padding. Active = filled `accent_fill()` + `on_accent_fill()`
+            // text; idle = transparent over the chrome bg. Hover comes
+            // from `HoverOverlay`, scoped to the pill radius so the
+            // tint follows the chip outline.
+            let tab_style = rounded_pill_tab_style(is_active, is_focused);
+            let text_color = if is_active {
+                theme::on_accent_fill()
+            } else {
+                theme::fg2()
+            };
+
+            let elem: Element<'_, NavBarMessage> = mouse_area(
+                super::hover_overlay::HoverOverlay::new(
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fixed(NAV_PILL_HEIGHT))
+                    .center_y(Length::Fixed(NAV_PILL_HEIGHT))
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
+                )
+                .border_radius(theme::ui_radius_pill())
+                .on_accent_surface(is_active),
+            )
+            .on_press(on_press)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .boxed();
+            elem
+        } else {
+            // Flat mode: full-height accent block when active, `bg0_hard()`
+            // cell otherwise. Sided 1 px `theme::border()` rules between
+            // cells handled by `tab_separator()` at the assembly level.
+            let tab_style = flat_tab_container_style(is_active, is_focused);
+            let text_color = if is_active {
+                theme::on_accent_fill()
+            } else {
+                theme::fg0()
+            };
+
+            let elem: Element<'_, NavBarMessage> = mouse_area(
+                super::hover_overlay::HoverOverlay::new(
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fill)
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
+                )
+                .border_radius(0.0.into())
+                .on_accent_surface(is_active),
+            )
+            .on_press(on_press)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .boxed();
+            elem
+        }
+    };
 
     let current = data.current_view;
 
@@ -745,6 +823,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 label,
                 icon_path,
                 is_active,
+                nav_focus == Some(NavFocus::Tab(view)),
                 NavBarMessage::SwitchView(view),
             ));
             // Inter-tab separator: flat draws one between every pair;
@@ -767,6 +846,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             "Settings",
             "assets/icons/settings.svg",
             true,
+            false,
             NavBarMessage::CloseSettings,
         ));
         left_section = left_section.push(tab_separator(true));
@@ -781,6 +861,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             "Editing",
             "assets/icons/pencil.svg",
             editor_active,
+            false,
             NavBarMessage::SwitchToEditor,
         ));
         left_section = left_section.push(tab_separator(true));
@@ -1094,7 +1175,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Pinned Harbour longship — the LAST child of the outer row, so the Fill in
     // `left_section` (or the center track-info) pushes it to the right edge,
     // mirroring the hamburger cluster on the left.
-    let harbour_button = harbour_nav_button(data.harbour_active, cluster_pill_h);
+    let harbour_button = harbour_nav_button(
+        data.harbour_active,
+        nav_focus == Some(NavFocus::Harbour),
+        cluster_pill_h,
+    );
 
     let nav_content = container(
         row![

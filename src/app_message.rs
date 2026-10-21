@@ -392,6 +392,9 @@ pub enum ScrobbleMessage {
 #[derive(Debug, Clone)]
 pub enum HotkeyMessage {
     ClearSearch,
+    /// Highlight the nav bar's tabs for the arrow keys (a TV remote's Menu),
+    /// or drop the highlight when it is already up.
+    FocusNavigation,
     CycleSortMode(bool),
     /// Seek by the Seek Step setting: `true` = forward, `false` = backward.
     ///

@@ -905,6 +905,7 @@ impl Nokkvi {
             let lib = self.library_filter_view_data();
             let side_data = widgets::SideNavBarData {
                 current_view: side_nav_view,
+                nav_focus: self.nav_focus,
                 settings_open: self.current_view == View::Settings,
                 editor_session_active: self.playlist_editor.is_some(),
                 editor_active: matches!(self.current_view, View::PlaylistEditor),
@@ -2236,6 +2237,7 @@ impl Nokkvi {
 
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
+            nav_focus: self.nav_focus,
             editor_session_active: self.playlist_editor.is_some(),
             editor_active: matches!(self.current_view, View::PlaylistEditor),
             harbour_active: matches!(self.current_view, View::Harbour),

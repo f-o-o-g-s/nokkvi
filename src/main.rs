@@ -417,6 +417,9 @@ pub struct Nokkvi {
     /// In-progress roulette spin, if any. Drives the dedicated tick
     /// subscription in `subscription()`.
     pub roulette: Option<crate::state::RouletteState>,
+    /// The nav item the keyboard highlights (Focus Navigation, a TV remote's
+    /// Menu). While set, the arrows walk the nav bar instead of the list.
+    pub(crate) nav_focus: Option<crate::widgets::nav_bar::NavFocus>,
 }
 
 // ============================================================================
@@ -578,6 +581,7 @@ impl Default for Nokkvi {
             trawl: crate::state::TrawlState::default(),
             open_menu: None,
             roulette: None,
+            nav_focus: None,
         }
     }
 }

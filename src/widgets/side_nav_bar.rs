@@ -22,7 +22,7 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
-use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon};
+use super::nav_bar::{NAV_TABS, NavBarMessage, NavFocus, NavView, colored_icon, nav_focus_border};
 use crate::theme;
 
 /// Side-nav width (px) by chrome mode.
@@ -93,6 +93,8 @@ fn side_nav_tab_width() -> f32 {
 /// Data passed to the side nav bar for rendering
 pub(crate) struct SideNavBarData {
     pub current_view: NavView,
+    /// The keyboard-highlighted item (Focus Navigation), drawn with a ring.
+    pub nav_focus: Option<NavFocus>,
     pub settings_open: bool,
     /// A playlist-edit session is active — render the contextual editor cell.
     pub editor_session_active: bool,
@@ -237,9 +239,11 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let current = data.current_view;
     let is_rounded = theme::is_rounded_mode();
 
+    let nav_focus = data.nav_focus;
     let nav_tab = |label: &'static str,
                    icon_path: &'static str,
                    is_active: bool,
+                   is_focused: bool,
                    on_press: NavBarMessage|
      -> Element<'_, NavBarMessage> {
         let display_mode = theme::nav_display_mode();
@@ -273,22 +277,22 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     .width(Length::Fixed(card_width))
                     .height(Length::FillPortion(1))
                     .align_y(iced::Alignment::Center)
-                    .style(move |_: &iced::Theme| container::Style {
-                        background: if is_active {
-                            Some(Background::Color(theme::accent_fill()))
+                    .style(move |_: &iced::Theme| {
+                        let fill = if is_active {
+                            theme::accent_fill()
                         } else {
-                            Some(Background::Color(theme::bg0_hard()))
-                        },
-                        text_color: Some(if is_active {
-                            theme::on_accent_fill()
-                        } else {
-                            theme::fg0()
-                        }),
-                        border: Border {
-                            radius: card_radius,
+                            theme::bg0_hard()
+                        };
+                        container::Style {
+                            background: Some(Background::Color(fill)),
+                            text_color: Some(if is_active {
+                                theme::on_accent_fill()
+                            } else {
+                                theme::fg0()
+                            }),
+                            border: nav_focus_border(is_focused, fill, card_radius),
                             ..Default::default()
-                        },
-                        ..Default::default()
+                        }
                     }),
             )
             .border_radius(card_radius)
@@ -522,7 +526,13 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let is_active = !settings_open && !editor_active && !harbour_active && current == view;
         tabs = tabs
             .push(wrap_in_gutter(
-                nav_tab(label, icon_path, is_active, NavBarMessage::SwitchView(view)),
+                nav_tab(
+                    label,
+                    icon_path,
+                    is_active,
+                    nav_focus == Some(NavFocus::Tab(view)),
+                    NavBarMessage::SwitchView(view),
+                ),
                 is_rounded,
                 nav_width,
             ))
@@ -543,6 +553,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     "Editing",
                     "assets/icons/pencil.svg",
                     editor_active,
+                    false,
                     NavBarMessage::SwitchToEditor,
                 ),
                 is_rounded,
@@ -557,6 +568,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     tabs = tabs.push(separator()).push(
         container(super::nav_bar::harbour_nav_button(
             data.harbour_active,
+            nav_focus == Some(NavFocus::Harbour),
             ICON_TAB_HEIGHT,
         ))
         .width(Length::Fixed(nav_width))

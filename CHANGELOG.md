@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - A remote's Home button (the Home Page key) now opens Harbour.
 - Remote and media keys such as Menu, Search, Rewind and Volume Up can now be bound to actions.
 - A remote button with no key name can now be bound by its key number, shown as "Key 582".
+- A remote's Menu button now highlights the view tabs, so the D-pad can switch views.
+- While the tabs are highlighted, the arrows move along them, Enter opens one and Escape returns to the list.
 
 ### Changed
 

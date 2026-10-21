@@ -1,15 +1,71 @@
 //! Navigation, search, and sort hotkey handlers
 
-use iced::Task;
-use nokkvi_data::audio;
+use iced::{
+    Task,
+    keyboard::{Key, key::Named},
+};
+use nokkvi_data::{audio, types::hotkey_config::HotkeyAction};
 use tracing::{debug, trace};
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, SlotListMessage, SplitViewMessage},
+    app_message::{Message, NavigationMessage, SlotListMessage, SplitViewMessage},
+    theme,
     update::modals::ActiveModal,
     views, widgets,
+    widgets::nav_bar::{NavFocus, NavView},
 };
+
+/// What a key does while the nav bar is highlighted ([`nav_focus_key`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NavFocusKey {
+    /// Highlight the next (`true`) or previous item.
+    Move(bool),
+    /// Open the highlighted item.
+    Open,
+    /// Drop the highlight and go back to the list.
+    Leave,
+    /// Nothing lies that way (above the top bar, left of the sidebar): stay.
+    Stay,
+}
+
+/// The nav-highlight meaning of a named key, or `None` for a key it doesn't
+/// own. The bar runs along the arrows that walk it: Left/Right on the top bar,
+/// Up/Down on the sidebar; the arrow toward the list leaves.
+pub(crate) fn nav_focus_key(key: Named, side_nav: bool) -> Option<NavFocusKey> {
+    let (back, forward, toward_list, away) = if side_nav {
+        (
+            Named::ArrowUp,
+            Named::ArrowDown,
+            Named::ArrowRight,
+            Named::ArrowLeft,
+        )
+    } else {
+        (
+            Named::ArrowLeft,
+            Named::ArrowRight,
+            Named::ArrowDown,
+            Named::ArrowUp,
+        )
+    };
+    match key {
+        k if k == back => Some(NavFocusKey::Move(false)),
+        k if k == forward => Some(NavFocusKey::Move(true)),
+        Named::Enter => Some(NavFocusKey::Open),
+        k if k == toward_list || k == Named::Escape => Some(NavFocusKey::Leave),
+        k if k == away => Some(NavFocusKey::Stay),
+        _ => None,
+    }
+}
+
+/// The nav item that stands for `view`: its tab, the Harbour longship, or the
+/// Queue tab for the views with no item of their own (Settings, the editor).
+fn nav_focus_for(view: View) -> NavFocus {
+    if view == View::Harbour {
+        return NavFocus::Harbour;
+    }
+    Option::<NavView>::from(view).map_or(NavFocus::Tab(NavView::Queue), NavFocus::Tab)
+}
 
 /// The signed second offset one Seek key press asks for.
 ///
@@ -121,6 +177,78 @@ impl Nokkvi {
             }
         }
         Task::none()
+    }
+
+    /// Focus Navigation (default: a TV remote's Menu). Highlights the current
+    /// view's nav item so the arrows can reach the other views: a remote has no
+    /// pointer to aim and no number keys. Pressed again, the highlight goes.
+    /// The None nav layout has no bar to highlight.
+    pub(crate) fn handle_focus_navigation(&mut self) -> Task<Message> {
+        if self.nav_focus.take().is_some() {
+            self.sfx_engine.play(audio::SfxType::Escape);
+            return Task::none();
+        }
+        if theme::is_none_nav() {
+            self.toast_info("No navigation bar to highlight: Nav Layout is set to None");
+            return Task::none();
+        }
+        self.nav_focus = Some(nav_focus_for(self.current_view));
+        self.sfx_engine.play(audio::SfxType::Tab);
+        // A focused search field would keep the arrows for its caret.
+        if let Some(page) = self.current_view_page_mut() {
+            page.common_mut().search_input_focused = false;
+        }
+        crate::update::components::unfocus_all()
+    }
+
+    /// A key while the nav bar is highlighted: the arrows walk it, Enter opens
+    /// the item, Escape or the arrow toward the list leaves. `None` when nothing
+    /// is highlighted, or for a key the bar doesn't own; that key drops the
+    /// highlight and runs as usual (Space still plays). Literal keys, like the
+    /// rules editor's: this is spatial movement, and a remote's D-pad sends
+    /// exactly these.
+    pub(crate) fn nav_focus_key_intercept(
+        &mut self,
+        key: &Key,
+        resolved_action: Option<HotkeyAction>,
+    ) -> Option<Task<Message>> {
+        let focus = self.nav_focus?;
+        // Focus Navigation itself drops the highlight (its own handler).
+        if resolved_action == Some(HotkeyAction::FocusNavigation) {
+            return None;
+        }
+        let action = match key {
+            Key::Named(named) => nav_focus_key(*named, theme::is_side_nav()),
+            Key::Character(_) | Key::Unidentified => None,
+        };
+        let Some(action) = action else {
+            self.nav_focus = None;
+            return None;
+        };
+        match action {
+            NavFocusKey::Move(forward) => {
+                let next = focus.step(forward);
+                if next != focus {
+                    self.sfx_engine.play(audio::SfxType::Tab);
+                }
+                self.nav_focus = Some(next);
+                Some(Task::none())
+            }
+            NavFocusKey::Open => {
+                self.nav_focus = None;
+                let view = match focus {
+                    NavFocus::Tab(nav_view) => nav_view.into(),
+                    NavFocus::Harbour => View::Harbour,
+                };
+                Some(self.update(Message::Navigation(NavigationMessage::SwitchView(view))))
+            }
+            NavFocusKey::Leave => {
+                self.nav_focus = None;
+                self.sfx_engine.play(audio::SfxType::Escape);
+                Some(Task::none())
+            }
+            NavFocusKey::Stay => Some(Task::none()),
+        }
     }
 
     /// Handle edit value up/down hotkey (default: bare ↑/↓).

@@ -207,6 +207,7 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::Activate => Message::SlotList(SlotListMessage::ActivateCenter),
         HotkeyAction::ShufflePlay => Message::SlotList(SlotListMessage::ActivateCenterShuffled),
         HotkeyAction::ExpandCenter => Message::Hotkey(HotkeyMessage::ExpandCenter),
+        HotkeyAction::FocusNavigation => Message::Hotkey(HotkeyMessage::FocusNavigation),
         // Browse
         HotkeyAction::ToggleBrowsingPanel => {
             Message::SplitView(SplitViewMessage::ToggleBrowsingPanel)
