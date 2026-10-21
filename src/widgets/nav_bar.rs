@@ -110,16 +110,6 @@ pub(crate) fn nav_tab_colors(
     }
 }
 
-/// The Harbour longship's keyboard highlight: a 3 px ring, contrast-floored
-/// against its fill (an `fg0` chip would swallow the boat's `fg0` body).
-fn harbour_focus_border(focused: bool, fill: iced::Color, radius: iced::border::Radius) -> Border {
-    Border {
-        width: if focused { 3.0 } else { 0.0 },
-        color: theme::selection_ring_on(fill),
-        radius,
-    }
-}
-
 /// Pure view data passed from root for nav bar rendering
 #[derive(Debug, Clone)]
 pub(crate) struct NavBarViewData {
@@ -512,17 +502,17 @@ pub(crate) fn harbour_nav_button(
         .height(Length::Fixed(cell))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
+        // The highlight is the tabs' chip. The boat's `fg0` body melts into
+        // it but its fixed dark outline holds the shape, and a ring alone on
+        // this small cell was missed from the couch (Harbour is the start view).
         .style(move |_: &iced::Theme| container::Style {
-            background: active.then(|| Background::Color(theme::accent_fill())),
-            border: harbour_focus_border(
-                focused,
-                if active {
-                    theme::accent_fill()
-                } else {
-                    theme::bg0_hard()
-                },
+            background: nav_tab_colors(active, focused, None, theme::fg0())
+                .0
+                .map(Background::Color),
+            border: Border {
                 radius,
-            ),
+                ..Default::default()
+            },
             ..Default::default()
         });
     mouse_area(
