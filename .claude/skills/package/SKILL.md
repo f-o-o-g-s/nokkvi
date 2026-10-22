@@ -57,6 +57,8 @@ The release workflow extracts the section matching the pushed tag verbatim into 
 
 Read `README.md` and verify the feature list, dependencies, and build instructions match the current codebase. Update any stale sections. Don't touch screenshots or media.
 
+Keep the README a landing page. Highlights holds about nine bullets, each one short line: the features that set nokkvi apart from peer clients, then one trailing "Plus the essentials" bullet. A new feature joins an existing bullet or the essentials as a few words, and its detail (modes, effects, options, version gates) goes on the docs site. When a bullet grows past one line or the list past ten, trim it in the same release (1e8358eb shows the pattern).
+
 **Logo assets:** if the logo artwork changed this release, regenerate the committed derived assets from the canonical master before tagging: `sh scripts/gen-logo-assets.sh <new-art.svg>` rebuilds `assets/logo/nokkvi_master.svg` and re-derives `assets/nokkvi_logo.svg`, `assets/nokkvi_logo_readme.svg`, `assets/org.nokkvi.nokkvi.svg`, and `assets/org.nokkvi.nokkvi.png` (pinned scour 0.38.2 / rsvg-convert 2.62.x). Stage the master plus all four derived outputs in the same commit, and run `sh scripts/gen-logo-assets.sh --check` to confirm they are in sync. The tarball and AUR builds consume these committed assets and never regenerate them (no rasterizer in their deps).
 
 ## 3. Bump version

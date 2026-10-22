@@ -12,60 +12,39 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 
 <img src="assets/nokkvi_demo.webp?v=5" width="100%" alt="Nokkvi theme and visualizer demo" />
 
-*Demo of Nokkvi's GPU-accelerated audio visualizers and how the layout adapts to different window sizes.*
+*MilkDrop presets, Theater Mode, and theme swaps, tiled and floating.*
 
 > **⚠️ AI-Generated Project**
 >
 > This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
 
 **Platform:** Linux only. Built and tested on Arch Linux (Wayland/Hyprland) with PipeWire v<!-- pipewire-version -->1.6.9<!-- /pipewire-version --> and Navidrome v<!-- navidrome-version -->0.64.2<!-- /navidrome-version -->. No Windows or macOS support.
-**Network:** Built and tested on LAN. Nokkvi streams your original files and can't ask Navidrome for a smaller version yet, so a FLAC library over a slow remote connection can keep stopping to buffer. If you listen remotely, you can set a transcoding for Nokkvi's player in Navidrome under Settings > Players. Those tracks play fine, but you can't seek within them.
+
+**Network:** Built and tested on LAN. Nokkvi streams your original files and can't ask for a smaller version yet, so FLAC over a slow remote connection can keep stopping to buffer. To listen remotely, set a transcoding for Nokkvi's player in Navidrome under Settings > Players (those tracks play fine, but you can't seek within them).
 
 ## 📖 Documentation
 
 Full guides, config reference, keyboard shortcuts, theming, and visualizer details are at the **[Nokkvi docs site](https://f-o-o-g-s.github.io/nokkvi-docs/)**.
 
-## Inspirations
-
-Things that shaped this project:
-
-- **[rmpc](https://github.com/mierak/rmpc)**: My previous daily driver, a terminal MPD client.
-- **[Feishin](https://github.com/jeffvli/feishin)**: Referenced heavily for Navidrome API coverage and enums.
-- **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Shaped the queue and consume logic.
-- **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for the native PipeWire implementation.
-- **[cava](https://github.com/karlstav/cava)**: The visualizer DSP (`spectrum.rs`) is a Rust port of cavacore, and the Monstercat smoothing filter is ported from cava.c.
-- **[OjoDrop](https://github.com/sho-run/ojodrop)** and **[Butterchurn](https://github.com/jberg/butterchurn)**: The MilkDrop mode runs OjoDrop's Rust MilkDrop engine on presets from Butterchurn's converted pack.
-- **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the MusicWheel-style slot list (fixed odd-row centered viewport, height-adaptive) and the roulette wheel's discrete-tick decel.
-- **Vim**: Inspired the color schemes and keyboard-first approach.
-
 ## Highlights
 
-- Native **PipeWire** audio engine: gapless playback, a 10-band EQ, ReplayGain and AGC normalization, and configurable crossfade with transition fades.
-- Opt-in **bit-perfect** playback (Strict or Relaxed, follows the native sample rate) with a badge that reads the real hardware clock as `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED`.
-- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, reflection, horizon, a spiralling tunnel inside the scope ring, and CRT, shown in a band above the player bar or over the cover art, and a `milkdrop` mode that plays MilkDrop presets in place of the cover, chosen from a searchable list with live preview, including nokkvi's own presets drawn in your theme's colours, several built on the playing album's cover.
-- **Theater Mode** (F11): the playing track's cover, visualizer, and lyrics fill the window, with an auto-hiding player bar and optional fullscreen.
-- **Smart playlists** authored in-app: a rules editor with nested All/Any groups, live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
-- **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
-- Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
-- **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, optional accent and visualizer colors taken from the playing album cover, and two icon sets (Phosphor, Lucide).
-- Built for tiling WMs: a width-adaptive player bar with five seek bar looks (one draws the playing song's waveform) and a **slot-paginated list** that fits a whole number of rows to the window (up to 29) and scales their contents to match.
-- Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search, one-press shelves and random plays; persistent queue, multi-select, drag-and-drop, star ratings; lyrics, plain or synced line by line or word by word; similar artists from ListenBrainz and Deezer, in your library or not; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
-
-Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
+- Native **PipeWire** engine: gapless playback, crossfade, a 10-band EQ, ReplayGain, and opt-in **bit-perfect** output with a badge that checks the real hardware clock.
+- GPU visualizer (`bars`, `lines`, `scope`) with beat glow, bloom, reflection, and CRT effects, plus a **MilkDrop** mode with a live-preview preset picker and nokkvi's own theme-colored presets.
+- **Theater Mode** (F11): the playing track's cover, visualizer, and lyrics fill the window.
+- **Smart playlists** (Navidrome 0.61+) built in-app with a rules editor and server-evaluated previews; also imports `.nsp`.
+- **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into one mix and save it as a playlist.
+- Scriptable from the shell: `nokkvi <verb>` controls the running player (playback, volume, ratings, queue).
+- **23 built-in themes** (default **Svalbard**), custom `.toml` themes that hot-reload, and optional accent and visualizer colors taken from the playing album cover.
+- Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** that fits a whole number of rows to the window.
+- Plus the essentials: browse albums, artists, songs, genres, playlists, and radio; a **Harbour** home screen; persistent queue with drag-and-drop; star ratings; lyrics synced by line or by word; similar songs, plus similar artists from ListenBrainz and Deezer; five seek bar styles (one draws the waveform); server queue sync; scrobbling; MPRIS; an optional tray icon; and full keyboard control.
 
 ### Non-Goals
 
-Nokkvi is a fast, keyboard-driven music player, not a Navidrome admin panel. These features are intentionally left out for now:
-- Server administration (library scans, user management)
-- Podcasts
-- Jukebox mode
-- Bookmarks
-- Public sharing links
-- Offline download
+Nokkvi is a fast, keyboard-driven music player, not a Navidrome admin panel. For now it leaves out server administration (library scans, user management), podcasts, jukebox mode, bookmarks, public sharing links, and offline downloads.
 
 ## Download
 
-**Prebuilt binary (x86_64 Linux):** grab the latest tarball from [Releases](https://github.com/f-o-o-g-s/nokkvi/releases). Each release ships `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` plus a matching `.sha256`. Verify, extract, and install:
+**Prebuilt binary (x86_64 Linux):** grab the latest tarball and its `.sha256` from [Releases](https://github.com/f-o-o-g-s/nokkvi/releases), then verify, extract, and install:
 
 ```bash
 sha256sum -c nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz.sha256
@@ -74,9 +53,9 @@ cd nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu
 ./install.sh
 ```
 
-Runtime requirements: `pipewire`, `alsa-lib`, and `fontconfig` installed system-wide (Arch: `sudo pacman -S pipewire alsa-lib fontconfig`).
+It needs `pipewire`, `alsa-lib`, and `fontconfig` (Arch: `sudo pacman -S pipewire alsa-lib fontconfig`).
 
-**Arch (AUR):** [`nokkvi-bin`](https://aur.archlinux.org/packages/nokkvi-bin) tracks the released tarballs above; [`nokkvi-git`](https://aur.archlinux.org/packages/nokkvi-git) builds from `main`. Install with your AUR helper of choice (e.g. `yay -S nokkvi-bin` or `paru -S nokkvi-bin`).
+**Arch (AUR):** [`nokkvi-bin`](https://aur.archlinux.org/packages/nokkvi-bin) tracks the releases; [`nokkvi-git`](https://aur.archlinux.org/packages/nokkvi-git) builds from `main` (e.g. `paru -S nokkvi-bin`).
 
 ## Quickstart (build from source)
 
@@ -86,13 +65,19 @@ cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```
 
-The binary goes to `target/release/nokkvi`; `install.sh` copies it to `~/.local/bin/nokkvi` with the desktop entry and icon. Config lives in `~/.config/nokkvi/`; runtime state and logs live in `~/.local/state/nokkvi/`. See [debug logging](CONTRIBUTING.md#debug-logging) for the `RUST_LOG` escape hatch when filing bug reports.
+`install.sh` puts the binary in `~/.local/bin/`. Config lives in `~/.config/nokkvi/`, runtime state and logs in `~/.local/state/nokkvi/`. Filing a bug? See [debug logging](CONTRIBUTING.md#debug-logging).
 
-More detail in the docs:
-- [Installation](https://f-o-o-g-s.github.io/nokkvi-docs/guides/installation/)
-- [Connecting to Navidrome](https://f-o-o-g-s.github.io/nokkvi-docs/guides/navidrome/)
-- [Configuration reference](https://f-o-o-g-s.github.io/nokkvi-docs/reference/config/)
-- [Keyboard shortcuts](https://f-o-o-g-s.github.io/nokkvi-docs/reference/hotkeys/)
-- [Media controls (MPRIS)](https://f-o-o-g-s.github.io/nokkvi-docs/guides/mpris/)
+More in the docs: [Installation](https://f-o-o-g-s.github.io/nokkvi-docs/guides/installation/) · [Connecting to Navidrome](https://f-o-o-g-s.github.io/nokkvi-docs/guides/navidrome/) · [Configuration](https://f-o-o-g-s.github.io/nokkvi-docs/reference/config/) · [Keyboard shortcuts](https://f-o-o-g-s.github.io/nokkvi-docs/reference/hotkeys/) · [MPRIS](https://f-o-o-g-s.github.io/nokkvi-docs/guides/mpris/)
 
 Build setup and contributor workflow (including the **nightly** rustfmt requirement) are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Inspirations
+
+- **[rmpc](https://github.com/mierak/rmpc)**: My previous daily driver, a terminal MPD client.
+- **[Feishin](https://github.com/jeffvli/feishin)**: Referenced heavily for Navidrome API coverage and enums.
+- **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Shaped the queue and consume logic.
+- **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for the native PipeWire implementation.
+- **[cava](https://github.com/karlstav/cava)**: The visualizer DSP is a Rust port of cavacore, and the Monstercat smoothing comes from cava.c.
+- **[OjoDrop](https://github.com/sho-run/ojodrop)** and **[Butterchurn](https://github.com/jberg/butterchurn)**: MilkDrop mode runs OjoDrop's Rust engine on presets from Butterchurn's converted pack.
+- **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the MusicWheel-style slot list and the roulette wheel.
+- **Vim**: Inspired the color schemes and keyboard-first approach.
