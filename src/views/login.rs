@@ -105,6 +105,9 @@ pub struct LoginPage {
     pub username: String,
     pub password: String,
     pub login_in_progress: bool,
+    /// The login in flight waits out the server's failed-login lockout
+    /// (`LoginProgress::WaitingOutLockout`); the form says so.
+    pub waiting_out_lockout: bool,
     pub error: Option<LoginError>,
 }
 
@@ -115,6 +118,7 @@ impl Default for LoginPage {
             username: String::new(),
             password: String::new(),
             login_in_progress: false,
+            waiting_out_lockout: false,
             error: None,
         }
     }
@@ -127,6 +131,7 @@ impl LoginPage {
         self.password.clear();
         self.error = None;
         self.login_in_progress = false;
+        self.waiting_out_lockout = false;
     }
 
     /// Initialize with pre-filled credentials (e.g., from saved auth)
@@ -136,6 +141,7 @@ impl LoginPage {
             username,
             password,
             login_in_progress: false,
+            waiting_out_lockout: false,
             error: None,
         }
     }
@@ -313,13 +319,28 @@ impl LoginPage {
     /// Called by root when login succeeds
     pub fn on_login_success(&mut self) {
         self.login_in_progress = false;
+        self.waiting_out_lockout = false;
         self.error = None;
     }
 
     /// Called by root when login fails
     pub fn on_login_error(&mut self, error: String) {
         self.login_in_progress = false;
+        self.waiting_out_lockout = false;
         self.error = Some(classify_login_error(&error));
+    }
+
+    /// Called by root when the login in flight reports progress. A report
+    /// that outlives its login (none is in flight) changes nothing.
+    pub fn on_login_progress(&mut self, progress: crate::app_message::LoginProgress) {
+        if !self.login_in_progress {
+            return;
+        }
+        match progress {
+            crate::app_message::LoginProgress::WaitingOutLockout => {
+                self.waiting_out_lockout = true;
+            }
+        }
     }
 }
 
@@ -530,15 +551,32 @@ impl LoginPage {
             );
         }
 
+        if self.login_in_progress && self.waiting_out_lockout {
+            form = form.push(
+                text(
+                    "Navidrome is pausing sign-ins for a few seconds after failed attempts. \
+                     You're signed in as soon as it lifts.",
+                )
+                .color(theme::fg2())
+                .size(13)
+                .font(theme::ui_font())
+                .width(Length::Fill)
+                .align_x(Alignment::Center)
+                .boxed(),
+            );
+        }
+
         form.push(self.login_button())
     }
 
     /// The accent-filled Login button (doubles as the "Connecting…" indicator).
     fn login_button(&self) -> Element<'_, LoginMessage> {
-        let label = if self.login_in_progress {
-            "Connecting..."
-        } else {
+        let label = if !self.login_in_progress {
             "Login"
+        } else if self.waiting_out_lockout {
+            "Waiting for the server..."
+        } else {
+            "Connecting..."
         };
         mouse_area(
             crate::widgets::hover_overlay::HoverOverlay::new(
@@ -691,6 +729,7 @@ mod tests {
             username: "alice".into(),
             password: "hunter2".into(),
             login_in_progress: true,
+            waiting_out_lockout: false,
             error: None,
         };
         let (_task, action) = page.update(LoginMessage::LoginPressed);
@@ -704,6 +743,7 @@ mod tests {
             username: "alice".into(),
             password: "hunter2".into(),
             login_in_progress: false,
+            waiting_out_lockout: false,
             error: None,
         };
         let (_task, action) = page.update(LoginMessage::LoginPressed);
@@ -718,6 +758,7 @@ mod tests {
             username: String::new(),
             password: String::new(),
             login_in_progress: false,
+            waiting_out_lockout: false,
             error: None,
         };
         let (_task, _action) = page.update(LoginMessage::LoginPressed);

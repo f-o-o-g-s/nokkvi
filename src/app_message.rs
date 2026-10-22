@@ -100,6 +100,30 @@ pub struct LoginSuccess {
     pub user_id: String,
 }
 
+/// Why a login or resume ended without a session.
+#[derive(Debug, Clone)]
+pub enum LoginFailure {
+    /// The attempt failed; the form shows the text.
+    Failed(String),
+    /// The server no longer takes the saved session a resume tried, which
+    /// is already cleared from storage.
+    SessionEnded,
+}
+
+impl From<anyhow::Error> for LoginFailure {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Failed(format!("{e:#}"))
+    }
+}
+
+/// What a login in flight tells the form while it is still running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginProgress {
+    /// The server took the password but turns the new session's requests
+    /// away: Navidrome's failed-login lockout, which the login waits out.
+    WaitingOutLockout,
+}
+
 /// Grouped playback state for cleaner message passing (R1 refactoring)
 #[derive(Debug, Clone)]
 pub struct PlaybackStateUpdate {
@@ -1600,7 +1624,9 @@ pub enum Message {
     /// Boxed: `LoginSuccess` (AppService + URLs + user id) dwarfs every
     /// other variant and would bloat the whole `Message` enum
     /// (`large_enum_variant`) — same treatment as `Ipc(Box<..>)`.
-    LoginResult(Box<Result<LoginSuccess, String>>),
+    LoginResult(Box<Result<LoginSuccess, LoginFailure>>),
+    /// A login in flight has something to show on the form.
+    LoginProgress(LoginProgress),
     /// Resume session from stored JWT (no password needed)
     ResumeSession,
     /// Response from pinging the server to fetch its native application version

@@ -3,12 +3,12 @@
 use std::time::Duration;
 
 use iced::Task;
-use nokkvi_data::{audio, backend::app_service::AppService};
+use nokkvi_data::{audio, backend::app_service::AppService, services::auth::SessionCheck};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     Nokkvi, Screen, View,
-    app_message::{Message, NavigationMessage, PlaybackMessage},
+    app_message::{LoginFailure, LoginProgress, Message, NavigationMessage, PlaybackMessage},
     services, views, widgets,
 };
 
@@ -106,25 +106,38 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
 
 // === login tail ===
 
-/// When a session's Subsonic requests move to an OpenSubsonic API key.
+/// How a session started, which decides its API-key step and what a
+/// refused session check means.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum KeySetup {
-    /// A password login: a fresh key now, before the session is handed over.
-    /// Fails the login only when the server sent no token pair and no key
-    /// could be set up.
-    Now,
+enum LoginKind {
+    /// A password login: a fresh key now, before the session is handed over
+    /// (fails the login only when the server sent no token pair and no key
+    /// could be set up). The server just took the password, so a check it
+    /// refuses with error 40 is its failed-login lockout, waited out.
+    Password,
     /// A resume: a session still on the token pair moves to a key in the
     /// background once its queue is claimed, so startup never waits on it.
-    InBackground,
+    /// A check the server refuses ends the saved session.
+    Resume,
 }
 
+/// How a login in flight reports to its form: each call sends one
+/// [`LoginProgress`] through the login task's progress channel.
+type ProgressReport =
+    dyn Fn(LoginProgress) -> futures::future::BoxFuture<'static, ()> + Send + Sync;
+
 /// Everything after a login or resume authenticated `shell`, up to the
-/// `LoginSuccess` the root takes over: the JWT-refresh persistence, the
-/// API-key step, and this session's own queue.
+/// `LoginSuccess` the root takes over: the session check, the JWT-refresh
+/// persistence, the API-key step, and this session's own queue.
 async fn finish_login(
     shell: AppService,
-    key: KeySetup,
-) -> Result<crate::app_message::LoginSuccess, String> {
+    kind: LoginKind,
+    report: &ProgressReport,
+) -> Result<crate::app_message::LoginSuccess, LoginFailure> {
+    if kind == LoginKind::Resume {
+        check_resumed_session(&shell).await?;
+    }
+
     // Persist every refreshed JWT, so the next launch resumes with it.
     let storage = shell.storage().clone();
     shell
@@ -136,11 +149,11 @@ async fn finish_login(
         }))
         .await;
 
-    if key == KeySetup::Now {
-        shell
-            .establish_api_key()
-            .await
-            .map_err(|e| format!("{e:#}"))?;
+    if kind == LoginKind::Password {
+        shell.establish_api_key().await?;
+        // After the key step: a fresh key is never under an old
+        // credential's lockout.
+        check_new_session(&shell, report).await?;
     }
 
     // Load this session's own queue before anything reads it: a login to
@@ -149,7 +162,7 @@ async fn finish_login(
         tracing::warn!("Could not load this session's queue: {e:#}");
     }
 
-    if key == KeySetup::InBackground {
+    if kind == LoginKind::Resume {
         // Tracked, so a logout drains it before the stored session is cleared.
         let upgrading = shell.clone();
         shell
@@ -171,6 +184,72 @@ async fn finish_login(
         username,
         user_id,
     })
+}
+
+/// A resume's first requests: the saved session is checked before the home
+/// screen's first burst sends it, which tripped Navidrome's failed-login
+/// lockout for the login after a password change (#14). The JWT goes first,
+/// on the native API outside the Subsonic limiter: a changed password or a
+/// token past its lifetime ends there at no failed login. Then one ping
+/// with the saved `/rest` credential. A refusal clears the saved session. No
+/// verdict (no network yet at autostart, a server restarting) resumes as
+/// before, unchecked.
+async fn check_resumed_session(shell: &AppService) -> Result<(), LoginFailure> {
+    let verdict = match shell.auth().check_token().await {
+        SessionCheck::Accepted => shell.auth().check_credential().await,
+        refused_or_unknown => refused_or_unknown,
+    };
+    match verdict {
+        SessionCheck::Accepted => Ok(()),
+        SessionCheck::Refused { .. } => {
+            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
+                warn!(target: "nokkvi::auth", "Failed to clear the refused session: {e}");
+            }
+            Err(LoginFailure::SessionEnded)
+        }
+        SessionCheck::Unknown(e) => {
+            warn!(target: "nokkvi::auth", "Resuming without a session check: {e:#}");
+            Ok(())
+        }
+    }
+}
+
+/// A password login's check before the home screen's first burst. The
+/// server just took the password, so an error 40 here is its failed-login
+/// lockout (a dead session's last requests can trip it): the form says so
+/// and the login waits it out, where it used to land on a home screen whose
+/// every request was refused and drop straight back to the login screen.
+async fn check_new_session(
+    shell: &AppService,
+    report: &ProgressReport,
+) -> Result<(), LoginFailure> {
+    let mut verdict = shell.auth().check_credential().await;
+    if verdict.lockout_possible() {
+        info!(target: "nokkvi::auth", "The server turns the new session away: waiting out its failed-login lockout");
+        report(LoginProgress::WaitingOutLockout).await;
+        verdict =
+            nokkvi_data::services::auth::wait_out_lockout(|| shell.auth().check_credential()).await;
+    }
+    match verdict {
+        SessionCheck::Accepted => Ok(()),
+        SessionCheck::Refused {
+            lockout_possible: true,
+        } => Err(LoginFailure::Failed(
+            "Navidrome is still pausing sign-ins for this account after failed attempts. \
+             If another app or device still uses the old password, update it there, then \
+             try again in a minute."
+                .to_owned(),
+        )),
+        SessionCheck::Refused {
+            lockout_possible: false,
+        } => Err(LoginFailure::Failed(
+            "The server took the password but refuses the session's requests.".to_owned(),
+        )),
+        SessionCheck::Unknown(e) => {
+            warn!(target: "nokkvi::auth", "Signing in without a session check: {e:#}");
+            Ok(())
+        }
+    }
 }
 
 impl Nokkvi {
@@ -562,20 +641,20 @@ impl Nokkvi {
                 // Chain the login task with the mapped task
                 Task::batch([
                     mapped_task,
-                    Task::perform(
-                        async move {
+                    Task::sip(
+                        iced::task::sipper(async move |progress| {
+                            let report = move |p| -> futures::future::BoxFuture<'static, ()> {
+                                let mut progress = progress.clone();
+                                Box::pin(async move { progress.send(p).await })
+                            };
                             let shell = match cached {
                                 Some(storage) => AppService::new_with_storage(storage).await,
                                 None => AppService::new().await,
-                            }
-                            .map_err(|e| format!("{e:#}"))?;
-                            shell
-                                .auth()
-                                .login(server_url, username, password)
-                                .await
-                                .map_err(|e| format!("{e:#}"))?;
-                            finish_login(shell, KeySetup::Now).await
-                        },
+                            }?;
+                            shell.auth().login(server_url, username, password).await?;
+                            finish_login(shell, LoginKind::Password, &report).await
+                        }),
+                        Message::LoginProgress,
                         |r| Message::LoginResult(Box::new(r)),
                     ),
                 ])
@@ -619,27 +698,30 @@ impl Nokkvi {
         // login attempt for why it is cloned, not taken.
         let cached = self.cached_storage.clone();
 
-        Task::perform(
-            async move {
+        Task::sip(
+            iced::task::sipper(async move |progress| {
+                let report = move |p| -> futures::future::BoxFuture<'static, ()> {
+                    let mut progress = progress.clone();
+                    Box::pin(async move { progress.send(p).await })
+                };
                 let shell = match cached {
                     Some(storage) => AppService::new_with_storage(storage).await,
                     None => AppService::new().await,
-                }
-                .map_err(|e| format!("{e:#}"))?;
+                }?;
                 shell
                     .auth()
                     .resume_session(server_url, username, jwt_token, subsonic_credential)
-                    .await
-                    .map_err(|e| format!("{e:#}"))?;
-                finish_login(shell, KeySetup::InBackground).await
-            },
+                    .await?;
+                finish_login(shell, LoginKind::Resume, &report).await
+            }),
+            Message::LoginProgress,
             |r| Message::LoginResult(Box::new(r)),
         )
     }
 
     pub(crate) fn handle_login_result(
         &mut self,
-        result: Result<crate::app_message::LoginSuccess, String>,
+        result: Result<crate::app_message::LoginSuccess, LoginFailure>,
     ) -> Task<Message> {
         match result {
             Ok(success) => {
@@ -855,9 +937,16 @@ impl Nokkvi {
                     self.orphan_sweep_task(shell),
                 ]);
             }
-            Err(e) => {
+            Err(LoginFailure::Failed(e)) => {
                 error!(target: "nokkvi::auth", "Login failed: {e}");
                 self.login_page.on_login_error(format!("Login failed: {e}"));
+            }
+            // The resume's session check came back refused: the form starts
+            // empty, never having shown the home screen.
+            Err(LoginFailure::SessionEnded) => {
+                info!(target: "nokkvi::auth", "The server no longer takes the saved session");
+                self.login_page.reset_for_session();
+                self.toast_info("Session expired. Please log in again.");
             }
         }
         Task::none()

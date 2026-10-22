@@ -192,6 +192,10 @@ impl Nokkvi {
             Message::Roulette(msg) => self.handle_roulette_message(msg),
             Message::Login(msg) => self.handle_login(msg),
             Message::LoginResult(res) => self.handle_login_result(*res),
+            Message::LoginProgress(progress) => {
+                self.login_page.on_login_progress(progress);
+                Task::none()
+            }
             Message::ResumeSession => self.handle_resume_session(),
             Message::SessionExpired => self.handle_session_expired(),
             Message::SessionScoped {

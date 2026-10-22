@@ -171,6 +171,14 @@ impl AuthService {
             Err(AttemptError::Reached(anyhow::anyhow!(
                 self.error_message.clone()
             )))
+        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // Navidrome's own limit on sign-ins from one address
+            // (`AuthRequestLimit` per `AuthWindowLength`, 5 per 20 s).
+            self.error_message =
+                "Too many sign-in attempts. Wait a few seconds and try again.".to_string();
+            Err(AttemptError::Reached(anyhow::anyhow!(
+                self.error_message.clone()
+            )))
         } else {
             self.error_message =
                 format!("Authentication failed (Status: {status}). Please try again.");
@@ -310,6 +318,145 @@ pub(crate) async fn server_version(
     .context("Timed out pinging the server")??;
     extract_server_version(&body)
         .context("Could not extract Navidrome server version from API response")
+}
+
+/// What the server says about a session's `/rest` credential
+/// ([`check_credential`]) or its JWT ([`check_token`]).
+#[derive(Debug)]
+pub enum SessionCheck {
+    /// It answered the ping.
+    Accepted,
+    /// It refused the credential: HTTP 401, or an error code that ends a
+    /// session. `lockout_possible` when the code is 40, which is also what
+    /// Navidrome answers every request for the user with while its
+    /// failed-login lockout holds.
+    Refused { lockout_possible: bool },
+    /// No verdict: the server wasn't reached in time, or answered something
+    /// that is neither.
+    Unknown(anyhow::Error),
+}
+
+impl SessionCheck {
+    /// Whether the refusal could be Navidrome's failed-login lockout.
+    pub fn lockout_possible(&self) -> bool {
+        matches!(
+            self,
+            Self::Refused {
+                lockout_possible: true
+            }
+        )
+    }
+}
+
+/// How long a session check may take before it is given up as no verdict.
+/// A login waits on it. A request the server got but answered late can
+/// still count as a failed login there.
+const SESSION_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ask the server, with one strict `ping`, whether it still takes
+/// `subsonic_credential`. A resume (after [`check_token`]) and a login run
+/// it before anything else goes out with the credential: Navidrome locks a user out from this
+/// computer's address after 5 failed `/rest` logins in 20 s
+/// (`AuthRequestLimit`, `AuthWindowLength`), and the home screen's first
+/// burst of requests once sent a dead credential 9 times at once, so the
+/// login after it was refused too (#14).
+pub(crate) async fn check_credential(
+    http_client: &std::sync::Arc<reqwest::Client>,
+    server_url: &str,
+    subsonic_credential: &str,
+) -> SessionCheck {
+    use crate::services::api::subsonic;
+
+    let answer = tokio::time::timeout(
+        SESSION_CHECK_TIMEOUT,
+        subsonic::fetch_subsonic_body(
+            http_client,
+            server_url,
+            "ping",
+            subsonic_credential,
+            &[],
+            "session check",
+        ),
+    )
+    .await;
+    let (status, body) = match answer {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(e)) => return SessionCheck::Unknown(e),
+        Err(_) => return SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session")),
+    };
+    match subsonic::check_subsonic_response_status(status, &body, "session check") {
+        Ok(()) => SessionCheck::Accepted,
+        Err(e) if crate::types::error::NokkviError::is_unauthorized(&e) => SessionCheck::Refused {
+            lockout_possible: subsonic::failed_envelope_error(&body).and_then(|e| e.code)
+                == Some(subsonic::WRONG_CREDENTIALS),
+        },
+        Err(e) => SessionCheck::Unknown(e),
+    }
+}
+
+/// Ask the server, with the native keepalive, whether it still takes the
+/// session's JWT. A resume asks this first: the JWT dies with a password
+/// change (Navidrome 0.64 revokes every token through the user's token
+/// epoch) and after 48 h unused, and the native API sits outside the
+/// Subsonic limiter, so a dead session costs no failed login at all.
+pub(crate) async fn check_token(client: &ApiClient) -> SessionCheck {
+    let answer = tokio::time::timeout(
+        SESSION_CHECK_TIMEOUT,
+        client.get("/api/keepalive/keepalive", &[]),
+    )
+    .await;
+    match answer {
+        Ok(Ok(_)) => SessionCheck::Accepted,
+        Ok(Err(e)) if crate::types::error::NokkviError::is_unauthorized(&e) => {
+            SessionCheck::Refused {
+                lockout_possible: false,
+            }
+        }
+        Ok(Err(e)) => SessionCheck::Unknown(e),
+        Err(_) => SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session")),
+    }
+}
+
+/// How long a login waits out Navidrome's failed-login lockout before it
+/// gives up. The lockout ends `AuthWindowLength` (20 s by default) after the
+/// first request it counted.
+pub const LOCKOUT_WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How often the lockout wait asks again. A request the lockout turns away
+/// counts no failure and doesn't extend it (`authLimiter.reserve`).
+const LOCKOUT_RECHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ask again with `check` until the server gives a verdict the lockout
+/// can't, every [`LOCKOUT_RECHECK_EVERY`] for up to [`LOCKOUT_WAIT_BUDGET`]:
+/// it takes the credential, or refuses it some other way. A lost answer (a
+/// timeout, a dropped connection) is no such verdict, since the lockout
+/// answers at once, so the wait goes on through it. Returns that verdict,
+/// or the last answer once the budget is spent. For a login whose password
+/// the server just took, so an error 40 there is the lockout, not the
+/// credential.
+pub async fn wait_out_lockout<F, Fut>(mut check: F) -> SessionCheck
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = SessionCheck>,
+{
+    let deadline = tokio::time::Instant::now() + LOCKOUT_WAIT_BUDGET;
+    loop {
+        tokio::time::sleep(LOCKOUT_RECHECK_EVERY).await;
+        let verdict = check().await;
+        let settled = match verdict {
+            SessionCheck::Accepted
+            | SessionCheck::Refused {
+                lockout_possible: false,
+            } => true,
+            SessionCheck::Refused {
+                lockout_possible: true,
+            }
+            | SessionCheck::Unknown(_) => false,
+        };
+        if settled || tokio::time::Instant::now() >= deadline {
+            return verdict;
+        }
+    }
 }
 
 /// The server's advertised OpenSubsonic extension names, via
@@ -577,6 +724,235 @@ mod tests {
         );
     }
 
+    /// The session check's verdict for one `ping` answer.
+    async fn check_against(status: u16, body: String) -> SessionCheck {
+        let server = crate::services::api::test_server::ScriptedServer::start(move |_| {
+            (status, body.clone())
+        })
+        .await;
+        let client = std::sync::Arc::new(reqwest::Client::new());
+        check_credential(&client, &server.base_url, "u=foogs&s=salt&t=tok").await
+    }
+
+    #[tokio::test]
+    async fn a_ping_the_server_answers_accepts_the_session() {
+        let verdict = check_against(
+            200,
+            crate::services::api::test_server::subsonic_ok(r#""serverVersion":"0.64.2""#),
+        )
+        .await;
+        assert!(matches!(verdict, SessionCheck::Accepted), "{verdict:?}");
+    }
+
+    /// Error 40 is a dead credential or the lockout: the server answers both
+    /// the same way.
+    #[tokio::test]
+    async fn error_40_refuses_the_session_and_could_be_the_lockout() {
+        let verdict = check_against(
+            200,
+            crate::services::api::test_server::subsonic_failed(40, "Wrong username or password"),
+        )
+        .await;
+        assert!(verdict.lockout_possible(), "{verdict:?}");
+    }
+
+    /// A revoked API key and a proxy's 401 end the session too, but no
+    /// lockout answers that way for a key just minted or behind a proxy.
+    #[tokio::test]
+    async fn a_revoked_key_or_a_proxy_401_refuses_the_session_without_a_lockout() {
+        for (status, body) in [
+            (
+                200,
+                crate::services::api::test_server::subsonic_failed(44, "Invalid API key"),
+            ),
+            (401, String::new()),
+        ] {
+            let verdict = check_against(status, body).await;
+            assert!(
+                matches!(
+                    verdict,
+                    SessionCheck::Refused {
+                        lockout_possible: false
+                    }
+                ),
+                "{status}: {verdict:?}"
+            );
+        }
+    }
+
+    /// Anything that isn't a verdict on the credential keeps the session
+    /// unchecked: a server error, a missing-parameter error, no server.
+    #[tokio::test]
+    async fn an_answer_about_something_else_gives_no_verdict() {
+        for (status, body) in [
+            (500, "boom".to_owned()),
+            (
+                200,
+                crate::services::api::test_server::subsonic_failed(10, "Missing parameter"),
+            ),
+        ] {
+            let verdict = check_against(status, body).await;
+            assert!(
+                matches!(verdict, SessionCheck::Unknown(_)),
+                "{status}: {verdict:?}"
+            );
+        }
+        let client = std::sync::Arc::new(reqwest::Client::new());
+        let verdict = check_credential(&client, "http://127.0.0.1:1", "u=foogs&s=salt&t=tok").await;
+        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+    }
+
+    fn lockout() -> SessionCheck {
+        SessionCheck::Refused {
+            lockout_possible: true,
+        }
+    }
+
+    fn rejected() -> SessionCheck {
+        SessionCheck::Refused {
+            lockout_possible: false,
+        }
+    }
+
+    fn accepted() -> SessionCheck {
+        SessionCheck::Accepted
+    }
+
+    fn lost() -> SessionCheck {
+        SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session"))
+    }
+
+    /// A check the wait makes: answers `script` in order, then its last
+    /// entry for every later call. Counts the calls.
+    fn scripted(
+        script: Vec<fn() -> SessionCheck>,
+    ) -> (
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        impl FnMut() -> std::future::Ready<SessionCheck>,
+    ) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = calls.clone();
+        let check = move || {
+            let call = counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let answer = script
+                .get(call)
+                .or_else(|| script.last())
+                .expect("a script");
+            std::future::ready(answer())
+        };
+        (calls, check)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_lockout_wait_asks_again_until_the_server_takes_the_session() {
+        let (calls, check) = scripted(vec![lockout, lockout, lockout, accepted]);
+        let started = tokio::time::Instant::now();
+
+        let verdict = wait_out_lockout(check).await;
+
+        assert!(matches!(verdict, SessionCheck::Accepted), "{verdict:?}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
+        assert_eq!(started.elapsed(), LOCKOUT_RECHECK_EVERY * 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_lockout_wait_gives_up_at_its_budget() {
+        let (_calls, check) = scripted(vec![lockout]);
+        let started = tokio::time::Instant::now();
+
+        let verdict = wait_out_lockout(check).await;
+
+        assert!(verdict.lockout_possible(), "{verdict:?}");
+        assert_eq!(started.elapsed(), LOCKOUT_WAIT_BUDGET);
+    }
+
+    /// A refusal the lockout can't give ends the wait at once.
+    #[tokio::test(start_paused = true)]
+    async fn the_lockout_wait_stops_at_a_refusal_that_is_no_lockout() {
+        let (calls, check) = scripted(vec![lockout, rejected]);
+
+        let verdict = wait_out_lockout(check).await;
+
+        assert!(
+            matches!(
+                verdict,
+                SessionCheck::Refused {
+                    lockout_possible: false
+                }
+            ),
+            "{verdict:?}"
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// A lockout answers at once, so a check lost on the way (a timeout, a
+    /// dropped connection) says nothing about it: the wait goes on. Ending
+    /// there sent the login to a home screen still locked out.
+    #[tokio::test(start_paused = true)]
+    async fn the_lockout_wait_goes_on_past_a_lost_answer() {
+        let (calls, check) = scripted(vec![lost, lockout, accepted]);
+
+        let verdict = wait_out_lockout(check).await;
+
+        assert!(matches!(verdict, SessionCheck::Accepted), "{verdict:?}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    /// The token check's verdict for one keepalive answer.
+    async fn token_check_against(
+        status: u16,
+    ) -> (
+        SessionCheck,
+        Vec<crate::services::api::test_server::Recorded>,
+    ) {
+        let server = crate::services::api::test_server::ScriptedServer::start(move |_| {
+            (status, r#"{"response":"ok", "id":"keepalive"}"#.to_owned())
+        })
+        .await;
+        let client = ApiClient::new(Url::parse(&server.base_url).expect("url"), "jwt".into());
+        let verdict = check_token(&client).await;
+        (verdict, server.requests())
+    }
+
+    /// The token check asks the native keepalive, which sits behind
+    /// Navidrome's JWT check and outside the Subsonic limiter.
+    #[tokio::test]
+    async fn a_keepalive_the_server_answers_accepts_the_token() {
+        let (verdict, requests) = token_check_against(200).await;
+        assert!(matches!(verdict, SessionCheck::Accepted), "{verdict:?}");
+        let keepalive = requests.first().expect("one request");
+        assert!(
+            keepalive.is("GET", "/api/keepalive/keepalive"),
+            "{keepalive:?}"
+        );
+        assert_eq!(keepalive.header("x-nd-authorization"), Some("Bearer jwt"));
+    }
+
+    /// A revoked or expired JWT answers 401: refused, and never the
+    /// Subsonic lockout.
+    #[tokio::test]
+    async fn a_refused_token_is_no_lockout() {
+        let (verdict, _) = token_check_against(401).await;
+        assert!(
+            matches!(
+                verdict,
+                SessionCheck::Refused {
+                    lockout_possible: false
+                }
+            ),
+            "{verdict:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_keepalive_that_fails_otherwise_gives_no_verdict() {
+        let (verdict, _) = token_check_against(500).await;
+        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+        let client = ApiClient::new(Url::parse("http://127.0.0.1:1").expect("url"), "jwt".into());
+        let verdict = check_token(&client).await;
+        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+    }
+
     #[test]
     fn same_user_ignores_case_and_user_key_lowercases() {
         assert!(same_user("Foogs", "fOOGS"));
@@ -681,6 +1057,21 @@ mod tests {
             "{:?}",
             elsewhere.requests()
         );
+    }
+
+    /// `/auth/login` has a limiter of its own (5 sign-ins per address in
+    /// 20 s, every attempt counted), which answers 429.
+    #[tokio::test]
+    async fn a_rate_limited_login_says_to_wait() {
+        let server = ScriptedServer::start(|_| (429, "Too Many Requests".to_owned())).await;
+        let mut auth = AuthService::new().expect("auth service");
+
+        let result = auth
+            .login(server.base_url.clone(), "alice".into(), "pw".into())
+            .await;
+
+        let message = format!("{:#}", result.expect_err("refused"));
+        assert!(message.contains("Too many sign-in attempts"), "{message}");
     }
 
     #[tokio::test]

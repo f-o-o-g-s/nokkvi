@@ -324,6 +324,31 @@ impl AuthGateway {
         .await
     }
 
+    /// Whether the server still takes this session's `/rest` credential (see
+    /// `auth_api::check_credential`). Snapshot under the lock, ask without it,
+    /// like `fetch_server_version`.
+    pub async fn check_credential(&self) -> auth_api::SessionCheck {
+        let session = self.key_session().await;
+        let Some(client) = session.client else {
+            return auth_api::SessionCheck::Unknown(anyhow::anyhow!("Not authenticated"));
+        };
+        auth_api::check_credential(
+            &client.http_client(),
+            &session.server_url,
+            &session.credential,
+        )
+        .await
+    }
+
+    /// Whether the server still takes this session's JWT (see
+    /// `auth_api::check_token`).
+    pub async fn check_token(&self) -> auth_api::SessionCheck {
+        let Some(client) = self.get_client().await else {
+            return auth_api::SessionCheck::Unknown(anyhow::anyhow!("Not authenticated"));
+        };
+        auth_api::check_token(&client).await
+    }
+
     /// Fetch the server's advertised OpenSubsonic extension names
     /// (`getOpenSubsonicExtensions`). Used to gate extension-backed features
     /// like the `indexBasedQueue` play-queue sync.

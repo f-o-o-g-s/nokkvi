@@ -26,6 +26,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A saved session the server no longer accepts now opens the login screen at startup, instead of the home screen.
+- Restarting nokkvi after a password change no longer triggers Navidrome's failed-login block.
+- Logging in during Navidrome's short failed-login block now waits it out instead of sending you back to the login screen.
+- While it waits, the login form says Navidrome is pausing sign-ins.
+- Hitting Navidrome's sign-in limit now says "Too many sign-in attempts" instead of showing a 429 status.
+
 ### Removed
 
 ## v0.27.2 — 2026-10-20

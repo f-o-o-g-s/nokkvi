@@ -129,7 +129,37 @@ pub async fn subsonic_post_ok(
 /// the token pair; `services::api_key`). 43 (a key sent beside another
 /// credential) stays a plain error: it is nokkvi's own bug, which a re-login
 /// would only repeat.
-const SESSION_REJECTED_CODES: [i64; 4] = [40, 41, 42, 44];
+const SESSION_REJECTED_CODES: [i64; 4] = [WRONG_CREDENTIALS, 41, 42, 44];
+
+/// Error 40, "Wrong username or password": Navidrome's answer to a dead
+/// token pair, and also to every request for the user from this address
+/// while its failed-login lockout holds (`server/subsonic/auth_limiter.go`;
+/// by design, so a guesser can't tell the two apart).
+pub(crate) const WRONG_CREDENTIALS: i64 = 40;
+
+/// The error a failed Subsonic envelope (`status: "failed"`) carries.
+pub(crate) struct EnvelopeError {
+    pub(crate) code: Option<i64>,
+    pub(crate) message: String,
+}
+
+/// The error in `body` when it is a failed Subsonic envelope, else `None`.
+pub(crate) fn failed_envelope_error(body: &str) -> Option<EnvelopeError> {
+    let json = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let subsonic = json.get("subsonic-response")?;
+    if subsonic.get("status").and_then(|s| s.as_str()) != Some("failed") {
+        return None;
+    }
+    let error = subsonic.get("error");
+    Some(EnvelopeError {
+        code: error.and_then(|e| e.get("code")).and_then(|c| c.as_i64()),
+        message: error
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error")
+            .to_owned(),
+    })
+}
 
 /// Apply Subsonic response status/body policy.
 ///
@@ -165,23 +195,14 @@ pub(crate) fn check_subsonic_response_status(
     }
 
     // Subsonic API wraps errors inside a 200 OK response — check the inner status
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body)
-        && let Some(subsonic) = json.get("subsonic-response")
-        && subsonic.get("status").and_then(|s| s.as_str()) == Some("failed")
-    {
-        let error = subsonic.get("error");
-        let error_msg = error
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error");
-        let code = error.and_then(|e| e.get("code")).and_then(|c| c.as_i64());
+    if let Some(EnvelopeError { code, message }) = failed_envelope_error(body) {
         if code.is_some_and(|c| SESSION_REJECTED_CODES.contains(&c)) {
             // The typed error carries no detail, so keep the server's reason
             // in the file log for "why was I logged out".
-            tracing::debug!("{operation_label}: credential rejected ({code:?}): {error_msg}");
+            tracing::debug!("{operation_label}: credential rejected ({code:?}): {message}");
             return Err(NokkviError::Unauthorized.into());
         }
-        return Err(anyhow::anyhow!("{operation_label}: {error_msg}"));
+        return Err(anyhow::anyhow!("{operation_label}: {message}"));
     }
 
     Ok(())

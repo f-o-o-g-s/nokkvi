@@ -195,3 +195,66 @@ fn reset_session_state_releases_the_scrobble_latches() {
         "the radio latch is released at logout"
     );
 }
+
+/// A resume whose session check the server refused (a changed password)
+/// leaves the login form ready for the new password: no home screen, no
+/// error on the form, the username kept, and the same toast a session that
+/// expires mid-use shows (#14).
+#[test]
+fn a_refused_resume_leaves_a_ready_login_form() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Login;
+    app.login_page.username = "foogs".into();
+    app.login_page.login_in_progress = true;
+
+    let _ = app.update(crate::app_message::Message::LoginResult(Box::new(Err(
+        crate::app_message::LoginFailure::SessionEnded,
+    ))));
+
+    assert_eq!(app.screen, crate::Screen::Login);
+    assert!(app.app_service.is_none());
+    assert!(!app.login_page.login_in_progress, "the form takes a login");
+    assert!(app.login_page.error.is_none(), "{:?}", app.login_page.error);
+    assert_eq!(app.login_page.username, "foogs");
+    assert!(
+        app.toast
+            .toasts
+            .iter()
+            .any(|t| t.message.contains("Session expired")),
+        "the expiry is announced"
+    );
+}
+
+/// A login waiting out the server's failed-login lockout says so on the form
+/// until the login ends either way.
+#[test]
+fn the_lockout_wait_shows_until_the_login_ends() {
+    use crate::app_message::{LoginFailure, LoginProgress, Message};
+
+    let mut app = test_app();
+    app.screen = crate::Screen::Login;
+    app.login_page.login_in_progress = true;
+
+    let _ = app.update(Message::LoginProgress(LoginProgress::WaitingOutLockout));
+    assert!(app.login_page.waiting_out_lockout);
+
+    let _ = app.update(Message::LoginResult(Box::new(Err(LoginFailure::Failed(
+        "Navidrome is still pausing sign-ins".into(),
+    )))));
+    assert!(!app.login_page.waiting_out_lockout);
+    assert!(!app.login_page.login_in_progress);
+    assert!(app.login_page.error.is_some());
+}
+
+/// A report that outlives its login changes nothing on an idle form.
+#[test]
+fn a_late_lockout_report_leaves_an_idle_form_alone() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Login;
+
+    let _ = app.update(crate::app_message::Message::LoginProgress(
+        crate::app_message::LoginProgress::WaitingOutLockout,
+    ));
+
+    assert!(!app.login_page.waiting_out_lockout);
+}
