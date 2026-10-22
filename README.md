@@ -36,7 +36,7 @@ Full guides, config reference, keyboard shortcuts, theming, and visualizer detai
 - Scriptable from the shell: `nokkvi <verb>` controls the running player (playback, volume, ratings, queue).
 - **23 built-in themes** (default **Svalbard**), custom `.toml` themes that hot-reload, and optional accent and visualizer colors taken from the playing album cover.
 - Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** that fits a whole number of rows to the window.
-- Plus the essentials: browse albums, artists, songs, genres, playlists, and radio; a **Harbour** home screen; persistent queue with drag-and-drop; star ratings; lyrics synced by line or by word; similar songs, plus similar artists from ListenBrainz and Deezer; five seek bar styles (one draws the waveform); server queue sync; scrobbling; MPRIS; an optional tray icon; and full keyboard control.
+- Plus the essentials: browse albums, artists, songs, genres, playlists, and radio; a **Harbour** home screen; persistent queue with drag-and-drop; star ratings; lyrics synced by line or by word; similar songs, plus similar artists from ListenBrainz and Deezer; five seek bar styles (one draws the waveform); server queue sync; scrobbling; MPRIS; an optional tray icon; and full keyboard control, plus media keys and TV remotes.
 
 ### Non-Goals
 
