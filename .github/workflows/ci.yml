@@ -13,7 +13,9 @@ jobs:
   check:
     name: Build & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Job budget: ~1.5x the slowest cold-cache run (~19m). The Test step
+    # carries its own tighter limit as the hang guard.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
@@ -36,6 +38,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
+        timeout-minutes: 15
         run: cargo test --workspace
 
       - name: Build (release)
