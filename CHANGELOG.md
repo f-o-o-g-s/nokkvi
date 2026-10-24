@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 - Switching libraries or a server rescan now refreshes which similar artists show as in your library.
 - A background library refresh that lands after you scroll no longer jumps the list back to where it was when the refresh started.
 - Dragging the scrollbar no longer clears rows ticked in the checkbox column.
+- With an album expanded, the Albums panel now loads the full-size cover of the row you are on after a reload or resize.
+- Under Track Artwork's Track's Own Cover, a smart playlist's rules editor now reloads its preview covers when you return to it.
 
 ### Removed
 

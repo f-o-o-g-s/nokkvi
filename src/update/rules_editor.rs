@@ -2140,8 +2140,10 @@ impl Nokkvi {
     /// serve them — fetch by album_id instead. Deduped, skips empty ids and
     /// whatever the shared 80px gate holds back (warm, still on its way from an
     /// earlier evaluation, or known to have no art), and claims what it sends;
-    /// bounded by the loaded page count.
-    fn rules_preview_artwork_tasks(&mut self) -> Task<Message> {
+    /// bounded by the loaded page count. Also the editor's viewport warm for
+    /// a rules session (`editor_artwork_prefetch_tasks`): a return to the
+    /// editor, a resize or a Track Artwork flip re-plans the rows.
+    pub(crate) fn rules_preview_artwork_tasks(&mut self) -> Task<Message> {
         use crate::{
             app_message::{ArtworkMessage, MiniArt},
             update::components::ArtworkGate,

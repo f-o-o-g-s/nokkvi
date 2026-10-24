@@ -526,6 +526,11 @@ impl Nokkvi {
         else {
             return Task::none();
         };
+        // A rules session's rows are its preview's, not this buffer's (which
+        // it leaves empty), with their own planner.
+        if editor.rules_session().is_some() {
+            return self.rules_preview_artwork_tasks();
+        }
         if editor.songs.is_empty() {
             return Task::none();
         }

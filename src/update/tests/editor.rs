@@ -2503,3 +2503,83 @@ fn editor_hover_skips_the_prefetch_but_still_lands() {
     )));
     assert_eq!(hovered(&app), None);
 }
+
+/// A return to the Tracks editor (a view switch) re-plans its rows' covers
+/// like the other views, so a Track Artwork flip made in Settings, or a
+/// resize while away, is drawn on the way back instead of after the first
+/// scroll.
+#[tokio::test]
+async fn a_return_to_the_tracks_editor_warms_its_rows() {
+    let (mut app, db_path) = crate::update::tests::library::test_app_with_shell().await;
+    let mut editor = PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    ));
+    editor.songs = make_queue_songs_with_art(3);
+    app.playlist_editor = Some(editor);
+    app.current_view = crate::View::Settings;
+
+    let _ = app.handle_switch_view(crate::View::PlaylistEditor);
+
+    assert!(
+        app.artwork.album_art_pending.contains("album_s0"),
+        "the rows' covers are claimed: {:?}",
+        app.artwork.album_art_pending
+    );
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+/// A rules session keeps its rows in its preview, not the Tracks buffer, so
+/// the same return re-plans those: under Track's Own Cover each row's own
+/// key is fetched, which nothing else does until the next rule edit.
+#[tokio::test]
+async fn a_return_to_the_rules_editor_warms_the_preview_rows() {
+    use nokkvi_data::types::{
+        player_settings::TrackArtwork,
+        rules_session::RulesTarget,
+        smart_criteria::{ServerCaps, SmartRules},
+    };
+
+    use crate::state::RulesSessionUi;
+
+    let (mut app, db_path) = crate::update::tests::library::test_app_with_shell().await;
+    let session = RulesSessionUi::open(
+        RulesTarget::Create,
+        SmartRules::new_empty(),
+        ServerCaps::default(),
+    );
+    let mut editor = PlaylistEditorState::new_rules(
+        PlaylistEditState::new(
+            String::new(),
+            "New".into(),
+            String::new(),
+            false,
+            Vec::new(),
+        ),
+        session,
+    );
+    let mut row = make_queue_song("s1", "Song", "Artist", "Album");
+    row.own_cover = Some("mf-s1".into());
+    editor
+        .rules_session_mut()
+        .expect("a rules session")
+        .preview
+        .rows = vec![row];
+    app.playlist_editor = Some(editor);
+    app.settings.track_artwork = TrackArtwork::OwnCover;
+    app.current_view = crate::View::Settings;
+
+    let _ = app.handle_switch_view(crate::View::PlaylistEditor);
+
+    assert!(
+        app.artwork.album_art_pending.contains("mf-s1"),
+        "the preview rows' own covers are claimed: {:?}",
+        app.artwork.album_art_pending
+    );
+    drop(app);
+    let _ = std::fs::remove_file(&db_path);
+}
