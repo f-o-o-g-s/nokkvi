@@ -191,14 +191,17 @@ async fn finish_login(
 /// lockout for the login after a password change (#14). The JWT goes first,
 /// on the native API outside the Subsonic limiter: a changed password or a
 /// token past its lifetime ends there at no failed login. Then one ping
-/// with the saved `/rest` credential, also when the keepalive gave no verdict
-/// (a proxy's or the server's error page, a slow first connection), since
-/// one ping costs at most one failed login. A refusal clears the saved
-/// session. Only a ping without a verdict (no network yet at autostart, a
-/// server restarting) resumes as before, unchecked.
+/// with the saved `/rest` credential, also when the keepalive answered with
+/// neither verdict (a proxy's or the server's error page), since one ping
+/// costs at most one failed login. A refusal clears the saved session. No
+/// answer at all (`SessionCheck::Unreachable`: no network yet at autostart, a
+/// server down) resumes as before, unchecked, without a ping that would wait
+/// out a second timeout on the same dead address; so does a ping without a
+/// verdict.
 async fn check_resumed_session(shell: &AppService) -> Result<(), LoginFailure> {
     let verdict = match shell.auth().check_token().await {
         refused @ SessionCheck::Refused { .. } => refused,
+        unreached @ SessionCheck::Unreachable(_) => unreached,
         SessionCheck::Accepted => shell.auth().check_credential().await,
         SessionCheck::Unknown(e) => {
             debug!(target: "nokkvi::auth", "The keepalive gave no verdict, asking the ping: {e:#}");
@@ -213,7 +216,7 @@ async fn check_resumed_session(shell: &AppService) -> Result<(), LoginFailure> {
             }
             Err(LoginFailure::SessionEnded)
         }
-        SessionCheck::Unknown(e) => {
+        SessionCheck::Unknown(e) | SessionCheck::Unreachable(e) => {
             warn!(target: "nokkvi::auth", "Resuming without a session check: {e:#}");
             Ok(())
         }
@@ -251,7 +254,7 @@ async fn check_new_session(
         } => Err(LoginFailure::Failed(
             "The server took the password but refuses the session's requests.".to_owned(),
         )),
-        SessionCheck::Unknown(e) => {
+        SessionCheck::Unknown(e) | SessionCheck::Unreachable(e) => {
             warn!(target: "nokkvi::auth", "Signing in without a session check: {e:#}");
             Ok(())
         }

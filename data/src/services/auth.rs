@@ -331,9 +331,30 @@ pub enum SessionCheck {
     /// Navidrome answers every request for the user with while its
     /// failed-login lockout holds.
     Refused { lockout_possible: bool },
-    /// No verdict: the server wasn't reached in time, or answered something
-    /// that is neither.
+    /// The server answered, with neither verdict: an error page (its own or
+    /// a proxy's), an unrelated error code.
     Unknown(anyhow::Error),
+    /// No answer: the connection failed, or nothing came back within
+    /// [`SESSION_CHECK_TIMEOUT`]. A resume asks nothing more on it (no
+    /// network yet at autostart, a server down), where an `Unknown` is
+    /// worth one more question.
+    Unreachable(anyhow::Error),
+}
+
+/// The check for a request that got no verdict: `Unreachable` when the
+/// transport failed (a `reqwest::Error` in the chain: no connection, a
+/// dropped one, no such host), else `Unknown`.
+fn no_verdict(e: anyhow::Error) -> SessionCheck {
+    if e.downcast_ref::<reqwest::Error>().is_some() {
+        SessionCheck::Unreachable(e)
+    } else {
+        SessionCheck::Unknown(e)
+    }
+}
+
+/// The check for a request nothing answered within the timeout.
+fn timed_out() -> SessionCheck {
+    SessionCheck::Unreachable(anyhow::anyhow!("Timed out checking the session"))
 }
 
 impl SessionCheck {
@@ -381,8 +402,8 @@ pub(crate) async fn check_credential(
     .await;
     let (status, body) = match answer {
         Ok(Ok(answer)) => answer,
-        Ok(Err(e)) => return SessionCheck::Unknown(e),
-        Err(_) => return SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session")),
+        Ok(Err(e)) => return no_verdict(e),
+        Err(_) => return timed_out(),
     };
     match subsonic::check_subsonic_response_status(status, &body, "session check") {
         Ok(()) => SessionCheck::Accepted,
@@ -412,8 +433,8 @@ pub(crate) async fn check_token(client: &ApiClient) -> SessionCheck {
                 lockout_possible: false,
             }
         }
-        Ok(Err(e)) => SessionCheck::Unknown(e),
-        Err(_) => SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session")),
+        Ok(Err(e)) => no_verdict(e),
+        Err(_) => timed_out(),
     }
 }
 
@@ -451,7 +472,8 @@ where
             SessionCheck::Refused {
                 lockout_possible: true,
             }
-            | SessionCheck::Unknown(_) => false,
+            | SessionCheck::Unknown(_)
+            | SessionCheck::Unreachable(_) => false,
         };
         if settled || tokio::time::Instant::now() >= deadline {
             return verdict;
@@ -781,7 +803,8 @@ mod tests {
     }
 
     /// Anything that isn't a verdict on the credential keeps the session
-    /// unchecked: a server error, a missing-parameter error, no server.
+    /// unchecked: a server error and a missing-parameter error are answers
+    /// (`Unknown`), no server at all is no answer (`Unreachable`).
     #[tokio::test]
     async fn an_answer_about_something_else_gives_no_verdict() {
         for (status, body) in [
@@ -799,7 +822,10 @@ mod tests {
         }
         let client = std::sync::Arc::new(reqwest::Client::new());
         let verdict = check_credential(&client, "http://127.0.0.1:1", "u=foogs&s=salt&t=tok").await;
-        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+        assert!(
+            matches!(verdict, SessionCheck::Unreachable(_)),
+            "{verdict:?}"
+        );
     }
 
     fn lockout() -> SessionCheck {
@@ -819,7 +845,7 @@ mod tests {
     }
 
     fn lost() -> SessionCheck {
-        SessionCheck::Unknown(anyhow::anyhow!("Timed out checking the session"))
+        timed_out()
     }
 
     /// A check the wait makes: answers `script` in order, then its last
@@ -944,13 +970,24 @@ mod tests {
         );
     }
 
+    /// A keepalive answered with an error page gives no verdict but says the
+    /// server is up (`Unknown`, so a resume still asks the ping); one that
+    /// no server answers is `Unreachable` (the resume asks nothing more).
     #[tokio::test]
     async fn a_keepalive_that_fails_otherwise_gives_no_verdict() {
-        let (verdict, _) = token_check_against(500).await;
-        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+        for status in [500, 502, 403] {
+            let (verdict, _) = token_check_against(status).await;
+            assert!(
+                matches!(verdict, SessionCheck::Unknown(_)),
+                "{status}: {verdict:?}"
+            );
+        }
         let client = ApiClient::new(Url::parse("http://127.0.0.1:1").expect("url"), "jwt".into());
         let verdict = check_token(&client).await;
-        assert!(matches!(verdict, SessionCheck::Unknown(_)), "{verdict:?}");
+        assert!(
+            matches!(verdict, SessionCheck::Unreachable(_)),
+            "{verdict:?}"
+        );
     }
 
     #[test]
