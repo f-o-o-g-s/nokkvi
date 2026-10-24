@@ -198,13 +198,15 @@ fn reset_session_state_releases_the_scrobble_latches() {
 
 /// A resume whose session check the server refused (a changed password)
 /// leaves the login form ready for the new password: no home screen, no
-/// error on the form, the username kept, and the same toast a session that
-/// expires mid-use shows (#14).
+/// error on the form, the username kept, a password typed while the check
+/// ran kept too (the field has focus at launch), and the same toast a
+/// session that expires mid-use shows (#14).
 #[test]
 fn a_refused_resume_leaves_a_ready_login_form() {
     let mut app = test_app();
     app.screen = crate::Screen::Login;
     app.login_page.username = "foogs".into();
+    app.login_page.password = "new-passw".into();
     app.login_page.login_in_progress = true;
 
     let _ = app.update(crate::app_message::Message::LoginResult(Box::new(Err(
@@ -216,6 +218,7 @@ fn a_refused_resume_leaves_a_ready_login_form() {
     assert!(!app.login_page.login_in_progress, "the form takes a login");
     assert!(app.login_page.error.is_none(), "{:?}", app.login_page.error);
     assert_eq!(app.login_page.username, "foogs");
+    assert_eq!(app.login_page.password, "new-passw", "typing survives");
     assert!(
         app.toast
             .toasts

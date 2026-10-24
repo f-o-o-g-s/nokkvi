@@ -324,6 +324,15 @@ impl LoginPage {
     }
 
     /// Called by root when login fails
+    /// Called by root when a resume's session check came back refused: the
+    /// form takes a login with no error on it. The password field has focus
+    /// from launch, so whatever was typed while the check ran is kept.
+    pub fn on_session_ended(&mut self) {
+        self.login_in_progress = false;
+        self.waiting_out_lockout = false;
+        self.error = None;
+    }
+
     pub fn on_login_error(&mut self, error: String) {
         self.login_in_progress = false;
         self.waiting_out_lockout = false;

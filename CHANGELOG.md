@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
 - With a queue search active, Play now starts the highlighted song instead of the song at that position in the full queue.
 - The queue's highlighted row now stays on its song when the queue reloads, for example after a consume advance.
 - In split view, `nokkvi remove-from-queue` now names the queue song it removed, not the browsing panel's focused item.
+- A password typed while nokkvi checks the saved session at launch is no longer cleared when the server turns that session away.
+- When the server's keepalive answers with an error page, nokkvi still checks the saved sign-in before the home screen loads.
 
 ### Removed
 

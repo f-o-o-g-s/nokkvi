@@ -191,13 +191,19 @@ async fn finish_login(
 /// lockout for the login after a password change (#14). The JWT goes first,
 /// on the native API outside the Subsonic limiter: a changed password or a
 /// token past its lifetime ends there at no failed login. Then one ping
-/// with the saved `/rest` credential. A refusal clears the saved session. No
-/// verdict (no network yet at autostart, a server restarting) resumes as
-/// before, unchecked.
+/// with the saved `/rest` credential, also when the keepalive gave no verdict
+/// (a proxy's or the server's error page, a slow first connection), since
+/// one ping costs at most one failed login. A refusal clears the saved
+/// session. Only a ping without a verdict (no network yet at autostart, a
+/// server restarting) resumes as before, unchecked.
 async fn check_resumed_session(shell: &AppService) -> Result<(), LoginFailure> {
     let verdict = match shell.auth().check_token().await {
+        refused @ SessionCheck::Refused { .. } => refused,
         SessionCheck::Accepted => shell.auth().check_credential().await,
-        refused_or_unknown => refused_or_unknown,
+        SessionCheck::Unknown(e) => {
+            debug!(target: "nokkvi::auth", "The keepalive gave no verdict, asking the ping: {e:#}");
+            shell.auth().check_credential().await
+        }
     };
     match verdict {
         SessionCheck::Accepted => Ok(()),
@@ -942,11 +948,11 @@ impl Nokkvi {
                 error!(target: "nokkvi::auth", "Login failed: {e}");
                 self.login_page.on_login_error(format!("Login failed: {e}"));
             }
-            // The resume's session check came back refused: the form starts
-            // empty, never having shown the home screen.
+            // The resume's session check came back refused: the form takes
+            // the new password, never having shown the home screen.
             Err(LoginFailure::SessionEnded) => {
                 info!(target: "nokkvi::auth", "The server no longer takes the saved session");
-                self.login_page.reset_for_session();
+                self.login_page.on_session_ended();
                 self.toast_info("Session expired. Please log in again.");
             }
         }
