@@ -28,6 +28,16 @@ struct HasCoverArtResponse {
     content: Option<Vec<HasCoverArt>>,
 }
 
+/// Native rows say only `hasCoverArt`, never a `coverArt` id, so a song whose
+/// file carries its own art gets `mf-<id>`, the id Navidrome serves that art
+/// under (`SongCover::own_cover`). A cover id the server sent itself is kept.
+/// Shared by the `/api/song` parse and the playlist-tracks rows.
+pub(crate) fn mark_own_cover(song: &mut Song, has_cover_art: bool) {
+    if has_cover_art && song.cover_art.is_none() {
+        song.cover_art = Some(format!("mf-{}", song.id));
+    }
+}
+
 impl SongsApiService {
     pub fn new(client: ApiClient) -> Self {
         Self { client }
@@ -342,9 +352,7 @@ impl SongsApiService {
             return;
         };
         for (song, flag) in songs.iter_mut().zip(flags) {
-            if flag.has_cover_art && song.cover_art.is_none() {
-                song.cover_art = Some(format!("mf-{}", song.id));
-            }
+            mark_own_cover(song, flag.has_cover_art);
         }
     }
 

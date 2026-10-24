@@ -599,10 +599,11 @@ impl Nokkvi {
                 self.refresh_settings_entries_if_dirty();
                 Task::none()
             }
-            View::PlaylistEditor => Task::none(), // Buffer already populated by the enter flow
-            // Data already loaded — re-prefetch artwork for the current slot_count
-            // in case the window was resized since the data was first loaded.
-            View::Albums
+            // Data already loaded (the editor's buffer by its enter flow) —
+            // re-prefetch artwork for the current slot_count in case the
+            // window was resized, or Track Artwork changed, while away.
+            View::PlaylistEditor
+            | View::Albums
             | View::Artists
             | View::Songs
             | View::Genres

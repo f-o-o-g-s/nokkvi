@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Under Track Artwork's Track's Own Cover, a smart playlist's rules preview now shows each song's own cover.
+- Returning to the playlist editor after changing Track Artwork now loads its thumbnails, instead of blank squares until you scroll.
+
 ### Removed
 
 ## v0.28.0 — 2026-10-22

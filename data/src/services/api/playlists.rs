@@ -709,7 +709,8 @@ pub struct NativePlaylistTrackRow {
 
 impl NativePlaylistTrackRow {
     /// Capture `id` (position) + `mediaFileId`, remap the object's `id` to
-    /// the media-file id, then deserialize to `Song`.
+    /// the media-file id, then deserialize to `Song` and key its own cover
+    /// from `hasCoverArt` (`songs::mark_own_cover`).
     fn remap(mut row: serde_json::Value) -> Result<Self> {
         let obj = row
             .as_object_mut()
@@ -727,9 +728,14 @@ impl NativePlaylistTrackRow {
             .and_then(|v| v.as_str())
             .context("playlist track row has no mediaFileId")?
             .to_owned();
+        let has_cover_art = obj
+            .get("hasCoverArt")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or_default();
         obj.insert("id".to_owned(), serde_json::Value::String(media_file_id));
-        let song: crate::types::song::Song = serde_json::from_value(row)
+        let mut song: crate::types::song::Song = serde_json::from_value(row)
             .context("Failed to deserialize playlist track row as Song")?;
+        super::songs::mark_own_cover(&mut song, has_cover_art);
         Ok(Self { position, song })
     }
 }
@@ -1415,6 +1421,26 @@ mod tests {
             "the song id must be the mediaFileId, never the position"
         );
         assert_eq!(remapped.song.title, "Karma Police");
+    }
+
+    /// A tracks row says only `hasCoverArt`, like native `/api/song`: a file
+    /// with its own art gets the `mf-<mediaFileId>` key Track Artwork shows
+    /// (the rules preview reads these rows), one without keeps no cover id.
+    #[test]
+    fn native_track_row_marks_its_own_cover() {
+        let row = |has_cover_art: bool| {
+            json!({
+                "id": "1",
+                "mediaFileId": "abc123",
+                "title": "Karma Police",
+                "albumId": "album-1",
+                "hasCoverArt": has_cover_art
+            })
+        };
+        let with_art = NativePlaylistTrackRow::remap(row(true)).expect("fixture must remap");
+        assert_eq!(with_art.song.cover_art.as_deref(), Some("mf-abc123"));
+        let without = NativePlaylistTrackRow::remap(row(false)).expect("fixture must remap");
+        assert_eq!(without.song.cover_art, None);
     }
 
     /// The smart-create POST body carries name/comment/public/rules — and

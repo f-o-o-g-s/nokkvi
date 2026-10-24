@@ -211,13 +211,10 @@ impl Nokkvi {
                 }
                 Task::batch(tasks)
             }
+            View::PlaylistEditor => self.editor_artwork_prefetch_tasks(),
             // Harbour warms its shelf artwork through the Harbour loader,
             // not the slot-list viewport prefetch.
-            View::Harbour
-            | View::Genres
-            | View::Playlists
-            | View::Settings
-            | View::PlaylistEditor => Task::none(),
+            View::Harbour | View::Genres | View::Playlists | View::Settings => Task::none(),
         }
     }
 
