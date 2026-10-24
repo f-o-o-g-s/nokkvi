@@ -162,6 +162,9 @@ impl Nokkvi {
             // Queue view — so lyrics added by the rescan appear without a
             // restart, and a rendered sheet is never disturbed.
             tasks.push(self.lyrics_kick_if_unresolved());
+            // A scan can add or drop the artists each similar-artist row
+            // says the library has.
+            tasks.push(self.reask_artist_recs());
         }
 
         // Notify the user gently (skipped when the user has opted to suppress

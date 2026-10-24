@@ -496,3 +496,29 @@ fn a_change_of_sources_asks_again_for_the_open_modal() {
     let _ = app.handle_player_settings_loaded(both_off);
     assert_eq!(modal(&app).status, SimilarArtistsStatus::Off);
 }
+
+/// A queue row names its artist by the track's display text ("A feat. B")
+/// with the first participant's id, and Deezer's exact-name search finds no
+/// such artist. With no library row for the id, the ask carries no name, and
+/// the backend reads the artist's own name by id; it is still sent at once.
+#[test]
+fn a_rows_display_artist_never_names_the_deezer_ask() {
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.library.queue_songs = vec![make_queue_song(
+        "s1",
+        "Get Lucky",
+        "Daft Punk feat. Pharrell Williams",
+        "Random Access Memories",
+    )];
+    app.settings.similar_artists_online = false;
+    app.settings.similar_artists_deezer = true;
+    open_from_row(&mut app);
+
+    assert_eq!(
+        app.artist_name(ARTIST_ID),
+        None,
+        "no display text for Deezer"
+    );
+    assert!(app.artist_recs.is_pending(ARTIST_ID), "asked by id");
+}

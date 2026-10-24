@@ -211,7 +211,8 @@ pub fn unowned_first(recs: &mut [ArtistRec]) {
 /// whose MusicBrainz id matches, else the first whose name matches exactly,
 /// ignoring case and surrounding whitespace. Navidrome's name search matches
 /// substrings ("Muse" finds "Musetta"), so the exact comparison is what keeps
-/// a recommendation from linking to a different artist. A recommendation
+/// a recommendation from linking to a different artist. So does an id on
+/// both sides that differs: two artists share the name. A recommendation
 /// from Deezer has no MusicBrainz id and matches on the name alone.
 pub fn match_library<'a>(
     rec_mbid: Option<&str>,
@@ -224,10 +225,11 @@ pub fn match_library<'a>(
             id: id.to_string(),
             album_artist,
         };
-        if let (Some(mbid), Some(rec_mbid)) = (mbid, rec_mbid)
-            && mbid.eq_ignore_ascii_case(rec_mbid)
-        {
-            return Some(found);
+        if let (Some(mbid), Some(rec_mbid)) = (mbid, rec_mbid) {
+            if mbid.eq_ignore_ascii_case(rec_mbid) {
+                return Some(found);
+            }
+            continue;
         }
         if by_name.is_none() && same_artist_name(name, rec_name) {
             by_name = Some(found);
@@ -425,6 +427,26 @@ mod tests {
 
     /// The MusicBrainz id outranks the name: a library artist tagged with
     /// the id is the match even when another candidate carries the name.
+    /// Two artists can share a name: when both MusicBrainz ids are known and
+    /// differ, the library's is another artist, never a name match (the
+    /// seed could otherwise be listed as similar to itself). A library row
+    /// without an id still matches on the name.
+    #[test]
+    fn a_different_musicbrainz_id_is_another_artist() {
+        let other_nirvana = "f1a3b9c2-0000-4000-8000-000000000001";
+        let tagged = [("ar1", "Nirvana", Some(NIRVANA), true)];
+        assert_eq!(match_library(Some(other_nirvana), "Nirvana", tagged), None);
+
+        let untagged = [("ar1", "Nirvana", None, true)];
+        assert_eq!(
+            match_library(Some(other_nirvana), "Nirvana", untagged),
+            Some(LibraryArtist {
+                id: "ar1".into(),
+                album_artist: true
+            })
+        );
+    }
+
     #[test]
     fn a_musicbrainz_id_match_outranks_a_name_match() {
         let candidates = [

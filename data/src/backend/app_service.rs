@@ -1794,11 +1794,31 @@ impl AppService {
     // Whole-library search
     // =========================================================================
 
+    /// The artist's own name, read by id, for Deezer's name search. `None`
+    /// when the server has no such artist or the read fails (Deezer is then
+    /// left out of the ask); a rejected session is the call's error.
+    async fn own_artist_name(&self, artist_id: &str) -> Result<Option<String>> {
+        if artist_id.is_empty() {
+            return Ok(None);
+        }
+        match self.artists_api().await?.load_artist(artist_id).await {
+            Ok(artist) => Ok(Some(artist.name).filter(|name| !name.trim().is_empty())),
+            Err(e) if crate::types::error::NokkviError::is_unauthorized(&e) => Err(e),
+            Err(e) => {
+                debug!("no name for artist {artist_id}, so Deezer is left out: {e:#}");
+                Ok(None)
+            }
+        }
+    }
+
     /// The artists ListenBrainz and Deezer find similar to one artist, at
     /// most `limit` of them, each stamped with its standing in the library,
     /// the artists the library lacks first. ListenBrainz is asked by the
-    /// artist's MusicBrainz id `mbid`, Deezer by their `name`, each when
-    /// `sources` says so and its key is known; the two lists are blended
+    /// artist's MusicBrainz id `mbid`, Deezer by their own `name`, each when
+    /// `sources` says so and its key is known. Without a `name` (the caller
+    /// holds no library row for `artist_id`, only a song's display text such
+    /// as "A feat. B", which Deezer's exact match never finds) Deezer's name
+    /// is read from the server by id first. The two lists are blended
     /// (`artist_recs::blend`). The server is then searched for every name
     /// (its name search, scoped to the active libraries) and the match is
     /// made on the MusicBrainz id first, then the exact name
@@ -1815,6 +1835,7 @@ impl AppService {
     /// [`LibraryMatch::Unknown`]: crate::types::artist_recs::LibraryMatch::Unknown
     pub async fn similar_artists(
         &self,
+        artist_id: &str,
         mbid: Option<&str>,
         name: Option<&str>,
         sources: crate::types::artist_recs::RecSources,
@@ -1833,7 +1854,12 @@ impl AppService {
         const CONCURRENCY: usize = 4;
 
         let mbid = mbid.filter(|_| sources.listenbrainz);
-        let name = name.filter(|n| sources.deezer && !n.trim().is_empty());
+        let name = match name.filter(|n| !n.trim().is_empty()) {
+            _ if !sources.deezer => None,
+            Some(name) => Some(name.to_owned()),
+            None => self.own_artist_name(artist_id).await?,
+        };
+        let name = name.as_deref();
         let (listenbrainz, deezer) = tokio::join!(
             async {
                 match mbid {
@@ -2616,6 +2642,31 @@ mod tests {
             )
             .await
             .expect("resume");
+    }
+
+    /// Deezer goes by the artist's own name. A song row names its artist by
+    /// the track's display text, so without a library row the name is read
+    /// by id from the native API; an artist the server lacks has none.
+    #[tokio::test]
+    async fn an_artists_own_name_is_read_by_id() {
+        use crate::services::api::test_server::ScriptedServer;
+
+        let server = ScriptedServer::start(|r| {
+            if r.is("GET", "/api/artist/ar1") {
+                return (200, r#"{"id":"ar1","name":"Daft Punk"}"#.to_owned());
+            }
+            (404, r#"{"error":"not found"}"#.to_owned())
+        })
+        .await;
+        let (app, _db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+
+        assert_eq!(
+            app.own_artist_name("ar1").await.expect("read"),
+            Some("Daft Punk".to_owned())
+        );
+        assert_eq!(app.own_artist_name("gone").await.expect("a miss"), None);
+        assert_eq!(app.own_artist_name("").await.expect("no id"), None);
     }
 
     /// A resumed session on the token pair moves to a key when the server

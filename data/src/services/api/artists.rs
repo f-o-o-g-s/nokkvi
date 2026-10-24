@@ -48,6 +48,18 @@ impl ArtistsApiService {
         Ok((artists, total_count))
     }
 
+    /// One artist by id (native `GET /api/artist/{id}`): its own name, where
+    /// a song or album row carries only the track's display text ("A feat.
+    /// B") beside the first participant's id.
+    pub async fn load_artist(&self, artist_id: &str) -> Result<Artist> {
+        let body = self
+            .client
+            .get(&format!("/api/artist/{artist_id}"), &[])
+            .await
+            .context("Failed to fetch the artist")?;
+        parse::parse_json_with_preview(&body, "artist JSON response")
+    }
+
     /// [`Self::load_artists`] without the total-count coalescing — returns the RAW
     /// `X-Total-Count` so [`pagination::draw_random_row`] can DETECT a missing
     /// header and warn (the drawn row is the same either way). See the

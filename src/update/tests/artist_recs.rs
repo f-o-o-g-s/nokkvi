@@ -405,3 +405,21 @@ fn a_change_of_sources_drops_the_lists_and_asks_again() {
         "the centred artist is asked again"
     );
 }
+
+/// A full scan can add or drop the library's artists, which every similar
+/// artist's "in library" standing names: the lists cached before it are
+/// dropped and asked for again.
+#[test]
+fn a_library_scan_drops_the_similar_artist_lists() {
+    let mut app = crate::test_helpers::test_app();
+    app.screen = crate::Screen::Home;
+    app.artist_recs.settle_with("a1", vec![rec("Low")]);
+    assert!(app.artist_recs.is_cached("a1"));
+
+    let _ = app.handle_library_changed(crate::services::navidrome_sse::LibraryChange {
+        is_wildcard: true,
+        ..Default::default()
+    });
+
+    assert!(!app.artist_recs.is_cached("a1"));
+}

@@ -447,13 +447,22 @@ impl Nokkvi {
     /// rather than at the next centring. Unchanged sources (every hot reload
     /// re-delivers them) keep everything.
     pub(crate) fn rec_sources_changed(&mut self, previous: RecSources) -> Task<Message> {
-        use crate::widgets::similar_artists_modal::SimilarArtistsStatus;
-
         let sources = self.rec_sources();
         if sources == previous {
             return Task::none();
         }
         debug!("similar-artist sources changed to {sources:?}; lists asked for again");
+        self.reask_artist_recs()
+    }
+
+    /// Forget every similar-artist list and ask again for the centred artist
+    /// and the open modal's: what the lists say changed, through the sources,
+    /// or through the library's artists, whose "in library" standing each
+    /// row carries (another active library, a server scan).
+    pub(crate) fn reask_artist_recs(&mut self) -> Task<Message> {
+        use crate::widgets::similar_artists_modal::SimilarArtistsStatus;
+
+        let sources = self.rec_sources();
         // A logout's reset is the same forgetting: lists, asks in flight
         // (their answers are dropped by generation) and the id wait.
         self.artist_recs.reset_for_session();
@@ -501,22 +510,16 @@ impl Nokkvi {
     }
 
     /// The name of `artist_id`, which Deezer is asked by: the library row's,
-    /// else the open modal's when it is about that artist (a queue row's
-    /// artist the loaded Artists pages may not hold).
+    /// the artist's own. A song or album row (the open modal's) names its
+    /// artist by the track's display text ("A feat. B"), which Deezer's exact
+    /// match never finds, so without a loaded row the backend reads the
+    /// name by id (`AppService::similar_artists`).
     pub(crate) fn artist_name(&self, artist_id: &str) -> Option<String> {
-        let from_row = self
-            .library
+        self.library
             .artists
             .iter()
             .find(|a| a.id == artist_id)
-            .map(|a| a.name.clone());
-        from_row
-            .or_else(|| {
-                self.similar_artists_modal
-                    .as_ref()
-                    .filter(|state| state.artist_id == artist_id)
-                    .map(|state| state.artist_name.clone())
-            })
+            .map(|a| a.name.clone())
             .filter(|name| !name.trim().is_empty())
     }
 
@@ -562,9 +565,10 @@ impl Nokkvi {
             self.artist_recs.wait_for_mbid(&artist_id);
             return Task::none();
         }
+        // Deezer can always be asked: by the row's name, else by id.
         let name = self.artist_name(&artist_id).filter(|_| sources.deezer);
-        if mbid.is_none() && name.is_none() {
-            debug!("no MusicBrainz id or name to ask with for {artist_id}; no similar artists");
+        if mbid.is_none() && !sources.deezer {
+            debug!("no MusicBrainz id to ask with for {artist_id}; no similar artists");
             self.artist_recs.settle_with(&artist_id, Vec::new());
             self.sync_similar_artists_modal(&artist_id, true);
             return Task::none();
@@ -580,7 +584,13 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 shell
-                    .similar_artists(mbid.as_deref(), name.as_deref(), sources, ARTIST_RECS_SHOWN)
+                    .similar_artists(
+                        &artist_id,
+                        mbid.as_deref(),
+                        name.as_deref(),
+                        sources,
+                        ARTIST_RECS_SHOWN,
+                    )
                     .await
             },
             move |result| Self::artist_recs_result_message(generation, id, result),

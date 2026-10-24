@@ -136,13 +136,17 @@ impl Nokkvi {
         // visit (or the eager refetch below, when Harbour is current) rebuilds
         // against the new filter.
         self.harbour.invalidate_shelves();
+        // So is each similar artist's "in library" standing: the lists are
+        // asked for again (the open modal's now, the centred artist's once
+        // the Artists list is back).
+        let recs_task = self.reask_artist_recs();
 
         // Refetch the currently-visible view eagerly. Queue / Radios /
         // Settings have no library-scoped paged buffer, so they
         // contribute no task. The other views' `handle_load_*` build
         // tasks that pick up `active_library_ids_vec()` through their
         // `_with_libraries` plumbing.
-        match self.current_view {
+        let view_task = match self.current_view {
             View::Albums => self.handle_load_albums(None),
             View::Artists => self.handle_load_artists(None),
             View::Songs => self.handle_load_songs(None),
@@ -164,7 +168,8 @@ impl Nokkvi {
                 }
             }
             View::Queue | View::Radios | View::Settings | View::PlaylistEditor => Task::none(),
-        }
+        };
+        Task::batch([recs_task, view_task])
     }
 
     /// Apply a freshly-fetched library list. The backend handles
