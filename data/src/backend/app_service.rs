@@ -1795,19 +1795,21 @@ impl AppService {
     // =========================================================================
 
     /// The artist's own name, read by id, for Deezer's name search. `None`
-    /// when the server has no such artist or the read fails (Deezer is then
-    /// left out of the ask); a rejected session is the call's error.
+    /// when the server has no such artist (a 404, or no id at all), so
+    /// Deezer has nothing to ask with. Any other failure is Deezer's half
+    /// failing: the caller treats it like a Deezer error, so the list is
+    /// never cached thinner because the server hiccuped.
     async fn own_artist_name(&self, artist_id: &str) -> Result<Option<String>> {
         if artist_id.is_empty() {
             return Ok(None);
         }
         match self.artists_api().await?.load_artist(artist_id).await {
             Ok(artist) => Ok(Some(artist.name).filter(|name| !name.trim().is_empty())),
-            Err(e) if crate::types::error::NokkviError::is_unauthorized(&e) => Err(e),
-            Err(e) => {
-                debug!("no name for artist {artist_id}, so Deezer is left out: {e:#}");
+            Err(e) if crate::types::error::NokkviError::is_not_found(&e) => {
+                debug!("the server has no artist {artist_id}, so Deezer has no name to ask with");
                 Ok(None)
             }
+            Err(e) => Err(e.context(format!("reading artist {artist_id}'s name for Deezer"))),
         }
     }
 
@@ -1818,7 +1820,9 @@ impl AppService {
     /// `sources` says so and its key is known. Without a `name` (the caller
     /// holds no library row for `artist_id`, only a song's display text such
     /// as "A feat. B", which Deezer's exact match never finds) Deezer's name
-    /// is read from the server by id first. The two lists are blended
+    /// is read from the server by id first; a failed read fails Deezer's
+    /// half, an artist the server lacks leaves Deezer out. The two lists are
+    /// blended
     /// (`artist_recs::blend`). The server is then searched for every name
     /// (its name search, scoped to the active libraries) and the match is
     /// made on the MusicBrainz id first, then the exact name
@@ -1854,12 +1858,13 @@ impl AppService {
         const CONCURRENCY: usize = 4;
 
         let mbid = mbid.filter(|_| sources.listenbrainz);
-        let name = match name.filter(|n| !n.trim().is_empty()) {
+        // Deezer's name: the caller's, else read by id. `Some(Err)` is a
+        // failed read, which fails Deezer's half below.
+        let name: Option<Result<String>> = match name.filter(|n| !n.trim().is_empty()) {
             _ if !sources.deezer => None,
-            Some(name) => Some(name.to_owned()),
-            None => self.own_artist_name(artist_id).await?,
+            Some(name) => Some(Ok(name.to_owned())),
+            None => self.own_artist_name(artist_id).await.transpose(),
         };
-        let name = name.as_deref();
         let (listenbrainz, deezer) = tokio::join!(
             async {
                 match mbid {
@@ -1869,12 +1874,20 @@ impl AppService {
             },
             async {
                 match name {
-                    Some(name) => Some(deezer_similar::fetch_similar_artists(name).await),
+                    Some(Ok(name)) => Some(deezer_similar::fetch_similar_artists(&name).await),
+                    Some(Err(e)) => Some(Err(e)),
                     None => None,
                 }
             },
         );
         let (listenbrainz, deezer) = match (listenbrainz, deezer) {
+            // A rejected session on the name read ends the call as one, so
+            // the UI drops to login.
+            (Some(Err(_)), Some(Err(dz)))
+                if crate::types::error::NokkviError::is_unauthorized(&dz) =>
+            {
+                return Err(dz);
+            }
             (Some(Err(lb)), Some(Err(dz))) => {
                 return Err(lb.context(format!("and Deezer failed too: {dz:#}")));
             }
@@ -2646,7 +2659,8 @@ mod tests {
 
     /// Deezer goes by the artist's own name. A song row names its artist by
     /// the track's display text, so without a library row the name is read
-    /// by id from the native API; an artist the server lacks has none.
+    /// by id from the native API; an artist the server lacks has none, and
+    /// a server failure is an error, never a missing name.
     #[tokio::test]
     async fn an_artists_own_name_is_read_by_id() {
         use crate::services::api::test_server::ScriptedServer;
@@ -2654,6 +2668,9 @@ mod tests {
         let server = ScriptedServer::start(|r| {
             if r.is("GET", "/api/artist/ar1") {
                 return (200, r#"{"id":"ar1","name":"Daft Punk"}"#.to_owned());
+            }
+            if r.is("GET", "/api/artist/down") {
+                return (500, "boom".to_owned());
             }
             (404, r#"{"error":"not found"}"#.to_owned())
         })
@@ -2667,6 +2684,43 @@ mod tests {
         );
         assert_eq!(app.own_artist_name("gone").await.expect("a miss"), None);
         assert_eq!(app.own_artist_name("").await.expect("no id"), None);
+        assert!(
+            app.own_artist_name("down").await.is_err(),
+            "a 500 is an error"
+        );
+    }
+
+    /// With Deezer the only source and no name from the caller, the name
+    /// read decides the ask: a server failure fails the call (so the UI asks
+    /// again later instead of caching an empty list), an artist the server
+    /// lacks settles on no similar artists. Neither reaches Deezer.
+    #[tokio::test]
+    async fn a_failed_name_read_fails_a_deezer_only_ask() {
+        use crate::{services::api::test_server::ScriptedServer, types::artist_recs::RecSources};
+
+        let server = ScriptedServer::start(|r| {
+            if r.is("GET", "/api/artist/down") {
+                return (500, "boom".to_owned());
+            }
+            (404, r#"{"error":"not found"}"#.to_owned())
+        })
+        .await;
+        let (app, _db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+        let deezer_only = RecSources {
+            listenbrainz: false,
+            deezer: true,
+        };
+
+        let failed = app
+            .similar_artists("down", None, None, deezer_only, 10)
+            .await;
+        assert!(failed.is_err(), "{failed:?}");
+        let missing = app
+            .similar_artists("gone", None, None, deezer_only, 10)
+            .await
+            .expect("an artist the server lacks is no error");
+        assert!(missing.is_empty());
     }
 
     /// A resumed session on the token pair moves to a key when the server
