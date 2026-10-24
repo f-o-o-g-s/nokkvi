@@ -44,17 +44,50 @@ impl Nokkvi {
         )
     }
 
+    /// The highlighted queue row's `entry_id`, read against the rows the
+    /// Queue shows (filtered under a search) before a reload replaces them.
+    fn focused_queue_entry(&self) -> Option<u64> {
+        let list = &self.queue_page.common.slot_list;
+        let row = list.selected_offset?;
+        self.filter_queue_songs().get(row).map(|song| song.entry_id)
+    }
+
+    /// Put the highlight back on its song after a reload: a row dropped above
+    /// it (a consume advance, another client's edit) would otherwise slide a
+    /// different song under it. Dropped when the song is gone or no longer on
+    /// screen, where it would steer the keys without the user seeing it.
+    fn refocus_queue_entry(&mut self, entry: Option<u64>) {
+        let Some(entry) = entry else {
+            return;
+        };
+        let rows = self.filter_queue_songs();
+        let total = rows.len();
+        let row = rows.iter().position(|song| song.entry_id == entry);
+        drop(rows);
+        let list = &mut self.queue_page.common.slot_list;
+        let on_screen = row.filter(|&row| {
+            (0..list.slot_count).any(|slot| list.slot_to_item_index(slot, total) == Some(row))
+        });
+        match on_screen {
+            Some(row) if list.selected_offset_pinned => list.pin_selected(row, total),
+            Some(row) => list.set_selected(row, total),
+            None => list.clear_focus_cursor(),
+        }
+    }
+
     pub(crate) fn handle_queue_loaded(
         &mut self,
         result: Result<Vec<QueueSongUIViewData>, String>,
     ) -> Task<Message> {
         match result {
             Ok(songs) => {
+                let focused = self.focused_queue_entry();
                 self.library.queue_songs = songs;
                 // Drop any stale multi-selection — the new contents may not
                 // line up with the rows the user had selected before the
                 // reload (consume-mode advance, SSE refresh, navigation).
                 self.queue_page.common.slot_list.clear_multi_selection();
+                self.refocus_queue_entry(focused);
 
                 // Honest sort label: an applied queue sort survives a reload
                 // only while the reloaded order still matches the applied mode.
@@ -80,34 +113,36 @@ impl Nokkvi {
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
                 if let Some(shell) = &self.app_service {
-                    let total = self.library.queue_songs.len();
-                    if total > 0 {
+                    // The slot indices name rows of the list the Queue shows
+                    // (filtered under a search).
+                    let rows = self.filter_queue_songs();
+                    if !rows.is_empty() {
                         // Mini artwork prefetch using canonical helper
                         let mode = self.settings.track_artwork;
                         let gate = ArtworkGate::new(&self.artwork);
                         let (queued, prefetch) = queue_row_artwork_tasks(
                             &self.queue_page.common.slot_list,
-                            &self.library.queue_songs,
+                            &rows,
                             &gate,
                             shell.albums().clone(),
                             mode,
                         );
                         drop(gate);
-                        self.claim_minis(queued);
                         tasks.extend(prefetch);
 
                         // Load large artwork for center song
-                        if let Some(center_idx) =
-                            self.queue_page.common.get_center_item_index(total)
-                            && let Some(key) = self
-                                .library
-                                .queue_songs
-                                .get(center_idx)
-                                .and_then(|song| song.cover_key(mode))
-                        {
-                            tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                                key.to_owned(),
-                            ))));
+                        let center_key = self
+                            .queue_page
+                            .common
+                            .get_center_item_index(rows.len())
+                            .and_then(|center_idx| rows.get(center_idx))
+                            .and_then(|song| song.cover_key(mode))
+                            .map(str::to_owned);
+                        drop(rows);
+                        self.claim_minis(queued);
+                        if let Some(key) = center_key {
+                            tasks
+                                .push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(key))));
                         }
                     }
                 }

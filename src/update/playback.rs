@@ -1386,6 +1386,18 @@ impl Nokkvi {
         )
     }
 
+    /// The queue row a cold-start Play starts: the highlighted row of the
+    /// rows the Queue shows (filtered under a search), else the first row.
+    pub(crate) fn cold_start_entry_id(&self) -> Option<u64> {
+        let rows = self.filter_queue_songs();
+        self.queue_page
+            .common
+            .get_center_item_index(rows.len())
+            .and_then(|row| rows.get(row))
+            .or_else(|| self.library.queue_songs.first())
+            .map(|song| song.entry_id)
+    }
+
     pub(crate) fn handle_play(&mut self) -> Task<Message> {
         // If a track is already loaded (playing or paused), just resume via play().
         // This covers the pause→play case.
@@ -1425,21 +1437,10 @@ impl Nokkvi {
         }
 
         // Nothing loaded — cold start. Use the same path as Enter-key:
-        // play_entry_from_queue() with the selected (or first) queue row's
+        // play_entry_from_queue() with the highlighted (or first) queue row's
         // per-row entry_id. Drift-immune handle keeps the click resolving
         // to the exact row the user sees, even across optimistic mutations.
-        let selected_index = self
-            .queue_page
-            .common
-            .get_center_item_index(self.library.queue_songs.len())
-            .unwrap_or(0);
-        let selected_entry_id = self
-            .library
-            .queue_songs
-            .get(selected_index)
-            .map(|s| s.entry_id);
-
-        if let Some(entry_id) = selected_entry_id {
+        if let Some(entry_id) = self.cold_start_entry_id() {
             // Optimistic UI update
             self.playback.playing = true;
             self.playback.paused = false;

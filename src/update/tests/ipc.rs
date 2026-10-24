@@ -693,6 +693,38 @@ fn add_to_queue_without_a_modal_names_the_centered_song() {
 }
 
 #[test]
+fn remove_from_queue_names_the_queue_song_while_the_panel_has_focus() {
+    // The browsing panel's focus steers the rating keys, but Ctrl+D always
+    // removes from the queue: the reply names the queue song it removed, not
+    // the panel's focused album.
+    let mut app = queue_app_with_songs();
+    let mut panel = crate::views::BrowsingPanel::new();
+    panel.active_view = crate::views::BrowsingView::Albums;
+    app.browsing_panel = Some(panel);
+    app.library
+        .albums
+        .set_from_vec(vec![crate::test_helpers::make_album(
+            "a1",
+            "Panel Album",
+            "A",
+        )]);
+    app.pane_focus = crate::state::PaneFocus::Browser;
+    let focused = app
+        .queue_page
+        .common
+        .get_center_item_index(app.library.queue_songs.len())
+        .expect("a focused queue row");
+    let title = app.library.queue_songs[focused].title.clone();
+
+    let resp = drive_on(&mut app, "remove-from-queue");
+    assert_eq!(resp.data, Some(json!({ "removed": title })));
+    assert!(
+        !app.library.queue_songs.iter().any(|s| s.title == title),
+        "that song was the one removed"
+    );
+}
+
+#[test]
 fn remove_from_queue_under_trawl_outside_theater_does_nothing() {
     // Trawl takes Shift+A (it adds the mix) but not Ctrl+D.
     let mut app = queue_app_with_songs();

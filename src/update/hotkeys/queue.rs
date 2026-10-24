@@ -54,6 +54,28 @@ impl Nokkvi {
         self.center_item().map(|item| item.into_name())
     }
 
+    /// The queue row Ctrl+D removes, as an index into the rows the Queue shows
+    /// (filtered under a search). A selection is the target, as for Enter and
+    /// Shift+A: one of its rows keeps it whole through the menu's batch
+    /// resolution. Otherwise the focused row. Always the queue's, whichever
+    /// pane has the keyboard.
+    fn queue_removal_row(&self) -> Option<usize> {
+        let common = &self.queue_page.common;
+        common
+            .activation_batch()
+            .and_then(|batch| batch.first().copied())
+            .or_else(|| common.get_center_item_index(self.filter_queue_songs().len()))
+    }
+
+    /// The title of the row Ctrl+D removes (the first, for a selection): the
+    /// `remove-from-queue` verb's reply, read before the removal.
+    pub(crate) fn queue_removal_name(&self) -> Option<String> {
+        let row = self.queue_removal_row()?;
+        self.filter_queue_songs()
+            .get(row)
+            .map(|song| song.title.clone())
+    }
+
     pub(crate) fn handle_remove_from_queue(&mut self) -> Task<Message> {
         debug!("  RemoveFromQueue (Ctrl+D) hotkey pressed");
 
@@ -63,15 +85,7 @@ impl Nokkvi {
             return Task::none();
         }
 
-        // Use filtered queue since the slot list indices are relative to the filtered list
-        let filtered_queue = self.filter_queue_songs();
-
-        // Get the center item from the FILTERED list
-        let center_idx = match self
-            .queue_page
-            .common
-            .get_center_item_index(filtered_queue.len())
-        {
+        let center_idx = match self.queue_removal_row() {
             Some(idx) => idx,
             None => {
                 debug!("No center item to remove");

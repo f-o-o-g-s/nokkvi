@@ -190,6 +190,115 @@ fn ctrl_d_removes_the_highlighted_queue_row() {
     );
 }
 
+fn queue_ids(app: &Nokkvi) -> Vec<String> {
+    app.library
+        .queue_songs
+        .iter()
+        .map(|s| s.id.clone())
+        .collect()
+}
+
+/// Ctrl+click a selected row again to drop it: the highlight leaves it for a
+/// row still in the selection, so Ctrl+D takes what is drawn as selected and
+/// never the row the user just let go of.
+#[test]
+fn ctrl_click_deselect_leaves_the_highlight_on_the_selection() {
+    use iced::keyboard::Modifiers;
+
+    let mut app = app_on_queue();
+    for (row, mods) in [
+        (5, Modifiers::default()),
+        (8, Modifiers::CTRL),
+        (8, Modifiers::CTRL),
+    ] {
+        let _ = app.update(Message::Queue(QueueMessage::SlotList(
+            SlotListPageMessage::SetOffset(row, mods),
+        )));
+    }
+    assert_eq!(
+        app.queue_page.common.slot_list.selected_offset,
+        Some(5),
+        "the highlight moved onto the row still selected"
+    );
+
+    let _ = app.handle_remove_from_queue();
+    let ids = queue_ids(&app);
+    assert!(!ids.contains(&"s5".to_owned()), "the selected row went");
+    assert!(ids.contains(&"s8".to_owned()), "the deselected row stayed");
+}
+
+/// Rows ticked in the checkbox column carry no highlight, so the viewport's
+/// centre is unmarked; Ctrl+D removes the ticked rows, as Enter plays them
+/// and Shift+A adds them.
+#[test]
+fn ctrl_d_with_ticked_rows_removes_the_ticked_rows() {
+    let mut app = app_on_queue();
+    for row in [2, 3] {
+        let _ = app.update(Message::Queue(QueueMessage::SlotList(
+            SlotListPageMessage::SelectionToggle(row),
+        )));
+    }
+    let centre = app
+        .queue_page
+        .common
+        .get_center_item_index(ROWS)
+        .expect("a viewport centre");
+    assert!(![2, 3].contains(&centre), "the centre is not ticked");
+
+    let _ = app.handle_remove_from_queue();
+    let ids = queue_ids(&app);
+    assert_eq!(ids.len(), ROWS - 2, "both ticked rows went");
+    assert!(!ids.contains(&"s2".to_owned()) && !ids.contains(&"s3".to_owned()));
+    assert!(ids.contains(&format!("s{centre}")), "the centre row stayed");
+}
+
+/// Under a search the queue's slot indices name rows of the filtered list,
+/// so Play's cold start reads the highlighted row from there, as Enter does.
+#[test]
+fn play_cold_start_takes_the_highlighted_row_of_the_searched_queue() {
+    let mut app = app_on_queue();
+    app.queue_page.common.search_query = "Song 1".to_owned();
+    let _ = app.update(Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::SetOffset(3, iced::keyboard::Modifiers::default()),
+    )));
+    let shown = app.filter_queue_songs()[3].clone();
+    assert_eq!(shown.title, "Song 12", "row 3 of the search results");
+
+    assert_eq!(app.cold_start_entry_id(), Some(shown.entry_id));
+}
+
+/// A reload that drops a row above the highlight (a consume advance, another
+/// client's edit) moves the highlight with its song, so the keys never act on
+/// the song that slid under it.
+#[test]
+fn a_queue_reload_keeps_the_highlight_on_its_song() {
+    let mut app = app_on_queue();
+    let (clicked, _) = click_queue_off_centre(&mut app);
+    let mut reloaded = app.library.queue_songs.clone();
+    reloaded.remove(0);
+    let _ = app.handle_queue_loaded(Ok(reloaded));
+
+    let focused = app
+        .queue_page
+        .common
+        .get_center_item_index(app.library.queue_songs.len())
+        .expect("a focused row");
+    assert_eq!(app.library.queue_songs[focused].id, format!("s{clicked}"));
+}
+
+/// A reload that drops the highlighted song itself drops the highlight, so
+/// the keys fall back to the viewport's centre, which is drawn.
+#[test]
+fn a_queue_reload_without_the_highlighted_song_drops_the_highlight() {
+    let mut app = app_on_queue();
+    let (clicked, _) = click_queue_off_centre(&mut app);
+    let mut reloaded = app.library.queue_songs.clone();
+    reloaded.remove(clicked);
+    let _ = app.handle_queue_loaded(Ok(reloaded));
+
+    assert_eq!(app.queue_page.common.slot_list.selected_offset, None);
+}
+
 #[test]
 fn shift_down_moves_the_highlighted_queue_row() {
     let mut app = app_on_queue();

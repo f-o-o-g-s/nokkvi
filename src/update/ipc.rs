@@ -550,12 +550,12 @@ define_commands! {
         let task = app.handle_add_to_queue();
         Ok((task, json!({ "added": added })))
     }), help ("", "Add the focused list item to the queue");
-    // Remove the centered queue song — the in-app Ctrl+D hotkey. Queue-gated:
-    // the centered item only has meaning in the queue view, so this errors
+    // Remove the focused queue song — the in-app Ctrl+D hotkey. Queue-gated:
+    // the focused item only has meaning in the queue view, so this errors
     // elsewhere (unlike clear-queue, which is ungated because it needs no
-    // selection). The Queue branch of get_center_item_info resolves the same
-    // filtered-center song handle_remove_from_queue removes, so the echo is
-    // exact; null when the queue is empty (no song centered).
+    // selection). The reply names the row handle_remove_from_queue removes
+    // (`queue_removal_name`, the first for a selection), the queue's even
+    // while the browsing panel has the keyboard; null when the queue is empty.
     "remove-from-queue" => act (|app: &mut Nokkvi| {
         // The key gate first, like its key: a modal swallows Ctrl+D, and
         // in theater it leaves theater in any view.
@@ -570,7 +570,7 @@ define_commands! {
                 "remove-from-queue only works in the queue view".to_string(),
             ));
         }
-        let removed = app.get_center_item_info().map(|info| info.name);
+        let removed = app.queue_removal_name();
         let task = app.handle_remove_from_queue();
         Ok((task, json!({ "removed": removed })))
     }), help ("", "Remove the centered song from the queue (queue view only)");

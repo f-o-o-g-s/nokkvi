@@ -241,10 +241,17 @@ impl SlotListPageState {
                 if self.slot_list.anchor_index == Some(offset) {
                     self.slot_list.anchor_index = None;
                 }
-                // Clear focus cursor when the selection set empties, otherwise
-                // the deselected slot keeps its center-highlight.
-                if self.slot_list.selected_indices.is_empty() {
-                    self.slot_list.selected_offset = None;
+                // The focus cursor leaves the deselected row for the nearest
+                // row still selected (none once the set empties), otherwise
+                // the keys that act on the focused row (Ctrl+D, star, Get
+                // Info) take a row nothing marks as selected.
+                if self.slot_list.selected_offset == Some(offset) {
+                    self.slot_list.selected_offset = self
+                        .slot_list
+                        .selected_indices
+                        .iter()
+                        .copied()
+                        .min_by_key(|&row| row.abs_diff(offset));
                 }
             } else {
                 self.slot_list.selected_indices.insert(offset);

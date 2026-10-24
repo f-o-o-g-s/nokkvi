@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
 
 - Under Track Artwork's Track's Own Cover, a smart playlist's rules preview now shows each song's own cover.
 - Returning to the playlist editor after changing Track Artwork now loads its thumbnails, instead of blank squares until you scroll.
+- Ctrl+clicking a selected row to deselect it moves the highlight onto a row still selected, so Ctrl+D or a star no longer hits it.
+- With rows ticked in the checkbox column, Ctrl+D now removes those rows instead of the unmarked row in the middle of the queue.
+- With a queue search active, Play now starts the highlighted song instead of the song at that position in the full queue.
+- The queue's highlighted row now stays on its song when the queue reloads, for example after a consume advance.
+- In split view, `nokkvi remove-from-queue` now names the queue song it removed, not the browsing panel's focused item.
 
 ### Removed
 
