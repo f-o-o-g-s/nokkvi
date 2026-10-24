@@ -252,11 +252,22 @@ impl Nokkvi {
             | View::Genres
             | View::Playlists
             | View::Radios => {
-                let msg = self.view_page(view).and_then(|page| {
+                // The synthesized SetOffset is a click, for the centred row's
+                // artwork and the next page. A scrollbar drag selects nothing,
+                // so rows ticked before it stay ticked, as through a keyboard
+                // scroll.
+                let (msg, ticked) = self.view_page(view).map_or((None, None), |page| {
                     let offset = page.common().slot_list.viewport_offset;
-                    page.synth_set_offset_message(offset)
+                    (
+                        page.synth_set_offset_message(offset),
+                        page.common().ticked_rows(),
+                    )
                 });
-                msg.map_or_else(Task::none, |m| self.update(m))
+                let task = msg.map_or_else(Task::none, |m| self.update(m));
+                if let (Some(ticked), Some(page)) = (ticked, self.view_page_mut(view)) {
+                    page.common_mut().restore_ticked_rows(ticked);
+                }
+                task
             }
         }
     }

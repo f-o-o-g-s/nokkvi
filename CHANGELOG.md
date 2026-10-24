@@ -22,6 +22,8 @@ All notable changes to this project will be documented in this file.
 - Similar Artists opened from a song or album now asks Deezer for the artist's own name, so "feat." credits no longer come back empty.
 - A similar artist sharing a name with a different library artist is no longer linked to that library artist.
 - Switching libraries or a server rescan now refreshes which similar artists show as in your library.
+- A background library refresh that lands after you scroll no longer jumps the list back to where it was when the refresh started.
+- Dragging the scrollbar no longer clears rows ticked in the checkbox column.
 
 ### Removed
 

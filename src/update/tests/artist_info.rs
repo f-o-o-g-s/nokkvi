@@ -351,3 +351,36 @@ fn a_highlight_pushed_off_screen_by_the_reload_is_dropped() {
     assert_eq!(app.artists_page.common.slot_list.viewport_offset, 15);
     assert_eq!(app.artists_page.common.slot_list.selected_offset, None);
 }
+
+/// A background reload is a slow 10,000-row fetch. The user who scrolls
+/// and clicks while it is out keeps both: the viewport stays where they
+/// scrolled, not on the row it sat on when the reload was sent, so the
+/// clicked row stays on screen and keeps its highlight.
+#[test]
+fn a_reload_landing_after_a_scroll_keeps_the_scroll_and_the_click() {
+    let mut app = app_with_artists(40);
+    let anchor_at_send = app
+        .library
+        .artists
+        .get(app.artists_page.common.slot_list.viewport_offset)
+        .map(|a| a.id.clone());
+
+    let total = app.library.artists.len();
+    app.artists_page.common.slot_list.set_offset(20, total);
+    slot(
+        &mut app,
+        SlotListPageMessage::SetOffset(21, iced::keyboard::Modifiers::default()),
+    );
+    assert_eq!(app.centred_artist_id().as_deref(), Some("a21"));
+
+    let artists: Vec<_> = app.library.artists.iter().cloned().collect();
+    let _ = app.handle_artists_loaded(Ok(artists), total, true, anchor_at_send, None);
+
+    let list = &app.artists_page.common.slot_list;
+    assert_eq!(list.viewport_offset, 20, "the scroll stays");
+    assert_eq!(
+        app.centred_artist_id().as_deref(),
+        Some("a21"),
+        "so does the click"
+    );
+}

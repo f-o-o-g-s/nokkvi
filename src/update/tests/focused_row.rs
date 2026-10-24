@@ -315,3 +315,37 @@ fn shift_down_moves_the_highlighted_queue_row() {
         "the focus followed the row, and Shift+A would add it"
     );
 }
+
+/// Under an expanded album the slot indices are flattened (its tracks sit
+/// between the albums), so the Albums panel's cover is the album the
+/// highlighted row belongs to, not the album at that index of the list.
+#[test]
+fn the_albums_panel_follows_the_flattened_row() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.library.albums.set_from_vec(
+        (0..20)
+            .map(|i| make_album(&format!("al{i}"), &format!("Album {i}"), "Artist"))
+            .collect(),
+    );
+    expand_albums_with(
+        &mut app,
+        "al2",
+        vec![
+            make_song("t1", "One", "Artist"),
+            make_song("t2", "Two", "Artist"),
+            make_song("t3", "Three", "Artist"),
+        ],
+    );
+    let total = app.albums_page.expansion.flattened_len(&app.library.albums);
+
+    // al0 al1 al2 t1 t2 t3 al3 al4 al5
+    app.albums_page.common.slot_list.set_selected(8, total);
+    assert_eq!(app.centred_album_id().as_deref(), Some("al5"));
+    app.albums_page.common.slot_list.set_selected(4, total);
+    assert_eq!(
+        app.centred_album_id().as_deref(),
+        Some("al2"),
+        "a track's album"
+    );
+}

@@ -242,9 +242,7 @@ impl Nokkvi {
 
         match view {
             View::Albums => {
-                let total = self.library.albums.len();
-                let center_idx = self.albums_page.common.get_center_item_index(total)?;
-                let album_id = self.library.albums.get(center_idx)?.id.clone();
+                let album_id = self.centred_album_id()?;
                 if self.artwork.large_artwork.peek(&album_id).is_some() {
                     return None;
                 }

@@ -3,6 +3,8 @@
 //! Provides common functionality for slot-list-based views (Albums, Artists, Songs, Genres, Playlists).
 //! Eliminates ~800 lines of duplicated code by abstracting common patterns.
 
+use std::collections::BTreeSet;
+
 use crate::widgets::{SlotListView, slot_list_view::HoveredSlot, view_header::SortMode};
 
 /// Common state shared by all slot-list-based views
@@ -648,6 +650,26 @@ impl SlotListPageState {
                 .selected_offset
                 .is_some_and(|focus| selected.contains(&focus));
         (!selected.is_empty() && !only_the_focus_marker).then(|| selected.iter().copied().collect())
+    }
+
+    /// The rows ticked beyond a plain click's focus marker (see
+    /// [`Self::activation_batch`]), with their anchor, for a synthesized click
+    /// to put back ([`Self::restore_ticked_rows`]).
+    pub fn ticked_rows(&self) -> Option<(BTreeSet<usize>, Option<usize>)> {
+        self.activation_batch()?;
+        Some((
+            self.slot_list.selected_indices.clone(),
+            self.slot_list.anchor_index,
+        ))
+    }
+
+    /// Put back rows [`Self::ticked_rows`] read, with no focus marker: a
+    /// marker outside a selection is drawn nowhere, so no key may act on it.
+    pub fn restore_ticked_rows(&mut self, (rows, anchor): (BTreeSet<usize>, Option<usize>)) {
+        self.slot_list.selected_indices = rows;
+        self.slot_list.anchor_index = anchor;
+        self.slot_list.selected_offset = None;
+        self.slot_list.selected_offset_pinned = false;
     }
 
     /// Resolve target indices for context menu batch operations.

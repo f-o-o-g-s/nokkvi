@@ -22,7 +22,7 @@ Slot-list views and the handler plumbing they share. Area files: `ui-queue.md` (
 ## ViewPage Trait
 
 All slot-list-based views implement `ViewPage` (in `views/mod.rs`):
-- `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek.
+- `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. The message is a click, so the settle puts rows ticked before the drag back (`SlotListPageState::ticked_rows` / `restore_ticked_rows`), as a keyboard scroll keeps them.
 - `reload_message(&self) -> Option<Message>` — emits the view's "reload from server" message (the RefreshView hotkey, `r`, and Escape on an empty search call it; the header Refresh button reaches its reload through `handle_common_view_action`'s `reload_msg` argument). Reloadable views return `Some(...)`; views without server backing return `None`.
 - `slot_list_message(&self, msg: SlotListPageMessage) -> Message` — wraps a `SlotListPageMessage` in the view's per-view `*Message::SlotList(...)` variant. Lets cross-view dispatch (slot_list.rs, roulette.rs, center-on-playing) fan out without a manual match on `View`.
 

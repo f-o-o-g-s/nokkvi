@@ -1091,3 +1091,43 @@ fn a_library_event_refreshes_the_library_list() {
     };
     assert!(!album.refreshes_libraries());
 }
+
+#[test]
+fn seek_settled_keeps_the_ticked_rows() {
+    // The settle synthesizes a click for its artwork and page loads, but a
+    // scrollbar drag selects nothing: rows ticked in the checkbox column
+    // before it stay ticked, as through a keyboard scroll.
+    use crate::app_message::SlotListMessage;
+
+    let mut app = home_app();
+    app.current_view = View::Albums;
+    app.library.albums.set_from_vec(
+        (0..50)
+            .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+            .collect(),
+    );
+    for row in [2, 3] {
+        let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SelectionToggle(row),
+        ));
+    }
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(25),
+    ));
+    let gen_id = app.albums_page.common.slot_list.scroll_generation_id;
+
+    let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, gen_id));
+
+    let list = &app.albums_page.common.slot_list;
+    assert_eq!(
+        list.selected_indices.iter().copied().collect::<Vec<_>>(),
+        [2, 3],
+        "the ticks survive"
+    );
+    assert_eq!(list.selected_offset, None, "no highlight outside them");
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("a25"),
+        "the settle still loads the centred cover"
+    );
+}

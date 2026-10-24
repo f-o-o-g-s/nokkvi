@@ -15,6 +15,22 @@ use crate::{
 };
 
 impl Nokkvi {
+    /// The album whose cover the Albums view's panel shows: the effective
+    /// centre (a clicked row's highlight, else the viewport centre), with a
+    /// track row of an expanded album resolving to that album. The slot
+    /// indices are flattened, so they never index the album list directly.
+    pub(crate) fn centred_album_id(&self) -> Option<String> {
+        let albums = &self.library.albums;
+        let page = &self.albums_page;
+        let idx = page
+            .common
+            .get_center_item_index(page.expansion.flattened_len(albums))?;
+        match page.expansion.get_entry_at(idx, albums, |a| &a.id)? {
+            views::expansion::SlotListEntry::Parent(album) => Some(album.id.clone()),
+            views::expansion::SlotListEntry::Child(_, parent_id) => Some(parent_id),
+        }
+    }
+
     /// Per-entity fetch closure for `Nokkvi::load_paged::<AlbumsTarget>`.
     ///
     /// The shared invariant body (page_size, defensive gate, `PaginatedFetch`,

@@ -188,6 +188,15 @@ pub(crate) trait LoaderTarget {
         }
     }
 
+    /// The id of the row at the viewport's offset, which a background
+    /// reload lands the viewport back on (`apply_viewport_on_load`).
+    fn viewport_anchor_id(app: &Nokkvi) -> Option<String> {
+        let offset = Self::page_common(app).slot_list.viewport_offset;
+        Self::library(app)
+            .get(offset)
+            .map(|item| Self::item_id(item).to_owned())
+    }
+
     // ── Defaulted: the highlighted row across a background reload ─────────
     /// The row flattened slot-list index `flat` shows, as (index in
     /// [`Self::library`], rows below that parent): 0 for the parent row, n for
@@ -348,9 +357,7 @@ impl LoaderTarget for AlbumsTarget {
     }
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
-        let total = app.library.albums.len();
-        let center_idx = app.albums_page.common.get_center_item_index(total)?;
-        let album_id = app.library.albums.get(center_idx)?.id.clone();
+        let album_id = app.centred_album_id()?;
         Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
             album_id,
         ))))
@@ -863,11 +870,16 @@ impl Nokkvi {
                     total_count
                 );
                 // The highlighted row's identity, read while its indices
-                // still name the old rows (background reloads only).
-                let focused = if background {
-                    T::focused_row(self)
+                // still name the old rows (background reloads only). So is
+                // the viewport's row: the user may have scrolled since the
+                // reload was sent, and its send-time anchor would undo that.
+                let (focused, anchor_id) = if background {
+                    (
+                        T::focused_row(self),
+                        T::viewport_anchor_id(self).or(anchor_id),
+                    )
                 } else {
-                    None
+                    (None, anchor_id)
                 };
                 T::library_mut(self).set_first_page(items, total_count);
                 T::apply_viewport_on_load(self, background, anchor_id.as_deref());
@@ -914,10 +926,10 @@ impl Nokkvi {
         }
         let slot_list = &T::page_common(self).slot_list;
         let rows = reload_rows(slot_list, self.settings.library_page_size.to_usize())?;
-        let anchor_id = library
-            .get(slot_list.viewport_offset)
-            .map(|item| T::item_id(item).to_owned());
-        Some(Reload { rows, anchor_id })
+        Some(Reload {
+            rows,
+            anchor_id: T::viewport_anchor_id(self),
+        })
     }
 
     pub(crate) fn handle_page_loaded_with<T: LoaderTarget>(
