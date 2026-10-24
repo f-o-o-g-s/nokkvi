@@ -112,9 +112,19 @@ pub(crate) fn reload_rows(slot_list: &SlotListView, page_size: usize) -> Option<
 /// parent it sits (an expanded child), and whether it is a find-and-expand pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FocusedRow {
+    place: RowPlace,
+    pinned: bool,
+}
+
+/// A row by identity rather than index, in terms a reload can find again:
+/// its parent row's id and its place under that parent (0 for the parent
+/// itself, n for its n-th expanded child). The slot indices are flattened
+/// under an inline expansion, so an index into them never indexes the
+/// parent list directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RowPlace {
     id: String,
     below: usize,
-    pinned: bool,
 }
 
 pub(crate) trait LoaderTarget {
@@ -152,7 +162,6 @@ pub(crate) trait LoaderTarget {
     /// are small, fully-refreshed lists where a background sync may reorder
     /// entries — preserving an arbitrary offset would be misleading.
     fn apply_viewport_on_load(app: &mut Nokkvi, background: bool, anchor_id: Option<&str>) {
-        let new_len = Self::library(app).len();
         if !background {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = 0;
@@ -170,7 +179,10 @@ pub(crate) trait LoaderTarget {
                     .iter()
                     .position(|item| Self::item_id(item) == id)
             });
-            let new_offset = anchor_idx.unwrap_or_else(|| current.min(new_len.saturating_sub(1)));
+            // The clamp is against the rows shown, flattened under an
+            // expansion (`reanchor` then lands the viewport exactly).
+            let shown = Self::flattened_len(app);
+            let new_offset = anchor_idx.unwrap_or_else(|| current.min(shown.saturating_sub(1)));
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = new_offset;
             // Clear the multi-selection rather than retaining in-range indices:
@@ -186,15 +198,6 @@ pub(crate) trait LoaderTarget {
             // jump just landed on.
             sl.clear_selection_for_refresh();
         }
-    }
-
-    /// The id of the row at the viewport's offset, which a background
-    /// reload lands the viewport back on (`apply_viewport_on_load`).
-    fn viewport_anchor_id(app: &Nokkvi) -> Option<String> {
-        let offset = Self::page_common(app).slot_list.viewport_offset;
-        Self::library(app)
-            .get(offset)
-            .map(|item| Self::item_id(item).to_owned())
     }
 
     // ── Defaulted: the highlighted row across a background reload ─────────
@@ -223,14 +226,54 @@ pub(crate) trait LoaderTarget {
     /// rows, whose indices it is relative to.
     fn focused_row(app: &Nokkvi) -> Option<FocusedRow> {
         let list = &Self::page_common(app).slot_list;
-        let flat = list.selected_offset?;
-        let (parent, below) = Self::flat_to_parent(app, flat)?;
-        let id = Self::item_id(Self::library(app).get(parent)?).to_owned();
         Some(FocusedRow {
-            id,
-            below,
+            place: Self::row_place(app, list.selected_offset?)?,
             pinned: list.selected_offset_pinned,
         })
+    }
+
+    /// The row at flattened index `flat`, by identity (`None` past the end).
+    fn row_place(app: &Nokkvi, flat: usize) -> Option<RowPlace> {
+        let (parent, below) = Self::flat_to_parent(app, flat)?;
+        let id = Self::item_id(Self::library(app).get(parent)?).to_owned();
+        Some(RowPlace { id, below })
+    }
+
+    /// The flattened index `place` names among the rows now loaded: its
+    /// parent's, plus its place under it while an expanded child still sits
+    /// there, else the parent's own. `None` when the parent is gone.
+    fn flat_index_of(app: &Nokkvi, place: &RowPlace) -> Option<usize> {
+        let parent = Self::library(app)
+            .iter()
+            .position(|item| Self::item_id(item) == place.id)?;
+        let parent_flat = Self::parent_to_flat(app, parent);
+        let flat = parent_flat + place.below;
+        Some(
+            if Self::flat_to_parent(app, flat) == Some((parent, place.below)) {
+                flat
+            } else {
+                parent_flat
+            },
+        )
+    }
+
+    /// The row the viewport is on, read before a background reload replaces
+    /// the rows. At a flat offset past the parents (an expanded album's
+    /// tracks above it) the parent list held no row at that index, so the
+    /// reload clamped the viewport to the last parent.
+    fn viewport_row(app: &Nokkvi) -> Option<RowPlace> {
+        Self::row_place(app, Self::page_common(app).slot_list.viewport_offset)
+    }
+
+    /// Put the viewport back on `row` after a background reload, at its
+    /// flattened place among the new rows, clamped to them. A parent gone
+    /// leaves the viewport where [`Self::apply_viewport_on_load`] put it.
+    fn reanchor(app: &mut Nokkvi, row: &RowPlace) {
+        let Some(flat) = Self::flat_index_of(app, row) else {
+            return;
+        };
+        let total = Self::flattened_len(app);
+        Self::slot_list_mut(app).viewport_offset = flat.min(total.saturating_sub(1));
     }
 
     /// Put the highlight back on `row` after a background reload. Nothing is
@@ -241,12 +284,12 @@ pub(crate) trait LoaderTarget {
     fn refocus(app: &mut Nokkvi, row: &FocusedRow) {
         let Some(parent) = Self::library(app)
             .iter()
-            .position(|item| Self::item_id(item) == row.id)
+            .position(|item| Self::item_id(item) == row.place.id)
         else {
             return;
         };
-        let flat = Self::parent_to_flat(app, parent) + row.below;
-        if Self::flat_to_parent(app, flat) != Some((parent, row.below)) {
+        let flat = Self::parent_to_flat(app, parent) + row.place.below;
+        if Self::flat_to_parent(app, flat) != Some((parent, row.place.below)) {
             return;
         }
         let total = Self::flattened_len(app);
@@ -872,17 +915,18 @@ impl Nokkvi {
                 // The highlighted row's identity, read while its indices
                 // still name the old rows (background reloads only). So is
                 // the viewport's row: the user may have scrolled since the
-                // reload was sent, and its send-time anchor would undo that.
-                let (focused, anchor_id) = if background {
-                    (
-                        T::focused_row(self),
-                        T::viewport_anchor_id(self).or(anchor_id),
-                    )
+                // reload was sent, and its send-time anchor would undo that
+                // (`anchor_id` stays the fallback for a row since gone).
+                let (focused, viewport) = if background {
+                    (T::focused_row(self), T::viewport_row(self))
                 } else {
-                    (None, anchor_id)
+                    (None, None)
                 };
                 T::library_mut(self).set_first_page(items, total_count);
                 T::apply_viewport_on_load(self, background, anchor_id.as_deref());
+                if let Some(row) = &viewport {
+                    T::reanchor(self, row);
+                }
                 if let Some(row) = &focused {
                     T::refocus(self, row);
                 }
@@ -928,7 +972,7 @@ impl Nokkvi {
         let rows = reload_rows(slot_list, self.settings.library_page_size.to_usize())?;
         Some(Reload {
             rows,
-            anchor_id: T::viewport_anchor_id(self),
+            anchor_id: T::viewport_row(self).map(|row| row.id),
         })
     }
 

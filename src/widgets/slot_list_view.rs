@@ -318,10 +318,18 @@ impl SlotListView {
     }
 
     /// Set viewport to specific offset (clears selected_offset and the pin).
+    /// A plain click leaves its row as a one-row selection that is the focus
+    /// marker; the jump drops that row with the marker, as `move_up` /
+    /// `move_down` do, because a marker-less one-row set reads as a checkbox
+    /// tick (`activation_batch`), which Ctrl+D would then remove off screen
+    /// and Enter would play. Ticks and ranges stay.
     pub fn set_offset(&mut self, offset: usize, total_items: usize) {
         if total_items > 0 && offset < total_items {
             self.viewport_offset = offset;
-            self.selected_offset = None;
+            if self.selected_offset.take().is_some() && self.selected_indices.len() == 1 {
+                self.selected_indices.clear();
+                self.anchor_index = None;
+            }
             self.selected_offset_pinned = false;
         }
     }

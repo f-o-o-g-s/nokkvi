@@ -573,7 +573,7 @@ define_commands! {
         let removed = app.queue_removal_name();
         let task = app.handle_remove_from_queue();
         Ok((task, json!({ "removed": removed })))
-    }), help ("", "Remove the centered song from the queue (queue view only)");
+    }), help ("", "Remove the focused song, or the ticked rows, from the queue (queue view only)");
     // Switch the top-pane view. The `view` arg is required and validated
     // against the View enum before dispatch; the actual switch goes through
     // the normal NavigationMessage::SwitchView path so view-change side

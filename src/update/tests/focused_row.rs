@@ -349,3 +349,48 @@ fn the_albums_panel_follows_the_flattened_row() {
         "a track's album"
     );
 }
+
+/// A plain click's row is a one-row selection that is the focus marker. A
+/// scrollbar drag drops both (as a keyboard step does), so Ctrl+D removes the
+/// row at the centre afterwards, the one Enter plays, never the clicked row
+/// that scrolled away.
+#[test]
+fn ctrl_d_after_a_scrollbar_drag_removes_the_centre_row() {
+    let mut app = app_on_queue();
+    for msg in [
+        SlotListPageMessage::SetOffset(3, iced::keyboard::Modifiers::default()),
+        SlotListPageMessage::ScrollSeek(15),
+    ] {
+        let _ = app.update(Message::Queue(QueueMessage::SlotList(msg)));
+    }
+    let centre = app
+        .queue_page
+        .common
+        .get_center_item_index(ROWS)
+        .expect("a viewport centre");
+    assert_ne!(centre, 3, "the drag moved the list off the clicked row");
+
+    let _ = app.handle_remove_from_queue();
+    let ids = queue_ids(&app);
+    assert!(ids.contains(&"s3".to_owned()), "the clicked row stayed");
+    assert!(!ids.contains(&format!("s{centre}")), "the centre row went");
+}
+
+/// A reload that drops rows above a highlighted row near the end moves the
+/// viewport back onto the rows (the clamp runs first), so the highlight is
+/// judged against the rows then shown and kept.
+#[test]
+fn a_queue_reload_clamps_the_viewport_before_it_keeps_the_highlight() {
+    let mut app = app_on_queue();
+    let list = &mut app.queue_page.common.slot_list;
+    list.slot_count = 5;
+    list.viewport_offset = 19;
+    list.set_selected(18, ROWS);
+
+    let reloaded: Vec<_> = app.library.queue_songs[5..].to_vec();
+    let _ = app.handle_queue_loaded(Ok(reloaded));
+
+    let list = &app.queue_page.common.slot_list;
+    assert_eq!(list.viewport_offset, 14, "clamped to the rows");
+    assert_eq!(list.selected_offset, Some(13), "the highlight followed s18");
+}

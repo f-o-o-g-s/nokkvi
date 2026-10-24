@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
 - Ctrl+clicking a selected row to deselect it moves the highlight onto a row still selected, so Ctrl+D or a star no longer hits it.
 - With rows ticked in the checkbox column, Ctrl+D now removes those rows instead of the unmarked row in the middle of the queue.
 - With a queue search active, Play now starts the highlighted song instead of the song at that position in the full queue.
-- The queue's highlighted row now stays on its song when the queue reloads, for example after a consume advance.
+- With Auto-Follow Playing off, the queue's highlighted row now stays on its song when the queue reloads, for example after another client removes rows.
 - In split view, `nokkvi remove-from-queue` now names the queue song it removed, not the browsing panel's focused item.
 - A password typed while nokkvi checks the saved session at launch is no longer cleared when the server turns that session away.
 - When the server's keepalive answers with an error page, nokkvi still checks the saved sign-in before the home screen loads.

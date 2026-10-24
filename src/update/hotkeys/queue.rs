@@ -55,10 +55,11 @@ impl Nokkvi {
     }
 
     /// The queue row Ctrl+D removes, as an index into the rows the Queue shows
-    /// (filtered under a search). A selection is the target, as for Enter and
-    /// Shift+A: one of its rows keeps it whole through the menu's batch
-    /// resolution. Otherwise the focused row. Always the queue's, whichever
-    /// pane has the keyboard.
+    /// (filtered under a search). A selection (ticked rows, a Shift+click
+    /// range) is the target, as it is for a library view's Enter and Shift+A:
+    /// one of its rows keeps it whole through the menu's batch resolution.
+    /// Otherwise the focused row, the one the Queue's own Enter plays. Always
+    /// the queue's, whichever pane has the keyboard.
     fn queue_removal_row(&self) -> Option<usize> {
         let common = &self.queue_page.common;
         common

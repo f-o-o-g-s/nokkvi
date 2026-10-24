@@ -1131,3 +1131,65 @@ fn seek_settled_keeps_the_ticked_rows() {
         "the settle still loads the centred cover"
     );
 }
+
+#[test]
+fn seek_settled_after_a_plain_click_focuses_the_centre_row() {
+    // A plain click leaves its row as a one-row selection that is the focus
+    // marker. The scrollbar drag drops the marker, and the one-row set with
+    // it (as a keyboard step does), so the settle's click focuses the centre
+    // row instead of keeping the clicked row as an unseen selection that
+    // Enter would play and Shift+A would add.
+    use crate::app_message::SlotListMessage;
+
+    let mut app = home_app();
+    app.current_view = View::Albums;
+    app.library.albums.set_from_vec(
+        (0..50)
+            .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+            .collect(),
+    );
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::SetOffset(5, iced::keyboard::Modifiers::default()),
+    ));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(25),
+    ));
+    let gen_id = app.albums_page.common.slot_list.scroll_generation_id;
+
+    let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, gen_id));
+
+    let list = &app.albums_page.common.slot_list;
+    assert_eq!(list.selected_offset, Some(25), "the centre row is focused");
+    assert_eq!(
+        list.selected_indices.iter().copied().collect::<Vec<_>>(),
+        [25],
+        "and is the only selected row"
+    );
+}
+
+/// A background reload of an expansion view anchors the viewport on the row
+/// it shows, in the flattened list (an expanded album's tracks sit between
+/// the albums), not on the album at that index of the album list, which may
+/// not exist: the viewport jumped to the last album.
+#[test]
+fn a_background_reload_keeps_an_expanded_views_viewport() {
+    let mut app = home_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..60)
+        .map(|i| make_album(&format!("al{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums.clone());
+    expand_albums_with(
+        &mut app,
+        "al10",
+        (0..20)
+            .map(|i| make_song(&format!("t{i}"), &format!("Track {i}"), "Artist"))
+            .collect(),
+    );
+    // Flat 70 is album al50 (20 tracks sit above it).
+    app.albums_page.common.slot_list.viewport_offset = 70;
+
+    let _ = app.handle_albums_loaded(Ok(albums), 60, true, None, None);
+
+    assert_eq!(app.albums_page.common.slot_list.viewport_offset, 70);
+}

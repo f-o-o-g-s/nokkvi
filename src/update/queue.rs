@@ -87,6 +87,15 @@ impl Nokkvi {
                 // line up with the rows the user had selected before the
                 // reload (consume-mode advance, SSE refresh, navigation).
                 self.queue_page.common.slot_list.clear_multi_selection();
+                // The viewport comes back onto the rows the Queue shows
+                // first (a replaced queue can be shorter than the old offset,
+                // which rendered every slot empty), so the highlight is
+                // judged against the rows then on screen.
+                let shown = self.filter_queue_songs().len();
+                let list = &mut self.queue_page.common.slot_list;
+                if shown > 0 && list.viewport_offset >= shown {
+                    list.viewport_offset = shown - 1;
+                }
                 self.refocus_queue_entry(focused);
 
                 // Honest sort label: an applied queue sort survives a reload
@@ -154,14 +163,6 @@ impl Nokkvi {
                 // …and its uploaded cover, which beats the quad when the
                 // playlist has one.
                 tasks.push(self.prefetch_active_playlist_custom_cover());
-
-                // Always clamp queue slot list offset to valid range after queue data changes.
-                // When the queue is replaced (e.g. playing an album), the old offset may
-                // exceed the new queue length, causing all slot list slots to render empty.
-                let queue_len = self.library.queue_songs.len();
-                if queue_len > 0 && self.queue_page.common.slot_list.viewport_offset >= queue_len {
-                    self.queue_page.common.slot_list.viewport_offset = queue_len.saturating_sub(1);
-                }
 
                 // Focus slot list on current playing row by per-row entry_id
                 // (only when auto_follow_playing is ON). entry_id was captured
