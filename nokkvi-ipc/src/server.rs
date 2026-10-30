@@ -154,8 +154,10 @@ async fn handle_connection(
     conn: IpcStream,
     tx: mpsc::UnboundedSender<IncomingRequest>,
 ) -> std::io::Result<()> {
-    let (read_half, mut write_half) = conn.split();
-    let mut reader = BufReader::new(read_half);
+    // `&IpcStream` reads and writes on its own, so the reader and the reply
+    // share one stream (interprocess 2.4.7 deprecated `split()` for this).
+    let mut writer = &conn;
+    let mut reader = BufReader::new(&conn);
     let mut line = String::with_capacity(256);
 
     let read_bytes = reader.read_line(&mut line).await?;
@@ -175,7 +177,7 @@ async fn handle_connection(
                 "malformed_request",
                 format!("could not parse request as JSON: {err}"),
             );
-            write_response(&mut write_half, &resp).await?;
+            write_response(&mut writer, &resp).await?;
             return Ok(());
         }
     };
@@ -196,12 +198,12 @@ async fn handle_connection(
             "server_shutting_down",
             "server is shutting down",
         );
-        write_response(&mut write_half, &resp).await?;
+        write_response(&mut writer, &resp).await?;
         return Ok(());
     }
 
     match resp_rx.await {
-        Ok(resp) => write_response(&mut write_half, &resp).await?,
+        Ok(resp) => write_response(&mut writer, &resp).await?,
         Err(_) => {
             tracing::warn!(
                 request_id,
@@ -212,7 +214,7 @@ async fn handle_connection(
                 "no_response",
                 "dispatcher dropped responder without sending a reply",
             );
-            write_response(&mut write_half, &resp).await?;
+            write_response(&mut writer, &resp).await?;
         }
     }
 
