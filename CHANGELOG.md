@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - When lrclib.net is too busy to answer, nokkvi now asks again a few seconds later instead of showing "No lyrics for this track".
+- Lyrics from lrclib.net are now found when your album is named differently there, such as a deluxe edition.
 
 ### Removed
 

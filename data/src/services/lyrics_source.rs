@@ -100,10 +100,17 @@ enum LrclibAnswer {
 /// Fetch synced lyrics from LRCLIB's **exact** `/api/get` (never the fuzzy
 /// `/api/search`), so a hit is never-wrong by construction. A hit carries the
 /// parsed document **and** the raw `syncedLyrics` text (already valid LRC) so
-/// the cache can persist it verbatim — no serializer needed. `Miss` on a 404,
-/// an instrumental, or an unsynced result; `Failed` on a timeout, a transport
-/// error, a server still busy at the budget, any other HTTP status, or an
-/// unreadable body.
+/// the cache can persist it verbatim — no serializer needed.
+///
+/// LRCLIB matches the album letter for letter, so a deluxe edition or a single
+/// tagged differently from its copy reads as no record. When nothing synced is
+/// filed under the song's album, the fetch asks once more without it: title,
+/// artist and duration (LRCLIB's ±2 s) still have to match. An instrumental
+/// under the album is final.
+///
+/// `Miss` on no synced record either way or an instrumental; `Failed` when
+/// either ask hits a timeout, a transport error, a server still busy at the
+/// budget, any other HTTP status, or an unreadable body.
 pub async fn fetch_lrclib(
     artist: &str,
     title: &str,
@@ -114,38 +121,60 @@ pub async fn fetch_lrclib(
     if external_host_is_blocked(LRCLIB_URL) {
         return LyricsLookup::Miss;
     }
-    fetch_lrclib_with(|| lrclib_get(artist, title, album, duration_secs)).await
+    fetch_lrclib_with(!album.is_empty(), |with_album| {
+        lrclib_get(artist, title, with_album.then_some(album), duration_secs)
+    })
+    .await
 }
 
-/// [`fetch_lrclib`] behind any `get`, so its rules run on tokio's paused clock
-/// in tests. Each ask is cut at [`LRCLIB_TIMEOUT`] and the whole fetch at
-/// [`LRCLIB_BUDGET`].
-async fn fetch_lrclib_with<Fut>(mut get: impl FnMut() -> Fut) -> LyricsLookup<(LrcDocument, String)>
+/// [`fetch_lrclib`] behind any `get` (called with whether to send the album),
+/// so its rules run on tokio's paused clock in tests. Each ask is cut at
+/// [`LRCLIB_TIMEOUT`] and the whole fetch, both asks, at [`LRCLIB_BUDGET`].
+async fn fetch_lrclib_with<Fut>(
+    has_album: bool,
+    mut get: impl FnMut(bool) -> Fut,
+) -> LyricsLookup<(LrcDocument, String)>
 where
     Fut: std::future::Future<Output = LrclibAnswer>,
 {
     let deadline = tokio::time::Instant::now() + LRCLIB_BUDGET;
-    let body = match ask_lrclib(&mut get, deadline).await {
-        LrclibAnswer::Record(body) => body,
+    match ask_lrclib(&mut get, has_album, deadline).await {
+        LrclibAnswer::Record(body) if body.instrumental => return LyricsLookup::Miss,
+        LrclibAnswer::Record(body) => {
+            if let Some(hit) = synced_hit(body) {
+                return LyricsLookup::Hit(hit);
+            }
+        }
         // A 404 is the normal "no match" answer — not an error worth logging.
-        LrclibAnswer::NotFound => return LyricsLookup::Miss,
+        LrclibAnswer::NotFound => {}
         // `ask_lrclib` turns a busy answer it can't wait out into `Failed`;
         // either says nothing about the song.
         LrclibAnswer::Busy(_) | LrclibAnswer::Failed => return LyricsLookup::Failed,
-    };
+    }
+    if !has_album {
+        return LyricsLookup::Miss;
+    }
 
+    tracing::debug!("lrclib: nothing synced under the album, asking without it");
+    match ask_lrclib(&mut get, false, deadline).await {
+        LrclibAnswer::Record(body) => {
+            synced_hit(body).map_or(LyricsLookup::Miss, LyricsLookup::Hit)
+        }
+        LrclibAnswer::NotFound => LyricsLookup::Miss,
+        LrclibAnswer::Busy(_) | LrclibAnswer::Failed => LyricsLookup::Failed,
+    }
+}
+
+/// A record's synced lyrics, parsed, beside the raw text the cache writes.
+/// `None` for an instrumental, a record without `syncedLyrics`, or text that
+/// carries no timestamp.
+fn synced_hit(body: LrclibResponse) -> Option<(LrcDocument, String)> {
     if body.instrumental {
-        return LyricsLookup::Miss;
+        return None;
     }
-    let Some(synced) = body.synced_lyrics else {
-        return LyricsLookup::Miss;
-    };
+    let synced = body.synced_lyrics?;
     let doc = crate::types::lyrics::parse(&synced);
-    if doc.synced {
-        LyricsLookup::Hit((doc, synced))
-    } else {
-        LyricsLookup::Miss
-    }
+    doc.synced.then_some((doc, synced))
 }
 
 /// Ask until LRCLIB answers something other than busy. A busy answer is asked
@@ -153,7 +182,8 @@ where
 /// still ends before `deadline`; past it the ask is `Failed`. A timeout is
 /// never retried: it already spent most of the budget.
 async fn ask_lrclib<Fut>(
-    get: &mut impl FnMut() -> Fut,
+    get: &mut impl FnMut(bool) -> Fut,
+    with_album: bool,
     deadline: tokio::time::Instant,
 ) -> LrclibAnswer
 where
@@ -162,7 +192,8 @@ where
     let mut busy: u32 = 0;
     loop {
         let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let Ok(answer) = tokio::time::timeout(left.min(LRCLIB_TIMEOUT), get()).await else {
+        let Ok(answer) = tokio::time::timeout(left.min(LRCLIB_TIMEOUT), get(with_album)).await
+        else {
             tracing::debug!("lrclib fetch timed out");
             return LrclibAnswer::Failed;
         };
@@ -189,15 +220,20 @@ where
     }
 }
 
-/// One `/api/get` request, untimed (`ask_lrclib` times it).
-async fn lrclib_get(artist: &str, title: &str, album: &str, duration_secs: u32) -> LrclibAnswer {
+/// One `/api/get` request, untimed (`ask_lrclib` times it). `album: None`
+/// leaves `album_name` out, which LRCLIB reads as any album.
+async fn lrclib_get(
+    artist: &str,
+    title: &str,
+    album: Option<&str>,
+    duration_secs: u32,
+) -> LrclibAnswer {
     let duration = duration_secs.to_string();
-    let params = [
-        ("artist_name", artist),
-        ("track_name", title),
-        ("album_name", album),
-        ("duration", duration.as_str()),
-    ];
+    let mut params = vec![("artist_name", artist), ("track_name", title)];
+    if let Some(album) = album {
+        params.push(("album_name", album));
+    }
+    params.push(("duration", duration.as_str()));
     let mut full_url = String::from(LRCLIB_URL);
     for (i, (key, value)) in params.iter().enumerate() {
         full_url.push(if i == 0 { '?' } else { '&' });
@@ -638,15 +674,23 @@ mod tests {
         })
     }
 
-    /// Run `fetch_lrclib_with` against scripted answers, by ask number
-    /// (`None` = a request that never answers), counting the asks.
+    /// Run `fetch_lrclib_with` for a song with an album against scripted
+    /// answers, by ask number and whether that ask sent the album (`None` = a
+    /// request that never answers). Returns what each ask sent.
     async fn fetch_scripted(
-        mut answer: impl FnMut(usize) -> Option<LrclibAnswer>,
-    ) -> (LyricsLookup<(LrcDocument, String)>, usize) {
-        let mut asks = 0;
-        let got = fetch_lrclib_with(|| {
-            let scripted = answer(asks);
-            asks += 1;
+        answer: impl FnMut(usize, bool) -> Option<LrclibAnswer>,
+    ) -> (LyricsLookup<(LrcDocument, String)>, Vec<bool>) {
+        fetch_scripted_for(true, answer).await
+    }
+
+    async fn fetch_scripted_for(
+        has_album: bool,
+        mut answer: impl FnMut(usize, bool) -> Option<LrclibAnswer>,
+    ) -> (LyricsLookup<(LrcDocument, String)>, Vec<bool>) {
+        let mut asked = Vec::new();
+        let got = fetch_lrclib_with(has_album, |with_album| {
+            let scripted = answer(asked.len(), with_album);
+            asked.push(with_album);
             async move {
                 match scripted {
                     Some(scripted) => scripted,
@@ -655,13 +699,13 @@ mod tests {
             }
         })
         .await;
-        (got, asks)
+        (got, asked)
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_busy_answer_is_asked_again_after_its_wait() {
         let start = tokio::time::Instant::now();
-        let (got, asks) = fetch_scripted(|ask| {
+        let (got, asked) = fetch_scripted(|ask, _| {
             Some(match ask {
                 0 => LrclibAnswer::Busy(Some(Duration::from_secs(1))),
                 _ => synced_record("[00:01.00]found"),
@@ -671,14 +715,14 @@ mod tests {
         let (doc, raw) = got.hit().expect("the second ask answers");
         assert_eq!(doc.lines[0].text, "found");
         assert_eq!(raw, "[00:01.00]found");
-        assert_eq!(asks, 2);
+        assert_eq!(asked, [true, true], "a busy ask repeats as it was");
         assert_eq!(start.elapsed(), Duration::from_secs(1));
     }
 
     #[tokio::test(start_paused = true)]
     async fn busy_waits_are_held_between_one_and_five_seconds() {
         let start = tokio::time::Instant::now();
-        let (got, asks) = fetch_scripted(|ask| {
+        let (got, asked) = fetch_scripted(|ask, _| {
             Some(match ask {
                 0 => LrclibAnswer::Busy(Some(Duration::ZERO)),
                 1 => LrclibAnswer::Busy(Some(Duration::from_secs(60))),
@@ -688,21 +732,25 @@ mod tests {
         })
         .await;
         assert!(got.hit().is_some());
-        assert_eq!(asks, 4);
+        assert_eq!(asked.len(), 4);
         assert_eq!(start.elapsed(), Duration::from_secs(1 + 5 + 1));
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_server_still_busy_at_the_budget_fails_the_fetch() {
         let start = tokio::time::Instant::now();
-        let (got, asks) =
-            fetch_scripted(|_| Some(LrclibAnswer::Busy(Some(Duration::from_secs(1))))).await;
+        let (got, asked) =
+            fetch_scripted(|_, _| Some(LrclibAnswer::Busy(Some(Duration::from_secs(1))))).await;
         assert_eq!(
             got,
             LyricsLookup::Failed,
             "busy says nothing about the song"
         );
-        assert!(asks > 1);
+        assert!(asked.len() > 1);
+        assert!(
+            asked.iter().all(|&with_album| with_album),
+            "busy never falls back"
+        );
         assert!(
             start.elapsed() < LRCLIB_BUDGET,
             "gave up at {:?}, before a wait that would end past the budget",
@@ -713,18 +761,89 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_hung_request_fails_at_the_request_timeout_and_is_not_retried() {
         let start = tokio::time::Instant::now();
-        let (got, asks) = fetch_scripted(|_| None).await;
+        let (got, asked) = fetch_scripted(|_, _| None).await;
         assert_eq!(got, LyricsLookup::Failed);
-        assert_eq!(asks, 1);
+        assert_eq!(asked, [true]);
         assert_eq!(start.elapsed(), LRCLIB_TIMEOUT);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn not_found_is_a_miss_and_any_other_failure_fails() {
-        let (got, asks) = fetch_scripted(|_| Some(LrclibAnswer::NotFound)).await;
-        assert_eq!((got, asks), (LyricsLookup::Miss, 1));
-        let (got, asks) = fetch_scripted(|_| Some(LrclibAnswer::Failed)).await;
-        assert_eq!((got, asks), (LyricsLookup::Failed, 1));
+    async fn not_found_either_way_is_a_miss_and_any_other_failure_fails() {
+        let (got, asked) = fetch_scripted(|_, _| Some(LrclibAnswer::NotFound)).await;
+        assert_eq!((got, asked), (LyricsLookup::Miss, vec![true, false]));
+        let (got, asked) = fetch_scripted(|_, _| Some(LrclibAnswer::Failed)).await;
+        assert_eq!(
+            (got, asked),
+            (LyricsLookup::Failed, vec![true]),
+            "a failed ask never falls back"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_record_under_the_album_asks_again_without_it() {
+        let (got, asked) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                LrclibAnswer::NotFound
+            } else {
+                synced_record("[00:01.00]other album")
+            })
+        })
+        .await;
+        let (doc, _) = got.hit().expect("the album-less ask answers");
+        assert_eq!(doc.lines[0].text, "other album");
+        assert_eq!(asked, [true, false]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unsynced_record_under_the_album_asks_again_without_it() {
+        let (got, asked) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                LrclibAnswer::Record(LrclibResponse::default())
+            } else {
+                synced_record("[00:01.00]synced elsewhere")
+            })
+        })
+        .await;
+        assert_eq!(
+            got.hit().expect("synced wins").0.lines[0].text,
+            "synced elsewhere"
+        );
+        assert_eq!(asked, [true, false]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_synced_record_or_an_instrumental_under_the_album_is_final() {
+        let (got, asked) = fetch_scripted(|_, _| Some(synced_record("[00:01.00]x"))).await;
+        assert!(got.hit().is_some());
+        assert_eq!(asked, [true]);
+
+        let (got, asked) = fetch_scripted(|_, _| {
+            Some(LrclibAnswer::Record(LrclibResponse {
+                instrumental: true,
+                ..Default::default()
+            }))
+        })
+        .await;
+        assert_eq!((got, asked), (LyricsLookup::Miss, vec![true]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_song_without_an_album_asks_once() {
+        let (got, asked) = fetch_scripted_for(false, |_, _| Some(LrclibAnswer::NotFound)).await;
+        assert_eq!((got, asked), (LyricsLookup::Miss, vec![false]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_album_less_ask_fails_the_fetch() {
+        let (got, asked) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                LrclibAnswer::NotFound
+            } else {
+                LrclibAnswer::Failed
+            })
+        })
+        .await;
+        assert_eq!((got, asked), (LyricsLookup::Failed, vec![true, false]));
     }
 
     #[test]
