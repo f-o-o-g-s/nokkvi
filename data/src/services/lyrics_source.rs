@@ -12,7 +12,16 @@ use crate::{
 };
 
 const LRCLIB_URL: &str = "https://lrclib.net/api/get";
+/// One request's ceiling.
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
+/// The whole fetch's ceiling, busy retries included. An overloaded LRCLIB
+/// answers 503 with `Retry-After: 1` in about half a second, and the same
+/// request a few seconds later goes through.
+const LRCLIB_BUDGET: Duration = Duration::from_secs(12);
+/// The range a busy answer's wait is held to: its `Retry-After` when it gave
+/// one, else the shortest.
+const LRCLIB_BUSY_WAIT_MIN: Duration = Duration::from_secs(1);
+const LRCLIB_BUSY_WAIT_MAX: Duration = Duration::from_secs(5);
 
 /// What one lyrics lookup found. A `Miss` is an answer about the song; a
 /// `Failed` lookup (a timeout, a network or server error, an unreadable file)
@@ -66,7 +75,7 @@ fn lrclib_client() -> &'static reqwest::Client {
     })
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 struct LrclibResponse {
     #[serde(default)]
     instrumental: bool,
@@ -74,12 +83,27 @@ struct LrclibResponse {
     synced_lyrics: Option<String>,
 }
 
+/// One `/api/get` answer.
+#[derive(Debug, Clone)]
+enum LrclibAnswer {
+    /// A record under the asked signature.
+    Record(LrclibResponse),
+    /// A 404: no record has the signature.
+    NotFound,
+    /// A 503 or 429: the server is overloaded. Carries its `Retry-After` when
+    /// it gave one in seconds.
+    Busy(Option<Duration>),
+    /// A timeout, a transport error, any other status, or an unreadable body.
+    Failed,
+}
+
 /// Fetch synced lyrics from LRCLIB's **exact** `/api/get` (never the fuzzy
 /// `/api/search`), so a hit is never-wrong by construction. A hit carries the
 /// parsed document **and** the raw `syncedLyrics` text (already valid LRC) so
 /// the cache can persist it verbatim — no serializer needed. `Miss` on a 404,
 /// an instrumental, or an unsynced result; `Failed` on a timeout, a transport
-/// error, any other HTTP status, or an unreadable body.
+/// error, a server still busy at the budget, any other HTTP status, or an
+/// unreadable body.
 pub async fn fetch_lrclib(
     artist: &str,
     title: &str,
@@ -90,7 +114,83 @@ pub async fn fetch_lrclib(
     if external_host_is_blocked(LRCLIB_URL) {
         return LyricsLookup::Miss;
     }
+    fetch_lrclib_with(|| lrclib_get(artist, title, album, duration_secs)).await
+}
 
+/// [`fetch_lrclib`] behind any `get`, so its rules run on tokio's paused clock
+/// in tests. Each ask is cut at [`LRCLIB_TIMEOUT`] and the whole fetch at
+/// [`LRCLIB_BUDGET`].
+async fn fetch_lrclib_with<Fut>(mut get: impl FnMut() -> Fut) -> LyricsLookup<(LrcDocument, String)>
+where
+    Fut: std::future::Future<Output = LrclibAnswer>,
+{
+    let deadline = tokio::time::Instant::now() + LRCLIB_BUDGET;
+    let body = match ask_lrclib(&mut get, deadline).await {
+        LrclibAnswer::Record(body) => body,
+        // A 404 is the normal "no match" answer — not an error worth logging.
+        LrclibAnswer::NotFound => return LyricsLookup::Miss,
+        // `ask_lrclib` turns a busy answer it can't wait out into `Failed`;
+        // either says nothing about the song.
+        LrclibAnswer::Busy(_) | LrclibAnswer::Failed => return LyricsLookup::Failed,
+    };
+
+    if body.instrumental {
+        return LyricsLookup::Miss;
+    }
+    let Some(synced) = body.synced_lyrics else {
+        return LyricsLookup::Miss;
+    };
+    let doc = crate::types::lyrics::parse(&synced);
+    if doc.synced {
+        LyricsLookup::Hit((doc, synced))
+    } else {
+        LyricsLookup::Miss
+    }
+}
+
+/// Ask until LRCLIB answers something other than busy. A busy answer is asked
+/// again after its wait (held to `LRCLIB_BUSY_WAIT_MIN..=MAX`) while that wait
+/// still ends before `deadline`; past it the ask is `Failed`. A timeout is
+/// never retried: it already spent most of the budget.
+async fn ask_lrclib<Fut>(
+    get: &mut impl FnMut() -> Fut,
+    deadline: tokio::time::Instant,
+) -> LrclibAnswer
+where
+    Fut: std::future::Future<Output = LrclibAnswer>,
+{
+    let mut busy: u32 = 0;
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let Ok(answer) = tokio::time::timeout(left.min(LRCLIB_TIMEOUT), get()).await else {
+            tracing::debug!("lrclib fetch timed out");
+            return LrclibAnswer::Failed;
+        };
+        let LrclibAnswer::Busy(retry_after) = answer else {
+            if busy > 0 {
+                tracing::debug!(busy, "lrclib answered after busy retries");
+            }
+            return answer;
+        };
+        busy += 1;
+        let wait = retry_after
+            .unwrap_or(LRCLIB_BUSY_WAIT_MIN)
+            .clamp(LRCLIB_BUSY_WAIT_MIN, LRCLIB_BUSY_WAIT_MAX);
+        if tokio::time::Instant::now() + wait >= deadline {
+            tracing::debug!(busy, "lrclib still busy at the budget");
+            return LrclibAnswer::Failed;
+        }
+        tracing::debug!(
+            busy,
+            wait_ms = wait.as_millis(),
+            "lrclib busy, asking again"
+        );
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// One `/api/get` request, untimed (`ask_lrclib` times it).
+async fn lrclib_get(artist: &str, title: &str, album: &str, duration_secs: u32) -> LrclibAnswer {
     let duration = duration_secs.to_string();
     let params = [
         ("artist_name", artist),
@@ -107,50 +207,44 @@ pub async fn fetch_lrclib(
             .push_str(&url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>());
     }
 
-    let request = lrclib_client().get(&full_url);
-    let response = match tokio::time::timeout(LRCLIB_TIMEOUT, request.send()).await {
-        Ok(Ok(response)) => response,
-        Ok(Err(e)) => {
+    let response = match lrclib_client().get(&full_url).send().await {
+        Ok(response) => response,
+        Err(e) => {
             tracing::debug!(error = %e.without_url(), "lrclib fetch failed");
-            return LyricsLookup::Failed;
-        }
-        Err(_) => {
-            tracing::debug!("lrclib fetch timed out");
-            return LyricsLookup::Failed;
+            return LrclibAnswer::Failed;
         }
     };
 
-    // A 404 is the normal "no match" answer — not an error worth logging.
-    // Anything else (a 5xx, a rate limit) says nothing about the song.
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return LyricsLookup::Miss;
+        return LrclibAnswer::NotFound;
+    }
+    // LRCLIB's overload answer (503 + `Retry-After: 1`) and a rate limit in
+    // front of it both ask for the same request again shortly.
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        return LrclibAnswer::Busy(retry_after_secs(response.headers()));
     }
     if !status.is_success() {
         tracing::debug!(%status, "lrclib fetch refused");
-        return LyricsLookup::Failed;
+        return LrclibAnswer::Failed;
     }
 
-    let body: LrclibResponse = match response.json().await {
-        Ok(body) => body,
+    match response.json().await {
+        Ok(body) => LrclibAnswer::Record(body),
         Err(e) => {
             tracing::debug!(error = %e.without_url(), "lrclib response parse failed");
-            return LyricsLookup::Failed;
+            LrclibAnswer::Failed
         }
-    };
+    }
+}
 
-    if body.instrumental {
-        return LyricsLookup::Miss;
-    }
-    let Some(synced) = body.synced_lyrics else {
-        return LyricsLookup::Miss;
-    };
-    let doc = crate::types::lyrics::parse(&synced);
-    if doc.synced {
-        LyricsLookup::Hit((doc, synced))
-    } else {
-        LyricsLookup::Miss
-    }
+/// A `Retry-After` given in whole seconds (LRCLIB sends `1`). The HTTP-date
+/// form reads as none.
+fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
 /// Persist a fetched LRCLIB result into the store so the next play resolves it
@@ -535,6 +629,115 @@ mod tests {
             LyricsLookup::Miss => eprintln!("lrclib returned no match (acceptable if not in db)"),
             LyricsLookup::Failed => eprintln!("lrclib fetch failed (acceptable if offline)"),
         }
+    }
+
+    fn synced_record(lrc: &str) -> LrclibAnswer {
+        LrclibAnswer::Record(LrclibResponse {
+            synced_lyrics: Some(lrc.into()),
+            ..Default::default()
+        })
+    }
+
+    /// Run `fetch_lrclib_with` against scripted answers, by ask number
+    /// (`None` = a request that never answers), counting the asks.
+    async fn fetch_scripted(
+        mut answer: impl FnMut(usize) -> Option<LrclibAnswer>,
+    ) -> (LyricsLookup<(LrcDocument, String)>, usize) {
+        let mut asks = 0;
+        let got = fetch_lrclib_with(|| {
+            let scripted = answer(asks);
+            asks += 1;
+            async move {
+                match scripted {
+                    Some(scripted) => scripted,
+                    None => std::future::pending().await,
+                }
+            }
+        })
+        .await;
+        (got, asks)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_busy_answer_is_asked_again_after_its_wait() {
+        let start = tokio::time::Instant::now();
+        let (got, asks) = fetch_scripted(|ask| {
+            Some(match ask {
+                0 => LrclibAnswer::Busy(Some(Duration::from_secs(1))),
+                _ => synced_record("[00:01.00]found"),
+            })
+        })
+        .await;
+        let (doc, raw) = got.hit().expect("the second ask answers");
+        assert_eq!(doc.lines[0].text, "found");
+        assert_eq!(raw, "[00:01.00]found");
+        assert_eq!(asks, 2);
+        assert_eq!(start.elapsed(), Duration::from_secs(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn busy_waits_are_held_between_one_and_five_seconds() {
+        let start = tokio::time::Instant::now();
+        let (got, asks) = fetch_scripted(|ask| {
+            Some(match ask {
+                0 => LrclibAnswer::Busy(Some(Duration::ZERO)),
+                1 => LrclibAnswer::Busy(Some(Duration::from_secs(60))),
+                2 => LrclibAnswer::Busy(None),
+                _ => synced_record("[00:01.00]found"),
+            })
+        })
+        .await;
+        assert!(got.hit().is_some());
+        assert_eq!(asks, 4);
+        assert_eq!(start.elapsed(), Duration::from_secs(1 + 5 + 1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_still_busy_at_the_budget_fails_the_fetch() {
+        let start = tokio::time::Instant::now();
+        let (got, asks) =
+            fetch_scripted(|_| Some(LrclibAnswer::Busy(Some(Duration::from_secs(1))))).await;
+        assert_eq!(
+            got,
+            LyricsLookup::Failed,
+            "busy says nothing about the song"
+        );
+        assert!(asks > 1);
+        assert!(
+            start.elapsed() < LRCLIB_BUDGET,
+            "gave up at {:?}, before a wait that would end past the budget",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_request_fails_at_the_request_timeout_and_is_not_retried() {
+        let start = tokio::time::Instant::now();
+        let (got, asks) = fetch_scripted(|_| None).await;
+        assert_eq!(got, LyricsLookup::Failed);
+        assert_eq!(asks, 1);
+        assert_eq!(start.elapsed(), LRCLIB_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn not_found_is_a_miss_and_any_other_failure_fails() {
+        let (got, asks) = fetch_scripted(|_| Some(LrclibAnswer::NotFound)).await;
+        assert_eq!((got, asks), (LyricsLookup::Miss, 1));
+        let (got, asks) = fetch_scripted(|_| Some(LrclibAnswer::Failed)).await;
+        assert_eq!((got, asks), (LyricsLookup::Failed, 1));
+    }
+
+    #[test]
+    fn retry_after_reads_whole_seconds_only() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_secs(&headers), None);
+        headers.insert(reqwest::header::RETRY_AFTER, "1".parse().expect("header"));
+        assert_eq!(retry_after_secs(&headers), Some(Duration::from_secs(1)));
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            "Wed, 21 Oct 2026 07:28:00 GMT".parse().expect("header"),
+        );
+        assert_eq!(retry_after_secs(&headers), None);
     }
 
     /// `(channel token, first line's text)` — the two things every precedence

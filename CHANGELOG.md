@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- When lrclib.net is too busy to answer, nokkvi now asks again a few seconds later instead of showing "No lyrics for this track".
+
 ### Removed
 
 ## v0.28.1 — 2026-10-29
