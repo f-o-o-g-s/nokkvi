@@ -148,7 +148,8 @@ impl LrcLine {
 /// drifts with playback progress instead of following a line cursor, so
 /// [`LrcDocument::active_line_at`] never names a line of it.
 ///
-/// Plain docs come from the SERVER only: `parse()` still keeps timed lines
+/// Plain docs come from the server and from a live LRCLIB answer
+/// ([`LrcDocument::plain`]), never from disk: `parse()` still keeps timed lines
 /// alone, so the store and cached-LRCLIB channels stay synced-only.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LrcDocument {
@@ -167,6 +168,25 @@ impl LrcDocument {
     /// it (`doc.synced && doc.is_renderable()`) rather than folded in here.
     pub fn is_renderable(&self) -> bool {
         !self.lines.is_empty()
+    }
+
+    /// A plain sheet from untimed text: one line per non-blank line, trimmed,
+    /// every stamp 0. The shape Navidrome gives a plain sidecar, so LRCLIB's
+    /// `plainLyrics` reads like the server's plain lyrics.
+    pub fn plain(text: &str) -> LrcDocument {
+        LrcDocument {
+            lines: text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(|line| LrcLine {
+                    time_ms: 0,
+                    text: line.to_string(),
+                    words: Vec::new(),
+                })
+                .collect(),
+            synced: false,
+        }
     }
 
     /// Index of the line playing at `position_ms`: the last line whose
@@ -1144,6 +1164,25 @@ mod tests {
                 .collect(),
             synced,
         }
+    }
+
+    #[test]
+    fn plain_text_keeps_each_non_blank_line_untimed() {
+        let doc = LrcDocument::plain("  First line \n\n[Chorus]\r\nLast line\n\n");
+        let texts: Vec<&str> = doc.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["First line", "[Chorus]", "Last line"]);
+        assert!(!doc.synced);
+        assert!(
+            doc.lines
+                .iter()
+                .all(|l| l.time_ms == 0 && l.words.is_empty())
+        );
+        assert_eq!(
+            doc.active_line_at(60_000),
+            None,
+            "a plain sheet names no line"
+        );
+        assert!(!LrcDocument::plain(" \n\n").is_renderable());
     }
 
     // --- active line ---

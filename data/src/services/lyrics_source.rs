@@ -81,6 +81,8 @@ struct LrclibResponse {
     instrumental: bool,
     #[serde(rename = "syncedLyrics", default)]
     synced_lyrics: Option<String>,
+    #[serde(rename = "plainLyrics", default)]
+    plain_lyrics: Option<String>,
 }
 
 /// One `/api/get` answer.
@@ -97,10 +99,15 @@ enum LrclibAnswer {
     Failed,
 }
 
-/// Fetch synced lyrics from LRCLIB's **exact** `/api/get` (never the fuzzy
-/// `/api/search`), so a hit is never-wrong by construction. A hit carries the
-/// parsed document **and** the raw `syncedLyrics` text (already valid LRC) so
-/// the cache can persist it verbatim — no serializer needed.
+/// What [`fetch_lrclib`] found: the sheet, and for a synced one the raw
+/// `syncedLyrics` text (already valid LRC) so the cache can persist it
+/// verbatim — no serializer needed. A plain sheet carries `None`: it is never
+/// written to disk, so the store's channels stay synced-only and a song whose
+/// timed lyrics reach LRCLIB later picks them up in a later session.
+pub type LrclibHit = (LrcDocument, Option<String>);
+
+/// Fetch lyrics from LRCLIB's **exact** `/api/get` (never the fuzzy
+/// `/api/search`), so a hit is never-wrong by construction.
 ///
 /// LRCLIB matches the album letter for letter, so a deluxe edition or a single
 /// tagged differently from its copy reads as no record. When nothing synced is
@@ -108,15 +115,17 @@ enum LrclibAnswer {
 /// artist and duration (LRCLIB's ±2 s) still have to match. An instrumental
 /// under the album is final.
 ///
-/// `Miss` on no synced record either way or an instrumental; `Failed` when
-/// either ask hits a timeout, a transport error, a server still busy at the
-/// budget, any other HTTP status, or an unreadable body.
+/// Synced lyrics from either ask win; then the album's own `plainLyrics`, then
+/// the album-less record's. `Miss` when neither ask found lyrics or the album's
+/// record is an instrumental. `Failed` when an ask hits a timeout, a transport
+/// error, a server still busy at the budget, any other HTTP status, or an
+/// unreadable body, unless a plain sheet from the first ask is in hand.
 pub async fn fetch_lrclib(
     artist: &str,
     title: &str,
     album: &str,
     duration_secs: u32,
-) -> LyricsLookup<(LrcDocument, String)> {
+) -> LyricsLookup<LrclibHit> {
     // A static check of a constant URL: it never changes, so it is a miss.
     if external_host_is_blocked(LRCLIB_URL) {
         return LyricsLookup::Miss;
@@ -133,48 +142,73 @@ pub async fn fetch_lrclib(
 async fn fetch_lrclib_with<Fut>(
     has_album: bool,
     mut get: impl FnMut(bool) -> Fut,
-) -> LyricsLookup<(LrcDocument, String)>
+) -> LyricsLookup<LrclibHit>
 where
     Fut: std::future::Future<Output = LrclibAnswer>,
 {
     let deadline = tokio::time::Instant::now() + LRCLIB_BUDGET;
-    match ask_lrclib(&mut get, has_album, deadline).await {
+    let plain = match ask_lrclib(&mut get, has_album, deadline).await {
         LrclibAnswer::Record(body) if body.instrumental => return LyricsLookup::Miss,
-        LrclibAnswer::Record(body) => {
-            if let Some(hit) = synced_hit(body) {
-                return LyricsLookup::Hit(hit);
-            }
-        }
+        LrclibAnswer::Record(body) => match record_lyrics(body) {
+            RecordLyrics::Synced(doc, raw) => return LyricsLookup::Hit((doc, Some(raw))),
+            RecordLyrics::Plain(doc) => Some(doc),
+            RecordLyrics::Nothing => None,
+        },
         // A 404 is the normal "no match" answer — not an error worth logging.
-        LrclibAnswer::NotFound => {}
+        LrclibAnswer::NotFound => None,
         // `ask_lrclib` turns a busy answer it can't wait out into `Failed`;
         // either says nothing about the song.
         LrclibAnswer::Busy(_) | LrclibAnswer::Failed => return LyricsLookup::Failed,
-    }
+    };
     if !has_album {
-        return LyricsLookup::Miss;
+        return plain.map_or(LyricsLookup::Miss, |doc| LyricsLookup::Hit((doc, None)));
     }
 
     tracing::debug!("lrclib: nothing synced under the album, asking without it");
-    match ask_lrclib(&mut get, false, deadline).await {
-        LrclibAnswer::Record(body) => {
-            synced_hit(body).map_or(LyricsLookup::Miss, LyricsLookup::Hit)
+    let elsewhere = match ask_lrclib(&mut get, false, deadline).await {
+        LrclibAnswer::Record(body) => match record_lyrics(body) {
+            RecordLyrics::Synced(doc, raw) => return LyricsLookup::Hit((doc, Some(raw))),
+            RecordLyrics::Plain(doc) => Some(doc),
+            RecordLyrics::Nothing => None,
+        },
+        LrclibAnswer::Busy(_) | LrclibAnswer::Failed if plain.is_none() => {
+            return LyricsLookup::Failed;
         }
-        LrclibAnswer::NotFound => LyricsLookup::Miss,
-        LrclibAnswer::Busy(_) | LrclibAnswer::Failed => LyricsLookup::Failed,
-    }
+        // No record; or a failure with the album's plain sheet in hand, which
+        // still shows.
+        LrclibAnswer::NotFound | LrclibAnswer::Busy(_) | LrclibAnswer::Failed => None,
+    };
+    plain
+        .or(elsewhere)
+        .map_or(LyricsLookup::Miss, |doc| LyricsLookup::Hit((doc, None)))
 }
 
-/// A record's synced lyrics, parsed, beside the raw text the cache writes.
-/// `None` for an instrumental, a record without `syncedLyrics`, or text that
-/// carries no timestamp.
-fn synced_hit(body: LrclibResponse) -> Option<(LrcDocument, String)> {
+/// The lyrics in one LRCLIB record, synced first.
+enum RecordLyrics {
+    /// Parsed, beside the raw `syncedLyrics` the disk cache writes.
+    Synced(LrcDocument, String),
+    /// Untimed `plainLyrics`, as a plain sheet.
+    Plain(LrcDocument),
+    /// An instrumental, or a record with neither.
+    Nothing,
+}
+
+/// Read a record's lyrics: `syncedLyrics` when it carries a timestamp, else
+/// non-blank `plainLyrics`.
+fn record_lyrics(body: LrclibResponse) -> RecordLyrics {
     if body.instrumental {
-        return None;
+        return RecordLyrics::Nothing;
     }
-    let synced = body.synced_lyrics?;
-    let doc = crate::types::lyrics::parse(&synced);
-    doc.synced.then_some((doc, synced))
+    if let Some(synced) = body.synced_lyrics {
+        let doc = crate::types::lyrics::parse(&synced);
+        if doc.synced {
+            return RecordLyrics::Synced(doc, synced);
+        }
+    }
+    body.plain_lyrics
+        .map(|text| LrcDocument::plain(&text))
+        .filter(LrcDocument::is_renderable)
+        .map_or(RecordLyrics::Nothing, RecordLyrics::Plain)
 }
 
 /// Ask until LRCLIB answers something other than busy. A busy answer is asked
@@ -283,7 +317,7 @@ fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
-/// Persist a fetched LRCLIB result into the store so the next play resolves it
+/// Persist a fetched synced LRCLIB result into the store so the next play resolves it
 /// offline via the CACHED channel (the third of the four, after the user's own
 /// files and the server — see `resolve_from`). LRCLIB's `syncedLyrics` is header-less, and
 /// the index matches on `[ar:]/[ti:]/[al:]` headers (not paths) — so synthesize
@@ -655,12 +689,12 @@ mod tests {
         match hit {
             LyricsLookup::Hit((doc, raw)) => {
                 eprintln!(
-                    "lrclib hit: {} lines, {} raw bytes",
+                    "lrclib hit: {} lines, {:?} raw bytes",
                     doc.lines.len(),
-                    raw.len()
+                    raw.as_ref().map(String::len)
                 );
                 assert!(doc.synced && !doc.lines.is_empty());
-                assert!(raw.contains('['));
+                assert!(raw.is_some_and(|raw| raw.contains('[')));
             }
             LyricsLookup::Miss => eprintln!("lrclib returned no match (acceptable if not in db)"),
             LyricsLookup::Failed => eprintln!("lrclib fetch failed (acceptable if offline)"),
@@ -679,14 +713,14 @@ mod tests {
     /// request that never answers). Returns what each ask sent.
     async fn fetch_scripted(
         answer: impl FnMut(usize, bool) -> Option<LrclibAnswer>,
-    ) -> (LyricsLookup<(LrcDocument, String)>, Vec<bool>) {
+    ) -> (LyricsLookup<LrclibHit>, Vec<bool>) {
         fetch_scripted_for(true, answer).await
     }
 
     async fn fetch_scripted_for(
         has_album: bool,
         mut answer: impl FnMut(usize, bool) -> Option<LrclibAnswer>,
-    ) -> (LyricsLookup<(LrcDocument, String)>, Vec<bool>) {
+    ) -> (LyricsLookup<LrclibHit>, Vec<bool>) {
         let mut asked = Vec::new();
         let got = fetch_lrclib_with(has_album, |with_album| {
             let scripted = answer(asked.len(), with_album);
@@ -714,7 +748,11 @@ mod tests {
         .await;
         let (doc, raw) = got.hit().expect("the second ask answers");
         assert_eq!(doc.lines[0].text, "found");
-        assert_eq!(raw, "[00:01.00]found");
+        assert_eq!(
+            raw.as_deref(),
+            Some("[00:01.00]found"),
+            "synced text is cached"
+        );
         assert_eq!(asked, [true, true], "a busy ask repeats as it was");
         assert_eq!(start.elapsed(), Duration::from_secs(1));
     }
@@ -820,6 +858,7 @@ mod tests {
         let (got, asked) = fetch_scripted(|_, _| {
             Some(LrclibAnswer::Record(LrclibResponse {
                 instrumental: true,
+                plain_lyrics: Some("stray text".into()),
                 ..Default::default()
             }))
         })
@@ -844,6 +883,114 @@ mod tests {
         })
         .await;
         assert_eq!((got, asked), (LyricsLookup::Failed, vec![true, false]));
+    }
+
+    fn plain_record(text: &str) -> LrclibAnswer {
+        LrclibAnswer::Record(LrclibResponse {
+            plain_lyrics: Some(text.into()),
+            ..Default::default()
+        })
+    }
+
+    /// The hit's lines, and whether it would be cached to disk.
+    fn plain_hit(got: LyricsLookup<LrclibHit>) -> (Vec<String>, bool, bool) {
+        let (doc, raw) = got.hit().expect("a hit");
+        let lines = doc.lines.into_iter().map(|l| l.text).collect();
+        (lines, doc.synced, raw.is_some())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plain_lyrics_show_when_nothing_synced_is_anywhere() {
+        let (got, asked) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                plain_record("first line\n\nsecond line")
+            } else {
+                LrclibAnswer::NotFound
+            })
+        })
+        .await;
+        assert_eq!(
+            asked,
+            [true, false],
+            "the album-less ask may still be synced"
+        );
+        assert_eq!(
+            plain_hit(got),
+            (
+                vec!["first line".into(), "second line".into()],
+                false,
+                false
+            ),
+            "an untimed sheet, never cached to disk"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn synced_without_the_album_beats_plain_under_it() {
+        let (got, _) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                plain_record("plain")
+            } else {
+                synced_record("[00:01.00]synced")
+            })
+        })
+        .await;
+        assert_eq!(plain_hit(got), (vec!["synced".into()], true, true));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_albums_own_plain_text_beats_another_albums() {
+        let (got, _) = fetch_scripted(|_, with_album| {
+            Some(plain_record(if with_album { "ours" } else { "theirs" }))
+        })
+        .await;
+        assert_eq!(plain_hit(got).0, ["ours"]);
+
+        let (got, _) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                LrclibAnswer::NotFound
+            } else {
+                plain_record("theirs")
+            })
+        })
+        .await;
+        assert_eq!(plain_hit(got).0, ["theirs"], "plain from either ask shows");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unstamped_synced_text_reads_as_its_plain_lyrics() {
+        let (got, _) = fetch_scripted_for(false, |_, _| {
+            Some(LrclibAnswer::Record(LrclibResponse {
+                synced_lyrics: Some("no stamps here".into()),
+                plain_lyrics: Some("the plain copy".into()),
+                ..Default::default()
+            }))
+        })
+        .await;
+        assert_eq!(
+            plain_hit(got),
+            (vec!["the plain copy".into()], false, false)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_album_less_ask_keeps_the_plain_sheet_in_hand() {
+        let (got, _) = fetch_scripted(|_, with_album| {
+            Some(if with_album {
+                plain_record("in hand")
+            } else {
+                LrclibAnswer::Failed
+            })
+        })
+        .await;
+        assert_eq!(plain_hit(got).0, ["in hand"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_song_without_an_album_shows_plain_lyrics_too() {
+        let (got, asked) = fetch_scripted_for(false, |_, _| Some(plain_record("plain"))).await;
+        assert_eq!(asked, [false]);
+        assert_eq!(plain_hit(got).0, ["plain"]);
     }
 
     #[test]

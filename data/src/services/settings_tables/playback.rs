@@ -100,8 +100,8 @@ define_settings! {
                 label: "Lyrics: Online Fetch",
                 category: "Playback",
                 subtitle: Some(
-                    "Fetch missing lyrics from lrclib.net over the internet and cache them \
-                     locally for next time. Off resolves lyrics only from the local store and \
+                    "Fetch missing lyrics from lrclib.net over the internet. Timed ones are \
+                     cached locally for next time. Off resolves lyrics only from the local store and \
                      your Navidrome server.",
                 ),
                 default: true,

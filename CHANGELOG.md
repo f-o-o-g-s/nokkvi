@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - When lrclib.net is too busy to answer, nokkvi now asks again a few seconds later instead of showing "No lyrics for this track".
 - Lyrics from lrclib.net are now found when your album is named differently there, such as a deluxe edition.
+- When lrclib.net has only untimed lyrics for a song, nokkvi now shows them instead of "No lyrics for this track".
 
 ### Removed
 

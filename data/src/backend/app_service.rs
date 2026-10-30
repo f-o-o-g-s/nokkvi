@@ -1335,7 +1335,8 @@ impl AppService {
         let album = (!song.album.is_empty()).then_some(song.album.as_str());
         let length_ms = Some(song.duration.saturating_mul(1000));
         // Both disk channels read a real `.lrc`, so both keep the timestamp
-        // requirement spelled out: plain lyrics come from the server only.
+        // requirement spelled out: plain lyrics come from the server or a live
+        // LRCLIB answer, never from disk.
         let read_lrc = async |path: std::path::PathBuf| -> LyricsLookup<LrcDocument> {
             let text = match tokio::fs::read_to_string(&path).await {
                 Ok(text) => text,
@@ -1402,7 +1403,11 @@ impl AppService {
             .await
             {
                 LyricsLookup::Hit((doc, raw)) => {
-                    crate::services::lyrics_source::cache_to_store(&raw, song).await;
+                    // Only a synced sheet is written; a plain one lives in the
+                    // session cache alone (see `LrclibHit`).
+                    if let Some(raw) = raw {
+                        crate::services::lyrics_source::cache_to_store(&raw, song).await;
+                    }
                     LyricsLookup::Hit(doc)
                 }
                 LyricsLookup::Miss => LyricsLookup::Miss,
