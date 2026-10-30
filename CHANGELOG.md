@@ -10,6 +10,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.28.1 — 2026-10-29
+
+### Fixed
+
 - Under Track Artwork's Track's Own Cover, a smart playlist's rules preview now shows each song's own cover.
 - Returning to the playlist editor after changing Track Artwork now loads its thumbnails, instead of blank squares until you scroll.
 - Ctrl+clicking a selected row to deselect it moves the highlight onto a row still selected, so Ctrl+D or a star no longer hits it.
@@ -26,8 +32,6 @@ All notable changes to this project will be documented in this file.
 - Dragging the scrollbar no longer clears rows ticked in the checkbox column.
 - With an album expanded, the Albums panel now loads the full-size cover of the row you are on after a reload or resize.
 - Under Track Artwork's Track's Own Cover, a smart playlist's rules editor now reloads its preview covers when you return to it.
-
-### Removed
 
 ## v0.28.0 — 2026-10-22
 
