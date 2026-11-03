@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "nokkvi"
-version = "0.28.1"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "arc-swap",

@@ -10,13 +10,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- When lrclib.net is too busy to answer, nokkvi now asks again a few seconds later instead of showing "No lyrics for this track".
+### Removed
+
+## v0.28.2 — 2026-11-03
+
+### Fixed
+
+- When lrclib.net says it is busy for a moment, nokkvi now asks again instead of giving up.
 - Lyrics from lrclib.net are now found when your album is named differently there, such as a deluxe edition.
 - When lrclib.net has only untimed lyrics for a song, nokkvi now shows them instead of "No lyrics for this track".
-- When lrclib.net asks nokkvi to wait before retrying, nokkvi now waits as long as asked instead of asking sooner.
-- A paused nokkvi no longer redraws at your monitor's refresh rate, which cost up to a sixth of a CPU core.
-
-### Removed
+- A paused nokkvi now uses far less CPU on high refresh rate monitors while nothing on screen moves.
 
 ## v0.28.1 — 2026-10-29
 
