@@ -18,10 +18,11 @@ const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 /// answers 503 with `Retry-After: 1` in about half a second, and the same
 /// request a few seconds later goes through.
 const LRCLIB_BUDGET: Duration = Duration::from_secs(12);
-/// The range a busy answer's wait is held to: its `Retry-After` when it gave
-/// one, else the shortest.
+/// The least a busy answer waits before the same ask: LRCLIB's own
+/// `Retry-After` is 1 s, and an answer without one, or with a shorter one,
+/// waits this long. A longer `Retry-After` is honoured as given, and one that
+/// would end past the budget ends the ask instead of asking sooner than told.
 const LRCLIB_BUSY_WAIT_MIN: Duration = Duration::from_secs(1);
-const LRCLIB_BUSY_WAIT_MAX: Duration = Duration::from_secs(5);
 
 /// What one lyrics lookup found. A `Miss` is an answer about the song; a
 /// `Failed` lookup (a timeout, a network or server error, an unreadable file)
@@ -99,6 +100,18 @@ enum LrclibAnswer {
     Failed,
 }
 
+/// What an ask settled on once its busy answers were waited out.
+#[derive(Debug)]
+enum Settled {
+    /// A record under the asked signature.
+    Record(LrclibResponse),
+    /// A 404: no record has the signature.
+    NotFound,
+    /// A timeout, a transport error, any other status, an unreadable body, or
+    /// a server still busy at the budget.
+    Failed,
+}
+
 /// What [`fetch_lrclib`] found: the sheet, and for a synced one the raw
 /// `syncedLyrics` text (already valid LRC) so the cache can persist it
 /// verbatim — no serializer needed. A plain sheet carries `None`: it is never
@@ -148,17 +161,16 @@ where
 {
     let deadline = tokio::time::Instant::now() + LRCLIB_BUDGET;
     let plain = match ask_lrclib(&mut get, has_album, deadline).await {
-        LrclibAnswer::Record(body) if body.instrumental => return LyricsLookup::Miss,
-        LrclibAnswer::Record(body) => match record_lyrics(body) {
+        Settled::Record(body) if body.instrumental => return LyricsLookup::Miss,
+        Settled::Record(body) => match record_lyrics(body) {
             RecordLyrics::Synced(doc, raw) => return LyricsLookup::Hit((doc, Some(raw))),
             RecordLyrics::Plain(doc) => Some(doc),
             RecordLyrics::Nothing => None,
         },
         // A 404 is the normal "no match" answer — not an error worth logging.
-        LrclibAnswer::NotFound => None,
-        // `ask_lrclib` turns a busy answer it can't wait out into `Failed`;
-        // either says nothing about the song.
-        LrclibAnswer::Busy(_) | LrclibAnswer::Failed => return LyricsLookup::Failed,
+        Settled::NotFound => None,
+        // Says nothing about the song.
+        Settled::Failed => return LyricsLookup::Failed,
     };
     if !has_album {
         return plain.map_or(LyricsLookup::Miss, |doc| LyricsLookup::Hit((doc, None)));
@@ -166,17 +178,15 @@ where
 
     tracing::debug!("lrclib: nothing synced under the album, asking without it");
     let elsewhere = match ask_lrclib(&mut get, false, deadline).await {
-        LrclibAnswer::Record(body) => match record_lyrics(body) {
+        Settled::Record(body) => match record_lyrics(body) {
             RecordLyrics::Synced(doc, raw) => return LyricsLookup::Hit((doc, Some(raw))),
             RecordLyrics::Plain(doc) => Some(doc),
             RecordLyrics::Nothing => None,
         },
-        LrclibAnswer::Busy(_) | LrclibAnswer::Failed if plain.is_none() => {
-            return LyricsLookup::Failed;
-        }
+        Settled::Failed if plain.is_none() => return LyricsLookup::Failed,
         // No record; or a failure with the album's plain sheet in hand, which
         // still shows.
-        LrclibAnswer::NotFound | LrclibAnswer::Busy(_) | LrclibAnswer::Failed => None,
+        Settled::NotFound | Settled::Failed => None,
     };
     plain
         .or(elsewhere)
@@ -212,38 +222,43 @@ fn record_lyrics(body: LrclibResponse) -> RecordLyrics {
 }
 
 /// Ask until LRCLIB answers something other than busy. A busy answer is asked
-/// again after its wait (held to `LRCLIB_BUSY_WAIT_MIN..=MAX`) while that wait
-/// still ends before `deadline`; past it the ask is `Failed`. A timeout is
-/// never retried: it already spent most of the budget.
+/// again after its `Retry-After` (at least [`LRCLIB_BUSY_WAIT_MIN`]) when that
+/// wait still ends before `deadline`; a longer one ends the ask as `Failed`
+/// rather than asking sooner than told. A timeout is never retried: it already
+/// spent most of the budget.
 async fn ask_lrclib<Fut>(
     get: &mut impl FnMut(bool) -> Fut,
     with_album: bool,
     deadline: tokio::time::Instant,
-) -> LrclibAnswer
+) -> Settled
 where
     Fut: std::future::Future<Output = LrclibAnswer>,
 {
     let mut busy: u32 = 0;
-    loop {
+    let settled = loop {
         let left = deadline.saturating_duration_since(tokio::time::Instant::now());
         let Ok(answer) = tokio::time::timeout(left.min(LRCLIB_TIMEOUT), get(with_album)).await
         else {
             tracing::debug!("lrclib fetch timed out");
-            return LrclibAnswer::Failed;
+            return Settled::Failed;
         };
-        let LrclibAnswer::Busy(retry_after) = answer else {
-            if busy > 0 {
-                tracing::debug!(busy, "lrclib answered after busy retries");
-            }
-            return answer;
+        let retry_after = match answer {
+            LrclibAnswer::Record(body) => break Settled::Record(body),
+            LrclibAnswer::NotFound => break Settled::NotFound,
+            LrclibAnswer::Failed => break Settled::Failed,
+            LrclibAnswer::Busy(retry_after) => retry_after,
         };
         busy += 1;
         let wait = retry_after
             .unwrap_or(LRCLIB_BUSY_WAIT_MIN)
-            .clamp(LRCLIB_BUSY_WAIT_MIN, LRCLIB_BUSY_WAIT_MAX);
-        if tokio::time::Instant::now() + wait >= deadline {
-            tracing::debug!(busy, "lrclib still busy at the budget");
-            return LrclibAnswer::Failed;
+            .max(LRCLIB_BUSY_WAIT_MIN);
+        if wait >= deadline.saturating_duration_since(tokio::time::Instant::now()) {
+            tracing::debug!(
+                busy,
+                wait_ms = wait.as_millis(),
+                "lrclib busy, its wait ends past the budget"
+            );
+            return Settled::Failed;
         }
         tracing::debug!(
             busy,
@@ -251,7 +266,11 @@ where
             "lrclib busy, asking again"
         );
         tokio::time::sleep(wait).await;
+    };
+    if busy > 0 {
+        tracing::debug!(busy, "lrclib answered after busy retries");
     }
+    settled
 }
 
 /// One `/api/get` request, untimed (`ask_lrclib` times it). `album: None`
@@ -758,20 +777,37 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn busy_waits_are_held_between_one_and_five_seconds() {
+    async fn a_busy_answer_waits_what_it_asked_and_at_least_a_second() {
         let start = tokio::time::Instant::now();
         let (got, asked) = fetch_scripted(|ask, _| {
             Some(match ask {
                 0 => LrclibAnswer::Busy(Some(Duration::ZERO)),
-                1 => LrclibAnswer::Busy(Some(Duration::from_secs(60))),
-                2 => LrclibAnswer::Busy(None),
+                1 => LrclibAnswer::Busy(None),
+                2 => LrclibAnswer::Busy(Some(Duration::from_secs(8))),
                 _ => synced_record("[00:01.00]found"),
             })
         })
         .await;
         assert!(got.hit().is_some());
         assert_eq!(asked.len(), 4);
-        assert_eq!(start.elapsed(), Duration::from_secs(1 + 5 + 1));
+        assert_eq!(
+            start.elapsed(),
+            Duration::from_secs(1 + 1 + 8),
+            "a wait inside the budget is honoured as asked"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_busy_answer_asking_past_the_budget_is_not_asked_again() {
+        let start = tokio::time::Instant::now();
+        let (got, asked) =
+            fetch_scripted(|_, _| Some(LrclibAnswer::Busy(Some(Duration::from_secs(60))))).await;
+        assert_eq!(
+            (got, asked),
+            (LyricsLookup::Failed, vec![true]),
+            "a 60 s wait overruns the 12 s budget: give up now, don't ask sooner than told"
+        );
+        assert_eq!(start.elapsed(), Duration::ZERO);
     }
 
     #[tokio::test(start_paused = true)]
