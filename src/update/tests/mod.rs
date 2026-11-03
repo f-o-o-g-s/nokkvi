@@ -32,6 +32,7 @@ mod default_playlist_picker;
 mod dynamic_accent;
 mod editor;
 mod focused_row;
+mod frame;
 mod general;
 mod harbour;
 mod hotkeys;

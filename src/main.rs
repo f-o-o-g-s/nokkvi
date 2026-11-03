@@ -845,9 +845,15 @@ impl Nokkvi {
             .map(|incoming| Message::Ipc(Box::new(incoming)));
 
         // Per-frame redraw events drive everything that animates at display
-        // refresh (`update::frame::handle_frame_tick`). Always on: each step
-        // gates itself, so the work is trivial while its feature is idle.
-        let frames = iced::window::frames().map(Message::FrameTick);
+        // refresh (`update::frame::handle_frame_tick`). Only while something
+        // moves: a frame message redraws, and the redraw raises the next
+        // frame message, so left on it redraws at the monitor's rate while
+        // paused (`Nokkvi::frames_wanted` lists the terms).
+        let frames = if self.frames_wanted() {
+            iced::window::frames().map(Message::FrameTick)
+        } else {
+            iced::Subscription::none()
+        };
 
         // Roulette spin tick — only armed while a spin is active. Iced
         // tears down the subscription as soon as the batch no longer

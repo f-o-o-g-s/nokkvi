@@ -90,6 +90,26 @@ pub struct SlotListView {
     pub hovered_slot: Option<HoveredSlot>,
 }
 
+/// The transient scrollbar's opacity at `now`, from the last scroll
+/// (`SlotListView::last_scrolled`): `0.0` before any scroll, full for the
+/// first second, then a half-second linear fade to `0.0`. Pure, so the
+/// indicator widget times its own fade at draw time (it asks for the next
+/// frame while it shows) instead of needing the view rebuilt per frame.
+pub(crate) fn scrollbar_opacity_at(last_scrolled: Option<Instant>, now: Instant) -> f32 {
+    let Some(last) = last_scrolled else {
+        return 0.0;
+    };
+    let elapsed = now.saturating_duration_since(last).as_secs_f32();
+    const HOLD_DURATION: f32 = 1.0;
+    const FADE_DURATION: f32 = 0.5;
+    if elapsed < HOLD_DURATION {
+        1.0
+    } else {
+        let fade_progress = (elapsed - HOLD_DURATION) / FADE_DURATION;
+        (1.0 - fade_progress).clamp(0.0, 1.0)
+    }
+}
+
 impl SlotListView {
     pub fn new() -> Self {
         Self {
@@ -410,25 +430,9 @@ impl SlotListView {
         self.scroll_generation_id = self.scroll_generation_id.wrapping_add(1);
     }
 
-    /// Compute the current scrollbar opacity based on elapsed time since last scroll.
-    ///
-    /// Returns 0.0 if no scroll has occurred. Otherwise:
-    /// - 0.0–1.0s elapsed: full opacity (1.0)
-    /// - 1.0–1.5s elapsed: linear fade from 1.0 → 0.0
-    /// - >1.5s elapsed: fully hidden (0.0)
+    /// The transient scrollbar's opacity now (see [`scrollbar_opacity_at`]).
     pub fn scrollbar_opacity(&self) -> f32 {
-        let Some(last) = self.last_scrolled else {
-            return 0.0;
-        };
-        let elapsed = last.elapsed().as_secs_f32();
-        const HOLD_DURATION: f32 = 1.0;
-        const FADE_DURATION: f32 = 0.5;
-        if elapsed < HOLD_DURATION {
-            1.0
-        } else {
-            let fade_progress = (elapsed - HOLD_DURATION) / FADE_DURATION;
-            (1.0 - fade_progress).clamp(0.0, 1.0)
-        }
+        scrollbar_opacity_at(self.last_scrolled, Instant::now())
     }
 
     /// The item at the viewport's centre slot: where the list is scrolled,

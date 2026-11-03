@@ -11,6 +11,8 @@
 //!   still works via the surrounding wheel handler (`wrap_with_scroll`, applied
 //!   around this widget's result by the slot-list view builders).
 
+use std::time::Instant;
+
 use iced::{
     Alignment, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Widget as _,
     advanced::{
@@ -24,7 +26,10 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::ScrollbarVisibility;
 
-use crate::{theme, widgets::slot_list_view::SlotListView};
+use crate::{
+    theme,
+    widgets::slot_list_view::{SlotListView, scrollbar_opacity_at},
+};
 
 /// Base track width in pixels (at reference row height)
 const BASE_TRACK_WIDTH: f32 = 16.0;
@@ -60,8 +65,11 @@ struct ScrollbarOverlay<'a, Message> {
     fraction: f32,
     /// Ratio of visible items to total items (determines handle size)
     viewport_ratio: f32,
-    /// Visual opacity from scroll-fade timer (0.0–1.0). Ignored in `always` mode.
-    opacity: f32,
+    /// The last scroll, the transient fade's anchor: the widget times the fade
+    /// at draw time (`scrollbar_opacity_at`) and asks for the next frame while
+    /// it shows, so the fade runs without the view being rebuilt per frame.
+    /// Ignored in `always` mode.
+    last_scrolled: Option<Instant>,
     /// Scaled track width based on row height
     track_width: f32,
     /// "Always" mode: draw a permanent track behind the handle and force full
@@ -78,7 +86,7 @@ impl<'a, Message> ScrollbarOverlay<'a, Message> {
     fn new(
         fraction: f32,
         viewport_ratio: f32,
-        opacity: f32,
+        last_scrolled: Option<Instant>,
         track_width: f32,
         always: bool,
         has_overflow: bool,
@@ -87,11 +95,20 @@ impl<'a, Message> ScrollbarOverlay<'a, Message> {
         Self {
             fraction: fraction.clamp(0.0, 1.0),
             viewport_ratio: viewport_ratio.clamp(0.0, 1.0),
-            opacity,
+            last_scrolled,
             track_width,
             always,
             has_overflow,
             on_seek: Box::new(on_seek),
+        }
+    }
+
+    /// The scroll fade's opacity now; a permanent bar is always full.
+    fn fade_opacity(&self) -> f32 {
+        if self.always {
+            1.0
+        } else {
+            scrollbar_opacity_at(self.last_scrolled, Instant::now())
         }
     }
 
@@ -203,6 +220,15 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
                 shell.publish((self.on_seek)(state.drag_fraction));
                 state.is_dragging = false;
             }
+            // The transient handle times its fade at draw (`fade_opacity`),
+            // so it asks for the next frame while it shows: the app's
+            // display-rate loop is off while nothing else moves
+            // (`Nokkvi::frames_wanted`).
+            Event::Window(iced::window::Event::RedrawRequested(_))
+                if !self.always && self.fade_opacity() > 0.0 =>
+            {
+                shell.request_redraw();
+            }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
                 if state.is_dragging
@@ -252,7 +278,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
             } else {
                 0.0
             };
-            self.opacity.max(hover_opacity)
+            self.fade_opacity().max(hover_opacity)
         };
 
         if effective_opacity <= 0.0 {
@@ -427,8 +453,6 @@ pub(crate) fn wrap_with_scroll_indicator<'a, Message: Clone + 'a>(
         return inner;
     }
 
-    let opacity = if always { 1.0 } else { sl.scrollbar_opacity() };
-
     let current_fraction = if has_overflow && total_items > 1 {
         sl.viewport_offset as f32 / (total_items - 1) as f32
     } else {
@@ -450,7 +474,7 @@ pub(crate) fn wrap_with_scroll_indicator<'a, Message: Clone + 'a>(
     let scrollbar: Element<'a, Message> = ScrollbarOverlay::new(
         current_fraction,
         viewport_ratio,
-        opacity,
+        sl.last_scrolled,
         track_width,
         always,
         has_overflow,

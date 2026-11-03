@@ -156,4 +156,4 @@ Every icon follows the set through `get_svg`; the boat's drop-anchor sprite is a
 
 ## HoverOverlay + native buttons
 
-`HoverOverlay::new(button)` works where a native `button` is needed: `player_control_button` (`player_bar.rs`) wraps one, and the hover/press visual fires because `HoverOverlay::update` calls `shell.request_redraw()`. Clickable cells (slot rows, header icons, modal-icon buttons) keep the canonical `mouse_area(HoverOverlay(container))` chassis.
+`HoverOverlay::new(button)` works where a native `button` is needed: `player_control_button` (`player_bar.rs`) wraps one, and the hover/press visual fires because `HoverOverlay::update` calls `shell.request_redraw()`. Clickable cells (slot rows, header icons, modal-icon buttons) keep the canonical `mouse_area(HoverOverlay(container))` chassis. A widget whose `draw` reads the clock keeps its own frames the same way, a `RedrawRequested` arm calling `shell.request_redraw()` while it is in motion (the marquee, the seek bar's and the scrollbar's fades): the app's display-rate loop is gated (`Nokkvi::frames_wanted`, ui-lyrics.md), so without that arm the animation steps at the 10 Hz tick while paused.

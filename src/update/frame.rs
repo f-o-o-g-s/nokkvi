@@ -1,12 +1,15 @@
 //! The per-frame tick (`Message::FrameTick`, from `iced::window::frames()`):
-//! everything that animates at display refresh. The subscription is always
-//! on, so each step stays cheap while its feature is idle.
+//! everything that animates at display refresh. The subscription runs only
+//! while one of these steps has something to move (`Nokkvi::frames_wanted`,
+//! below); each step still gates itself, so the work is trivial while its
+//! feature is idle.
 
 use std::time::Instant;
 
 use iced::Task;
+use nokkvi_data::types::player_settings::VisualizationMode;
 
-use crate::{Nokkvi, app_message::Message};
+use crate::{Nokkvi, app_message::Message, state::ChromeMotion};
 
 /// Run every per-frame step. Each one gates itself, so none waits on another's
 /// early-out (the Lines boat's, say, when the visualizer is off).
@@ -89,4 +92,74 @@ fn publish_lyrics_center(app: &Nokkvi, now: Instant) {
         )
     };
     crate::widgets::lyrics_viewport::set_lyrics_center(pos);
+}
+
+impl Nokkvi {
+    /// Whether the display-rate frame subscription (`iced::window::frames()`)
+    /// is wanted now. A frame message redraws the window and the redraw raises
+    /// the next frame message, so left on it redraws at the monitor's refresh
+    /// rate while nothing moves (17% of a core, paused on a 240 Hz display).
+    /// It is on only while a step above has something to move: the transport
+    /// runs (the glow, the lyric clock, the boat), a visualizer mode is on
+    /// (its shaders animate on their own clock), Theater Mode's chrome slides
+    /// or is due to flip, the Harbour scene shows (its sea breathes while
+    /// paused) or a lyrics glide or dissolve is in flight. Everything else
+    /// that animates (a hover wash, the centre flash, the marquee, the seek
+    /// bar's and the scrollbar's fades, the roulette) requests its own frames,
+    /// and the 10 Hz position tick redraws the rest. `subscription()` is
+    /// re-read after every update, so a term that changes takes effect at the
+    /// next message. A new per-frame step adds its term here.
+    pub(crate) fn frames_wanted(&self) -> bool {
+        let transport_running = self.playback.playing && !self.playback.paused;
+        let visualizer_on = self.settings.visualization_mode != VisualizationMode::Off;
+        let now = Instant::now();
+        transport_running
+            || visualizer_on
+            || self.theater_in_motion(now)
+            || self.harbour_scene_on_screen()
+            || self.lyrics_in_motion(now)
+    }
+
+    /// Theater Mode's chrome sliding, or due to flip: `theater::tick` flips it
+    /// when its target (hovered, a menu open, recent activity under Auto-Hide)
+    /// disagrees with where it is, and the slide then eases for
+    /// `SLIDE_DURATION`. A bar at rest, shown or hidden, needs no frame; the
+    /// 10 Hz tick re-reads the subscription, so a hide deadline is met within
+    /// a tick, and a mouse move raises its own update.
+    fn theater_in_motion(&self, now: Instant) -> bool {
+        if !self.theater.active {
+            return false;
+        }
+        let chrome = self.theater.chrome;
+        let since = match chrome {
+            ChromeMotion::Shown { since, .. } | ChromeMotion::Hidden { since, .. } => since,
+        };
+        let sliding = now.saturating_duration_since(since) < super::theater::SLIDE_DURATION;
+        let flip_due = super::theater::chrome_target(
+            &self.theater,
+            now,
+            self.open_menu.is_some(),
+            self.theater_controls(),
+        ) != chrome.is_shown();
+        sliding || flip_due
+    }
+
+    /// A sheet dissolving out, or a synced sheet's glide still easing toward
+    /// its line (`eased_center` settles at `anim_duration_ms`; a snap has no
+    /// motion), with the layer drawn at all.
+    fn lyrics_in_motion(&self, now: Instant) -> bool {
+        if !self.settings.lyrics_mode.is_active() {
+            return false;
+        }
+        if self.lyrics.outgoing.is_some() {
+            return true;
+        }
+        self.lyrics.matched_song_id.is_some()
+            && self.lyrics.doc.synced
+            && self.lyrics.anim_duration_ms > 0
+            && self.lyrics.anim_start.is_some_and(|start| {
+                now.saturating_duration_since(start).as_millis()
+                    < u128::from(self.lyrics.anim_duration_ms)
+            })
+    }
 }

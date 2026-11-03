@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Lyrics from lrclib.net are now found when your album is named differently there, such as a deluxe edition.
 - When lrclib.net has only untimed lyrics for a song, nokkvi now shows them instead of "No lyrics for this track".
 - When lrclib.net asks nokkvi to wait before retrying, nokkvi now waits as long as asked instead of asking sooner.
+- A paused nokkvi no longer redraws at your monitor's refresh rate, which cost up to a sixth of a CPU core.
 
 ### Removed
 
