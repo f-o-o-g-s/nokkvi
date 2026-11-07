@@ -12,46 +12,46 @@ use crate::test_helpers::*;
 /// `similar_page` kept their default `slot_count` of 9, so the artwork
 /// prefetch indices under-fetched and large windows showed only ~9 rows of
 /// content for those views.
+///
+/// Both pages start on 0, a count the resync never stores (it always lands
+/// on an odd count of at least 1), so a skipped page fails whatever count the
+/// layout resolves to. The default of 9 can't be that witness: a 1600 px
+/// window resolves Similar to exactly 9 under some layouts (Comfortable rows,
+/// or the side nav + TopBar + vertical artwork state the settings tests pass
+/// through), so the test failed whenever one of them ran alongside it.
 #[test]
 fn resync_slot_counts_covers_radios_and_similar_pages() {
+    use crate::app_view::LibraryPage;
+
+    // The resync and the check below both read the process-global layout
+    // (row height, nav layout, strip, artwork column), which the settings
+    // tests change while holding this lock; holding it too keeps both reads
+    // on one layout.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+
     let mut app = test_app();
-
-    // Sanity: every page starts at the SlotListView default of 9.
-    assert_eq!(app.albums_page.common.slot_list.slot_count, 9);
-    assert_eq!(app.radios_page.common.slot_list.slot_count, 9);
-    assert_eq!(app.similar_page.common.slot_list.slot_count, 9);
-
-    // Tall window — picks a slot_count != 9 so the assertion would have
-    // caught the original bug (default == bug-state value).
     app.window.width = 1600.0;
     app.window.height = 1600.0;
+    for page in [LibraryPage::Radios, LibraryPage::Similar] {
+        app.library_page_common_mut(page).slot_list.slot_count = 0;
+    }
 
     app.resync_slot_counts();
 
-    // Albums is the canonical "did the resync run" witness: it's been in the
-    // list since the function was introduced.
-    let sc = app.albums_page.common.slot_list.slot_count;
-    assert_ne!(
-        sc, 9,
-        "test setup invariant: a 1600px-tall window must resolve to a slot_count != 9, \
-         otherwise this test would pass even with the bug present"
-    );
-
-    // The fix: radios_page and similar_page are resynced too, each to the
-    // count its own view renders (Similar lives in the browsing pane, so its
-    // size can differ from Albums').
-    use crate::app_view::LibraryPage;
+    // Each page holds the count its own view renders (Similar lives in the
+    // browsing pane, so its size can differ from Albums').
     for page in [LibraryPage::Radios, LibraryPage::Similar] {
-        assert_eq!(
-            app.library_page_common(page).slot_list.slot_count,
-            app.library_page_chrome(page).slot_count(),
+        let stored = app.library_page_common(page).slot_list.slot_count;
+        assert_ne!(
+            stored, 0,
             "{page:?}.slot_count was not resynced on window resize"
         );
+        assert_eq!(
+            stored,
+            app.library_page_chrome(page).slot_count(),
+            "{page:?} was resynced to another view's count"
+        );
     }
-    assert_ne!(
-        app.similar_page.common.slot_list.slot_count, 9,
-        "similar_page kept the SlotListView default"
-    );
 }
 
 /// Regression: when the auto-hide toolbar is enabled and collapsed, the queue
