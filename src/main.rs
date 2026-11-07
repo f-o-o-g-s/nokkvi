@@ -888,26 +888,6 @@ impl Nokkvi {
     }
 }
 
-/// The lowercased text a string queue sort orders by, shared by
-/// `sort_queue_songs` and `queue_is_sorted` so the two can't disagree on a
-/// field. `None` for the modes that order by a number or shuffle.
-fn queue_sort_text_key(
-    mode: views::QueueSortMode,
-    song: &nokkvi_data::backend::queue::QueueSongUIViewData,
-) -> Option<String> {
-    use views::QueueSortMode;
-    match mode {
-        QueueSortMode::Title => Some(song.title.to_lowercase()),
-        QueueSortMode::Artist => Some(song.artist.to_lowercase()),
-        QueueSortMode::Album => Some(song.album.to_lowercase()),
-        QueueSortMode::Genre => Some(song.genre.to_lowercase()),
-        QueueSortMode::Duration
-        | QueueSortMode::Rating
-        | QueueSortMode::MostPlayed
-        | QueueSortMode::Random => None,
-    }
-}
-
 impl Nokkvi {
     // =========================================================================
     // SECTION: Shell Helpers (KEEP IN main.rs)
@@ -1058,10 +1038,15 @@ impl Nokkvi {
 
     /// Sort queue songs based on current sort mode and sort order (client-side).
     ///
+    /// This is the instant half of a queue sort: `apply_queue_sort` also has
+    /// the backend reorder the queue itself, and the Queue view takes the
+    /// backend's rows at its next reload (a track change, Enter on a row).
+    /// Both halves key through `QueueSortMode::sort_key`, which keeps tied
+    /// rows in queue order in both directions, so the reload moves nothing.
+    ///
     /// Short-circuits when `(mode, ascending, queue_len)` matches the last
     /// applied signature — re-toggling the same sort with no length change is
-    /// a no-op. String sorts use `sort_by_cached_key` so each item's
-    /// lowercased key is built exactly once per sort instead of N×log(N) times.
+    /// a no-op.
     ///
     /// `QueueSortMode::Random` is dispatched separately via
     /// `dispatch_random_queue_shuffle`; this method skips it so the cached
@@ -1088,45 +1073,7 @@ impl Nokkvi {
             len
         );
 
-        match sort_mode {
-            QueueSortMode::Title
-            | QueueSortMode::Artist
-            | QueueSortMode::Album
-            | QueueSortMode::Genre => {
-                self.library
-                    .queue_songs
-                    .sort_by_cached_key(|s| queue_sort_text_key(sort_mode, s));
-                if !ascending {
-                    self.library.queue_songs.reverse();
-                }
-            }
-            QueueSortMode::Duration => {
-                self.library.queue_songs.sort_by_key(|s| s.duration_seconds);
-                if !ascending {
-                    self.library.queue_songs.reverse();
-                }
-            }
-            QueueSortMode::Rating => {
-                // Highest rating first by default; descending toggle flips.
-                self.library
-                    .queue_songs
-                    .sort_by_key(|s| std::cmp::Reverse(s.rating.unwrap_or(0)));
-                if !ascending {
-                    self.library.queue_songs.reverse();
-                }
-            }
-            QueueSortMode::MostPlayed => {
-                self.library
-                    .queue_songs
-                    .sort_by_key(|s| std::cmp::Reverse(s.play_count.unwrap_or(0)));
-                if !ascending {
-                    self.library.queue_songs.reverse();
-                }
-            }
-            // Random is handled by `dispatch_random_queue_shuffle` and
-            // early-returned at the top of this method.
-            QueueSortMode::Random => {}
-        }
+        sort_mode.sort_songs(ascending, &mut self.library.queue_songs);
 
         self.queue_page.last_sort_signature = Some(signature);
 
@@ -1145,69 +1092,12 @@ impl Nokkvi {
     /// from elsewhere — play album/playlist, session restore, add/remove, drag,
     /// consume, an SSE refresh — in which case the label reverts to "Unsorted".
     /// A queue of 0 or 1 songs is trivially sorted. `Random` has no
-    /// deterministic order to verify, so it always reports `false`.
-    ///
-    /// INTERLOCK: the per-mode comparisons here mirror `sort_queue_songs`
-    /// exactly (same fields, same `Reverse` for Rating/MostPlayed, same
-    /// `ascending` flip). The `queue_is_sorted_matches_sort_queue_songs` parity
-    /// test pins the two together.
+    /// deterministic order to verify, so it always reports `false`. Keys
+    /// through `QueueSortMode::sort_key`, as both sorts do.
     pub fn queue_is_sorted(&self, mode: views::QueueSortMode, ascending: bool) -> bool {
-        use views::QueueSortMode;
-
-        let songs = &self.library.queue_songs;
-        match mode {
-            // A shuffled order is not a verifiable sort.
-            QueueSortMode::Random => false,
-            // 0 or 1 items are trivially in order for any deterministic mode.
-            _ if songs.len() < 2 => true,
-            QueueSortMode::Title
-            | QueueSortMode::Artist
-            | QueueSortMode::Album
-            | QueueSortMode::Genre => {
-                let key = |s| queue_sort_text_key(mode, s);
-                if ascending {
-                    songs.windows(2).all(|w| key(&w[0]) <= key(&w[1]))
-                } else {
-                    songs.windows(2).all(|w| key(&w[0]) >= key(&w[1]))
-                }
-            }
-            QueueSortMode::Duration => {
-                if ascending {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].duration_seconds <= w[1].duration_seconds)
-                } else {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].duration_seconds >= w[1].duration_seconds)
-                }
-            }
-            // `sort_queue_songs` keys Rating/MostPlayed by `Reverse(..)`, so the
-            // default (ascending) order is highest-first; the `!ascending` flip
-            // makes it lowest-first.
-            QueueSortMode::Rating => {
-                if ascending {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].rating.unwrap_or(0) >= w[1].rating.unwrap_or(0))
-                } else {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].rating.unwrap_or(0) <= w[1].rating.unwrap_or(0))
-                }
-            }
-            QueueSortMode::MostPlayed => {
-                if ascending {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].play_count.unwrap_or(0) >= w[1].play_count.unwrap_or(0))
-                } else {
-                    songs
-                        .windows(2)
-                        .all(|w| w[0].play_count.unwrap_or(0) <= w[1].play_count.unwrap_or(0))
-                }
-            }
-        }
+        // A shuffled order is not a verifiable sort.
+        !matches!(mode, views::QueueSortMode::Random)
+            && mode.songs_are_sorted(ascending, &self.library.queue_songs)
     }
 
     /// Re-evaluate the queue's sort state after an out-of-band order change

@@ -650,39 +650,17 @@ impl QueueManager {
         // through the sort by construction. Take the backing storage out
         // via `mem::take` so the closure can borrow `pool` immutably
         // without overlapping these mutable accesses.
+        //
+        // The key is the one the UI sorts its rows by at once
+        // (`QueueSortMode::sort_key`), so the Queue view's order is the
+        // order that plays and the view's next reload moves nothing. A row
+        // whose song is missing from the pool (the projection never shows
+        // it) keys as `None` and goes first.
         let mut rows_buf = std::mem::take(&mut qm.queue.rows);
         let pool = &qm.pool;
-        rows_buf.sort_by(|ra, rb| {
-            let a = pool.get(&ra.song_id);
-            let b = pool.get(&rb.song_id);
-            let cmp = match (a, b) {
-                (Some(a), Some(b)) => match mode {
-                    QueueSortMode::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
-                    QueueSortMode::Artist => a.artist.to_lowercase().cmp(&b.artist.to_lowercase()),
-                    QueueSortMode::Album => a.album.to_lowercase().cmp(&b.album.to_lowercase()),
-                    QueueSortMode::Duration => a.duration.cmp(&b.duration),
-                    QueueSortMode::Genre => {
-                        let a_genre = a.genre.as_deref().unwrap_or("").to_lowercase();
-                        let b_genre = b.genre.as_deref().unwrap_or("").to_lowercase();
-                        a_genre.cmp(&b_genre)
-                    }
-                    QueueSortMode::Rating => {
-                        let a_rating = a.rating.unwrap_or(0);
-                        let b_rating = b.rating.unwrap_or(0);
-                        b_rating.cmp(&a_rating)
-                    }
-                    QueueSortMode::MostPlayed => {
-                        let a_count = a.play_count.unwrap_or(0);
-                        let b_count = b.play_count.unwrap_or(0);
-                        b_count.cmp(&a_count)
-                    }
-                    // Handled by the early-return above; keep the arm so the
-                    // exhaustiveness check passes if a future caller forgets.
-                    QueueSortMode::Random => std::cmp::Ordering::Equal,
-                },
-                _ => std::cmp::Ordering::Equal,
-            };
-            if ascending { cmp } else { cmp.reverse() }
+        rows_buf.sort_by_cached_key(|row| {
+            pool.get(&row.song_id)
+                .map(|song| mode.sort_key(ascending, song))
         });
         qm.queue.rows = rows_buf;
 
@@ -3084,6 +3062,93 @@ pub(crate) mod tests {
         // "c" (Charlie) should now be at index 2
         assert_eq!(qm.queue.current_index(), Some(2));
         assert_eq!(qm.rows()[2].song_id, "c");
+    }
+
+    /// The backend's physical sort and the UI's sort of the projected rows
+    /// put every row in the same place, ties included, for every
+    /// deterministic mode in both directions. The Queue view shows its own
+    /// sort at once and takes the backend's rows only at the next reload (a
+    /// track change, Enter on a row), so any disagreement moves rows under
+    /// the user: an unrated block sorted Rating descending once came back
+    /// reversed, and the song just played jumped from the top of the block
+    /// to its bottom. Every field ties across two interleaved groups: titles
+    /// differ in case only, and a missing genre, rating or play count must
+    /// read like an empty or zero one on both sides.
+    #[test]
+    fn sort_queue_orders_rows_like_the_ui() {
+        use crate::{
+            backend::queue::build_queue_song_ui_view_data, types::queue_sort_mode::QueueSortMode,
+        };
+
+        let songs: Vec<Song> = (0..8)
+            .map(|i| {
+                let mut s = make_test_song(&format!("s{i}"));
+                let pick_a = i % 2 == 0;
+                let blank = i % 4 < 2;
+                s.title = if pick_a {
+                    ["Same", "SAME", "same", "sAmE"][i / 2].to_string()
+                } else {
+                    "Other".to_string()
+                };
+                s.artist = if pick_a { "Xavier" } else { "Yara" }.to_string();
+                s.album = if pick_a { "One" } else { "Two" }.to_string();
+                s.duration = if pick_a { 200 } else { 100 };
+                if pick_a {
+                    s.genre = Some("Rock".to_string());
+                    s.rating = (!blank).then_some(0);
+                    s.play_count = (!blank).then_some(0);
+                } else {
+                    s.genre = (!blank).then(String::new);
+                    s.rating = Some(3);
+                    s.play_count = Some(5);
+                }
+                s
+            })
+            .collect();
+
+        let deterministic = [
+            QueueSortMode::Title,
+            QueueSortMode::Artist,
+            QueueSortMode::Album,
+            QueueSortMode::Genre,
+            QueueSortMode::Duration,
+            QueueSortMode::Rating,
+            QueueSortMode::MostPlayed,
+        ];
+        for mode in deterministic {
+            for ascending in [true, false] {
+                let (mut qm, _temp) = make_test_manager(songs.clone(), Some(0));
+                let _ = qm.sort_queue(mode, ascending);
+                let backend = qm.song_ids_snapshot();
+
+                let mut rows: Vec<_> = songs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, song)| build_queue_song_ui_view_data(song, i, i as u64, "", ""))
+                    .collect();
+                mode.sort_songs(ascending, &mut rows);
+                let ui: Vec<String> = rows.into_iter().map(|row| row.id).collect();
+
+                assert_eq!(backend, ui, "{mode:?} ascending={ascending}");
+                let group = |members: &[&str]| -> Vec<&str> {
+                    backend
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|id| members.contains(id))
+                        .collect()
+                };
+                assert_eq!(
+                    group(&["s0", "s2", "s4", "s6"]),
+                    ["s0", "s2", "s4", "s6"],
+                    "{mode:?} ascending={ascending}: tied rows left queue order"
+                );
+                assert_eq!(
+                    group(&["s1", "s3", "s5", "s7"]),
+                    ["s1", "s3", "s5", "s7"],
+                    "{mode:?} ascending={ascending}: tied rows left queue order"
+                );
+            }
+        }
     }
 
     #[test]

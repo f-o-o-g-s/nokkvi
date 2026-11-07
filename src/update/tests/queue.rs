@@ -575,6 +575,96 @@ fn sort_queue_stable_for_equal_values() {
     );
 }
 
+/// Rows that tie under a sort keep their queue order in BOTH directions,
+/// as the backend's physical sort leaves them (the parity test in the data
+/// crate pins the two together). The UI used to sort ascending and then
+/// reverse for a descending sort, which flipped every run of ties: under
+/// Rating descending (lowest first) a queue's unrated block showed its last
+/// song on top, Enter played it, the play changed the backend's index, and
+/// the reload that follows put the block back in queue order, so the song
+/// just played jumped to the bottom of the block. Each field takes two
+/// values over two interleaved groups; the titles also differ in case only,
+/// which ties too.
+#[test]
+fn sort_queue_keeps_tied_rows_in_queue_order_in_both_directions() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let queue = || {
+        ["a", "b", "c", "d", "e", "f"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let first_group = i % 2 == 0;
+                let title = match i {
+                    0 => "Same",
+                    2 => "SAME",
+                    4 => "same",
+                    _ => "Other",
+                };
+                let mut song = make_queue_song_full(
+                    id,
+                    title,
+                    if first_group { "Xavier" } else { "Yara" },
+                    if first_group { "One" } else { "Two" },
+                    i as i32 + 1,
+                    if first_group { 200 } else { 100 },
+                    if first_group { "Rock" } else { "Jazz" },
+                );
+                song.rating = (!first_group).then_some(3);
+                song.play_count = (!first_group).then_some(5);
+                song
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let deterministic = [
+        QueueSortMode::Title,
+        QueueSortMode::Artist,
+        QueueSortMode::Album,
+        QueueSortMode::Genre,
+        QueueSortMode::Duration,
+        QueueSortMode::Rating,
+        QueueSortMode::MostPlayed,
+    ];
+    for mode in deterministic {
+        for ascending in [true, false] {
+            let mut app = test_app();
+            app.library.queue_songs = queue();
+            app.queue_page.queue_sort_mode = mode;
+            app.queue_page.common.sort_ascending = ascending;
+
+            app.sort_queue_songs();
+
+            let ids: Vec<&str> = app
+                .library
+                .queue_songs
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect();
+            let group = |members: [&str; 3]| -> Vec<&str> {
+                ids.iter()
+                    .copied()
+                    .filter(|id| members.contains(id))
+                    .collect()
+            };
+            assert!(
+                app.queue_is_sorted(mode, ascending),
+                "{mode:?} ascending={ascending}: not sorted: {ids:?}"
+            );
+            assert_eq!(
+                group(["a", "c", "e"]),
+                ["a", "c", "e"],
+                "{mode:?} ascending={ascending}: tied rows left queue order: {ids:?}"
+            );
+            assert_eq!(
+                group(["b", "d", "f"]),
+                ["b", "d", "f"],
+                "{mode:?} ascending={ascending}: tied rows left queue order: {ids:?}"
+            );
+        }
+    }
+}
+
 /// Phase 4B: re-sorting with the same `(mode, ascending, len)` signature
 /// must be a no-op — the cached signature short-circuits redundant work.
 /// We assert via a custom marker: shuffle the queue manually after the first
@@ -1695,9 +1785,10 @@ fn revalidate_queue_sorted_never_promotes() {
     );
 }
 
-/// INTERLOCK: `queue_is_sorted` must agree with `sort_queue_songs` for every
-/// deterministic mode and direction — after a real sort, the verifier reports
-/// the queue as sorted. Guards the two parallel per-mode matches against drift.
+/// `queue_is_sorted` agrees with `sort_queue_songs` for every deterministic
+/// mode and direction: after a real sort, the verifier reports the queue as
+/// sorted. Both key through `QueueSortMode::sort_key`; this keeps either from
+/// growing a per-mode copy of its own again.
 #[test]
 fn queue_is_sorted_matches_sort_queue_songs() {
     use nokkvi_data::types::queue_sort_mode::QueueSortMode;

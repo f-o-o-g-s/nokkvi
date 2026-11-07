@@ -12,7 +12,7 @@ paths:
 
 ## Queue Sort
 
-Physical sort via `QueueManager::sort_queue()`, persists to redb. Random re-rolls on re-select / order toggle and is dispatched separately. Album column visible across all sort modes; stars use responsive hide. An unchanged `(mode, ascending, len)` signature skips the sort; text sorts key once via `sort_by_cached_key` (`queue_sort_text_key`, shared with `queue_is_sorted`).
+Physical sort via `QueueManager::sort_queue()`, persists to redb; `apply_queue_sort` also sorts the UI's rows at once (`sort_queue_songs`), and the view takes the backend's rows at its next reload. Both sorts and `queue_is_sorted` key through `QueueSortMode::sort_key` (`data/src/types/queue_sort_mode.rs`, fields read through `QueueSortFields`), built once per row (`sort_by_cached_key`); gotchas/queue.md "A queue sort runs twice". Random re-rolls on re-select / order toggle and is dispatched separately. Album column visible across all sort modes; stars use responsive hide. An unchanged `(mode, ascending, len)` signature skips the UI sort.
 
 **"Unsorted" placeholder**: the queue takes its order from whatever populated it (play album, session restore, add/remove, drag, consume, SSE refresh), so `QueuePage.queue_sort_mode` is only the *remembered* mode. The sort dropdown shows a grayed "Unsorted" placeholder (`sort_placeholder` on the view header) until `QueuePage.queue_sorted` is true. Only `apply_queue_sort` promotes it; `revalidate_queue_sorted` (`src/main.rs`) demotes — never promotes — by re-verifying the live order against the applied mode (`queue_is_sorted`) and clearing the sort-signature cache. It runs from `handle_queue_loaded` and after every in-place reorder (drag, batch drag, Shift+arrow move).
 

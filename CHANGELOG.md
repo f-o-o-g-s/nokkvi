@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- After a descending queue sort, songs that share a rating or other sorted value no longer flip order when the track changes.
+- After a descending queue sort with shuffle off, Next now plays the song shown below the current one.
+
 ### Removed
 
 ## v0.28.2 — 2026-11-03

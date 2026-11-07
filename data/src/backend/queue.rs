@@ -13,6 +13,7 @@ use crate::{
     services::queue::QueueManager,
     types::{
         NextTrackResetEffect,
+        queue_sort_mode::QueueSortFields,
         reactive::{ReactiveInt, ReactiveVecProperty},
         song::{Song, SongCover},
     },
@@ -152,6 +153,59 @@ pub fn build_queue_song_ui_view_data(
         rating: song.rating,
         play_count: song.play_count,
         searchable_lower,
+    }
+}
+
+// The two sides of a queue sort: the backend keys its rows by their pooled
+// `Song`, the UI by the rows the projection above built from that song. Each
+// reads what the projection copies (a missing genre as "", a missing rating
+// or play count as 0), so both put every row in the same place.
+// `sort_queue_orders_rows_like_the_ui` pins the pair together.
+impl QueueSortFields for Song {
+    fn sort_title(&self) -> &str {
+        &self.title
+    }
+    fn sort_artist(&self) -> &str {
+        &self.artist
+    }
+    fn sort_album(&self) -> &str {
+        &self.album
+    }
+    fn sort_genre(&self) -> &str {
+        self.genre.as_deref().unwrap_or_default()
+    }
+    fn sort_duration_seconds(&self) -> u32 {
+        self.duration
+    }
+    fn sort_rating(&self) -> u32 {
+        self.rating.unwrap_or(0)
+    }
+    fn sort_play_count(&self) -> u32 {
+        self.play_count.unwrap_or(0)
+    }
+}
+
+impl QueueSortFields for QueueSongUIViewData {
+    fn sort_title(&self) -> &str {
+        &self.title
+    }
+    fn sort_artist(&self) -> &str {
+        &self.artist
+    }
+    fn sort_album(&self) -> &str {
+        &self.album
+    }
+    fn sort_genre(&self) -> &str {
+        &self.genre
+    }
+    fn sort_duration_seconds(&self) -> u32 {
+        self.duration_seconds
+    }
+    fn sort_rating(&self) -> u32 {
+        self.rating.unwrap_or(0)
+    }
+    fn sort_play_count(&self) -> u32 {
+        self.play_count.unwrap_or(0)
     }
 }
 
