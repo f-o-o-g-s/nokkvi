@@ -1661,6 +1661,30 @@ fn seek_on_a_live_transcode_returns_unavailable() {
     }
 }
 
+/// The verb's refusal says why in the toast's words: a smaller copy nokkvi
+/// asked for on a server that can't seek in one, or a format the server
+/// chose on its own.
+#[test]
+fn a_refused_seek_says_why_in_the_toasts_words() {
+    for (requested_transcode, why) in [
+        (true, "Can't seek in a smaller copy on this server"),
+        (
+            false,
+            "Can't seek: your server is choosing this song's format",
+        ),
+    ] {
+        let mut app = test_app();
+        app.playback.seekable = false;
+        app.playback.stream.requested_transcode = requested_transcode;
+
+        let resp = drive_on_with_args(&mut app, "seek", json!({ "position": "42" }));
+
+        let err = resp.error.expect("refused");
+        assert_eq!(err.code, "unavailable");
+        assert_eq!(err.message, why, "requested: {requested_transcode}");
+    }
+}
+
 #[test]
 fn seek_on_a_transcode_the_engine_reopens_is_dispatched() {
     // With `transcodeOffset` the engine seeks a transcode nokkvi asked for
@@ -1895,6 +1919,40 @@ fn status_with_nothing_loaded_names_no_stream() {
     assert_eq!(data.get("origin"), Some(&json!("unknown")));
     assert_eq!(data.get("seekable"), Some(&json!(false)));
     assert_eq!(data.get("seek_kind"), Some(&json!("none")));
+}
+
+/// After Stop nothing plays, so there is no stream to describe: the
+/// stopped track's codec, delivery and seek kind are not reported beside a
+/// bitrate of 0. Paused, the stream is still there.
+#[test]
+fn status_after_stop_names_no_stream() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(crate::app_message::PlaybackStateUpdate {
+        playing: false,
+        paused: false,
+        ..reopening_opus_tick()
+    });
+
+    let data = drive_on(&mut app, "status").data.expect("data");
+
+    assert_eq!(data.get("state"), Some(&json!("stopped")));
+    assert_eq!(data.get("codec"), Some(&serde_json::Value::Null));
+    assert_eq!(data.get("bitrate"), Some(&json!(0)));
+    assert_eq!(data.get("sample_rate"), Some(&json!(0)));
+    assert_eq!(data.get("delivery"), Some(&serde_json::Value::Null));
+    assert_eq!(data.get("origin"), Some(&json!("unknown")));
+    assert_eq!(data.get("seekable"), Some(&json!(false)));
+    assert_eq!(data.get("seek_kind"), Some(&json!("none")));
+
+    let _ = app.handle_playback_state_updated(crate::app_message::PlaybackStateUpdate {
+        playing: false,
+        paused: true,
+        ..reopening_opus_tick()
+    });
+    let data = drive_on(&mut app, "status").data.expect("data");
+    assert_eq!(data.get("state"), Some(&json!("paused")));
+    assert_eq!(data.get("codec"), Some(&json!("opus")));
+    assert_eq!(data.get("seek_kind"), Some(&json!("reopen")));
 }
 
 /// A tick on which the engine does not describe the song yet (a skip's

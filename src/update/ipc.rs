@@ -478,9 +478,10 @@ define_commands! {
         let task = app.handle_stop();
         Ok((task, json!({ "state": app.playback.transport().ipc_token() })))
     }), help ("", "Stop playback");
-    // The seek handlers no-op on radio and on a song the server transcodes
-    // on the fly (no seekable position), so guard here
-    // and return an error rather than echoing a false success.
+    // The seek handlers no-op on radio and on a live transcode the engine
+    // can't reopen at an offset (no seekable position), so guard here and
+    // return an error rather than echoing a false success, in the toast's
+    // words.
     //
     // Absolute answers `{"position": N}`; relative answers `{"offset": ±N}`,
     // the honest "what was dispatched" shape — the landing point is not known
@@ -490,10 +491,7 @@ define_commands! {
             return Err(("unavailable", "seek is not available during radio playback".to_string()));
         }
         if !app.seek_available() {
-            return Err((
-                "unavailable",
-                "seek is not available: the server is transcoding this song".to_string(),
-            ));
+            return Err(("unavailable", app.playback.stream.seek_refusal().to_string()));
         }
         let request = parse_seek_arg(raw).map_err(|message| ("invalid_args", message))?;
         match request {
@@ -839,8 +837,18 @@ fn round_f32(v: f32) -> f64 {
 /// resident app state. Unlike the toggle verbs' optimistic echo, this reports
 /// ground-truth current state and never predicts.
 fn status_json(app: &Nokkvi) -> serde_json::Value {
+    // After Stop nothing plays: the tick still carries the stopped track's
+    // stream, which is no stream to describe.
+    let transport = app.playback.transport();
+    let stopped = crate::state::StreamStatus::default();
+    let (stream, sample_rate) = match transport {
+        crate::state::TransportState::Playing | crate::state::TransportState::Paused => {
+            (&app.playback.stream, app.playback.sample_rate)
+        }
+        crate::state::TransportState::Stopped => (&stopped, 0),
+    };
     json!({
-        "state": app.playback.transport().ipc_token(),
+        "state": transport.ipc_token(),
         "title": app.playback.title,
         "artist": app.playback.artist,
         "album": app.playback.album,
@@ -854,14 +862,14 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "visualizer": app.settings.visualization_mode.to_string(),
         "preset": app.milkdrop.on_screen,
         // The stream that plays (the queue's track, or a station).
-        "codec": app.playback.stream.codec,
-        "bitrate": app.playback.stream.live_bitrate,
-        "sample_rate": app.playback.sample_rate,
-        "delivery": app.playback.stream.delivery.map(delivery_token),
-        "origin": origin_token(app.playback.stream.origin),
+        "codec": stream.codec,
+        "bitrate": stream.live_bitrate,
+        "sample_rate": sample_rate,
+        "delivery": stream.delivery.map(delivery_token),
+        "origin": origin_token(stream.origin),
         "seekable": app.seek_available()
-            && app.playback.stream.seek_kind != nokkvi_data::audio::engine::SeekKind::None,
-        "seek_kind": seek_kind_token(app.playback.stream.seek_kind),
+            && stream.seek_kind != nokkvi_data::audio::engine::SeekKind::None,
+        "seek_kind": seek_kind_token(stream.seek_kind),
     })
 }
 

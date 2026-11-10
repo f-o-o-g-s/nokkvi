@@ -1425,7 +1425,28 @@ fn a_player_row_cap_shows_a_read_only_row_under_streaming_quality() {
              smaller copy. Change it in Navidrome under Settings > Players."
         )
     );
-    assert!(app.settings_page.config_dirty || !app.settings_page.cached_entries.is_empty());
+}
+
+/// The player-row read lands after the Playback tab may already be on
+/// screen: the open page shows the row at once, without waiting for
+/// something else to rebuild it.
+#[test]
+fn a_player_row_cap_reaches_an_open_playback_tab_at_once() {
+    use nokkvi_data::types::{player_override::PlayerOverride, setting_item::SettingsEntry};
+    let mut app = test_app();
+    app.current_view = crate::View::Settings;
+    app.settings_page.active_category = crate::views::settings::SettingsTab::Playback;
+    app.refresh_settings_entries_if_dirty();
+    let shows_the_row = |app: &crate::Nokkvi| {
+        app.settings_page.cached_entries.iter().any(|entry| {
+            matches!(entry, SettingsEntry::Item(item) if item.key == "general.server_player_override")
+        })
+    };
+    assert!(!shows_the_row(&app), "precondition: no override, no row");
+
+    let _ = app.handle_player_override_fetched(PlayerOverride::of(None, 96));
+
+    assert!(shows_the_row(&app), "the open tab shows the row");
 }
 
 /// A row that forces nothing (or a read that failed) shows no row.

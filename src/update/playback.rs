@@ -2218,14 +2218,7 @@ impl Nokkvi {
         // verb and Previous's rewind check first, so this backstop fires on a
         // deliberate act that beat the tick (never a held key): say why.
         if !self.seek_available() {
-            // A smaller copy nokkvi asked for refuses only on a server
-            // without `transcodeOffset`; any other live transcode is one the
-            // server chose on its own (a transcoding set on nokkvi's player).
-            self.toast_info(if self.playback.stream.requested_transcode {
-                "Can't seek in a smaller copy on this server"
-            } else {
-                "Can't seek: your server is choosing this song's format"
-            });
+            self.toast_info(self.playback.stream.seek_refusal());
             return Task::none();
         }
         // Mark the seek explicitly: advance last_position to the seek target so

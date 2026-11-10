@@ -81,6 +81,21 @@ pub struct StreamStatus {
     pub requested_transcode: bool,
 }
 
+impl StreamStatus {
+    /// Why a seek on this stream, which can't seek, is refused: the words
+    /// of the toast and of `nokkvi seek`'s refusal. A smaller copy nokkvi
+    /// asked for refuses only on a server without `transcodeOffset`; any
+    /// other live transcode is one the server chose on its own (a
+    /// transcoding set on nokkvi's player).
+    pub fn seek_refusal(&self) -> &'static str {
+        if self.requested_transcode {
+            "Can't seek in a smaller copy on this server"
+        } else {
+            "Can't seek: your server is choosing this song's format"
+        }
+    }
+}
+
 impl Default for StreamStatus {
     fn default() -> Self {
         Self {
