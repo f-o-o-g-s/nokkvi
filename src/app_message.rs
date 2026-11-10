@@ -171,6 +171,10 @@ pub struct PlaybackStateUpdate {
     /// Whether the playing song is the server's live transcode
     /// (`CustomAudioEngine::is_live_transcode`): lossy whatever the file is.
     pub live_transcode: bool,
+    /// Whether the queue song's stream is its own file, a transcode, or
+    /// can't be told (`StreamOrigin::of`); only the file can show BIT-PERFECT.
+    /// `Unknown` for a radio tick.
+    pub stream_origin: crate::state::StreamOrigin,
     /// Live ICY-metadata parsed by IcyMetadataReader
     pub live_icy_metadata: Option<String>,
     /// Tagged BPM of the current song, if the file/server reports one.

@@ -353,6 +353,33 @@ pub enum StreamDelivery {
     Live,
 }
 
+/// What a track's open stream is: how its bytes arrive, the answer's byte
+/// length and the codec that decodes it. Taken from a decoder in one piece
+/// ([`Self::of`]) and stored in one piece wherever the engine keeps a track
+/// (the now-playing track, a skip blend's incoming, `GaplessTransitionInfo`),
+/// so no site can record one fact and forget another.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StreamFacts {
+    /// How the bytes arrive, and so whether the track can seek.
+    pub delivery: StreamDelivery,
+    /// The answer's byte length when `Sized` ([`AudioDecoder::byte_len`]).
+    pub byte_len: Option<u64>,
+    /// The codec Symphonia decodes, by its short name (`flac`, `opus`,
+    /// `pcm_s16le`, ...).
+    pub codec: Option<String>,
+}
+
+impl StreamFacts {
+    /// The facts of `decoder`'s open stream.
+    pub fn of(decoder: &AudioDecoder) -> Self {
+        Self {
+            delivery: decoder.delivery(),
+            byte_len: decoder.byte_len(),
+            codec: decoder.live_codec(),
+        }
+    }
+}
+
 /// Audio decoder using symphonia
 pub struct AudioDecoder {
     format_reader: Option<Box<dyn FormatReader>>,
@@ -374,6 +401,12 @@ pub struct AudioDecoder {
     /// `Live` is what the engine treats as radio: no backpressure, the jitter
     /// prebuffer, and the reconnect at EOF.
     delivery: StreamDelivery,
+    /// The answer's byte length, recorded with `delivery`: the length a
+    /// `Sized` source is read in (the HTTP length the range reader serves, or
+    /// the file's size); `None` for an `Unsized` or `Live` stream. Navidrome
+    /// serves a song's own file at exactly its scanned size, so the UI compares
+    /// the two to tell the file from a transcode its cache serves sized.
+    byte_len: Option<u64>,
     /// Server-reported track duration in ms, used to sanity-check the probed
     /// duration in `open_input`. `None` for radio and engine-internal loads.
     expected_duration_ms: Option<u64>,
@@ -681,6 +714,7 @@ impl AudioDecoder {
             smoothed_bitrate_kbps: 0.0,
             source_kind: SourceKind::Track,
             delivery: StreamDelivery::Sized,
+            byte_len: None,
             expected_duration_ms: None,
             seek_scale: 1.0,
             live_icy_metadata,
@@ -949,6 +983,7 @@ impl AudioDecoder {
                 // Create Range-based reader - fetches only needed bytes on demand
                 let reader = RangeHttpReader::new(self.url.clone(), len);
                 self.delivery = StreamDelivery::Sized;
+                self.byte_len = Some(len);
 
                 let media_source: Box<dyn MediaSource> = Box::new(reader);
                 MediaSourceStream::new(media_source, Default::default())
@@ -1016,6 +1051,7 @@ impl AudioDecoder {
                     );
                     StreamDelivery::Unsized
                 };
+                self.byte_len = None;
 
                 let content_type = response
                     .headers()
@@ -1086,9 +1122,11 @@ impl AudioDecoder {
                     crate::utils::url_redaction::redact_subsonic_url(&self.url)
                 )
             })?;
+            let byte_len = file.metadata().map(|metadata| metadata.len()).ok();
             let media_source: Box<dyn MediaSource> = Box::new(file);
             let mss = MediaSourceStream::new(media_source, Default::default());
             self.delivery = StreamDelivery::Sized;
+            self.byte_len = byte_len;
 
             // Try to extract format from file path
             (mss, Self::extract_format_hint(&self.url))
@@ -1628,6 +1666,21 @@ impl AudioDecoder {
         self.live_codec = codec;
     }
 
+    /// Test-only: stamp how the open source delivers its bytes, so an engine
+    /// test can take a sized file for one its first open read without a
+    /// length (a live transcode the server has since finished caching).
+    #[cfg(test)]
+    pub fn set_delivery_for_test(&mut self, delivery: StreamDelivery) {
+        self.delivery = delivery;
+    }
+
+    /// Test-only: stamp the answer's byte length (see [`Self::byte_len`]) so
+    /// engine tests can follow it through the promotions without a server.
+    #[cfg(test)]
+    pub fn set_byte_len_for_test(&mut self, byte_len: Option<u64>) {
+        self.byte_len = byte_len;
+    }
+
     /// Test-only: stamp decoder EOF so engine tests can drive the
     /// track-completion path of `on_renderer_finished` without real I/O.
     #[cfg(test)]
@@ -1663,6 +1716,11 @@ impl AudioDecoder {
     /// How the open source delivers its bytes (see [`StreamDelivery`]).
     pub fn delivery(&self) -> StreamDelivery {
         self.delivery
+    }
+
+    /// The answer's byte length when the source is `Sized`, `None` otherwise.
+    pub fn byte_len(&self) -> Option<u64> {
+        self.byte_len
     }
 
     /// Get the EMA-smoothed live compressed bitrate in kbps.
@@ -2729,7 +2787,7 @@ pub(crate) mod tests {
     }
 
     /// The bytes [`spawn_sized_file`] serves.
-    const SIZED_FILE: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+    pub(crate) const SIZED_FILE: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
 
     /// A local server shaped like Navidrome serving a file it has whole
     /// (`http.ServeContent`): every answer carries `Accept-Ranges: bytes` and
@@ -2737,7 +2795,16 @@ pub(crate) mod tests {
     /// header gets that slice (206) and a GET without one the whole file.
     /// Returns the stream URL and each request as `"METHOD"` or
     /// `"METHOD <range>"`, in the order the server read them.
-    async fn spawn_sized_file() -> (String, Arc<parking_lot::Mutex<Vec<String>>>) {
+    pub(crate) async fn spawn_sized_file() -> (String, Arc<parking_lot::Mutex<Vec<String>>>) {
+        spawn_sized_file_with(true).await
+    }
+
+    /// [`spawn_sized_file`], whose HEAD answer carries the Content-Length
+    /// only when `head_length` is set (a server or proxy whose HEAD names no
+    /// length leaves the size to the `bytes=0-0` Range probe).
+    async fn spawn_sized_file_with(
+        head_length: bool,
+    ) -> (String, Arc<parking_lot::Mutex<Vec<String>>>) {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
@@ -2780,10 +2847,11 @@ pub(crate) mod tests {
                         None => ("200 OK", SIZED_FILE),
                     };
                     let mut headers = format!(
-                        "HTTP/1.1 {status}\r\nContent-Type: audio/mpeg\r\n\
-                         Accept-Ranges: bytes\r\nContent-Length: {}\r\n",
-                        body.len()
+                        "HTTP/1.1 {status}\r\nContent-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n"
                     );
+                    if method != "HEAD" || head_length {
+                        headers.push_str(&format!("Content-Length: {}\r\n", body.len()));
+                    }
                     if let Some((start, end)) = slice {
                         headers.push_str(&format!(
                             "Content-Range: bytes {start}-{end}/{}\r\n",
@@ -2826,6 +2894,90 @@ pub(crate) mod tests {
             ]
         );
         assert_eq!(delivery, StreamDelivery::Sized);
+    }
+
+    /// A sized answer records its byte length beside its delivery: the UI
+    /// compares it with the song's file size to tell the file from a
+    /// transcode the server's cache serves sized (an MP3 body for a `.flac`
+    /// song). The length is what the server said; the codec is what decodes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sized_answer_records_its_byte_length_and_its_codec() {
+        let (url, _requests) = spawn_sized_file().await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the answer must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(SIZED_FILE.len() as u64));
+        assert_eq!(decoder.live_codec().as_deref(), Some("mp3"));
+    }
+
+    /// A local file is sized by the file itself.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_local_file_records_its_size_as_its_byte_length() {
+        let size = std::fs::metadata(VBR_SILENCE_THEN_NOISE)
+            .expect("the fixture exists")
+            .len();
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(VBR_SILENCE_THEN_NOISE)
+            .await
+            .expect("the fixture opens");
+
+        assert_eq!(decoder.byte_len(), Some(size));
+    }
+
+    /// A live transcode has no length to record, and neither has a station,
+    /// even on a decoder whose previous open was sized: the length is the
+    /// open answer's, never left over from the last one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stream_without_a_length_records_no_byte_length() {
+        let (sized, _requests) = spawn_sized_file().await;
+        let (lengthless, _requests) = spawn_live_transcode(Some("245.5")).await;
+
+        let mut transcode = AudioDecoder::default();
+        transcode.init(&sized).await.expect("the file must open");
+        assert_eq!(transcode.byte_len(), Some(SIZED_FILE.len() as u64));
+        transcode
+            .init(&lengthless)
+            .await
+            .expect("the transcode must open");
+        let mut station = AudioDecoder::default();
+        station.init(&sized).await.expect("the file must open");
+        station.set_source_kind(SourceKind::Station);
+        station
+            .init(&lengthless)
+            .await
+            .expect("the station must open");
+
+        assert_eq!(transcode.delivery(), StreamDelivery::Unsized);
+        assert_eq!(transcode.byte_len(), None);
+        assert_eq!(station.delivery(), StreamDelivery::Live);
+        assert_eq!(station.byte_len(), None);
+    }
+
+    /// A HEAD that names no length leaves the size to the `bytes=0-0` Range
+    /// probe, whose 206 carries the whole length as the Content-Range total
+    /// (its own Content-Length is the one byte it sends): that total is the
+    /// answer's byte length.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_head_without_a_length_takes_the_range_probes_total_as_the_byte_length() {
+        let (url, requests) = spawn_sized_file_with(false).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the file must open");
+
+        assert_eq!(
+            *requests.lock(),
+            [
+                "HEAD".to_owned(),
+                "GET bytes=0-0".to_owned(),
+                format!("GET bytes=0-{}", SIZED_FILE.len() - 1)
+            ]
+        );
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(SIZED_FILE.len() as u64));
     }
 
     /// The header's parse: Navidrome writes seconds as a float (Go's `'G'`

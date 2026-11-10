@@ -1,6 +1,6 @@
 //! Tests for playback transport, modes, volume, and crossfade update handlers.
 
-use crate::{app_message::PlaybackStateUpdate, test_helpers::*};
+use crate::{app_message::PlaybackStateUpdate, state::StreamOrigin, test_helpers::*};
 
 // ============================================================================
 // Mode Flag Handlers (playback.rs)
@@ -77,6 +77,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         bitrate: 1411,
         seekable: true,
         live_transcode: false,
+        stream_origin: StreamOrigin::OriginalFile,
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,
@@ -2059,6 +2060,7 @@ fn live_transcode_tick() -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         seekable: false,
         live_transcode: true,
+        stream_origin: StreamOrigin::Transcode,
         ..make_playback_update()
     }
 }
@@ -2120,15 +2122,18 @@ fn a_live_transcode_never_shows_the_bit_perfect_badge() {
 fn a_live_transcode_is_labelled_with_its_own_codec() {
     use crate::update::playback::song_format_label;
     assert_eq!(
-        song_format_label("/m/a/01.flac", Some("opus"), true),
+        song_format_label("/m/a/01.flac", Some("opus"), StreamOrigin::Transcode),
         "opus"
     );
     assert_eq!(
-        song_format_label("/m/a/01.flac", Some("flac"), false),
+        song_format_label("/m/a/01.flac", Some("flac"), StreamOrigin::OriginalFile),
         "flac"
     );
-    assert_eq!(song_format_label("/m/a/01.FLAC", None, true), "flac");
-    assert_eq!(song_format_label("", None, false), "");
+    assert_eq!(
+        song_format_label("/m/a/01.FLAC", None, StreamOrigin::Transcode),
+        "flac"
+    );
+    assert_eq!(song_format_label("", None, StreamOrigin::OriginalFile), "");
 }
 
 /// With rewind-on-previous on, Previous on a song the server transcodes on
@@ -2151,4 +2156,401 @@ fn prev_track_steps_back_on_a_live_transcode_instead_of_rewinding() {
         toasts_before,
         "Previous stepped back; it must not refuse a rewind"
     );
+}
+
+// ============================================================================
+// The stream's origin: the song's own file, a transcode, or not known
+// ============================================================================
+
+/// A queue song as the server lists it: its path and its file size (0 when
+/// the server sent none).
+fn listed_song(path: &str, size: u64) -> nokkvi_data::types::song::Song {
+    nokkvi_data::types::song::Song {
+        id: "song_1".to_string(),
+        path: path.to_string(),
+        size,
+        ..Default::default()
+    }
+}
+
+/// The stream URL nokkvi builds for the queue song `id`, as the engine
+/// holds it for the track it plays.
+fn stream_url_of(id: &str) -> String {
+    nokkvi_data::services::playback::StreamSession::new(
+        "http://server".to_string(),
+        "u=nk&t=token&s=salt".to_string(),
+    )
+    .expect("a server and a credential make a session")
+    .stream_url(id)
+}
+
+/// The tick `handle_tick` builds for `song` while the engine reports
+/// `stream` under `source` for the queue's track (`None` for both while a
+/// skip's decoder builds), on a stream built bit-perfect.
+fn tick_with(
+    song: &nokkvi_data::types::song::Song,
+    source: Option<&str>,
+    stream: Option<nokkvi_data::audio::StreamFacts>,
+) -> PlaybackStateUpdate {
+    use crate::update::playback::queue_song_format;
+    let live_transcode = stream
+        .as_ref()
+        .is_some_and(|stream| stream.delivery == nokkvi_data::audio::StreamDelivery::Unsized);
+    let (format_suffix, stream_origin) = queue_song_format(song, source, stream.as_ref());
+    PlaybackStateUpdate {
+        format_suffix,
+        stream_origin,
+        live_transcode,
+        seekable: !live_transcode,
+        current_stream_bit_perfect: true,
+        ..make_playback_update()
+    }
+}
+
+/// [`tick_with`] for an engine on `song` itself, its stream sent with
+/// `codec` and `byte_len` (a live transcode, without a length, when
+/// `live_transcode`).
+fn tick_for(
+    song: &nokkvi_data::types::song::Song,
+    codec: Option<&str>,
+    live_transcode: bool,
+    byte_len: Option<u64>,
+) -> PlaybackStateUpdate {
+    use nokkvi_data::audio::{StreamDelivery, StreamFacts};
+    let stream = StreamFacts {
+        delivery: if live_transcode {
+            StreamDelivery::Unsized
+        } else {
+            StreamDelivery::Sized
+        },
+        byte_len,
+        codec: codec.map(str::to_string),
+    };
+    tick_with(song, Some(&stream_url_of(&song.id)), Some(stream))
+}
+
+/// Navidrome serves a transcode that is finished in its cache like a file:
+/// sized, in ranges. Its length is not the song's file size, so the label
+/// names the codec that plays, not the song's `.flac`, and the badge stays
+/// off.
+#[test]
+fn a_cached_transcode_of_a_flac_song_shows_its_codec_and_no_badge() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+
+    let _ = app.handle_playback_state_updated(tick_for(&song, Some("mp3"), false, Some(4_100_000)));
+
+    assert_eq!(app.playback.format_suffix, "mp3");
+    assert!(!app.playback.bit_perfect_engaged);
+}
+
+/// A re-encode to the song's own codec (a 320 kbps MP3 capped to 128) is
+/// still a transcode: its label stays true, but it never shows the badge.
+#[test]
+fn a_same_codec_reencode_never_shows_the_badge() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.mp3", 9_600_000);
+
+    let _ = app.handle_playback_state_updated(tick_for(&song, Some("mp3"), false, Some(3_800_000)));
+
+    assert_eq!(app.playback.format_suffix, "mp3");
+    assert!(!app.playback.bit_perfect_engaged);
+}
+
+/// The control: the song's own file arrives at exactly its file size, so
+/// it keeps its suffix and the badge.
+#[test]
+fn the_songs_own_file_keeps_its_label_and_the_badge() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("flac"), false, Some(31_000_000)));
+
+    assert_eq!(app.playback.format_suffix, "flac");
+    assert!(app.playback.bit_perfect_engaged);
+}
+
+/// The song's own file keeps its suffix whatever Symphonia names the codec
+/// inside it: PCM or ADPCM in a WAV, ALAC, AAC or FLAC in an MP4, Vorbis or
+/// Opus in an Ogg.
+#[test]
+fn the_songs_own_file_keeps_its_suffix_whatever_its_codec() {
+    for (path, codec) in [
+        ("/m/a/01.wav", "pcm_s24le"),
+        ("/m/a/01.wav", "adpcm_ms"),
+        ("/m/a/01.aif", "pcm_s16be"),
+        ("/m/a/01.m4a", "alac"),
+        ("/m/a/01.m4a", "aac"),
+        ("/m/a/01.mp4", "flac"),
+        ("/m/a/01.ogg", "vorbis"),
+        ("/m/a/01.ogg", "opus"),
+    ] {
+        let mut app = test_app();
+        let song = listed_song(path, 12_345_678);
+
+        let _ = app.handle_playback_state_updated(tick_for(
+            &song,
+            Some(codec),
+            false,
+            Some(12_345_678),
+        ));
+
+        let suffix = path.rsplit('.').next().unwrap_or_default();
+        assert_eq!(app.playback.format_suffix, suffix, "{path} holding {codec}");
+        assert!(app.playback.bit_perfect_engaged, "{path} holding {codec}");
+    }
+}
+
+/// A transcode into a codec the song's container can also hold is still a
+/// transcode: an Ogg Vorbis song sent as Opus, an M4A sent as ADTS AAC, a
+/// WebM or MKA sent as anything. Its length (or its lack of one) gives it
+/// away, so the label names the codec, not the song's container.
+#[test]
+fn a_transcode_within_the_songs_container_family_shows_its_codec() {
+    for (path, codec, live_transcode, byte_len) in [
+        ("/m/a/01.ogg", "opus", false, Some(3_000_000)),
+        ("/m/a/01.ogg", "opus", true, None),
+        ("/m/a/01.m4a", "aac", false, Some(7_000_000)),
+        ("/m/a/01.webm", "mp3", false, Some(4_000_000)),
+        ("/m/a/01.mka", "flac", false, Some(20_000_000)),
+        ("/m/a/01.mka", "opus", true, None),
+    ] {
+        let mut app = test_app();
+        let song = listed_song(path, 25_000_000);
+
+        let _ = app.handle_playback_state_updated(tick_for(
+            &song,
+            Some(codec),
+            live_transcode,
+            byte_len,
+        ));
+
+        assert_eq!(app.playback.format_suffix, codec, "{path} sent as {codec}");
+        assert!(!app.playback.bit_perfect_engaged, "{path} sent as {codec}");
+    }
+}
+
+/// Without the song's file size (a server that sent none) a length proves
+/// nothing either way, so the badge stays off; the label then goes by
+/// whether the codec belongs to the suffix's container, and an ALAC `.m4a`
+/// keeps its suffix.
+#[test]
+fn an_unknown_file_size_never_shows_the_badge() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.m4a", 0);
+
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("alac"), false, Some(31_000_000)));
+
+    assert_eq!(app.playback.format_suffix, "m4a");
+    assert!(!app.playback.bit_perfect_engaged);
+}
+
+/// While a skip's decoder builds the engine knows nothing of the target,
+/// and what sounds is still the outgoing track that earned the badge. The
+/// label shows the song's suffix and the badge holds with its verdict (the
+/// probe countdown runs on as on any tick of the same track) until the
+/// target is judged at the fire. It used to blink off on every Relaxed
+/// crossfade skip between two files.
+#[test]
+fn a_pending_tick_keeps_an_engaged_badge_and_its_verdict() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("flac"), false, Some(31_000_000)));
+    assert!(
+        app.playback.bit_perfect_engaged,
+        "precondition: the file has the badge"
+    );
+    app.playback.bit_perfect_status = crate::state::BitPerfectStatus::Verified;
+    let probe_ticks = app.playback.bit_perfect_probe_ticks;
+
+    let _ = app.handle_playback_state_updated(tick_with(&song, None, None));
+
+    assert_eq!(app.playback.format_suffix, "flac");
+    assert!(app.playback.bit_perfect_engaged, "the badge blinked off");
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        crate::state::BitPerfectStatus::Verified
+    );
+    assert_eq!(
+        app.playback.bit_perfect_probe_ticks,
+        probe_ticks - 1,
+        "the countdown runs on, neither reset nor frozen"
+    );
+}
+
+/// A pending tick can also be the first to carry a new track's rate (a
+/// hard load landing between the tick's engine and queue reads). The held
+/// badge still treats that as a transition: the old verdict is cleared and
+/// the device is probed at once, not up to a second later.
+#[test]
+fn a_pending_tick_with_a_new_rate_clears_the_verdict_and_re_probes() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("flac"), false, Some(31_000_000)));
+    app.playback.bit_perfect_status = crate::state::BitPerfectStatus::Verified;
+    app.playback.bit_perfect_probe_ticks = 3;
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        sample_rate: 96_000,
+        ..tick_with(&song, None, None)
+    });
+
+    assert!(app.playback.bit_perfect_engaged);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        crate::state::BitPerfectStatus::Unknown,
+        "the old rate's verdict survived the change"
+    );
+    assert!(
+        app.playback.bit_perfect_probe_ticks > 3,
+        "no probe went out for the new rate"
+    );
+}
+
+/// A pending tick only holds a verdict an earlier tick earned: it never
+/// turns the badge on, from a cold start or after a transcode.
+#[test]
+fn a_pending_tick_never_engages_the_badge() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+
+    let _ = app.handle_playback_state_updated(tick_with(&song, None, None));
+    assert!(!app.playback.bit_perfect_engaged, "from a cold start");
+
+    let _ = app.handle_playback_state_updated(tick_for(&song, Some("mp3"), false, Some(4_100_000)));
+    let _ = app.handle_playback_state_updated(tick_with(&song, None, None));
+    assert!(!app.playback.bit_perfect_engaged, "after a transcode");
+}
+
+/// A held badge still goes off when playback stops during the wait.
+#[test]
+fn a_pending_tick_drops_the_badge_when_playback_stops() {
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("flac"), false, Some(31_000_000)));
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        playing: false,
+        ..tick_with(&song, None, None)
+    });
+
+    assert!(!app.playback.bit_perfect_engaged);
+}
+
+/// An auto crossfade's finalize moves the engine to the next song a moment
+/// before the queue follows, so a tick in between pairs the next song's
+/// stream with this song. It must not judge this song by it (an "mp3" label
+/// on a FLAC, the badge dropping and coming back): it holds the verdict
+/// until the queue catches up.
+#[test]
+fn a_tick_whose_engine_already_names_the_next_song_holds_the_verdict() {
+    use nokkvi_data::audio::{StreamDelivery, StreamFacts};
+    let mut app = test_app();
+    let song = listed_song("/m/a/01.flac", 31_000_000);
+    let _ =
+        app.handle_playback_state_updated(tick_for(&song, Some("flac"), false, Some(31_000_000)));
+    assert!(
+        app.playback.bit_perfect_engaged,
+        "precondition: the file has the badge"
+    );
+    let next_song = StreamFacts {
+        delivery: StreamDelivery::Sized,
+        byte_len: Some(4_100_000),
+        codec: Some("mp3".to_string()),
+    };
+
+    let _ = app.handle_playback_state_updated(tick_with(
+        &song,
+        Some(&stream_url_of("song_2")),
+        Some(next_song),
+    ));
+
+    assert_eq!(app.playback.format_suffix, "flac");
+    assert!(app.playback.bit_perfect_engaged, "the badge dropped");
+}
+
+/// With the origin unknown, a codec that belongs to the suffix's container
+/// keeps the suffix, so no untranscoded file is mislabelled: PCM and ADPCM
+/// in WAV and AIFF, every codec Symphonia reads from MP4, Vorbis, Opus and
+/// FLAC in Ogg, anything in Matroska or WebM, and a codec-named suffix.
+#[test]
+fn with_the_origin_unknown_a_codec_in_the_suffixs_container_keeps_the_suffix() {
+    use crate::update::playback::song_format_label;
+    for (suffix, codecs) in [
+        (
+            "wav",
+            &[
+                "pcm_s16le",
+                "pcm_s24le",
+                "pcm_f32le",
+                "pcm_mulaw",
+                "adpcm_ms",
+                "adpcm_ima_wav",
+            ][..],
+        ),
+        ("wave", &["pcm_s16le"][..]),
+        ("aif", &["pcm_s16be", "pcm_s24be"][..]),
+        ("aiff", &["pcm_s16be", "pcm_alaw"][..]),
+        ("aifc", &["pcm_s16le", "adpcm_ima_qt"][..]),
+        (
+            "m4a",
+            &["aac", "alac", "mp3", "flac", "opus", "pcm_s16be"][..],
+        ),
+        ("m4b", &["aac", "alac"][..]),
+        (
+            "mp4",
+            &["aac", "alac", "mp3", "flac", "opus", "pcm_s24le"][..],
+        ),
+        ("ogg", &["vorbis", "opus", "flac"][..]),
+        ("oga", &["vorbis", "opus", "flac"][..]),
+        ("mka", &["flac", "opus", "vorbis", "aac", "pcm_s16le"][..]),
+        ("mkv", &["opus"][..]),
+        ("webm", &["opus", "vorbis"][..]),
+        ("flac", &["flac"][..]),
+        ("mp3", &["mp3"][..]),
+        ("mp2", &["mp2"][..]),
+        ("opus", &["opus"][..]),
+        ("aac", &["aac"][..]),
+    ] {
+        for codec in codecs {
+            let path = format!("/m/a/01.{suffix}");
+            assert_eq!(
+                song_format_label(&path, Some(codec), StreamOrigin::Unknown),
+                suffix,
+                "{suffix} holding {codec}"
+            );
+        }
+    }
+}
+
+/// With the origin unknown, a codec no file of that suffix holds can only
+/// be a transcode: the label names the codec.
+#[test]
+fn with_the_origin_unknown_a_codec_outside_the_suffixs_container_names_the_codec() {
+    use crate::update::playback::song_format_label;
+    for (suffix, codec) in [
+        ("flac", "mp3"),
+        ("flac", "opus"),
+        ("mp3", "opus"),
+        ("opus", "vorbis"),
+        ("wav", "mp3"),
+        ("aiff", "flac"),
+        ("m4a", "vorbis"),
+        ("ogg", "mp3"),
+        ("ogg", "aac"),
+        ("ape", "opus"),
+        ("dsf", "mp3"),
+    ] {
+        let path = format!("/m/a/01.{suffix}");
+        assert_eq!(
+            song_format_label(&path, Some(codec), StreamOrigin::Unknown),
+            codec,
+            "{suffix} sent as {codec}"
+        );
+    }
 }

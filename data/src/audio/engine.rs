@@ -11,7 +11,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     audio::{
         AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration,
-        decoder::{SourceKind, StreamDelivery},
+        decoder::{SourceKind, StreamDelivery, StreamFacts},
         format::samples_for_duration,
     },
     utils::url_redaction::redact_subsonic_url,
@@ -242,11 +242,12 @@ pub(crate) struct CrossfadeCoordinator {
     /// it to spare a live skip blend: its incoming is the queue's current
     /// track, not a next track.
     skip_fade: bool,
-    /// How the live skip blend's incoming (the track the queue names)
-    /// delivers its bytes, set at the fire. Read only while `skip_fade`
-    /// holds: `seekable()` and `seek` judge the target by it, not by the
-    /// outgoing's delivery.
-    skip_target_delivery: StreamDelivery,
+    /// The live skip blend's incoming (the track the queue names), as the
+    /// fire found its stream. Read only while `skip_fade` holds: `seekable()`
+    /// and `seek` judge the target by its delivery, not the outgoing's, and
+    /// [`CustomAudioEngine::queue_track_stream`] reports it, so the label and
+    /// the badge describe the target, not the outgoing still sounding.
+    skip_target: StreamFacts,
     /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0). Negative =
     /// extra overlap: the renderer's Armed trigger fires |offset| early
     /// (mirrored to `renderer.crossfade_lead_ms` by `set_crossfade_offset`).
@@ -288,7 +289,7 @@ impl CrossfadeCoordinator {
             album_continuity: false,
             suppress_this_transition: false,
             skip_fade: false,
-            skip_target_delivery: StreamDelivery::Sized,
+            skip_target: StreamFacts::default(),
             offset_secs: 0,
             bar_snap: false,
             skip_silence: false,
@@ -463,9 +464,9 @@ pub struct GaplessTransitionInfo {
     pub source: String,
     pub duration: u64,
     pub format: AudioFormat,
-    pub codec: Option<String>,
-    /// How the swapped-in track's bytes arrive (whether it can seek).
-    pub delivery: StreamDelivery,
+    /// The swapped-in track's stream (whether it can seek, its answer
+    /// length, its codec).
+    pub stream: StreamFacts,
     /// The swapped-in track's ReplayGain tags, restaged by
     /// `consume_gapless_transition` for the next rebuild of the track.
     pub replay_gain: Option<crate::types::song::ReplayGain>,
@@ -1264,8 +1265,7 @@ async fn try_gapless_swap(
                 replay_gain: next_replay_gain,
             } = next;
             let next_duration = next_dec.duration();
-            let next_codec = next_dec.live_codec();
-            let next_delivery = next_dec.delivery();
+            let next_stream = StreamFacts::of(&next_dec);
 
             // Swap into primary decoder, unless the loop was superseded while
             // waiting for it (a seek holds it) or a user action moved the
@@ -1310,8 +1310,7 @@ async fn try_gapless_swap(
                     source: next_source_url,
                     duration: next_duration,
                     format: next_fmt,
-                    codec: next_codec,
-                    delivery: next_delivery,
+                    stream: next_stream,
                     replay_gain: next_replay_gain,
                     generation: swap_generation,
                 });
@@ -1456,12 +1455,10 @@ async fn inject_transition_gap(gap: TransitionGap<'_>) {
     }
 }
 
-/// Thread-safe slot holding an optional metadata string with non-blocking
-/// reset (B11 fix — `reset` must never block the audio hot path) and a
-/// blocking writer for decoder-init updates that must land before the next
-/// packet. Replaces ad-hoc `Arc<RwLock<Option<String>>>` field patterns on
-/// the engine so the reset/write asymmetry is encoded structurally and
-/// impossible to drift.
+/// Thread-safe slot holding an optional metadata string (the live ICY title)
+/// with a non-blocking reset (B11 fix — `reset` must never block the audio
+/// hot path). The decoder's IcyMetadataReader callback writes through the
+/// cloned `Arc` ([`Self::clone_arc`]) on its own thread.
 pub(super) struct LiveStringSlot {
     inner: Arc<std::sync::RwLock<Option<String>>>,
 }
@@ -1489,20 +1486,25 @@ impl LiveStringSlot {
         }
     }
 
-    /// Blocking write. Used during decoder-init paths where the new codec
-    /// name MUST land before the next read so downstream readers don't
-    /// observe the previous track's value.
-    pub(super) fn set(&self, value: Option<String>) {
-        if let Ok(mut guard) = self.inner.write() {
-            *guard = value;
-        }
-    }
-
     /// Clone-on-read getter. Returns `None` on poisoned lock (same semantics
     /// as the prior bare `.read().ok().and_then(...)` pattern).
     pub(super) fn get(&self) -> Option<String> {
         self.inner.read().ok().and_then(|guard| guard.clone())
     }
+}
+
+/// Which of the engine's tracks the queue names. Once a skip or click has
+/// advanced the queue cursor, the engine's own source is still the outgoing
+/// until the target is promoted, so what the UI reports alongside the
+/// queue's current song comes from the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueTrack {
+    /// A skip's decoder is still building: nothing is known of it yet.
+    Building,
+    /// A skip blend is live: its incoming, as the fire recorded it.
+    SkipTarget,
+    /// The now-playing track.
+    NowPlaying,
 }
 
 /// Custom audio engine - main orchestrator
@@ -1512,11 +1514,13 @@ pub struct CustomAudioEngine {
     paused: bool,
     position: u64, // milliseconds
     duration: u64, // milliseconds
-    /// How the now-playing track's bytes arrive, recorded with `duration`
-    /// whenever a decoder becomes the now-playing one (a fresh `play()`, the
-    /// three promotions). Only a `Sized` track can seek: `seek` refuses the
-    /// others, and the UI and MPRIS read [`Self::seekable`].
-    delivery: StreamDelivery,
+    /// The now-playing track's stream, recorded with `duration` whenever a
+    /// decoder becomes the now-playing one (a fresh `play()` and its
+    /// Stop-then-Play reopen, the three promotions); `set_source` clears it.
+    /// Only a `Sized` track can seek: `seek` refuses the others, and the UI
+    /// and MPRIS read [`Self::seekable`]. The UI also reads its codec and
+    /// answer length ([`Self::queue_track_stream`]).
+    stream: StreamFacts,
     volume: f64, // 0.0-1.0
 
     // Decoder
@@ -1620,9 +1624,6 @@ pub struct CustomAudioEngine {
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: LiveStringSlot,
-
-    /// Extracted stream codec based on Symphonia probing (e.g. mp3, aac)
-    live_codec_name: LiveStringSlot,
 }
 
 impl CustomAudioEngine {
@@ -1634,7 +1635,7 @@ impl CustomAudioEngine {
             paused: false,
             position: 0,
             duration: 0,
-            delivery: StreamDelivery::Sized,
+            stream: StreamFacts::default(),
             volume: 1.0,
             decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
                 live_icy_metadata.clone_arc(),
@@ -1661,7 +1662,6 @@ impl CustomAudioEngine {
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             source_change_generation: 0,
             live_icy_metadata,
-            live_codec_name: LiveStringSlot::new(),
         }
     }
 
@@ -1725,9 +1725,6 @@ impl CustomAudioEngine {
         self.live_sample_rate.store(0, Ordering::Relaxed);
         self.channels.decoder_eof.store(false, Ordering::Release);
         self.live_icy_metadata.reset();
-        // Non-blocking like the icy_metadata reset above: stale codec data
-        // is acceptable here, and `set_source` must not block on UI readers.
-        self.live_codec_name.reset();
 
         trace!(" AudioEngine: creating fresh decoder for new source");
         let mut fresh_decoder = AudioDecoder::new(self.live_icy_metadata.clone_arc());
@@ -1743,7 +1740,7 @@ impl CustomAudioEngine {
 
         self.duration = 0;
         self.position = 0;
-        self.delivery = StreamDelivery::Sized;
+        self.stream = StreamFacts::default();
 
         self.source = source;
         self.source_change_generation = self.channels.source_generation.bump_for_user_action();
@@ -1784,9 +1781,10 @@ impl CustomAudioEngine {
         self.source == url
     }
 
-    /// Get current live codec name
+    /// The codec of the engine's own now-playing source (the outgoing in a
+    /// skip blend; the UI reads [`Self::queue_track_stream`] instead).
     pub fn live_codec(&self) -> Option<String> {
-        self.live_codec_name.get()
+        self.stream.codec.clone()
     }
 
     /// Get playing state
@@ -1869,12 +1867,54 @@ impl CustomAudioEngine {
     /// track's, the incoming's during a skip blend, and unknown (`None`)
     /// while a skip's decoder is still building.
     fn queue_track_delivery(&self) -> Option<StreamDelivery> {
+        self.queue_track_stream().map(|stream| stream.delivery)
+    }
+
+    /// The stream of the track the queue names (its delivery, its answer
+    /// length, its codec): the incoming's during a skip blend (the outgoing
+    /// still sounds, but the queue already names the target), `None` while a
+    /// skip's decoder builds. The UI compares the length with the song's
+    /// file size: only the song's own file arrives at exactly that size.
+    pub fn queue_track_stream(&self) -> Option<&StreamFacts> {
+        match self.queue_track() {
+            QueueTrack::Building => None,
+            QueueTrack::SkipTarget => Some(&self.crossfade.skip_target),
+            QueueTrack::NowPlaying => Some(&self.stream),
+        }
+    }
+
+    /// The source URL of the track the queue names (see
+    /// [`Self::queue_track_stream`] for which track that is): the skip
+    /// blend's incoming during one, `None` while a skip's decoder builds.
+    /// The UI checks it names the queue's current song before it pairs the
+    /// stream with that song: an auto crossfade's finalize (and a seek in
+    /// its finalize gap) moves the engine to the next track before the
+    /// completion task moves the queue.
+    pub fn queue_track_source(&self) -> Option<&str> {
+        match self.queue_track() {
+            QueueTrack::Building => None,
+            QueueTrack::SkipTarget => match &self.crossfade.phase {
+                CrossfadePhase::Active {
+                    incoming_source, ..
+                }
+                | CrossfadePhase::OutgoingFinished {
+                    incoming_source, ..
+                } => Some(incoming_source.as_str()),
+                CrossfadePhase::Idle => None,
+            },
+            QueueTrack::NowPlaying => Some(self.source.as_str()),
+        }
+    }
+
+    /// Which of the engine's tracks the queue names. The one selector behind
+    /// every `queue_track_*` getter, so they can't disagree.
+    fn queue_track(&self) -> QueueTrack {
         if self.skip_fade_window_pending() {
-            None
+            QueueTrack::Building
         } else if self.crossfade.skip_fade {
-            Some(self.crossfade.skip_target_delivery)
+            QueueTrack::SkipTarget
         } else {
-            Some(self.delivery)
+            QueueTrack::NowPlaying
         }
     }
 
@@ -1955,8 +1995,7 @@ impl CustomAudioEngine {
                         decoder.duration()
                     );
                     self.duration = decoder.duration();
-                    self.delivery = decoder.delivery();
-                    self.live_codec_name.set(decoder.live_codec());
+                    self.stream = StreamFacts::of(&decoder);
                 }
                 Err(e) => {
                     error!(" AudioEngine: decoder initialization FAILED: {:?}", e);
@@ -1976,7 +2015,9 @@ impl CustomAudioEngine {
                 return Err(e);
             }
             self.duration = decoder.duration();
-            self.delivery = decoder.delivery();
+            // The reopened answer may differ from the first (a transcode
+            // the server finished caching meanwhile comes back sized).
+            self.stream = StreamFacts::of(&decoder);
         } else {
             trace!(" AudioEngine: decoder already initialized, seeking to start");
             // Seek back to the beginning for replay. Chunk 0 may have left
@@ -2695,10 +2736,10 @@ impl CustomAudioEngine {
         // Belt and braces: the check above already judged a skip target by
         // its delivery. Had a promotion still brought in one that can't
         // seek, its decode loop is already running: refuse and leave it.
-        if self.delivery != StreamDelivery::Sized {
+        if self.stream.delivery != StreamDelivery::Sized {
             debug!(
                 "🔍 [SEEK] Refused - the promoted track can't seek ({:?})",
-                self.delivery
+                self.stream.delivery
             );
             return outcome;
         }
@@ -3196,13 +3237,7 @@ impl CustomAudioEngine {
                 info.duration,
                 info.format
             );
-            self.promote_to_now_playing(
-                info.source,
-                info.format,
-                info.duration,
-                info.codec,
-                info.delivery,
-            );
+            self.promote_to_now_playing(info.source, info.format, info.duration, info.stream);
             // The swap only recorded these tags as the stream's (it can't
             // touch `pending_replay_gain`: a superseded decode loop could
             // overwrite a newer hard load's). Restage them here, under the
@@ -3230,8 +3265,7 @@ impl CustomAudioEngine {
         source: String,
         format: AudioFormat,
         duration_ms: u64,
-        codec: Option<String>,
-        delivery: StreamDelivery,
+        stream: StreamFacts,
     ) {
         if self.next_source == source {
             self.next_source.clear();
@@ -3241,9 +3275,8 @@ impl CustomAudioEngine {
             .store(format.sample_rate(), Ordering::Relaxed);
         self.current_format = format;
         self.duration = duration_ms;
-        self.delivery = delivery;
+        self.stream = stream;
         self.position = 0;
-        self.live_codec_name.set(codec);
         self.next_format = AudioFormat::invalid();
     }
 
@@ -3798,7 +3831,7 @@ impl CustomAudioEngine {
         }
 
         let incoming_format = decoder.format().clone();
-        let incoming_delivery = decoder.delivery();
+        let incoming_stream = StreamFacts::of(&decoder);
         if self
             .renderer
             .lock()
@@ -3843,7 +3876,7 @@ impl CustomAudioEngine {
             incoming_source: incoming_url,
         };
         self.crossfade.skip_fade = true;
-        self.crossfade.skip_target_delivery = incoming_delivery;
+        self.crossfade.skip_target = incoming_stream;
 
         // A manual skip is a user-driven source change: invalidate stale
         // completion dispatches for the outgoing (set_source does the same
@@ -4096,11 +4129,10 @@ impl CustomAudioEngine {
         if let Some(decoder) = crossfade_dec {
             let format = decoder.format().clone();
             let duration = decoder.duration();
-            let codec = decoder.live_codec();
-            let delivery = decoder.delivery();
+            let stream = StreamFacts::of(&decoder);
             // Swap decoders
             *self.decoder.lock().await = decoder;
-            self.promote_to_now_playing(incoming_source, format, duration, codec, delivery);
+            self.promote_to_now_playing(incoming_source, format, duration, stream);
 
             // Read the stored crossfade elapsed time and apply state resets.
             // The renderer already finalized (from render_buffers), so we just
@@ -4290,11 +4322,10 @@ impl CustomAudioEngine {
 
         let format = next_decoder.format().clone();
         let duration = next_decoder.duration();
-        let codec = next_decoder.live_codec();
-        let delivery = next_decoder.delivery();
+        let stream = StreamFacts::of(&next_decoder);
         // Switch decoders
         *self.decoder.lock().await = next_decoder;
-        self.promote_to_now_playing(next_source, format, duration, codec, delivery);
+        self.promote_to_now_playing(next_source, format, duration, stream);
 
         // Check if formats match for gapless playback
         let formats_match = prev_format.is_valid()
@@ -4654,7 +4685,7 @@ impl CustomAudioEngine {
                     (duration - position) / 1000,
                     position,
                     duration,
-                    self.delivery
+                    self.stream.delivery
                 );
             }
             self.on_decoder_finished().await;
@@ -6252,6 +6283,14 @@ mod tests {
         d
     }
 
+    /// The codec and answer length the engine reports for the queue's track
+    /// (`(None, None)` while a skip's decoder builds).
+    fn queue_track_codec_and_len(engine: &CustomAudioEngine) -> (Option<String>, Option<u64>) {
+        engine.queue_track_stream().map_or((None, None), |stream| {
+            (stream.codec.clone(), stream.byte_len)
+        })
+    }
+
     /// Prime an engine as "audibly playing a finite 4-minute track" so the
     /// skip-fade viability + duration gates can pass.
     fn prime_playing_engine(engine: &mut CustomAudioEngine) {
@@ -7011,7 +7050,7 @@ mod tests {
         prime_playing_engine(&mut engine);
         let target = "http://example.test/target";
         let _keepalive = force_live_skip_fade(&mut engine, target);
-        engine.crossfade.skip_target_delivery = StreamDelivery::Unsized;
+        engine.crossfade.skip_target.delivery = StreamDelivery::Unsized;
 
         assert!(!engine.seekable(), "the target can't seek");
         assert!(engine.is_live_transcode());
@@ -7035,10 +7074,10 @@ mod tests {
     async fn seek_during_a_skip_blend_out_of_a_live_transcode_seeks_the_target() {
         let mut engine = CustomAudioEngine::new();
         prime_playing_engine(&mut engine);
-        engine.delivery = StreamDelivery::Unsized;
+        engine.stream.delivery = StreamDelivery::Unsized;
         let target = "http://example.test/target";
         let _keepalive = force_live_skip_fade(&mut engine, target);
-        engine.crossfade.skip_target_delivery = StreamDelivery::Sized;
+        engine.crossfade.skip_target.delivery = StreamDelivery::Sized;
 
         assert!(engine.seekable(), "the target can seek");
         engine.seek(30_000).await;
@@ -7047,6 +7086,66 @@ mod tests {
             engine.is_playing_source(target),
             "the seek must land on the skip target; source is {}",
             engine.source()
+        );
+    }
+
+    /// A skip from an Opus live transcode into a FLAC file: the queue
+    /// already names the FLAC file, so the codec and answer length the UI
+    /// pairs with it come from the incoming, not the outgoing still sounding.
+    /// While the target's decoder builds nothing is known of it, and the
+    /// promotion keeps the incoming's facts.
+    #[tokio::test]
+    async fn a_skip_blend_reports_the_queue_tracks_codec_and_length_not_the_outgoings() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.stream.delivery = StreamDelivery::Unsized;
+        engine.stream.byte_len = None;
+        engine.stream.codec = Some("opus".to_string());
+        engine.plan_skip_fade().await;
+        let plan_generation = engine.source_generation();
+        let building = queue_track_codec_and_len(&engine);
+        let mut sources = vec![engine.queue_track_source().map(str::to_owned)];
+
+        let mut flac = skip_ready_decoder(180_000);
+        flac.set_live_codec_for_test(Some("flac".to_string()));
+        flac.set_byte_len_for_test(Some(31_415_926));
+        let outcome = engine
+            .crossfade_to_next(
+                flac,
+                "http://example.test/flac".to_string(),
+                None,
+                plan_generation,
+            )
+            .await;
+        assert_eq!(outcome, SkipFadeOutcome::Fired, "precondition: blend fired");
+        let blending = queue_track_codec_and_len(&engine);
+        sources.push(engine.queue_track_source().map(str::to_owned));
+        engine.finalize_crossfade_engine().await;
+        let promoted = queue_track_codec_and_len(&engine);
+        sources.push(engine.queue_track_source().map(str::to_owned));
+
+        assert_eq!(
+            building,
+            (None, None),
+            "nothing is known of a target still building"
+        );
+        let flac_file = (Some("flac".to_string()), Some(31_415_926));
+        assert_eq!(
+            sources,
+            [
+                None,
+                Some("http://example.test/flac".to_string()),
+                Some("http://example.test/flac".to_string()),
+            ],
+            "the queue track's source: none while building, then the target"
+        );
+        assert_eq!(
+            blending, flac_file,
+            "the blend reported the outgoing's stream"
+        );
+        assert_eq!(
+            promoted, flac_file,
+            "the promotion lost the incoming's stream"
         );
     }
 
@@ -7474,7 +7573,7 @@ mod tests {
         let mut engine = CustomAudioEngine::new();
         prime_playing_engine(&mut engine);
         engine.duration = 200_000;
-        engine.delivery = StreamDelivery::Unsized;
+        engine.stream.delivery = StreamDelivery::Unsized;
         engine.crossfade.phase = CrossfadePhase::Active {
             decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
             incoming_source: "http://example.test/next".to_string(),
@@ -8361,13 +8460,60 @@ mod tests {
         assert_eq!(info.source, "http://example.test/next-gapless");
         assert_eq!(info.duration, 222_000);
         assert_eq!(info.format, matching_format());
-        assert_eq!(info.codec.as_deref(), Some("flac"));
+        assert_eq!(info.stream.codec.as_deref(), Some("flac"));
 
         // The staged decoder is now the primary decoder (format carried over).
         assert_eq!(
             engine.decoder.lock().await.format(),
             &matching_format(),
             "Swapped must install the staged decoder as the primary decoder"
+        );
+    }
+
+    /// The inline gapless swap carries the swapped-in track's answer length
+    /// in its transition info, as it carries its delivery, and the pickup
+    /// records it for the queue's track.
+    #[tokio::test]
+    async fn a_gapless_swap_carries_the_tracks_answer_length_through_its_pickup() {
+        let mut engine = CustomAudioEngine::new();
+        let _cb_count = install_callback_counter(&mut engine);
+        engine.stream.byte_len = Some(1_111);
+        {
+            let mut slot = engine.gapless.lock().await;
+            let mut next = staged_decoder(matching_format(), 222_000, "flac");
+            next.set_byte_len_for_test(Some(22_222_222));
+            slot.decoder = Some(next);
+            slot.source = "http://example.test/next-gapless".to_string();
+            slot.prepared = true;
+        }
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+            &engine.decode_loop,
+            engine.decode_loop.current(),
+        )
+        .await;
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped, "precondition");
+        let carried = engine
+            .gapless_transition_info
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|info| info.stream.byte_len);
+        engine.consume_gapless_transition().await;
+
+        assert_eq!(carried, Some(22_222_222), "the info lost the answer length");
+        assert_eq!(queue_track_codec_and_len(&engine).1, Some(22_222_222));
+        assert_eq!(
+            queue_track_codec_and_len(&engine).0.as_deref(),
+            Some("flac")
         );
     }
 
@@ -8586,8 +8732,11 @@ mod tests {
             source: "http://example.test/incoming-gapless".to_string(),
             duration: 222_222,
             format: staged_format.clone(),
-            codec: Some("flac-incoming".to_string()),
-            delivery: StreamDelivery::Unsized,
+            stream: StreamFacts {
+                delivery: StreamDelivery::Unsized,
+                byte_len: None,
+                codec: Some("flac-incoming".to_string()),
+            },
             replay_gain: None,
             generation: engine.source_generation(),
         });
@@ -8598,7 +8747,7 @@ mod tests {
         engine.duration = 111_111;
         engine.position = 77_777; // must be cleared to 0
         engine.current_format = AudioFormat::new(crate::audio::SampleFormat::S16, 44_100, 2);
-        engine.live_codec_name.set(Some("mp3-stale".to_string()));
+        engine.stream.codec = Some("mp3-stale".to_string());
         engine.next_source = "http://example.test/incoming-gapless".to_string();
         engine.next_format = staged_format.clone();
         engine.gapless.lock().await.source = "http://example.test/later-prep".to_string();
@@ -8620,7 +8769,7 @@ mod tests {
         );
         // 2b. delivery <- info.delivery (whether the track can seek)
         assert_eq!(
-            engine.delivery,
+            engine.stream.delivery,
             StreamDelivery::Unsized,
             "delivery must be replaced with the staged delivery",
         );
@@ -8635,7 +8784,7 @@ mod tests {
             engine.current_format, staged_format,
             "current_format must be replaced with the staged format",
         );
-        // 5. live_codec_name <- info.codec
+        // 5. the codec <- info.stream.codec
         assert_eq!(
             engine.live_codec(),
             Some("flac-incoming".to_string()),
@@ -8684,7 +8833,7 @@ mod tests {
         engine.duration = 333_333;
         engine.position = 44_444;
         engine.current_format = AudioFormat::new(crate::audio::SampleFormat::S24, 88_200, 2);
-        engine.live_codec_name.set(Some("opus-keep".to_string()));
+        engine.stream.codec = Some("opus-keep".to_string());
         engine.next_source = "http://example.test/keep-next".to_string();
         engine.gapless.lock().await.source = "http://example.test/keep-slot".to_string();
         engine.live_sample_rate.store(88_200, Ordering::Relaxed);
@@ -9085,6 +9234,35 @@ mod tests {
         );
     }
 
+    /// The end-of-track load of the prepared track records its answer length
+    /// beside its delivery, so the UI judges the new track by its own stream.
+    #[tokio::test]
+    async fn load_prepared_track_records_the_tracks_answer_length() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        engine.stream.byte_len = Some(1_111);
+        let mut next = staged_decoder(matching_format(), 200_000, "flac");
+        next.set_byte_len_for_test(Some(33_333_333));
+        engine
+            .store_prepared_decoder(
+                next,
+                PREPARED_URL.to_string(),
+                None,
+                PreparedTransitionDirectives::default(),
+            )
+            .await;
+
+        engine
+            .load_prepared_track()
+            .await
+            .expect("the prepared track loads");
+
+        assert_eq!(queue_track_codec_and_len(&engine).1, Some(33_333_333));
+        assert_eq!(
+            queue_track_codec_and_len(&engine).0.as_deref(),
+            Some("flac")
+        );
+    }
+
     /// Linear factor for `db` decibels (what the stream applies for a gain tag).
     fn db(db: f32) -> f32 {
         10f32.powf(db / 20.0)
@@ -9466,6 +9644,72 @@ mod tests {
             position, 0,
             "the start offset was applied to a live transcode"
         );
+    }
+
+    /// A hard load records the answer length with the delivery when the
+    /// track opens; a new source has none until it opens.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_played_file_reports_its_answer_length_for_the_queue_track() {
+        use crate::audio::decoder::tests::{SIZED_FILE, spawn_sized_file};
+
+        let (url, _requests) = spawn_sized_file().await;
+        let mut engine = CustomAudioEngine::new();
+        let _mixer = engine.renderer.lock().install_detached_output_for_test();
+        engine.load_track_with_rg(&url, None, None).await;
+        engine.play().await.expect("the file plays");
+        let played = queue_track_codec_and_len(&engine);
+        engine
+            .load_track_with_rg("http://example.test/next", None, None)
+            .await;
+        let staged = queue_track_codec_and_len(&engine).1;
+        engine.stop().await;
+
+        assert_eq!(
+            played,
+            (Some("mp3".to_string()), Some(SIZED_FILE.len() as u64))
+        );
+        assert_eq!(staged, None, "a new source has no length until it opens");
+    }
+
+    /// Stop then Play of a track whose first open had no length reopens it,
+    /// and the reopened answer can differ: a transcode the server finished
+    /// caching meanwhile comes back sized. The replay records that answer's
+    /// length, so the UI judges the stream that now plays.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_replay_records_the_reopened_answers_length() {
+        use crate::audio::decoder::tests::{SIZED_FILE, spawn_sized_file};
+
+        let (url, _requests) = spawn_sized_file().await;
+        let mut engine = CustomAudioEngine::new();
+        let _mixer = engine.renderer.lock().install_detached_output_for_test();
+        engine.load_track_with_rg(&url, None, None).await;
+        engine.play().await.expect("the track plays");
+        engine.stop().await;
+        // As if the first open had been the live transcode.
+        engine
+            .decoder
+            .lock()
+            .await
+            .set_delivery_for_test(StreamDelivery::Unsized);
+        engine.stream.delivery = StreamDelivery::Unsized;
+        engine.stream.byte_len = None;
+
+        let replayed = engine.play().await;
+        let reported = queue_track_codec_and_len(&engine).1;
+        engine.stop().await;
+
+        assert!(replayed.is_ok(), "the replay failed: {replayed:?}");
+        assert_eq!(reported, Some(SIZED_FILE.len() as u64));
+    }
+
+    /// A live transcode has no answer length to report.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_played_live_transcode_reports_no_answer_length() {
+        let (mut engine, _requests, _mixer) = engine_playing_a_live_transcode().await;
+        let reported = queue_track_codec_and_len(&engine);
+        engine.stop().await;
+
+        assert_eq!(reported, (Some("mp3".to_string()), None));
     }
 
     /// A station whose server sends no length and no ICY headers answers
@@ -9929,26 +10173,12 @@ mod tests {
         );
     }
 
-    /// `LiveStringSlot::set` overwrites prior values and accepts `None` to
-    /// clear. Preserves the historical write semantics of the blocking
-    /// `RwLock::write()` path used by decoder-init.
-    #[test]
-    fn live_string_slot_set_get_roundtrip() {
-        let slot = LiveStringSlot::new();
-        slot.set(Some("foo".to_string()));
-        assert_eq!(slot.get(), Some("foo".to_string()));
-        slot.set(Some("bar".to_string()));
-        assert_eq!(slot.get(), Some("bar".to_string()));
-        slot.set(None);
-        assert_eq!(slot.get(), None);
-    }
-
-    /// `LiveStringSlot::reset` is the B11 hot-path-safe equivalent of
-    /// `set(None)` — must clear a previously-set value.
+    /// `LiveStringSlot::reset` is the B11 hot-path-safe clear — it must
+    /// drop a value the callback wrote.
     #[test]
     fn live_string_slot_reset_clears() {
         let slot = LiveStringSlot::new();
-        slot.set(Some("x".to_string()));
+        *slot.clone_arc().write().expect("write lock") = Some("x".to_string());
         assert_eq!(slot.get(), Some("x".to_string()));
         slot.reset();
         assert_eq!(slot.get(), None);

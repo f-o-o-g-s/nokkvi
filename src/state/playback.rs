@@ -1,6 +1,60 @@
 //! Playback state: the active playback source, player-bar fields, and modes.
 
-use nokkvi_data::types::queue::RepeatMode;
+use nokkvi_data::{
+    audio::{StreamDelivery, StreamFacts},
+    types::queue::RepeatMode,
+};
+
+/// What the tick can tell about the queue song's stream: the song's own
+/// file, something the server made from it, not known, or not yet this
+/// song's. It decides the BIT-PERFECT badge (only the file can show it, and
+/// `Pending` holds the last verdict) and the format label
+/// (`update::playback::song_format_label`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamOrigin {
+    /// The file itself: the answer is sized and its byte length is the
+    /// song's file size (Navidrome serves a raw file at its size on disk,
+    /// which `Song.size` holds as of the scan the queue's copy came from).
+    OriginalFile,
+    /// Something else: a live transcode (no length), or a sized answer of
+    /// another length (a finished transcode from the server's cache, or a
+    /// re-encode to the same codec).
+    Transcode,
+    /// Can't tell: the song's size is unknown, or the stream has no length
+    /// and is no live transcode (a queue song the server sent with ICY
+    /// headers, read as a live stream).
+    Unknown,
+    /// The engine does not describe this song yet: a skip's decoder is
+    /// still building, or the engine has moved on to another song before the
+    /// queue has (an auto crossfade's finalize or a seek in its finalize gap
+    /// promotes the next track a task hop before the queue follows; a hard
+    /// load can land between the tick's engine and queue reads).
+    Pending,
+}
+
+impl StreamOrigin {
+    /// Classify the stream the engine reports for the queue's track
+    /// (`CustomAudioEngine::queue_track_stream`; the caller passes `None`
+    /// while it does not describe the song yet, which reads `Pending`)
+    /// against the song's file size (`Song::size`, 0 when the server sent
+    /// none). Navidrome always sends the size, so an unknown one proves
+    /// nothing and reads `Unknown`. Nothing refreshes the queue's copy of a
+    /// song (the pool persists in redb), so a file whose size changed (a
+    /// retag) reads `Transcode` until Navidrome rescans it AND the song is
+    /// queued again: it loses the badge, never gains one.
+    pub fn of(stream: Option<&StreamFacts>, song_size: u64) -> Self {
+        let Some(stream) = stream else {
+            return Self::Pending;
+        };
+        match stream.byte_len {
+            _ if stream.delivery == StreamDelivery::Unsized => Self::Transcode,
+            _ if song_size == 0 => Self::Unknown,
+            Some(len) if len == song_size => Self::OriginalFile,
+            Some(_) => Self::Transcode,
+            None => Self::Unknown,
+        }
+    }
+}
 
 /// Honest bit-perfect status for the now-playing indicator. Derived from the
 /// bit-perfect mode, the track's rate, and the REAL device clock rate (read
@@ -124,8 +178,10 @@ pub struct PlaybackState {
     pub bit_perfect_status: BitPerfectStatus,
     /// Whether the honest bit-perfect badge is currently live for the playing
     /// track (the stream was built bit-perfect, playback is active, and it is
-    /// queue — not radio). Recomputed each snapshot and used as the staleness
-    /// guard for the off-thread device-rate probe result.
+    /// a queue song's own file — not radio, not a transcode, not a stream
+    /// whose origin can't be told: [`StreamOrigin`]). Recomputed each
+    /// snapshot and used as the staleness guard for the off-thread
+    /// device-rate probe result.
     pub bit_perfect_engaged: bool,
     /// Countdown (in 100ms ticks) until the next `/proc/asound` device-rate
     /// re-probe. Throttles the blocking walk off the hot path while still

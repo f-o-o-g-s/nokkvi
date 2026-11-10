@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 
 - After a descending queue sort, songs that share a rating or other sorted value no longer flip order when the track changes.
 - After a descending queue sort with shuffle off, Next now plays the song shown below the current one.
+- A transcode served from Navidrome's cache is now labelled with the codec actually playing, instead of the file's own format.
+- BIT-PERFECT now shows only when the stream is the original file, so a cached transcode can no longer wear it.
+- During a skip crossfade, the format label now shows the incoming track's codec instead of the outgoing one's.
 
 ### Removed
 

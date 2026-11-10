@@ -69,6 +69,7 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
         bitrate: 1411,
         seekable: true,
         live_transcode: false,
+        stream_origin: crate::state::StreamOrigin::OriginalFile,
         live_icy_metadata: None,
         bpm: None,
         seek_epoch: 0,

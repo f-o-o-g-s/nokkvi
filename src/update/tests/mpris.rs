@@ -366,6 +366,7 @@ fn live_transcode_update() -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         seekable: false,
         live_transcode: true,
+        stream_origin: crate::state::StreamOrigin::Transcode,
         ..make_playback_update()
     }
 }

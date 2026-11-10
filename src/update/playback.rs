@@ -1,13 +1,16 @@
 //! Playback control handlers
 
 use iced::Task;
-use nokkvi_data::types::queue::RepeatMode;
+use nokkvi_data::{
+    audio::StreamFacts, services::playback::StreamSession, types::queue::RepeatMode,
+};
 use tracing::{debug, trace, warn};
 
 use crate::{
     Nokkvi, View,
     app_message::{Message, PlaybackMessage, ScrobbleMessage, ToastMessage},
     services::mpris_art_writer::{self, MprisArtItem},
+    state::StreamOrigin,
     views,
 };
 
@@ -128,32 +131,79 @@ fn bit_perfect_status_for(
 /// reading the setting would let the badge claim BIT-PERFECT for a stream still
 /// on the DSP path. `current_stream_bit_perfect` already encodes the
 /// native-PipeWire-volume requirement (the cpal fallback can't be bit-perfect),
-/// so no separate native-volume check is needed. A lossy source is excluded
-/// outright (a radio stream, or a song the server transcodes on the fly): it
-/// can't be bit-perfect regardless of the device clock.
+/// so no separate native-volume check is needed. A source not proven to be the
+/// song's own file is excluded outright (a radio stream, a transcode, or a
+/// stream whose origin can't be told, see [`StreamOrigin`]): it can't claim
+/// bit-perfect regardless of the device clock.
 fn bit_perfect_badge_engaged(
     current_stream_bit_perfect: bool,
     playing: bool,
-    lossy_source: bool,
+    unproven_source: bool,
 ) -> bool {
-    current_stream_bit_perfect && playing && !lossy_source
+    current_stream_bit_perfect && playing && !unproven_source
 }
 
-/// The format label for a queue song: the file's extension, or for a live
-/// transcode the codec the server actually sends.
-pub(crate) fn song_format_label(
-    path: &str,
-    live_codec: Option<&str>,
-    live_transcode: bool,
-) -> String {
-    match live_codec {
-        Some(codec) if live_transcode => codec.to_string(),
-        _ => path
-            .rsplit('.')
-            .next()
-            .map(|ext| ext.to_lowercase())
-            .unwrap_or_default(),
+/// The format label for a queue song: its file's extension for the file
+/// itself, the codec the server actually sends for a transcode. When the
+/// origin can't be told, the extension stays only while the decoded codec is
+/// one a file of that extension holds ([`codec_fits_suffix`]); any other
+/// codec can only be a transcode's. With no codec known yet, the extension.
+pub(crate) fn song_format_label(path: &str, codec: Option<&str>, origin: StreamOrigin) -> String {
+    let suffix = path
+        .rsplit('.')
+        .next()
+        .map(|ext| ext.to_lowercase())
+        .unwrap_or_default();
+    match (origin, codec) {
+        (StreamOrigin::Transcode, Some(codec)) => codec.to_string(),
+        (StreamOrigin::Unknown, Some(codec)) if !codec_fits_suffix(&suffix, codec) => {
+            codec.to_string()
+        }
+        // The file itself, a codec its extension holds, no codec yet, or a
+        // stream that does not describe this song yet.
+        (
+            StreamOrigin::OriginalFile
+            | StreamOrigin::Transcode
+            | StreamOrigin::Unknown
+            | StreamOrigin::Pending,
+            _,
+        ) => suffix,
     }
+}
+
+/// Whether a file with extension `suffix` can hold audio Symphonia decodes
+/// as `codec` (its short codec name). The container families, after what
+/// Symphonia 0.6's readers map: WAV and AIFF carry PCM (A-law and µ-law
+/// included, all `pcm_*`) or ADPCM; MP4 carries AAC, ALAC, MP3, FLAC, Opus
+/// or PCM; Ogg carries Vorbis, Opus or FLAC; Matroska and WebM carry
+/// anything. Every other extension names its codec (`flac`, `mp3`, `opus`,
+/// `aac`, ...).
+fn codec_fits_suffix(suffix: &str, codec: &str) -> bool {
+    let pcm = codec.starts_with("pcm_");
+    match suffix {
+        "wav" | "wave" | "aif" | "aiff" | "aifc" => pcm || codec.starts_with("adpcm_"),
+        "m4a" | "m4b" | "mp4" => pcm || matches!(codec, "aac" | "alac" | "mp3" | "flac" | "opus"),
+        "ogg" | "oga" => matches!(codec, "vorbis" | "opus" | "flac"),
+        "mka" | "mkv" | "webm" => true,
+        _ => suffix == codec,
+    }
+}
+
+/// The format label and stream origin the tick reports for `song`, from
+/// the stream the engine reports for the queue's track and that track's
+/// source URL.
+pub(crate) fn queue_song_format(
+    song: &nokkvi_data::types::song::Song,
+    queue_source: Option<&str>,
+    stream: Option<&StreamFacts>,
+) -> (String, StreamOrigin) {
+    // A stream whose source names another song (the engine moved on before
+    // the queue did) describes nothing about this one yet.
+    let names_song = queue_source.and_then(StreamSession::song_id_of) == Some(song.id.as_str());
+    let stream = stream.filter(|_| names_song);
+    let origin = StreamOrigin::of(stream, song.size);
+    let codec = stream.and_then(|stream| stream.codec.as_deref());
+    (song_format_label(&song.path, codec, origin), origin)
 }
 
 /// Resolve the next radio-station index when cycling.
@@ -357,7 +407,11 @@ impl Nokkvi {
                     Some(station) if !engine.is_playing_source(&station.stream_url) => None,
                     _ => engine.live_icy_metadata(),
                 };
-                let engine_live_codec = engine.live_codec();
+                // The stream of the track the QUEUE names (a skip blend's
+                // incoming, not the outgoing still sounding), paired below
+                // with the queue's current song.
+                let queue_stream = engine.queue_track_stream().cloned();
+                let queue_source = engine.queue_track_source().map(str::to_owned);
                 let next_track_epoch = engine.next_track_epoch();
                 let seekable = engine.seekable();
                 let live_transcode = engine.is_live_transcode();
@@ -368,51 +422,61 @@ impl Nokkvi {
                 let song = qm.get_current_song();
                 let current_index = qm.current_index();
                 let current_entry_id = current_index.and_then(|i| qm.entry_id_at(i));
-                let (title, artist, album, art_item, song_id, format_suffix, bitrate) =
-                    if let Some(station) = &radio_station {
-                        (
-                            station.name.clone(),
-                            String::new(), // Artist handles name sometimes? No, artist is empty
-                            String::new(),
-                            MprisArtItem::for_radio(station, icy_url),
-                            Some(station.id.clone()),
-                            engine_live_codec.unwrap_or_else(|| "radio".to_string()),
-                            engine_live_bitrate,
-                        )
-                    } else if let Some(s) = &song {
-                        // The file's extension (e.g. "flac"), or the codec a
-                        // live transcode actually sends.
-                        let suffix = song_format_label(
-                            &s.path,
-                            engine_live_codec.as_deref(),
-                            live_transcode,
-                        );
-                        // Prefer live decoder bitrate over static Navidrome API value
-                        let br = if engine_live_bitrate > 0 {
-                            engine_live_bitrate
-                        } else {
-                            s.bitrate.unwrap_or(0)
-                        };
-                        (
-                            s.title.clone(),
-                            s.artist.clone(),
-                            s.album.clone(),
-                            MprisArtItem::for_song(s, track_artwork),
-                            Some(s.id.clone()),
-                            suffix,
-                            br,
-                        )
+                let (
+                    title,
+                    artist,
+                    album,
+                    art_item,
+                    song_id,
+                    format_suffix,
+                    bitrate,
+                    stream_origin,
+                ) = if let Some(station) = &radio_station {
+                    (
+                        station.name.clone(),
+                        String::new(), // Artist handles name sometimes? No, artist is empty
+                        String::new(),
+                        MprisArtItem::for_radio(station, icy_url),
+                        Some(station.id.clone()),
+                        queue_stream
+                            .and_then(|stream| stream.codec)
+                            .unwrap_or_else(|| "radio".to_string()),
+                        engine_live_bitrate,
+                        StreamOrigin::Unknown,
+                    )
+                } else if let Some(s) = &song {
+                    // The file's extension (e.g. "flac"), or the codec a
+                    // transcode actually sends.
+                    let (suffix, origin) =
+                        queue_song_format(s, queue_source.as_deref(), queue_stream.as_ref());
+                    // Prefer live decoder bitrate over static Navidrome API value
+                    let br = if engine_live_bitrate > 0 {
+                        engine_live_bitrate
                     } else {
-                        (
-                            "Not Playing".to_string(),
-                            String::new(),
-                            String::new(),
-                            MprisArtItem::Nothing,
-                            None,
-                            String::new(),
-                            0,
-                        )
+                        s.bitrate.unwrap_or(0)
                     };
+                    (
+                        s.title.clone(),
+                        s.artist.clone(),
+                        s.album.clone(),
+                        MprisArtItem::for_song(s, track_artwork),
+                        Some(s.id.clone()),
+                        suffix,
+                        br,
+                        origin,
+                    )
+                } else {
+                    (
+                        "Not Playing".to_string(),
+                        String::new(),
+                        String::new(),
+                        MprisArtItem::Nothing,
+                        None,
+                        String::new(),
+                        0,
+                        StreamOrigin::Unknown,
+                    )
+                };
                 drop(qm);
 
                 // MPRIS art: `mpris_art_writer` owns the rules. A current song
@@ -489,6 +553,7 @@ impl Nokkvi {
                     bitrate,
                     seekable,
                     live_transcode,
+                    stream_origin,
                     live_icy_metadata: engine_live_icy_metadata,
                     bpm,
                     seek_epoch,
@@ -528,6 +593,7 @@ impl Nokkvi {
             bitrate,
             seekable,
             live_transcode,
+            stream_origin,
             live_icy_metadata,
             bpm,
             seek_epoch,
@@ -631,15 +697,31 @@ impl Nokkvi {
         // stream was actually built bit-perfect (build-time fact from the
         // renderer — NOT the live setting, which a mid-track toggle flips before
         // the running stream changes), playback is active, and this is queue
-        // playback (a lossy radio stream can't be bit-perfect). The renderer's
-        // build-time fact already encodes the native-PipeWire-volume requirement
+        // playback of the song's own file (a radio stream or anything the
+        // server made from the file can't be bit-perfect, and a stream whose
+        // origin can't be told never claims it). The renderer's build-time fact
+        // already encodes the native-PipeWire-volume requirement
         // (`bit_perfect_active`), so the cpal fallback reports false here.
         let mut bit_perfect_probe_task: Option<Task<Message>> = None;
-        let bit_perfect_engaged = bit_perfect_badge_engaged(
-            current_stream_bit_perfect,
-            playing,
-            self.active_playback.is_radio() || live_transcode,
-        );
+        let is_radio = self.active_playback.is_radio();
+        // A `Pending` stream (a skip's decoder building, or the engine on the
+        // next track before the queue) holds the verdict an earlier tick
+        // earned: what sounds is still the track that earned it, and the next
+        // one is judged once the engine describes it. It never turns the
+        // badge on, and a stop still turns it off. The status and the probe
+        // below run as on any engaged tick, so a rate change seen on a
+        // pending tick still resets the verdict and re-probes at once.
+        let pending = stream_origin == StreamOrigin::Pending;
+        let bit_perfect_engaged = if pending {
+            self.playback.bit_perfect_engaged
+                && bit_perfect_badge_engaged(current_stream_bit_perfect, playing, is_radio)
+        } else {
+            bit_perfect_badge_engaged(
+                current_stream_bit_perfect,
+                playing,
+                is_radio || stream_origin != StreamOrigin::OriginalFile,
+            )
+        };
         self.playback.bit_perfect_engaged = bit_perfect_engaged;
         // A genuine track / play-state change (vs a same-track periodic
         // re-probe) — bound once so the probe-dispatch gate and the
