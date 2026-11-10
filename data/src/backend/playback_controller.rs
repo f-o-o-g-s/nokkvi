@@ -205,6 +205,19 @@ impl PlaybackController {
         self.audio_engine.clone()
     }
 
+    /// Take the OpenSubsonic extensions the server advertises (the login's
+    /// `getOpenSubsonicExtensions` probe): with `transcodeOffset`, a
+    /// transcode nokkvi asked for can seek by reopening at an offset. The
+    /// engine starts without it, so a session whose probe failed stays
+    /// unable to seek such a stream, as before.
+    pub async fn apply_server_extensions(&self, names: &[String]) {
+        let supported = names.iter().any(|name| name == TRANSCODE_OFFSET_EXTENSION);
+        self.audio_engine
+            .lock()
+            .await
+            .set_transcode_offset_supported(supported);
+    }
+
     /// The controller's hard-load epilogue: [`StagedSong::load`] under the
     /// held engine lock, discharge the queue mutation's reset (even when
     /// `play()` failed: the queue changed either way), then name the song on
@@ -633,6 +646,17 @@ impl PlaybackController {
     /// The low clamp is [`offset_position_ms`]; the high clamp is the engine's
     /// own `min(duration)`, so a jump past the end ends the track exactly as
     /// dragging the slider there does.
+    ///
+    /// On a track that seeks by reopening its stream at an offset (a
+    /// transcode nokkvi asked for, [`CustomAudioEngine::seek_reopens`]), every
+    /// seek is a new transcode on the server, so a held key must not send one
+    /// per repeat: the target is held ([`CustomAudioEngine::defer_seek`]) and
+    /// sent once no repeat came for [`SEEK_SETTLE`], by a tracked task. The
+    /// engine reports the held target meanwhile, so the base of the next
+    /// repeat and the clock are both the target the repeats add up to, and
+    /// this returns at once with it. Every other seek runs here, as before.
+    ///
+    /// [`SEEK_SETTLE`]: crate::audio::engine::SEEK_SETTLE
     pub async fn seek_relative(&self, delta_seconds: f64) -> Result<u64> {
         let mut engine = self.audio_engine.lock().await;
         let base = engine.position();
@@ -644,6 +668,23 @@ impl PlaybackController {
             // key: the first fraction of the track machine-guns.
             return Ok(base);
         };
+        // A known length: a track is playing or paused (and no skip is
+        // landing, which the seek below resolves first).
+        let duration = engine.duration();
+        if duration > 0 && engine.seek_reopens() {
+            // The engine's own `min(duration)` is the high clamp, as below.
+            let first = engine.defer_seek(target.min(duration));
+            drop(engine);
+            if first {
+                let controller = self.clone();
+                self.task_manager.spawn("seek_settle", move || async move {
+                    if let Some(outcome) = run_seek_settle(&controller.audio_engine).await {
+                        controller.after_seek(outcome).await;
+                    }
+                });
+            }
+            return Ok(target.min(duration));
+        }
         let outcome = engine.seek(target).await;
         let landed = engine.position();
         drop(engine);
@@ -1677,6 +1718,34 @@ fn offset_position_ms(base_ms: u64, delta_seconds: f64) -> u64 {
 fn relative_seek_target(base_ms: u64, delta_seconds: f64) -> Option<u64> {
     let target = offset_position_ms(base_ms, delta_seconds);
     (target != base_ms).then_some(target)
+}
+
+/// The OpenSubsonic extension a server advertises when it honours
+/// `timeOffset` on a transcode.
+pub const TRANSCODE_OFFSET_EXTENSION: &str = "transcodeOffset";
+
+/// Wait out a settling relative seek ([`CustomAudioEngine::defer_seek`]),
+/// then run it under the engine lock. A repeat that lands meanwhile moves
+/// the deadline, so the seek goes to the server [`SEEK_SETTLE`] after the
+/// last repeat. Returns its outcome, or `None` when something else replaced
+/// it (another seek, a track change, a stop).
+///
+/// [`SEEK_SETTLE`]: crate::audio::engine::SEEK_SETTLE
+async fn run_seek_settle(
+    engine: &Mutex<CustomAudioEngine>,
+) -> Option<crate::audio::engine::SeekOutcome> {
+    use crate::audio::engine::SettleStep;
+
+    let mut due = engine.lock().await.settling_seek_due()?;
+    loop {
+        tokio::time::sleep_until(due).await;
+        let mut engine = engine.lock().await;
+        match engine.take_settled_seek(tokio::time::Instant::now()) {
+            SettleStep::Wait(later) => due = later,
+            SettleStep::Fire(target_ms) => return Some(engine.seek(target_ms).await),
+            SettleStep::Gone => return None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3020,5 +3089,190 @@ mod tests {
             "the skip blend's incoming is still the queue's track"
         );
         Ok(())
+    }
+
+    // ── Seeking a transcode by reopening it at an offset ──
+
+    use crate::{
+        audio::decoder::tests::{ClockReply, ClockServer, spawn_clock_server},
+        types::stream_quality::StreamQuality,
+    };
+
+    /// A FLAC queue song, which Opus or MP3 always asks the server to
+    /// transcode (its bitrate is unknown).
+    fn flac_song(id: &str) -> crate::types::song::Song {
+        let mut song = click_song(id);
+        song.suffix = Some("flac".to_owned());
+        song.path = format!("/music/{id}.flac");
+        song.duration = 10;
+        song
+    }
+
+    /// A controller logged in to `server` under `quality`, on a server that
+    /// honours `timeOffset`, its engine on a device-less output, playing
+    /// `flac_song("a")`. Keep the mixer source alive.
+    async fn playing_clock_fixture(
+        server: &ClockServer,
+        quality: StreamQuality,
+    ) -> Result<(ClickFixture, rodio::mixer::MixerSource)> {
+        let temp = tempfile::tempdir()?;
+        let storage_q =
+            crate::services::state_storage::StateStorage::new(temp.path().join("queue.redb"))?;
+        let storage_s =
+            crate::services::state_storage::StateStorage::new(temp.path().join("settings.redb"))?;
+        let auth = crate::backend::auth::AuthGateway::new()?;
+        auth.resume_session(
+            server.base.clone(),
+            "alice".to_string(),
+            "jwt".to_string(),
+            "u=alice&s=salt&t=token".to_string(),
+        )
+        .await?;
+        let queue = QueueService::new(auth, storage_q, quality)?;
+        let settings = SettingsService::new(storage_s)?;
+        let tm = Arc::new(TaskManager::new());
+        let (playback, _loop_rx, _qc_rx) =
+            PlaybackController::new(queue.clone(), settings, tm.clone()).await?;
+        let mixer = playback
+            .audio_engine()
+            .lock()
+            .await
+            .install_detached_output_for_test();
+        playback
+            .apply_server_extensions(&["formPost".to_owned(), "transcodeOffset".to_owned()])
+            .await;
+        playback
+            .play_songs_from_index(vec![flac_song("a")], 0)
+            .await?;
+        Ok((
+            ClickFixture {
+                _temp: temp,
+                queue,
+                playback,
+                tasks: tm,
+            },
+            mixer,
+        ))
+    }
+
+    const OPUS_128: StreamQuality = StreamQuality {
+        format: StreamFormat::Opus,
+        max_bitrate: StreamMaxBitrate::Kbps128,
+    };
+
+    /// A held seek key repeats ~25 times a second. On a stream that seeks by
+    /// reopening, each repeat would be a new transcode on the server, so the
+    /// seek waits until the key lets go: nothing goes out while it is held,
+    /// the clock shows the target the repeats add up to meanwhile, and one
+    /// reopen at that target follows (at most two requests in all).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_held_relative_seek_settles_into_one_reopen_and_shows_the_pending_target()
+    -> Result<()> {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let (fx, _mixer) = playing_clock_fixture(&server, OPUS_128).await?;
+        let opened = server.requests().len();
+        let engine = fx.playback.audio_engine();
+
+        let mut landed = Vec::new();
+        for _ in 0..8 {
+            landed.push(fx.playback.seek_relative(0.5).await?);
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+        let while_held = server.requests().len() - opened;
+        let shown = engine.lock().await.position();
+        tokio::time::sleep(
+            crate::audio::engine::SEEK_SETTLE + std::time::Duration::from_millis(500),
+        )
+        .await;
+        let after: Vec<_> = server.requests().into_iter().skip(opened).collect();
+        let position = engine.lock().await.position();
+        engine.lock().await.stop().await;
+
+        assert_eq!(
+            landed,
+            [500, 1_000, 1_500, 2_000, 2_500, 3_000, 3_500, 4_000],
+            "each repeat adds to the pending target"
+        );
+        assert_eq!(
+            while_held, 0,
+            "nothing goes to the server while the key is held"
+        );
+        assert_eq!(shown, 4_000, "the clock shows the pending target");
+        assert!(after.len() <= 2, "{after:?}");
+        assert_eq!(
+            after.iter().filter(|r| r.time_offset().is_some()).count(),
+            1,
+            "one reopen: {after:?}"
+        );
+        assert_eq!(after[0].time_offset().as_deref(), Some("4"), "{after:?}");
+        assert_eq!(position, 4_000);
+        Ok(())
+    }
+
+    /// The Streaming Quality setting changed mid-song applies from the next
+    /// song: a seek that reopens the playing song keeps the params it opened
+    /// with.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_mid_song_setting_change_leaves_a_seeks_reopen_on_the_songs_own_params() -> Result<()>
+    {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let (fx, _mixer) = playing_clock_fixture(&server, OPUS_128).await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut engine = engine_arc.lock().await;
+            PlaybackController::push_stream_quality(
+                &fx.queue,
+                &mut engine,
+                StreamQuality {
+                    format: StreamFormat::Mp3,
+                    max_bitrate: StreamMaxBitrate::Kbps192,
+                },
+            )
+            .await;
+        }
+
+        fx.playback.seek(3.0).await?;
+        let reopen = server.requests().last().cloned();
+        fx.playback.audio_engine().lock().await.stop().await;
+
+        let reopen = reopen.expect("a request");
+        assert_eq!(reopen.time_offset().as_deref(), Some("3"), "{reopen:?}");
+        assert_eq!(
+            reopen.param("format").as_deref(),
+            Some("opus"),
+            "{reopen:?}"
+        );
+        assert_eq!(
+            reopen.param("maxBitRate").as_deref(),
+            Some("128"),
+            "{reopen:?}"
+        );
+        Ok(())
+    }
+
+    /// The settle task waits until `SEEK_SETTLE` after the LAST repeat, then
+    /// runs the seek once; a repeat while it waits only moves the deadline.
+    #[tokio::test(start_paused = true)]
+    async fn the_seek_settle_runs_once_after_the_last_repeat() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let started = tokio::time::Instant::now();
+        assert!(engine.lock().await.defer_seek(5_000));
+        let settle = {
+            let engine = engine.clone();
+            tokio::spawn(async move { run_seek_settle(&engine).await })
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(!engine.lock().await.defer_seek(8_000), "a repeat moves it");
+        let outcome = settle.await.expect("the settle task");
+        let elapsed = started.elapsed();
+        let left = engine.lock().await.settling_seek_due();
+
+        assert_eq!(
+            elapsed,
+            std::time::Duration::from_millis(200) + crate::audio::engine::SEEK_SETTLE
+        );
+        assert_eq!(outcome, Some(crate::audio::engine::SeekOutcome::Settled));
+        assert_eq!(left, None, "it ran once");
     }
 }

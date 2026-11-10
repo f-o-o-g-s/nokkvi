@@ -26,8 +26,26 @@ use tracing::{debug, error, info, trace, warn};
 use super::range_http_reader::{CHUNK_SIZE, ContentRange, RangeHttpReader};
 use crate::{
     audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry},
-    utils::{artwork_url::requests_transcode, url_redaction::redact_subsonic_url},
+    utils::{
+        artwork_url::{requests_transcode, with_time_offset},
+        url_redaction::redact_subsonic_url,
+    },
 };
+
+/// The answer to a stream request whose `timeOffset` lies past the song's
+/// end: Navidrome sends an Ogg holding only its headers, or an empty body.
+/// Nothing went wrong; the song is over. [`AudioDecoder::open_at`] reports it
+/// as this error so the engine can end the track as at its natural end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamPastEnd;
+
+impl std::fmt::Display for StreamPastEnd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the song ends before that point")
+    }
+}
+
+impl std::error::Error for StreamPastEnd {}
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
 fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
@@ -237,7 +255,16 @@ struct OpenedStream {
     hint: Option<String>,
     recv_timeout: Option<RecvTimeout>,
     header_duration_ms: Option<u64>,
+    /// The answer declared a length small enough to be a container's headers
+    /// alone ([`PAST_END_ANSWER_MAX_BYTES`]).
+    tiny: bool,
 }
+
+/// The largest answer to a request at an offset that is taken for a
+/// container's headers alone when the probe finds no audio in it (Navidrome
+/// sends a 266-byte Ogg past a song's end; one second of 64 kbps Opus is
+/// already 8 KB).
+const PAST_END_ANSWER_MAX_BYTES: u64 = 4096;
 
 /// Bounded backoff (ms) between transient-I/O-error retries inside
 /// `read_buffer`. The retry sleep is a synchronous `std::thread::sleep` run
@@ -519,17 +546,20 @@ pub enum StreamDelivery {
     /// A queue song the server sends without a length, read once from front
     /// to back. Navidrome serves a live (not yet cached) transcode this way:
     /// `Accept-Ranges: none`, no Content-Length, `X-Content-Duration`.
-    /// Finite (its EOF ends the track) but not seekable.
+    /// Finite (its EOF ends the track). It can't seek within itself; a
+    /// transcode nokkvi asked for seeks by being opened again at an offset
+    /// (`CustomAudioEngine::seekable`).
     Unsized,
     /// A radio station's live stream: infinite, reconnected when it drops.
     Live,
 }
 
 /// What a track's open stream is: how its bytes arrive, the answer's byte
-/// length and the codec that decodes it. Taken from a decoder in one piece
-/// ([`Self::of`]) and stored in one piece wherever the engine keeps a track
-/// (the now-playing track, a skip blend's incoming, `GaplessTransitionInfo`),
-/// so no site can record one fact and forget another.
+/// length, the codec that decodes it and where in the song it starts. Taken
+/// from a decoder in one piece ([`Self::of`]) and stored in one piece wherever
+/// the engine keeps a track (the now-playing track, a skip blend's incoming,
+/// `GaplessTransitionInfo`), so no site can record one fact and forget
+/// another.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StreamFacts {
     /// How the bytes arrive, and so whether the track can seek.
@@ -539,6 +569,10 @@ pub struct StreamFacts {
     /// The codec Symphonia decodes, by its short name (`flac`, `opus`,
     /// `pcm_s16le`, ...).
     pub codec: Option<String>,
+    /// Where in the song the stream starts, in whole seconds: the
+    /// `timeOffset` the server honoured ([`AudioDecoder::offset_secs`]), 0
+    /// for a stream from the start. The track's URL never carries it.
+    pub offset_secs: u64,
 }
 
 impl StreamFacts {
@@ -548,6 +582,7 @@ impl StreamFacts {
             delivery: decoder.delivery(),
             byte_len: decoder.byte_len(),
             codec: decoder.live_codec(),
+            offset_secs: decoder.offset_secs(),
         }
     }
 }
@@ -602,6 +637,11 @@ pub struct AudioDecoder {
     /// position the clock names; `read_buffer` drops them. See
     /// [`seek_preroll_frames`].
     seek_preroll_frames: u64,
+    /// Where in the song the open stream starts, in whole seconds: the
+    /// `timeOffset` the server honoured ([`Self::open_at`]). 0 for a stream
+    /// from the start, and for an answer that ignored the offset (the song's
+    /// own file). `url` never carries it.
+    offset_secs: u64,
 }
 
 /// Leading-silence trim state (M8). The scan lives inside the registry-backed
@@ -807,6 +847,28 @@ fn sanitize_probed_duration(probed_ms: u64, expected_ms: Option<u64>) -> u64 {
     }
 }
 
+/// Whether a sized answer to a request at `offset_secs` holds the whole song
+/// from its start (the song's own file, which Navidrome sends whatever the
+/// offset) rather than the rest of it from the offset (a transcode its cache
+/// holds for that offset, the offset being part of the cache key). Told by
+/// the answer's own length (`probed_ms`) against the whole song's: the file
+/// runs about the whole song, the cache entry about the whole song less the
+/// offset, so whichever is nearer wins. With no length on either side it
+/// can't be told, and the offset is taken as honoured (the transcode's
+/// case, which a requested transcode on a server that transcoded its first
+/// request is, unless its player settings changed since).
+fn answer_starts_at_song_start(
+    probed_ms: u64,
+    whole_song_ms: Option<u64>,
+    offset_secs: u64,
+) -> bool {
+    let offset_ms = offset_secs.saturating_mul(1000);
+    whole_song_ms.is_some_and(|whole_ms| {
+        probed_ms > 0
+            && probed_ms.saturating_mul(2) >= whole_ms.saturating_mul(2).saturating_sub(offset_ms)
+    })
+}
+
 /// Ratio that maps the real (displayed) timeline onto Symphonia's internal
 /// one after `sanitize_probed_duration` overrode the probe.
 ///
@@ -893,6 +955,7 @@ impl AudioDecoder {
             live_codec: None,
             leading_trim: LeadingTrim::Off,
             seek_preroll_frames: 0,
+            offset_secs: 0,
         }
     }
 
@@ -927,24 +990,81 @@ impl AudioDecoder {
     /// reopens the URL, which is how the radio reconnect revives a station
     /// that dropped the connection.
     pub async fn init(&mut self, url: &str) -> Result<()> {
-        if self.initialized && self.url == url && !self.eof {
+        // Open on `url` from its start only: a stream open at an offset is
+        // another stream of the same URL.
+        if self.initialized && self.url == url && self.offset_secs == 0 && !self.eof {
             return Ok(());
         }
+        self.open_at(url, 0).await
+    }
 
+    /// Open `url` from `offset_secs` whole seconds into the song: the request
+    /// asks the server for `timeOffset=<offset_secs>` (0 asks for none).
+    /// `url` is the track's own URL, never one carrying an offset; it is what
+    /// [`Self::url`] reports afterwards. Navidrome honours an offset only on
+    /// a transcode, so only a queue song whose URL asks for one can start
+    /// mid-song. Always opens anew.
+    pub async fn open_at(&mut self, url: &str, offset_secs: u64) -> Result<()> {
         self.stop();
         self.url = url.to_string();
+        self.offset_secs = 0;
 
         if self.url.is_empty() {
             anyhow::bail!("Cannot initialize decoder - URL is empty");
         }
-
-        self.open_input().await?;
-
-        if self.initialized {
-            // Format detected, already set
+        if offset_secs > 0 && !self.opens_as_requested_transcode() {
+            anyhow::bail!("only a transcode nokkvi asked for can start mid-song");
         }
 
-        Ok(())
+        // What was asked; `open_input` settles what the server did (0 when
+        // it sent the song's own file, which ignores the offset).
+        self.offset_secs = offset_secs;
+        let opened = self.open_input().await;
+        if opened.is_err() {
+            self.offset_secs = 0;
+        }
+        opened
+    }
+
+    /// Whether the open URL is a queue song asking for a transcode, which
+    /// opens with one GET ([`Self::open_requested_transcode`]) and can start
+    /// at an offset.
+    fn opens_as_requested_transcode(&self) -> bool {
+        crate::utils::server_url::has_http_scheme(&self.url)
+            && self.source_kind == SourceKind::Track
+            && requests_transcode(&self.url)
+    }
+
+    /// The URL this decoder opened (the track's own, without `timeOffset`).
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The server's length for the track that the caller stamped before
+    /// opening it ([`Self::set_expected_duration_ms`]).
+    pub fn expected_duration_ms(&self) -> Option<u64> {
+        self.expected_duration_ms
+    }
+
+    /// Where in the song the open stream starts, in whole seconds (see the
+    /// field doc): its position is that much ahead of what it decoded.
+    pub fn offset_secs(&self) -> u64 {
+        self.offset_secs
+    }
+
+    /// Drop the next `ms` of decoded audio, in whole frames, through the seek
+    /// preroll: a stream opened at a whole-second offset reaches a target
+    /// between two seconds this way, so audio resumes exactly at it.
+    pub fn skip_ms(&mut self, ms: u64) {
+        self.seek_preroll_frames = ms.saturating_mul(u64::from(self.format.sample_rate())) / 1000;
+    }
+
+    /// End the open stream where it is: the next read reports EOF, so the
+    /// track ends as it would at its natural end.
+    pub fn end_here(&mut self) {
+        self.eof = true;
+        self.frame_buffer.clear();
+        self.seek_preroll_frames = 0;
     }
 
     async fn open_input(&mut self) -> Result<()> {
@@ -967,13 +1087,14 @@ impl AudioDecoder {
         // whose error would carry the URL and its credential). A queue song
         // whose URL asks for a transcode opens with one GET (no HEAD, no
         // probes); every other URL keeps the sizing sequence below.
-        let (mss, hint_from_data) = if crate::utils::server_url::has_http_scheme(&self.url)
-            && self.source_kind == SourceKind::Track
-            && requests_transcode(&self.url)
-        {
+        // A requested transcode's answer small enough to be headers alone
+        // (the Ogg Navidrome sends for an offset past the song's end).
+        let mut tiny_answer = false;
+        let (mss, hint_from_data) = if self.opens_as_requested_transcode() {
             let opened = self.open_requested_transcode().await?;
             radio_recv_timeout = opened.recv_timeout;
             header_duration_ms = opened.header_duration_ms;
+            tiny_answer = opened.tiny;
             (opened.mss, opened.hint)
         } else if crate::utils::server_url::has_http_scheme(&self.url) {
             // HTTP stream - use Range requests for instant playback
@@ -1234,14 +1355,28 @@ impl AudioDecoder {
         // `gapless: true` makes the decoder drop the container-declared encoder
         // delay and padding, so album tracks join seamlessly (see
         // `symphonia_registry::probe_and_make_decoder`).
-        let (format_reader, decoder, track_id) = tokio::task::block_in_place(|| {
-            symphonia_registry::probe_and_make_decoder(mss, &hint, true).inspect_err(|e| {
+        let probed = tokio::task::block_in_place(|| {
+            symphonia_registry::probe_and_make_decoder(mss, &hint, true)
+        });
+        let (format_reader, decoder, track_id) = match probed {
+            Ok(probed) => probed,
+            // Past the song's end the server sends a container's headers
+            // alone; a probe that finds no audio in that is the song's end.
+            Err(e) if self.offset_secs > 0 && tiny_answer => {
+                debug!(
+                    " [DECODER] The answer at {}s holds no audio ({e:#}): past the song's end",
+                    self.offset_secs
+                );
+                return Err(StreamPastEnd.into());
+            }
+            Err(e) => {
                 error!(
                     " [DECODER] Format probe / decoder construction FAILED: {:?}",
                     e
                 );
-            })
-        })?;
+                return Err(e);
+            }
+        };
         if let Some(recv_timeout) = &radio_recv_timeout {
             recv_timeout.set(READ_RECV_TIMEOUT);
         }
@@ -1264,18 +1399,47 @@ impl AudioDecoder {
                 .context("Selected track id missing from probed format")?,
         );
 
-        // Cross-check against server metadata: Symphonia's probe can hand back
-        // a bitrate-extrapolated MP3 estimate that is several times off. A
-        // live transcode's own header wins over the caller's metadata: it is
-        // the server's word on this stream.
-        let expected_ms = match self.delivery {
-            StreamDelivery::Unsized => header_duration_ms.or(self.expected_duration_ms),
-            StreamDelivery::Sized | StreamDelivery::Live => self.expected_duration_ms,
+        // The whole song's length, as the server says (`X-Content-Duration`
+        // names the whole song even on a stream opened at an offset), else
+        // the caller's metadata.
+        let whole_song_ms = header_duration_ms.or(self.expected_duration_ms);
+        if self.offset_secs > 0
+            && self.delivery == StreamDelivery::Sized
+            && answer_starts_at_song_start(probed_ms, whole_song_ms, self.offset_secs)
+        {
+            // A request that resolves to the song's own file is answered
+            // with the whole file, whatever its offset.
+            info!(
+                " [DECODER] The server sent the song's own file for an offset of {}s: \
+                 reading it from the song's start",
+                self.offset_secs
+            );
+            self.offset_secs = 0;
+        }
+
+        let duration_ms = if self.offset_secs > 0 {
+            // The stream holds only the rest of the song, and its timestamps
+            // start at 0: the track's length is the whole song's, and the
+            // stream is never sought within (a seek opens the track again at
+            // its own offset), so no seek scale applies.
+            self.seek_scale = 1.0;
+            whole_song_ms
+                .unwrap_or_else(|| probed_ms.saturating_add(self.offset_secs.saturating_mul(1000)))
+        } else {
+            // Cross-check against server metadata: Symphonia's probe can hand
+            // back a bitrate-extrapolated MP3 estimate that is several times
+            // off. A live transcode's own header wins over the caller's
+            // metadata: it is the server's word on this stream.
+            let expected_ms = match self.delivery {
+                StreamDelivery::Unsized => whole_song_ms,
+                StreamDelivery::Sized | StreamDelivery::Live => self.expected_duration_ms,
+            };
+            let duration_ms = sanitize_probed_duration(probed_ms, expected_ms);
+            // When the probe was overridden, the format reader still believes
+            // the probed timeline — seeks must be mapped into it (see seek()).
+            self.seek_scale = compute_seek_scale(probed_ms, duration_ms);
+            duration_ms
         };
-        let duration_ms = sanitize_probed_duration(probed_ms, expected_ms);
-        // When the probe was overridden, the format reader still believes the
-        // probed timeline — seeks must be mapped into it (see seek()).
-        self.seek_scale = compute_seek_scale(probed_ms, duration_ms);
 
         debug!(
             " [DECODER] Format: {}Hz, {} channels, duration: {}ms",
@@ -1343,7 +1507,7 @@ impl AudioDecoder {
         } else {
             info!(
                 " [DECODER] The server sent this track without a length (a live \
-                 transcode): playing it once through, with no seeking"
+                 transcode): playing it once through"
             );
             StreamDelivery::Unsized
         };
@@ -1422,9 +1586,22 @@ impl AudioDecoder {
     /// sends exactly that chunk with the whole length, which becomes the range
     /// reader's first chunk, so nothing is downloaded twice and the stream
     /// seeks like a file.
+    ///
+    /// With an offset ([`Self::open_at`]) the request carries `timeOffset`
+    /// and so does every Range read of a sized answer (a cache entry is kept
+    /// per offset). An empty answer to it is the song's end
+    /// ([`StreamPastEnd`]), not a failed transcode.
     async fn open_requested_transcode(&mut self) -> Result<OpenedStream> {
+        let request_url = with_time_offset(&self.url, self.offset_secs);
+        let past_end_or_failed = |offset_secs: u64| -> anyhow::Error {
+            if offset_secs > 0 {
+                StreamPastEnd.into()
+            } else {
+                anyhow::anyhow!(EMPTY_TRANSCODE)
+            }
+        };
         let response = Self::stream_client()?
-            .get(&self.url)
+            .get(&request_url)
             .header(
                 reqwest::header::RANGE,
                 format!("bytes=0-{}", CHUNK_SIZE - 1),
@@ -1440,6 +1617,8 @@ impl AudioDecoder {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .and_then(format_hint_from_content_type);
+        let tiny = declared_content_length(response.headers())
+            .is_some_and(|len| len <= PAST_END_ANSWER_MAX_BYTES);
 
         match classify_transcode_answer(response.status(), response.headers()) {
             TranscodeAnswer::Refused(status) => Err(refused_transcode_error(
@@ -1452,7 +1631,7 @@ impl AudioDecoder {
                     .unwrap_or_else(|| "an error with no message".to_owned());
                 anyhow::bail!("the server sent an error instead of the song: {message}")
             }
-            TranscodeAnswer::Empty => anyhow::bail!(EMPTY_TRANSCODE),
+            TranscodeAnswer::Empty => Err(past_end_or_failed(self.offset_secs)),
             TranscodeAnswer::WrongRange => anyhow::bail!(
                 "the server sent another part of the stream than the one asked for (HTTP 206), \
                  so it can't be read in parts"
@@ -1474,14 +1653,14 @@ impl AudioDecoder {
                 );
                 self.delivery = StreamDelivery::Sized;
                 self.byte_len = Some(total);
-                let reader =
-                    RangeHttpReader::with_first_chunk(self.url.clone(), total, first_chunk);
+                let reader = RangeHttpReader::with_first_chunk(request_url, total, first_chunk);
                 let media_source: Box<dyn MediaSource> = Box::new(reader);
                 Ok(OpenedStream {
                     mss: MediaSourceStream::new(media_source, Default::default()),
                     hint: content_type_hint.or_else(|| Self::extract_format_hint(&self.url)),
                     recv_timeout: None,
                     header_duration_ms,
+                    tiny,
                 })
             }
             TranscodeAnswer::Stream => {
@@ -1497,7 +1676,7 @@ impl AudioDecoder {
                     {
                         Some(chunk) if chunk.is_empty() => {}
                         Some(chunk) => break chunk,
-                        None => anyhow::bail!(EMPTY_TRANSCODE),
+                        None => return Err(past_end_or_failed(self.offset_secs)),
                     }
                 };
                 let (mss, hint, recv_timeout) =
@@ -1507,6 +1686,7 @@ impl AudioDecoder {
                     hint,
                     recv_timeout: Some(recv_timeout),
                     header_duration_ms,
+                    tiny,
                 })
             }
         }
@@ -4195,5 +4375,408 @@ pub(crate) mod tests {
             onset_ms.abs_diff(3_000) <= 10,
             "the 3.0 s onset played {onset_ms} ms after a seek to 0 (expected 3000 ms)"
         );
+    }
+
+    // =========================================================================
+    // A requested transcode reopened at `timeOffset` (seeking it)
+    // =========================================================================
+
+    /// The clock song's sample rate (the test mixer's, so nothing resamples
+    /// it on the way out) and its length.
+    pub(crate) const CLOCK_RATE: u64 = 48_000;
+    pub(crate) const CLOCK_SECS: u64 = 10;
+
+    /// The clock song from `offset_secs` on, as a 16-bit stereo WAV: both
+    /// samples of every frame hold the song time it plays at, in whole
+    /// milliseconds, so one decoded sample says where in the song it is
+    /// ([`clock_ms_of`]) and so which offset's answer was decoded. The WAV
+    /// header names the length of the part it holds, as the transcode of
+    /// that part would.
+    pub(crate) fn clock_wav_from(offset_secs: u64) -> Vec<u8> {
+        let first = offset_secs.min(CLOCK_SECS) * CLOCK_RATE;
+        let frames = CLOCK_SECS * CLOCK_RATE - first;
+        let data_len = u32::try_from(frames * 4).unwrap();
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&2_u16.to_le_bytes()); // stereo
+        wav.extend_from_slice(&(CLOCK_RATE as u32).to_le_bytes());
+        wav.extend_from_slice(&(CLOCK_RATE as u32 * 4).to_le_bytes());
+        wav.extend_from_slice(&4_u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16_u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for frame in first..CLOCK_SECS * CLOCK_RATE {
+            let ms = i16::try_from(frame * 1000 / CLOCK_RATE).unwrap();
+            wav.extend_from_slice(&ms.to_le_bytes());
+            wav.extend_from_slice(&ms.to_le_bytes());
+        }
+        wav
+    }
+
+    /// The song time (ms) a decoded clock sample plays at.
+    pub(crate) fn clock_ms_of(sample: f32) -> u64 {
+        (f64::from(sample) * 32_768.0).round() as u64
+    }
+
+    /// The song time (ms) of the next frame `decoder` decodes.
+    fn next_clock_ms(decoder: &mut AudioDecoder) -> u64 {
+        let buffer = tokio::task::block_in_place(|| decoder.read_buffer(8));
+        assert!(buffer.is_valid(), "the stream decodes");
+        let first = f32::from_ne_bytes(buffer.data()[..4].try_into().unwrap());
+        clock_ms_of(first)
+    }
+
+    impl LoggedRequest {
+        /// The `timeOffset` the request asked for, if any.
+        pub(crate) fn time_offset(&self) -> Option<String> {
+            self.target
+                .split_once('?')?
+                .1
+                .split('&')
+                .find_map(|param| param.strip_prefix("timeOffset="))
+                .map(str::to_owned)
+        }
+
+        /// The value of query param `key`.
+        pub(crate) fn param(&self, key: &str) -> Option<String> {
+            self.target
+                .split_once('?')?
+                .1
+                .split('&')
+                .find_map(|param| param.strip_prefix(&format!("{key}=")))
+                .map(str::to_owned)
+        }
+    }
+
+    /// How [`spawn_clock_server`] answers. The song is [`CLOCK_SECS`] long
+    /// and every answer carries `X-Content-Duration` for all of it, as
+    /// Navidrome's does.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum ClockReply {
+        /// A live transcode that honours `timeOffset`: 200, chunked,
+        /// `Accept-Ranges: none`, the song from the offset (any Range
+        /// ignored).
+        Live,
+        /// A transcode the server's cache holds whole for the offset asked
+        /// (the offset is part of the cache key): served like a file, a 206
+        /// for the Range asked, its total that entry's own length.
+        CachedAtOffset,
+        /// The song's own file, which a request that resolves to it is sent
+        /// whatever its offset: a 206 for the Range asked, from byte 0.
+        Raw,
+        /// Past the song's end: the headers-only Ogg Navidrome sends for an
+        /// Opus transcode (`Content-Length: 266`, `Accept-Ranges: none`).
+        /// Only a request with an offset; any other is answered `Live`.
+        PastEndOgg,
+        /// Past the song's end, an MP3 transcode's way: a 200 with
+        /// `Content-Length: 0`. Only a request with an offset.
+        PastEndEmpty,
+        /// The server's transcode limit: 429 with an envelope. Only a
+        /// request with an offset.
+        TooBusy,
+    }
+
+    /// A Navidrome-shaped server for the clock song: it reads `timeOffset`,
+    /// logs every request (method, path + query, Range) and answers as its
+    /// [`ClockReply`] says, which a test can switch between requests.
+    pub(crate) struct ClockServer {
+        pub(crate) base: String,
+        log: Arc<parking_lot::Mutex<Vec<LoggedRequest>>>,
+        reply: Arc<parking_lot::Mutex<ClockReply>>,
+    }
+
+    impl ClockServer {
+        /// Answer every request from now on as `reply` says.
+        pub(crate) fn set_reply(&self, reply: ClockReply) {
+            *self.reply.lock() = reply;
+        }
+
+        /// Every request read so far, in order.
+        pub(crate) fn requests(&self) -> Vec<LoggedRequest> {
+            self.log.lock().clone()
+        }
+
+        /// The stream URL nokkvi builds for queue song `id` when it asks for
+        /// an Opus 128 transcode (no offset: the track's own URL).
+        pub(crate) fn song_url(&self, id: &str) -> String {
+            format!(
+                "{}/rest/stream?id={id}&format=opus&maxBitRate=128&u=nk&t=token&s=salt&f=json\
+                 &v=1.8.0&c=nokkvi&_=1",
+                self.base
+            )
+        }
+    }
+
+    /// The headers-only Ogg (OpusHead + OpusTags, no audio) Navidrome 0.64.2
+    /// answered `timeOffset=400` on a 360 s song with, as captured.
+    pub(crate) const OPUS_HEADERS_ONLY: &[u8] =
+        include_bytes!("../../testdata/opus_headers_only_past_end.ogg");
+
+    /// Start a [`ClockServer`] answering as `reply` says.
+    pub(crate) async fn spawn_clock_server(reply: ClockReply) -> ClockServer {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let reply = Arc::new(parking_lot::Mutex::new(reply));
+        let (logged, replying) = (log.clone(), reply.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let logged = logged.clone();
+                let reply = *replying.lock();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let len = socket.read(&mut buf).await.unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buf[..len]).into_owned();
+                    let mut first = text.lines().next().unwrap_or("").split_whitespace();
+                    let request = LoggedRequest {
+                        method: first.next().unwrap_or("").to_owned(),
+                        target: first.next().unwrap_or("").to_owned(),
+                        range: text.lines().find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("range")
+                                .then(|| value.trim().to_owned())
+                        }),
+                    };
+                    logged.lock().push(request.clone());
+                    let offset: u64 = request
+                        .time_offset()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(0);
+                    let reply = match reply {
+                        ClockReply::PastEndOgg | ClockReply::PastEndEmpty | ClockReply::TooBusy
+                            if offset == 0 =>
+                        {
+                            ClockReply::Live
+                        }
+                        other => other,
+                    };
+                    let duration = format!("X-Content-Duration: {CLOCK_SECS}\r\n");
+                    let (status, headers, payload): (&str, String, Vec<u8>) = match reply {
+                        ClockReply::Live => {
+                            let mut chunked = Vec::new();
+                            for chunk in clock_wav_from(offset).chunks(16 * 1024) {
+                                chunked
+                                    .extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+                                chunked.extend_from_slice(chunk);
+                                chunked.extend_from_slice(b"\r\n");
+                            }
+                            chunked.extend_from_slice(b"0\r\n\r\n");
+                            (
+                                "200 OK",
+                                format!(
+                                    "Content-Type: audio/wav\r\nAccept-Ranges: none\r\n{duration}\
+                                     Transfer-Encoding: chunked\r\n"
+                                ),
+                                chunked,
+                            )
+                        }
+                        ClockReply::CachedAtOffset | ClockReply::Raw => {
+                            let body =
+                                clock_wav_from(if reply == ClockReply::Raw { 0 } else { offset });
+                            let last = body.len() - 1;
+                            let (start, end) = request
+                                .range
+                                .as_deref()
+                                .and_then(|r| r.strip_prefix("bytes="))
+                                .and_then(|r| r.split_once('-'))
+                                .map_or((0, last), |(start, end)| {
+                                    (
+                                        start.parse().unwrap(),
+                                        end.parse::<usize>().map_or(last, |end| end.min(last)),
+                                    )
+                                });
+                            (
+                                "206 Partial Content",
+                                format!(
+                                    "Content-Type: audio/wav\r\nAccept-Ranges: bytes\r\n{duration}\
+                                     Content-Range: bytes {start}-{end}/{}\r\n\
+                                     Content-Length: {}\r\n",
+                                    body.len(),
+                                    end - start + 1
+                                ),
+                                body[start..=end].to_vec(),
+                            )
+                        }
+                        ClockReply::PastEndOgg => (
+                            "200 OK",
+                            format!(
+                                "Content-Type: audio/ogg\r\nAccept-Ranges: none\r\n{duration}\
+                                 Content-Length: {}\r\n",
+                                OPUS_HEADERS_ONLY.len()
+                            ),
+                            OPUS_HEADERS_ONLY.to_vec(),
+                        ),
+                        ClockReply::PastEndEmpty => (
+                            "200 OK",
+                            format!(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: none\r\n{duration}\
+                                 Content-Length: 0\r\n"
+                            ),
+                            Vec::new(),
+                        ),
+                        ClockReply::TooBusy => {
+                            let envelope = br#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"navidrome","error":{"code":0,"message":"too many concurrent transcodes"}}}"#;
+                            (
+                                "429 Too Many Requests",
+                                format!(
+                                    "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                                    envelope.len()
+                                ),
+                                envelope.to_vec(),
+                            )
+                        }
+                    };
+                    let head = format!("HTTP/1.1 {status}\r\n{headers}Connection: close\r\n\r\n");
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    if request.method != "HEAD" {
+                        let _ = socket.write_all(&payload).await;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        ClockServer {
+            base: format!("http://{addr}"),
+            log,
+            reply,
+        }
+    }
+
+    /// A stream opened at an offset asks the server for that whole second
+    /// (`timeOffset=7`, with the track's own params) in its one request, and
+    /// the milliseconds past it are decoded and dropped through the seek
+    /// preroll, so the first frame heard is the target's. Its length is the
+    /// whole song, never what is left of it, and the URL it reports is the
+    /// track's own.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stream_opened_at_an_offset_starts_there_to_the_millisecond() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let url = server.song_url("s1");
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .open_at(&url, 7)
+            .await
+            .expect("the transcode opens at 7 s");
+        decoder.skip_ms(300);
+
+        let requests = server.requests();
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(
+            requests[0].time_offset().as_deref(),
+            Some("7"),
+            "{requests:?}"
+        );
+        assert_eq!(requests[0].param("format").as_deref(), Some("opus"));
+        assert_eq!(requests[0].param("maxBitRate").as_deref(), Some("128"));
+        assert_eq!(
+            decoder.url(),
+            url,
+            "the track's own URL, without the offset"
+        );
+        assert_eq!(decoder.offset_secs(), 7);
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+        assert_eq!(decoder.duration(), CLOCK_SECS * 1000, "the whole song");
+        assert_eq!(next_clock_ms(&mut decoder), 7_300);
+    }
+
+    /// A transcode the server's cache holds whole for that offset comes back
+    /// sized, at that entry's own length. It still starts at the offset.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cached_entry_at_an_offset_starts_at_the_offset() {
+        let server = spawn_clock_server(ClockReply::CachedAtOffset).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .open_at(&server.song_url("s1"), 4)
+            .await
+            .expect("the cached entry opens");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(clock_wav_from(4).len() as u64));
+        assert_eq!(decoder.offset_secs(), 4);
+        assert_eq!(decoder.duration(), CLOCK_SECS * 1000, "the whole song");
+        assert_eq!(next_clock_ms(&mut decoder), 4_000);
+        assert!(
+            server
+                .requests()
+                .iter()
+                .all(|r| r.time_offset().as_deref() == Some("4")),
+            "every read of the entry asks for its offset: {:?}",
+            server.requests()
+        );
+    }
+
+    /// A request that resolves to the song's own file is answered with the
+    /// whole file whatever its offset. The stream then starts at the song's
+    /// start, not at the offset, and seeks within itself.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_answer_that_ignored_the_offset_reads_from_the_songs_start() {
+        let server = spawn_clock_server(ClockReply::Raw).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .open_at(&server.song_url("s1"), 6)
+            .await
+            .expect("the file opens");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(
+            decoder.offset_secs(),
+            0,
+            "the file starts at the song's start"
+        );
+        assert_eq!(decoder.byte_len(), Some(clock_wav_from(0).len() as u64));
+        assert_eq!(next_clock_ms(&mut decoder), 0);
+    }
+
+    /// Past the song's end Navidrome answers with an Ogg holding only its
+    /// headers (the probe finds no audio in it), or an empty body: the song
+    /// is over. The open says so ([`StreamPastEnd`]) instead of failing as a
+    /// transcode the server couldn't make; from the song's start the same
+    /// empty answer still is that failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_answer_past_the_songs_end_reads_as_its_end() {
+        for reply in [ClockReply::PastEndOgg, ClockReply::PastEndEmpty] {
+            let server = spawn_clock_server(reply).await;
+
+            let mut decoder = AudioDecoder::default();
+            let error = decoder
+                .open_at(&server.song_url("s1"), 9)
+                .await
+                .expect_err("no audio past the end");
+
+            assert!(error.is::<StreamPastEnd>(), "{reply:?}: {error:#}");
+            assert!(!decoder.is_initialized(), "{reply:?}");
+            assert_eq!(decoder.offset_secs(), 0, "{reply:?}");
+        }
+    }
+
+    /// `init` on a decoder open at an offset opens the track again from its
+    /// start: the URL is the same, but the stream is not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn init_after_an_offset_open_starts_the_track_from_the_top() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let url = server.song_url("s1");
+        let mut decoder = AudioDecoder::default();
+        decoder.open_at(&url, 5).await.expect("opens at 5 s");
+
+        decoder.init(&url).await.expect("opens from the start");
+
+        let requests = server.requests();
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        assert_eq!(requests[1].time_offset(), None, "{requests:?}");
+        assert_eq!(decoder.offset_secs(), 0);
+        assert_eq!(next_clock_ms(&mut decoder), 0);
     }
 }

@@ -383,7 +383,7 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 let engine_arc = shell.audio_engine();
-                let engine = engine_arc.lock().await;
+                let mut engine = engine_arc.lock().await;
                 let pos = engine.position();
                 let dur = engine.duration();
                 let playing = engine.playing();
@@ -415,6 +415,7 @@ impl Nokkvi {
                 let next_track_epoch = engine.next_track_epoch();
                 let seekable = engine.seekable();
                 let live_transcode = engine.is_live_transcode();
+                let seek_failure = engine.take_seek_failure();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -558,6 +559,7 @@ impl Nokkvi {
                     bpm,
                     seek_epoch,
                     next_track_epoch,
+                    seek_failure,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -598,7 +600,14 @@ impl Nokkvi {
             bpm,
             seek_epoch,
             next_track_epoch,
+            seek_failure,
         } = update;
+
+        // A seek that reopened the stream failed (a busy server, the
+        // network); the old stream played on. The engine hands it over once.
+        if let Some(reason) = seek_failure {
+            self.toast_warn(format!("Couldn't seek: {reason}"));
+        }
 
         // Whether this update's POSITION is still current. A different seek
         // epoch means a seek was requested or landed between the tick's engine
@@ -1626,8 +1635,9 @@ impl Nokkvi {
         // `handle_seek` so the anti-seek-fraud guard (advancing
         // `scrobble.last_position` to the target) and the radio gate both apply
         // unchanged, and no queue navigation / consume-removal is reached.
-        // A song the server transcodes on the fly can't rewind (no seeking),
-        // so Previous steps back instead, as it does within the threshold.
+        // A song the server transcodes on the fly that the engine can't
+        // reopen at an offset can't rewind (no seeking), so Previous steps
+        // back instead, as it does within the threshold.
         if self.settings.rewind_on_previous
             && self.playback.position >= PREV_RESTART_THRESHOLD_SECS
             && self.seek_available()
@@ -2121,8 +2131,9 @@ impl Nokkvi {
         if self.active_playback.is_radio() {
             return Task::none();
         }
-        // A song the server transcodes on the fly can only play front to
-        // back (the engine refuses the seek too). The slider, MPRIS, the IPC
+        // A song the server transcodes on the fly, and the engine can't
+        // reopen at an offset, can only play front to back (the engine
+        // refuses the seek too). The slider, MPRIS, the IPC
         // verb and Previous's rewind check first, so this backstop fires on a
         // deliberate act that beat the tick (never a held key): say why.
         if !self.seek_available() {

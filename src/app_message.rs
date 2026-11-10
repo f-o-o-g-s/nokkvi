@@ -166,7 +166,9 @@ pub struct PlaybackStateUpdate {
     pub bitrate: u32,
     /// Whether the engine can seek the item it plays
     /// (`CustomAudioEngine::seekable`): false for a station and for a song
-    /// the server transcodes on the fly.
+    /// the server transcodes on the fly that the engine can't reopen at an
+    /// offset (one nokkvi did not ask for, or a server without
+    /// `transcodeOffset`).
     pub seekable: bool,
     /// Whether the playing song is the server's live transcode
     /// (`CustomAudioEngine::is_live_transcode`): lossy whatever the file is.
@@ -192,6 +194,10 @@ pub struct PlaybackStateUpdate {
     /// prepared next track is thrown away, which reopens the UI's gapless
     /// prep latch.
     pub next_track_epoch: u64,
+    /// Why a seek that reopened the stream failed since the last tick
+    /// (`CustomAudioEngine::take_seek_failure`); the old stream played on.
+    /// Shown once as a warning.
+    pub seek_failure: Option<String>,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.

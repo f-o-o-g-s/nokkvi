@@ -541,9 +541,9 @@ define_settings! {
                 category: "Streaming Quality",
                 subtitle: Some(
                     "Original streams your files as they are. Opus or MP3 has the server send \
-                     a smaller copy of lossless songs and songs well above Max Bitrate, to save \
-                     data. Smaller copies never show BIT-PERFECT. Applies from the next song. \
-                     MP3 can add a short gap between songs that run together.",
+                     a smaller copy of songs above Max Bitrate, to save data. Smaller copies \
+                     never show BIT-PERFECT. Applies from the next song. MP3 can add a short gap \
+                     between songs that run together.",
                 ),
                 default: "Original",
                 options: StreamFormat::LABELS,
@@ -564,8 +564,9 @@ define_settings! {
                 category: "Streaming Quality",
                 subtitle: Some(
                     "The size of a smaller copy: lower saves more data, higher sounds closer to \
-                     the original. Songs at or a little above this rate (up to a quarter more) \
-                     play as they are. Used only with Opus or MP3.",
+                     the original. Songs at or under this rate play as they are, and so do MP3s \
+                     and other already-compressed songs up to a quarter above it. Used only with \
+                     Opus or MP3.",
                 ),
                 default: "128 kbps",
                 options: StreamMaxBitrate::LABELS,

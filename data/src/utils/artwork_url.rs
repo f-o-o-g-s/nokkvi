@@ -171,6 +171,26 @@ pub fn requests_transcode(url: &str) -> bool {
     })
 }
 
+/// `url` asking the server to start its transcode `offset_secs` whole seconds
+/// into the song (`timeOffset`), replacing any offset it already carries; 0
+/// gives the URL without one. Navidrome reads the param as a whole number (a
+/// fraction or a negative silently means 0), so the type allows nothing else.
+/// The rest of the URL is kept as it is, `id` first included.
+pub fn with_time_offset(url: &str, offset_secs: u64) -> String {
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let offset = (offset_secs > 0).then(|| format!("timeOffset={offset_secs}"));
+    let params: Vec<&str> = query
+        .split('&')
+        .filter(|param| !param.is_empty() && param.split('=').next() != Some("timeOffset"))
+        .chain(offset.as_deref())
+        .collect();
+    if params.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}?{}", params.join("&"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,6 +494,60 @@ mod tests {
                 assert!(!url.contains("format=raw"), "{url}");
                 assert!(!url.contains("estimateContentLength"), "{url}");
             }
+        }
+    }
+
+    /// `timeOffset` is always a whole, non-negative number of seconds (the
+    /// server reads anything else as 0), it replaces an offset the URL
+    /// already carries instead of adding a second one, and 0 asks for the
+    /// stream from the start, with no param at all. The id stays first.
+    #[test]
+    fn a_time_offset_is_always_a_whole_non_negative_number() {
+        let base = build_stream_url(
+            "s1",
+            "http://srv",
+            "u=x&t=tok&s=salt",
+            Some(StreamParams {
+                format: TranscodeFormat::Opus,
+                max_bitrate_kbps: 128,
+            }),
+        );
+
+        let at_seven = with_time_offset(&base, 7);
+        assert_eq!(
+            query_value(&at_seven, "timeOffset").as_deref(),
+            Some("7"),
+            "{at_seven}"
+        );
+        assert_eq!(
+            query_keys(&at_seven).first().map(String::as_str),
+            Some("id")
+        );
+        assert_eq!(query_value(&at_seven, "format").as_deref(), Some("opus"));
+        assert!(requests_transcode(&at_seven));
+
+        let moved = with_time_offset(&at_seven, 240);
+        let keys = query_keys(&moved);
+        assert_eq!(
+            keys.iter().filter(|k| *k == "timeOffset").count(),
+            1,
+            "{moved}"
+        );
+        assert_eq!(query_value(&moved, "timeOffset").as_deref(), Some("240"));
+
+        assert_eq!(
+            with_time_offset(&moved, 0),
+            base,
+            "0 is the stream from the start"
+        );
+        assert_eq!(with_time_offset(&base, 0), base);
+        for offset in [1_u64, 59, 3_599, 86_399] {
+            let value = query_value(&with_time_offset(&base, offset), "timeOffset")
+                .expect("an offset param");
+            assert!(
+                value.chars().all(|c| c.is_ascii_digit()),
+                "a whole, unsigned number: {value}"
+            );
         }
     }
 

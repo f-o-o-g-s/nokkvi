@@ -215,7 +215,8 @@ pub struct PlaybackState {
     /// Bitrate in kbps (e.g., 320, 1411)
     pub bitrate: u32,
     /// Whether the engine can seek what it plays, from the last tick: false
-    /// for a song the server transcodes on the fly (and for a station).
+    /// for a song the server transcodes on the fly that the engine can't
+    /// reopen at an offset (and for a station).
     /// The seek producers and the progress bar read it through
     /// `Nokkvi::seek_available`.
     pub seekable: bool,

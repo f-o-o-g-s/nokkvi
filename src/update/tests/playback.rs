@@ -82,6 +82,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         bpm: None,
         seek_epoch: 0,
         next_track_epoch: 0,
+        seek_failure: None,
         station_id: None,
     }
 }
@@ -2158,6 +2159,72 @@ fn prev_track_steps_back_on_a_live_transcode_instead_of_rewinding() {
     );
 }
 
+/// The tick of a transcode nokkvi asked for on a server that honours
+/// `timeOffset`: the engine seeks it by opening it again at an offset, so it
+/// reports it seekable although it arrives without a length.
+fn reopenable_transcode_tick() -> PlaybackStateUpdate {
+    PlaybackStateUpdate {
+        seekable: true,
+        ..live_transcode_tick()
+    }
+}
+
+/// A transcode the engine can reopen at an offset seeks like a file: the
+/// slider's seek is dispatched (its anti-seek-fraud guard written) with no
+/// toast, and the seek bar keeps its handle.
+#[test]
+fn a_transcode_the_engine_reopens_seeks_from_the_slider_without_a_toast() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(reopenable_transcode_tick());
+    let toasts_before = app.toast.toasts.len();
+
+    let _ = app.handle_seek(30.0);
+
+    assert!(app.seek_available(), "the seek bar keeps its handle");
+    assert_eq!(app.scrobble.last_position, 30.0, "the seek was dispatched");
+    assert_eq!(app.toast.toasts.len(), toasts_before, "no refusal toast");
+}
+
+/// With rewind-on-previous on, Previous rewinds such a transcode past the
+/// threshold, as it does a file.
+#[test]
+fn prev_track_rewinds_a_transcode_the_engine_reopens() {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(reopenable_transcode_tick());
+    app.settings.rewind_on_previous = true;
+    app.playback.position = 8;
+    app.scrobble.last_position = 99.0;
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(app.scrobble.last_position, 0.0, "the rewind seek went out");
+}
+
+/// A seek whose reopen failed (a busy server, the network) left the old
+/// stream playing; the next tick says so once, as a warning, in plain words.
+#[test]
+fn a_failed_reopen_says_so_once_as_a_warning() {
+    use nokkvi_data::types::toast::ToastLevel;
+    let mut app = test_app();
+    let before = app.toast.toasts.len();
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        seek_failure: Some("the server is busy with other transcodes".to_string()),
+        ..reopenable_transcode_tick()
+    });
+    let after_failure = app.toast.toasts.len();
+    let _ = app.handle_playback_state_updated(reopenable_transcode_tick());
+
+    assert_eq!(after_failure, before + 1, "one toast");
+    assert_eq!(app.toast.toasts.len(), after_failure, "said once");
+    let toast = app.toast.toasts.back().expect("the toast");
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert_eq!(
+        toast.message,
+        "Couldn't seek: the server is busy with other transcodes"
+    );
+}
+
 // ============================================================================
 // The stream's origin: the song's own file, a transcode, or not known
 // ============================================================================
@@ -2228,6 +2295,7 @@ fn tick_for(
         },
         byte_len,
         codec: codec.map(str::to_string),
+        offset_secs: 0,
     };
     tick_with(song, Some(&stream_url_of(&song.id)), Some(stream))
 }
@@ -2465,6 +2533,7 @@ fn a_tick_whose_engine_already_names_the_next_song_holds_the_verdict() {
         delivery: StreamDelivery::Sized,
         byte_len: Some(4_100_000),
         codec: Some("mp3".to_string()),
+        offset_secs: 0,
     };
 
     let _ = app.handle_playback_state_updated(tick_with(

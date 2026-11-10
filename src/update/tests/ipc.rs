@@ -1654,6 +1654,26 @@ fn seek_on_a_live_transcode_returns_unavailable() {
     }
 }
 
+#[test]
+fn seek_on_a_transcode_the_engine_reopens_is_dispatched() {
+    // With `transcodeOffset` the engine seeks a transcode nokkvi asked for
+    // by reopening it at an offset, and reports it seekable: the verb seeks.
+    let mut app = test_app();
+    app.playback.seekable = true;
+    app.playback.live_transcode = true;
+    for (raw, key) in [("42", "position"), ("+10", "offset")] {
+        let resp = drive_on_with_args(&mut app, "seek", json!({ "position": raw }));
+        assert!(resp.error.is_none(), "{raw}: {:?}", resp.error);
+        assert!(
+            resp.data
+                .as_ref()
+                .is_some_and(|data| data.get(key).is_some()),
+            "{raw}: {:?}",
+            resp.data
+        );
+    }
+}
+
 /// Under the Trawl modal a verb does what its key would there: it acts only
 /// where the key gate admits its twin (`ActiveModal::takes_action`), and each
 /// verb's twin is admitted exactly when the verb acts. Walks every action, so

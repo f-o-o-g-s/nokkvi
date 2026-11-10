@@ -3487,4 +3487,49 @@ mod tests {
         drop(app);
         let _ = std::fs::remove_file(&db_path);
     }
+
+    /// Whether the server honours `timeOffset` (its `transcodeOffset`
+    /// extension) is learnt per session from the login's probe: every login
+    /// builds a new service over the kept storage, which starts without it,
+    /// so a logout or another server never inherits the last server's
+    /// answer, and a server whose list lacks it turns it off.
+    #[tokio::test]
+    async fn the_transcode_offset_extension_starts_off_in_every_session() {
+        let db_path = test_db_path("test_app_transcode_offset_session");
+        let storage = StateStorage::new(db_path.clone()).expect("redb open");
+        let first = AppService::new_with_storage(storage.clone())
+            .await
+            .expect("app service");
+        let supported = |app: &AppService| {
+            let engine = app.audio_engine();
+            async move { engine.lock().await.transcode_offset_supported() }
+        };
+        assert!(!supported(&first).await, "off until the probe says so");
+
+        first
+            .playback()
+            .apply_server_extensions(&["formPost".to_owned(), "transcodeOffset".to_owned()])
+            .await;
+        let advertised = supported(&first).await;
+        first
+            .playback()
+            .apply_server_extensions(&["formPost".to_owned()])
+            .await;
+        let withdrawn = supported(&first).await;
+        first
+            .playback()
+            .apply_server_extensions(&["transcodeOffset".to_owned()])
+            .await;
+        drop(first);
+        let next_login = AppService::new_with_storage(storage)
+            .await
+            .expect("app service");
+        let next_session = supported(&next_login).await;
+
+        assert!(advertised);
+        assert!(!withdrawn, "a server without the extension turns it off");
+        assert!(!next_session, "the next session starts without it");
+        drop(next_login);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

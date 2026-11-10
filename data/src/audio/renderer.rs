@@ -1284,6 +1284,24 @@ impl AudioRenderer {
         }
     }
 
+    /// [`Self::seek`] into a stream of `format`: a seek that opened the track
+    /// again can get another format back (the song's own file where a
+    /// transcode played), so the stream is rebuilt at it, the output first
+    /// moved to its rate (bit-perfect), as a fresh `init` would.
+    pub fn seek_into(&mut self, position_ms: u64, format: &AudioFormat) -> Result<()> {
+        if *format != self.format {
+            // The old stream's ring lives on the old mixer, which a rate
+            // change can drop: stop it first, as `init` does.
+            if let Some(old_stream) = self.primary_stream.take() {
+                old_stream.silence_and_stop();
+            }
+            self.format = format.clone();
+            self.ensure_music_output(format.sample_rate())?;
+        }
+        self.seek(position_ms);
+        Ok(())
+    }
+
     /// Seek to position (milliseconds).
     pub fn seek(&mut self, position_ms: u64) {
         // Cancel crossfade on seek

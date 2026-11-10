@@ -904,6 +904,11 @@ impl Nokkvi {
                     self.shell_task(
                         |shell| async move {
                             let names = shell.auth().fetch_open_subsonic_extensions().await.ok();
+                            // The engine learns `transcodeOffset` here; a
+                            // failed probe leaves it off (no offset seeks).
+                            if let Some(names) = &names {
+                                shell.playback().apply_server_extensions(names).await;
+                            }
                             (names, shell.auth().sends_api_key().await)
                         },
                         |(names, sends_api_key)| extensions_fetched_message(names, sends_api_key),

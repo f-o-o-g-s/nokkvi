@@ -1165,8 +1165,8 @@ impl Nokkvi {
 
     /// Push an Info-level toast notification
     /// Whether a seek can reach the engine: not on a station, and not on a
-    /// song the server transcodes on the fly (the last tick's
-    /// `PlaybackState::seekable`).
+    /// song the server transcodes on the fly that the engine can't reopen at
+    /// an offset (the last tick's `PlaybackState::seekable`).
     pub(crate) fn seek_available(&self) -> bool {
         !self.active_playback.is_radio() && self.playback.seekable
     }
