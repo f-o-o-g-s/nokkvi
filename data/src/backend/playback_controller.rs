@@ -852,6 +852,12 @@ impl PlaybackController {
             if engine.is_next_track_prepared().await {
                 return false; // Already prepared
             }
+            // A seek past the song's end has just ended it: the completion
+            // loads the next song itself, and its stop would throw a prep
+            // away after the server started its transcode.
+            if engine.track_ended_by_seek() {
+                return false;
+            }
             (engine.transition_prep_cfg(), engine.prep_ticket().await)
         };
 
@@ -3120,6 +3126,15 @@ mod tests {
         server: &ClockServer,
         quality: StreamQuality,
     ) -> Result<(ClickFixture, rodio::mixer::MixerSource)> {
+        playing_clock_fixture_with(server, quality, vec![flac_song("a")]).await
+    }
+
+    /// [`playing_clock_fixture`] with `songs` queued, the first one playing.
+    async fn playing_clock_fixture_with(
+        server: &ClockServer,
+        quality: StreamQuality,
+        songs: Vec<crate::types::song::Song>,
+    ) -> Result<(ClickFixture, rodio::mixer::MixerSource)> {
         let temp = tempfile::tempdir()?;
         let storage_q =
             crate::services::state_storage::StateStorage::new(temp.path().join("queue.redb"))?;
@@ -3146,9 +3161,7 @@ mod tests {
         playback
             .apply_server_extensions(&["formPost".to_owned(), "transcodeOffset".to_owned()])
             .await;
-        playback
-            .play_songs_from_index(vec![flac_song("a")], 0)
-            .await?;
+        playback.play_songs_from_index(songs, 0).await?;
         Ok((
             ClickFixture {
                 _temp: temp,
@@ -3289,5 +3302,41 @@ mod tests {
         );
         assert_eq!(outcome, Some(crate::audio::engine::SeekOutcome::Settled));
         assert_eq!(left, None, "it ran once");
+    }
+
+    /// A seek past the song's end ends it at once, and the completion then
+    /// loads the next song itself. A gapless prep started meanwhile (the UI
+    /// asks for one as soon as its clock reads past 80 %) only races that
+    /// load: the completion's stop throws it away, after the server already
+    /// started its transcode. So none is started once the track has ended.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_seek_past_the_end_prepares_no_next_track() -> Result<()> {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let (fx, _mixer) =
+            playing_clock_fixture_with(&server, OPUS_128, vec![flac_song("a"), flac_song("b")])
+                .await?;
+        server.set_reply(ClockReply::PastEndOgg);
+
+        fx.playback.seek(9.6).await?;
+        let prepared = fx.playback.prepare_next_for_gapless().await;
+        server.set_reply(ClockReply::Live);
+        let opens_of_b = || {
+            server
+                .requests()
+                .iter()
+                .filter(|r| r.param("id").as_deref() == Some("b"))
+                .count()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while opens_of_b() == 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let opened = opens_of_b();
+        fx.playback.audio_engine().lock().await.stop().await;
+
+        assert!(!prepared, "no prep once the track has ended");
+        assert_eq!(opened, 1, "the next song opens once, by the completion");
+        Ok(())
     }
 }

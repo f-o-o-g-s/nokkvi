@@ -75,6 +75,7 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
         seek_epoch: 0,
         next_track_epoch: 0,
         seek_failure: None,
+        stream_lost: false,
         station_id: None,
     }
 }

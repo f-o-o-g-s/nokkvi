@@ -387,12 +387,7 @@ impl Nokkvi {
                             Ok(()) => Message::Playback(PlaybackMessage::Tick), // Trigger immediate UI update
                             Err(e) => {
                                 error!(" Failed to play song from queue: {}", e);
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to play song: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
+                                crate::update::playback::play_failed_message(&e)
                             }
                         },
                     );

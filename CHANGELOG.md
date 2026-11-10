@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - A Streaming Quality change applies from the next song, leaving the song playing as it is.
 - The Waveform seek bar shows a plain line for songs streamed as a smaller copy, unless it already holds their waveform.
 - You can now seek in a song streamed as a smaller copy, when your server supports it.
+- When the connection drops partway through a smaller copy, nokkvi now picks the song up again where it stopped.
+- If the server keeps dropping a smaller copy, nokkvi now says the server stopped sending the song instead of skipping on silently.
 
 ### Changed
 
@@ -22,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - A transcode served from Navidrome's cache is now labelled with the codec actually playing, instead of the file's own format.
 - BIT-PERFECT now shows only when the stream is the original file, so a cached transcode can no longer wear it.
 - During a skip crossfade, the format label now shows the incoming track's codec instead of the outgoing one's.
+- When the next or previous song fails to load, Next and Previous now say why instead of "No next track".
 
 ### Removed
 

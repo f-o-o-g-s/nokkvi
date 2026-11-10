@@ -198,6 +198,10 @@ pub struct PlaybackStateUpdate {
     /// (`CustomAudioEngine::take_seek_failure`); the old stream played on.
     /// Shown once as a warning.
     pub seek_failure: Option<nokkvi_data::audio::engine::SeekFailure>,
+    /// A requested transcode's stream dropped and could not be resumed
+    /// since the last tick (`CustomAudioEngine::take_stream_lost`): its song
+    /// ended early. Shown once as a warning.
+    pub stream_lost: bool,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.

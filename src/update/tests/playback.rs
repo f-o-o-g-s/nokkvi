@@ -83,6 +83,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         seek_epoch: 0,
         next_track_epoch: 0,
         seek_failure: None,
+        stream_lost: false,
         station_id: None,
     }
 }
@@ -2651,4 +2652,131 @@ fn with_the_origin_unknown_a_codec_outside_the_suffixs_container_names_the_codec
             "{suffix} sent as {codec}"
         );
     }
+}
+
+// ============================================================================
+// Next / Previous: a failed load is not the end of the queue
+// ============================================================================
+
+/// The toast a transport result message pushes, if it pushes one.
+fn pushed_toast(message: crate::app_message::Message) -> Option<nokkvi_data::types::toast::Toast> {
+    match message {
+        crate::app_message::Message::Toast(crate::app_message::ToastMessage::Push(toast)) => {
+            Some(toast)
+        }
+        _ => None,
+    }
+}
+
+/// A Next whose song failed to load (the server's transcode limit, live:
+/// HTTP 429) says why, as Enter does, instead of claiming the queue ended.
+#[test]
+fn a_next_that_failed_to_load_says_why_not_no_next_track() {
+    use nokkvi_data::{audio::ServerBusy, types::toast::ToastLevel};
+    let busy = anyhow::Error::new(ServerBusy {
+        message: Some("too many concurrent transcodes, please retry shortly".to_owned()),
+    })
+    .context("Failed to load the next song");
+
+    let toast = pushed_toast(crate::update::playback::next_track_result_message(
+        Err(busy),
+        false,
+    ))
+    .expect("a toast");
+
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert_eq!(
+        toast.message,
+        "Failed to play song: the server is busy. Try again in a few seconds."
+    );
+}
+
+/// The real end of the queue still says so, and a Next that moved the
+/// queue refreshes it (reloads it under consume).
+#[test]
+fn the_end_of_the_queue_still_says_no_next_track() {
+    use nokkvi_data::types::toast::ToastLevel;
+    let toast = pushed_toast(crate::update::playback::next_track_result_message(
+        Ok(false),
+        false,
+    ))
+    .expect("a toast");
+    assert_eq!(toast.level, ToastLevel::Info);
+    assert_eq!(toast.message, "No next track");
+
+    assert!(matches!(
+        crate::update::playback::next_track_result_message(Ok(true), true),
+        crate::app_message::Message::LoadQueue
+    ));
+    assert!(matches!(
+        crate::update::playback::next_track_result_message(Ok(true), false),
+        crate::app_message::Message::Playback(crate::app_message::PlaybackMessage::Tick)
+    ));
+}
+
+/// A Previous whose song failed to load says why too, instead of passing
+/// for a step back that happened.
+#[test]
+fn a_previous_that_failed_to_load_says_why() {
+    use nokkvi_data::types::toast::ToastLevel;
+    let failed = anyhow::anyhow!("the server refused the stream (HTTP 500 Internal Server Error)");
+
+    let toast = pushed_toast(crate::update::playback::prev_track_result_message(
+        Err(failed),
+        false,
+    ))
+    .expect("a toast");
+
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert_eq!(
+        toast.message,
+        "Failed to play song: the server refused the stream (HTTP 500 Internal Server Error)"
+    );
+}
+
+/// A failed play says the server's state in plain words wherever it comes
+/// from: busy, no answer, or the error itself.
+#[test]
+fn a_failed_play_names_a_busy_or_silent_server_in_plain_words() {
+    use nokkvi_data::audio::{NoAnswer, ServerBusy};
+    let busy = anyhow::Error::new(ServerBusy { message: None });
+    let silent = anyhow::Error::new(NoAnswer("connection refused".to_owned()))
+        .context("Failed to open the stream connection");
+    let other = anyhow::anyhow!("Cannot play - source is empty");
+
+    assert_eq!(
+        crate::update::playback::play_failure_text(&busy),
+        "the server is busy. Try again in a few seconds."
+    );
+    assert_eq!(
+        crate::update::playback::play_failure_text(&silent),
+        "the server didn't answer."
+    );
+    assert_eq!(
+        crate::update::playback::play_failure_text(&other),
+        "Cannot play - source is empty"
+    );
+}
+
+/// A requested transcode whose stream dropped and could not be resumed
+/// ended its song early; the next tick says so once, as a warning, instead
+/// of the silent skip it was.
+#[test]
+fn a_lost_stream_says_so_once() {
+    use nokkvi_data::types::toast::ToastLevel;
+    let mut app = test_app();
+    let before = app.toast.toasts.len();
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        stream_lost: true,
+        ..reopenable_transcode_tick()
+    });
+    let after_loss = app.toast.toasts.len();
+    let _ = app.handle_playback_state_updated(reopenable_transcode_tick());
+
+    assert_eq!(after_loss, before + 1, "one toast");
+    assert_eq!(app.toast.toasts.len(), after_loss, "said once");
+    let toast = app.toast.toasts.back().expect("the toast");
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert_eq!(toast.message, "The server stopped sending this song.");
 }

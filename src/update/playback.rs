@@ -285,6 +285,74 @@ struct MprisUpdate<'a> {
     random: bool,
 }
 
+/// Why a song failed to play, in plain words for a toast: a busy server
+/// and one that didn't answer read as such, anything else as its error.
+pub(crate) fn play_failure_text(error: &anyhow::Error) -> String {
+    use nokkvi_data::audio::{NoAnswer, ServerBusy, error_is};
+    if error_is::<ServerBusy>(error) {
+        "the server is busy. Try again in a few seconds.".to_owned()
+    } else if error_is::<NoAnswer>(error) {
+        "the server didn't answer.".to_owned()
+    } else {
+        format!("{error}")
+    }
+}
+
+/// The toast for a song that failed to play: Enter, Next and Previous say
+/// it the same way.
+pub(crate) fn play_failed_message(error: &anyhow::Error) -> Message {
+    Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
+        format!("Failed to play song: {}", play_failure_text(error)),
+        nokkvi_data::types::toast::ToastLevel::Error,
+    )))
+}
+
+/// What a Next answered becomes on the UI: a moved queue refreshes
+/// (reloaded under consume, which removed a row), the end of the queue says
+/// so (button and MPRIS alike), and a song that failed to load says why
+/// (the server's transcode limit, live): the queue moved onto it, so a Play
+/// tries it again.
+pub(crate) fn next_track_result_message(result: anyhow::Result<bool>, consume: bool) -> Message {
+    match result {
+        Err(e) => {
+            warn!(" Next failed to play its song: {e:#}");
+            play_failed_message(&e)
+        }
+        Ok(false) => Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
+            "No next track",
+            nokkvi_data::types::toast::ToastLevel::Info,
+        ))),
+        Ok(true) if consume => Message::LoadQueue,
+        Ok(true) => Message::Playback(PlaybackMessage::Tick),
+    }
+}
+
+/// What a Previous answered becomes on the UI. `BlockedConsumeShuffle`
+/// means the step-back was refused because it would land on a consumed
+/// track under shuffle (re-inserting would strand a surviving track):
+/// nothing changed, so it says why instead of reloading the queue.
+pub(crate) fn prev_track_result_message(
+    result: anyhow::Result<nokkvi_data::services::queue::PreviousOutcome>,
+    consume: bool,
+) -> Message {
+    match result {
+        Ok(nokkvi_data::services::queue::PreviousOutcome::BlockedConsumeShuffle) => {
+            Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
+                "Can't step back while Shuffle and Consume are both on",
+                nokkvi_data::types::toast::ToastLevel::Warning,
+            )))
+        }
+        Err(e) => {
+            warn!(" Previous failed to play its song: {e:#}");
+            play_failed_message(&e)
+        }
+        Ok(nokkvi_data::services::queue::PreviousOutcome::Stepped) if consume => Message::LoadQueue,
+        Ok(nokkvi_data::services::queue::PreviousOutcome::Stepped) => {
+            Message::Playback(PlaybackMessage::Tick)
+        }
+    }
+}
+
 /// What a seek whose reopen failed says (the old stream played on): one
 /// plain sentence per kind of failure, never the decoder's or the server's
 /// own text (the log has that).
@@ -431,6 +499,7 @@ impl Nokkvi {
                 let seekable = engine.seekable();
                 let live_transcode = engine.is_live_transcode();
                 let seek_failure = engine.take_seek_failure();
+                let stream_lost = engine.take_stream_lost();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -575,6 +644,7 @@ impl Nokkvi {
                     seek_epoch,
                     next_track_epoch,
                     seek_failure,
+                    stream_lost,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -616,12 +686,18 @@ impl Nokkvi {
             seek_epoch,
             next_track_epoch,
             seek_failure,
+            stream_lost,
         } = update;
 
         // A seek that reopened the stream failed (a busy server, the
         // network); the old stream played on. The engine hands it over once.
         if let Some(failure) = seek_failure {
             self.toast_warn(seek_failure_text(failure));
+        }
+        // A requested transcode's stream dropped and could not be resumed:
+        // its song ended early. The engine hands it over once.
+        if stream_lost {
+            self.toast_warn("The server stopped sending this song.");
         }
 
         // Whether this update's POSITION is still current. A different seek
@@ -1483,7 +1559,7 @@ impl Nokkvi {
                     tracing::error!(" Play toggle cold-start failed: {}", e);
                     Message::Toast(crate::app_message::ToastMessage::Push(
                         nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to start playback: {e}"),
+                            format!("Failed to start playback: {}", play_failure_text(&e)),
                             nokkvi_data::types::toast::ToastLevel::Error,
                         ),
                     ))
@@ -1533,7 +1609,7 @@ impl Nokkvi {
                         tracing::error!(" Play resume failed: {}", e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
                             nokkvi_data::types::toast::Toast::new(
-                                format!("Failed to start playback: {e}"),
+                                format!("Failed to start playback: {}", play_failure_text(&e)),
                                 nokkvi_data::types::toast::ToastLevel::Error,
                             ),
                         ))
@@ -1560,7 +1636,7 @@ impl Nokkvi {
                         tracing::error!(" Play button cold-start failed: {}", e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
                             nokkvi_data::types::toast::Toast::new(
-                                format!("Failed to start playback: {e}"),
+                                format!("Failed to start playback: {}", play_failure_text(&e)),
                                 nokkvi_data::types::toast::ToastLevel::Error,
                             ),
                         ))
@@ -1618,25 +1694,8 @@ impl Nokkvi {
         // Only reset visualizer on stop/queue clear, not on track changes.
         let is_consume = self.modes.consume;
         self.shell_task(
-            move |shell| async move {
-                let advanced = shell.next().await.unwrap_or(false);
-                (advanced, is_consume)
-            },
-            |(advanced, consume)| {
-                if !advanced {
-                    // End of queue — show toast (works for both button and MPRIS)
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            "No next track",
-                            nokkvi_data::types::toast::ToastLevel::Info,
-                        ),
-                    ))
-                } else if consume {
-                    Message::LoadQueue
-                } else {
-                    Message::Playback(PlaybackMessage::Tick)
-                }
-            },
+            move |shell| async move { (shell.next().await, is_consume) },
+            |(result, consume)| next_track_result_message(result, consume),
         )
     }
 
@@ -1665,29 +1724,8 @@ impl Nokkvi {
         // Only reset visualizer on stop/queue clear, not on track changes.
         let is_consume = self.modes.consume;
         self.shell_task(
-            move |shell| async move {
-                // `BlockedConsumeShuffle` means the step-back was refused
-                // because it would land on a consumed track under shuffle
-                // (re-inserting would strand a surviving track). Nothing
-                // changed, so surface a toast instead of reloading the queue.
-                let blocked = matches!(
-                    shell.previous().await,
-                    Ok(nokkvi_data::services::queue::PreviousOutcome::BlockedConsumeShuffle)
-                );
-                (blocked, is_consume)
-            },
-            |(blocked, consume)| {
-                if blocked {
-                    Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
-                        "Can't step back while Shuffle and Consume are both on",
-                        nokkvi_data::types::toast::ToastLevel::Warning,
-                    )))
-                } else if consume {
-                    Message::LoadQueue
-                } else {
-                    Message::Playback(PlaybackMessage::Tick)
-                }
-            },
+            move |shell| async move { (shell.previous().await, is_consume) },
+            |(result, consume)| prev_track_result_message(result, consume),
         )
     }
 

@@ -689,13 +689,18 @@ impl QueueNavigator {
             debug!(" No queued song to transition to");
             return TrackTransitionPlan::Stop;
         };
+        let queue_reason = peeked.reason();
         let transition = peeked.transition();
 
         let song = transition.song.clone();
         // A crossfade is the most specific transition fact for the log, so it
         // wins the label even under shuffle (the engine blended the two tracks).
+        // A fresh load is no gapless join: the queue's own reason (next,
+        // shuffle, repeat queue) labels it.
         let reason = if was_crossfade {
             TransitionReason::Crossfade
+        } else if needs_load {
+            queue_reason
         } else if queue_manager.get_queue().shuffle {
             TransitionReason::Shuffle
         } else {
@@ -1330,7 +1335,9 @@ mod tests {
                 reason,
             } => {
                 assert_eq!(song.id, "b");
-                assert_eq!(reason, TransitionReason::Gapless);
+                // A fresh load is no gapless join: the queue's own reason
+                // labels it (the log once called every hard load "gapless").
+                assert_eq!(reason, TransitionReason::Next);
                 assert!(stream_url.starts_with("http://server/rest/stream?id=b"));
             }
             other => panic!("expected LoadFresh, got {other:?}"),
@@ -1394,9 +1401,10 @@ mod tests {
         match plan {
             TrackTransitionPlan::LoadFresh { song, reason, .. } => {
                 assert_eq!(song.id, "b", "must advance, not replay 'a'");
+                // A fresh load carries the queue's own reason (not Repeat).
                 assert_eq!(
                     reason,
-                    TransitionReason::Gapless,
+                    TransitionReason::Next,
                     "fell through to the advance path"
                 );
             }

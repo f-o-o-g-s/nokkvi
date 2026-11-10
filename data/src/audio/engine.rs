@@ -6,7 +6,7 @@ use std::sync::{
 use anyhow::Result;
 use parking_lot::Mutex as PlMutex;
 use tokio::sync::Notify;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     audio::{
@@ -862,6 +862,17 @@ struct DecodeLoopChannels {
     /// gap staged by a mid-blend prep for the transition AFTER the promoted
     /// track.
     gap_offset_ms: Arc<AtomicU64>,
+    /// Whether the server honours `timeOffset` on a transcode (its
+    /// OpenSubsonic `transcodeOffset` extension): `seekable` reads it to seek
+    /// a transcode nokkvi asked for by reopening, and the decode loop to
+    /// resume one whose connection dropped (`resume_dropped_stream`). Off
+    /// until the login's extension probe says so; every session builds a new
+    /// engine, so a logout or another server starts without it.
+    transcode_offset: Arc<AtomicBool>,
+    /// Set by the decode loop when a requested transcode's connection
+    /// dropped and resuming it gave up, so its song ends early; the UI tick
+    /// takes it once (`take_stream_lost`).
+    stream_lost: Arc<AtomicBool>,
 }
 
 /// Sentinel for `DecodeLoopChannels::skip_fade_pending`: no skip-fade plan
@@ -881,6 +892,8 @@ struct ClonedDecodeLoopChannels {
     live_bitrate: Arc<AtomicU32>,
     skip_fade_pending: Arc<AtomicU64>,
     gap_offset_ms: Arc<AtomicU64>,
+    transcode_offset: Arc<AtomicBool>,
+    stream_lost: Arc<AtomicBool>,
 }
 
 impl DecodeLoopChannels {
@@ -893,6 +906,8 @@ impl DecodeLoopChannels {
             live_bitrate: Arc::new(AtomicU32::new(0)),
             skip_fade_pending: Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING)),
             gap_offset_ms: Arc::new(AtomicU64::new(0)),
+            transcode_offset: Arc::new(AtomicBool::new(false)),
+            stream_lost: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -907,6 +922,8 @@ impl DecodeLoopChannels {
             live_bitrate: self.live_bitrate.clone(),
             skip_fade_pending: self.skip_fade_pending.clone(),
             gap_offset_ms: self.gap_offset_ms.clone(),
+            transcode_offset: self.transcode_offset.clone(),
+            stream_lost: self.stream_lost.clone(),
         }
     }
 }
@@ -1132,6 +1149,156 @@ async fn radio_reconnect_loop(
             }
         }
     }
+}
+
+/// How many times the decode loop opens a requested transcode again after its
+/// connection dropped mid-song before it lets the song end there
+/// ([`resume_dropped_stream`]).
+const STREAM_RESUME_ATTEMPTS: u32 = 3;
+
+/// The wait before each resume attempt (ms), by attempt: none for the first
+/// (the ring still holds about a second of audio), then longer, so a server
+/// or proxy that drops every stream is asked at most a few times, seconds
+/// apart, before the song ends.
+const STREAM_RESUME_BACKOFF_MS: [u64; STREAM_RESUME_ATTEMPTS as usize] = [0, 500, 1_500];
+
+/// A resumed stream that played this much audio before it dropped again
+/// earns its attempts back: an occasional drop on a long song never runs
+/// them out, while a stream dropped every few seconds does.
+const STREAM_RESUME_REFILL_MS: u64 = 30_000;
+
+/// A stream dropped this near the song's end (or past it) is at its end:
+/// nothing is left worth a new transcode.
+const STREAM_RESUME_END_SLACK_MS: u64 = 2_000;
+
+/// A requested transcode whose connection dropped short of the song's end,
+/// and where to resume it ([`dropped_stream`]).
+struct DroppedStream {
+    /// Where in the song its decoded audio stopped (ms).
+    at_ms: u64,
+    /// Its track's URL and what was said of it.
+    hints: ReopenHints,
+    /// Resume attempts already spent on the track.
+    attempts_used: u32,
+}
+
+/// Whether `decoder`, at the end of its stream, was a requested transcode
+/// (`format` in its URL: one the server forced on its own is never reopened
+/// by nokkvi) on a server that honours `timeOffset`, read once through, whose
+/// body ended in an error ([`AudioDecoder::was_cut`]: a clean end of stream
+/// is the song's end however early) more than
+/// [`STREAM_RESUME_END_SLACK_MS`] short of the whole song's length.
+fn dropped_stream(decoder: &AudioDecoder, transcode_offset: bool) -> Option<DroppedStream> {
+    if !transcode_offset
+        || decoder.delivery() != StreamDelivery::Unsized
+        || !decoder.was_cut()
+        || !crate::utils::artwork_url::requests_transcode(decoder.url())
+    {
+        return None;
+    }
+    let at_ms = decoder.stream_end_ms();
+    let whole_ms = decoder.duration();
+    if whole_ms == 0 || at_ms.saturating_add(STREAM_RESUME_END_SLACK_MS) >= whole_ms {
+        return None;
+    }
+    let attempts_used = if decoder.decoded_ms() >= STREAM_RESUME_REFILL_MS {
+        0
+    } else {
+        decoder.resume_attempts_used()
+    };
+    Some(DroppedStream {
+        at_ms,
+        hints: decoder.reopen_hints(),
+        attempts_used,
+    })
+}
+
+/// What [`resume_dropped_stream`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResumeOutcome {
+    /// The new stream replaced the dropped one; the loop decodes on.
+    Resumed,
+    /// A newer decode loop owns the source: exit WITHOUT storing EOF.
+    Superseded,
+    /// The attempts ran out (or the answer can't continue the stream): the
+    /// caller takes the end-of-stream path, as at any end.
+    GaveUp,
+}
+
+/// Open a dropped requested transcode again where its audio stopped: the
+/// track's own URL at that whole second, the rest dropped through the
+/// preroll, so playback continues with nothing repeated or skipped (the
+/// renderer's clock counts on from the samples it has). Up to the attempts
+/// left ([`STREAM_RESUME_ATTEMPTS`]), each after its wait
+/// ([`STREAM_RESUME_BACKOFF_MS`]), with no decoder lock held across a wait or
+/// an open (a seek or a track change supersedes the loop meanwhile, and the
+/// new stream is then dropped). The dropped decoder stays in place, at its
+/// end, until a new one is open, so giving up leaves the end-of-stream path
+/// exactly as it was. An answer in another format can't continue the ring
+/// and ends the attempts.
+async fn resume_dropped_stream(
+    decoder: &tokio::sync::Mutex<AudioDecoder>,
+    dropped: DroppedStream,
+    format: &AudioFormat,
+    decode_gen: &DecodeLoopHandle,
+    my_gen: u64,
+) -> ResumeOutcome {
+    warn!(
+        "📡 [DECODE LOOP] The transcode's connection dropped at {} ms of {} — resuming there",
+        dropped.at_ms,
+        redact_subsonic_url(dropped.hints.url())
+    );
+    for attempt in dropped.attempts_used..STREAM_RESUME_ATTEMPTS {
+        let wait = STREAM_RESUME_BACKOFF_MS[attempt as usize];
+        if wait > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+        }
+        if decode_gen.current() != my_gen {
+            return ResumeOutcome::Superseded;
+        }
+        let mut resumed = match dropped
+            .hints
+            .open_at(dropped.at_ms, Some(REOPEN_ANSWER_TIMEOUT))
+            .await
+        {
+            Ok(resumed) => resumed,
+            Err(e) => {
+                warn!(
+                    "📡 [DECODE LOOP] Resume {}/{} failed: {e:#}",
+                    attempt + 1,
+                    STREAM_RESUME_ATTEMPTS
+                );
+                continue;
+            }
+        };
+        if resumed.format() != format {
+            warn!(
+                "📡 [DECODE LOOP] The resumed stream is {:?}, not {:?}; the song ends here",
+                resumed.format(),
+                format
+            );
+            return ResumeOutcome::GaveUp;
+        }
+        resumed.set_resume_attempts_used(attempt + 1);
+        let mut guard = decoder.lock().await;
+        if decode_gen.current() != my_gen {
+            return ResumeOutcome::Superseded;
+        }
+        *guard = resumed;
+        info!(
+            "📡 [DECODE LOOP] Resumed at {} ms (attempt {}/{})",
+            dropped.at_ms,
+            attempt + 1,
+            STREAM_RESUME_ATTEMPTS
+        );
+        return ResumeOutcome::Resumed;
+    }
+    warn!(
+        "📡 [DECODE LOOP] Gave up resuming after {STREAM_RESUME_ATTEMPTS} attempts; the song ends \
+         at {} ms",
+        dropped.at_ms
+    );
+    ResumeOutcome::GaveUp
 }
 
 /// What a decode loop should do this iteration about ring-buffer backpressure.
@@ -1735,12 +1902,12 @@ pub struct CustomAudioEngine {
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: LiveStringSlot,
 
-    /// Whether the server honours `timeOffset` on a transcode (it advertises
-    /// the OpenSubsonic `transcodeOffset` extension). Off until the login's
-    /// extension probe says so; every session builds a new engine, so a
-    /// logout or another server starts without it. With it, a transcode
-    /// nokkvi asked for seeks by reopening at an offset ([`Self::seekable`]).
-    transcode_offset: bool,
+    /// A seek past the song's end ended the track: its decoder sits at EOF
+    /// and the completion is about to load the next song itself, so a
+    /// gapless prep now would only race that load
+    /// ([`Self::track_ended_by_seek`]). Cleared by the next source, a
+    /// promotion, a play from the start and the next seek.
+    track_ended_by_seek: bool,
 
     /// A relative seek waiting out [`SEEK_SETTLE`] ([`Self::defer_seek`]).
     settling_seek: Option<SettlingSeek>,
@@ -1791,7 +1958,7 @@ impl CustomAudioEngine {
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             source_change_generation: 0,
             live_icy_metadata,
-            transcode_offset: false,
+            track_ended_by_seek: false,
             settling_seek: None,
             seek_failure: None,
             reopen_answer_timeout: REOPEN_ANSWER_TIMEOUT,
@@ -1801,13 +1968,28 @@ impl CustomAudioEngine {
     /// Record whether the server honours `timeOffset` on a transcode (its
     /// `transcodeOffset` extension). See the field doc.
     pub fn set_transcode_offset_supported(&mut self, supported: bool) {
-        self.transcode_offset = supported;
+        self.channels
+            .transcode_offset
+            .store(supported, Ordering::Release);
     }
 
     /// Whether the server honours `timeOffset` (see
     /// [`Self::set_transcode_offset_supported`]).
     pub fn transcode_offset_supported(&self) -> bool {
-        self.transcode_offset
+        self.channels.transcode_offset.load(Ordering::Acquire)
+    }
+
+    /// Whether a seek past the song's end has just ended the track (see the
+    /// field doc): the gapless prep stands down.
+    pub fn track_ended_by_seek(&self) -> bool {
+        self.track_ended_by_seek
+    }
+
+    /// Whether a requested transcode's stream dropped and could not be
+    /// resumed since the last take, so its song ended early: the UI tick
+    /// takes it to say so once.
+    pub fn take_stream_lost(&self) -> bool {
+        self.channels.stream_lost.swap(false, Ordering::AcqRel)
     }
 
     /// Why the last seek that reopened the stream failed, once: the UI tick
@@ -1843,7 +2025,7 @@ impl CustomAudioEngine {
     /// for, and reopening it would change what plays), on a server that
     /// honours `timeOffset`. Never a station.
     fn reopens_by_offset(&self, delivery: StreamDelivery, url: &str) -> bool {
-        self.transcode_offset
+        self.transcode_offset_supported()
             && delivery != StreamDelivery::Live
             && crate::utils::artwork_url::requests_transcode(url)
     }
@@ -1935,6 +2117,7 @@ impl CustomAudioEngine {
         // restarts.
         self.pending_start_ms = None;
         self.settling_seek = None;
+        self.track_ended_by_seek = false;
         if self.source == source {
             trace!(" AudioEngine: source unchanged, returning early");
             return;
@@ -2396,8 +2579,10 @@ impl CustomAudioEngine {
             // Apply current volume to renderer
             renderer.set_volume(self.volume);
 
-            // The track started: its start offset is spent.
+            // The track started: its start offset is spent, and it plays
+            // from wherever that put it, not from an end a seek reached.
             self.pending_start_ms = None;
+            self.track_ended_by_seek = false;
 
             // Set playing state BEFORE starting decoding
             self.playing = true;
@@ -2478,6 +2663,8 @@ impl CustomAudioEngine {
             live_bitrate,
             skip_fade_pending,
             gap_offset_ms,
+            transcode_offset,
+            stream_lost,
         } = self.channels.clone_for_decode_loop();
 
         // Gapless: pass next-track state so the decode loop can swap inline
@@ -2696,10 +2883,34 @@ impl CustomAudioEngine {
                     }
 
                     // =========================================================
-                    // GAPLESS TRANSITION: try to swap the next decoder inline
+                    // A REQUESTED TRANSCODE CUT SHORT: open it again where its
+                    // audio stopped, before treating this as its end
                     // =========================================================
                     let current_format = decoder_guard.format().clone();
+                    let dropped =
+                        dropped_stream(&decoder_guard, transcode_offset.load(Ordering::Acquire));
                     drop(decoder_guard); // release primary decoder lock
+                    if let Some(dropped) = dropped {
+                        match resume_dropped_stream(
+                            &decoder,
+                            dropped,
+                            &current_format,
+                            &decode_gen,
+                            my_gen,
+                        )
+                        .await
+                        {
+                            ResumeOutcome::Resumed => continue 'decode_loop,
+                            ResumeOutcome::Superseded => break,
+                            ResumeOutcome::GaveUp => {
+                                stream_lost.store(true, Ordering::Release);
+                            }
+                        }
+                    }
+
+                    // =========================================================
+                    // GAPLESS TRANSITION: try to swap the next decoder inline
+                    // =========================================================
 
                     // M8 positive "Gap / Overlap Trim": inject the pending
                     // per-transition silence between the outgoing's last
@@ -2946,8 +3157,10 @@ impl CustomAudioEngine {
     pub async fn seek(&mut self, position_ms: u64) -> SeekOutcome {
         use tracing::{debug, trace, warn};
 
-        // This seek replaces a relative seek still settling.
+        // This seek replaces a relative seek still settling, and moves a
+        // track a seek past its end had ended.
         self.settling_seek = None;
+        self.track_ended_by_seek = false;
 
         // A planned skip's decoder is still building (the queue already
         // names the target): the seek is aimed at the target, not the
@@ -3346,6 +3559,7 @@ impl CustomAudioEngine {
                 drop(decoder);
                 self.renderer.lock().seek(plan.whole_ms);
                 self.position = plan.whole_ms;
+                self.track_ended_by_seek = true;
                 return;
             }
             ReopenOpened::Ready { decoder, pos } => (decoder, pos),
@@ -3797,6 +4011,7 @@ impl CustomAudioEngine {
         stream: StreamFacts,
     ) {
         self.settling_seek = None;
+        self.track_ended_by_seek = false;
         if self.next_source == source {
             self.next_source.clear();
         }
@@ -10785,7 +11000,8 @@ mod tests {
     // =========================================================================
 
     use crate::audio::decoder::tests::{
-        CLOCK_SECS, ClockReply, ClockServer, clock_ms_of, clock_wav_from, spawn_clock_server,
+        CLOCK_RATE, CLOCK_SECS, ClockReply, ClockServer, LoggedRequest, clock_ms_of,
+        clock_wav_from, spawn_clock_server,
     };
 
     /// The clock song's length, as the server reports it.
@@ -11649,5 +11865,204 @@ mod tests {
         assert_eq!(rate, 44_100);
         assert_eq!(format_rate, 44_100);
         assert_eq!(promoted_rate, 44_100, "the completion promotes the same");
+    }
+
+    // =========================================================================
+    // A requested transcode whose connection drops mid-song resumes there
+    // =========================================================================
+
+    /// An engine playing the clock song with a completion counter wired, as
+    /// the controller wires one, on a server that honours `timeOffset`;
+    /// `url` overrides the requested transcode's URL. Keep the mixer alive.
+    async fn clock_engine_with_completion(
+        server: &ClockServer,
+        url: Option<String>,
+    ) -> (
+        Arc<tokio::sync::Mutex<CustomAudioEngine>>,
+        Arc<AtomicU32>,
+        rodio::mixer::MixerSource,
+    ) {
+        let engine = Arc::new(tokio::sync::Mutex::new(CustomAudioEngine::new()));
+        let ended = Arc::new(AtomicU32::new(0));
+        let mixer = {
+            let mut e = engine.lock().await;
+            let mixer = clock_output(&mut e).await;
+            e.set_engine_reference(Arc::downgrade(&engine));
+            e.set_transcode_offset_supported(true);
+            let counter = ended.clone();
+            e.set_completion_callback(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+            });
+            let url = url.unwrap_or_else(|| server.song_url("s1"));
+            e.load_track_with_rg(&url, None, Some(CLOCK_MS), None).await;
+            e.play().await.expect("the clock plays");
+            mixer
+        };
+        (engine, ended, mixer)
+    }
+
+    /// Pull the output until the track's completion fires (or `limit`
+    /// passes), checking that the clock it plays never repeats and never
+    /// jumps: every audible frame names the last one's millisecond or the
+    /// next (silence, while the output waits for audio or has no stream, is
+    /// skipped). Returns the last millisecond heard.
+    fn play_to_the_end(
+        mixer: &mut rodio::mixer::MixerSource,
+        ended: &AtomicU32,
+        limit: std::time::Duration,
+    ) -> u64 {
+        let deadline = std::time::Instant::now() + limit;
+        let mut last = 0;
+        while ended.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+            for _ in 0..4_800 {
+                // No stream on the output at all (between a stop and the
+                // next stream) reads as silence too.
+                let (Some(left), Some(_right)) = (mixer.next(), mixer.next()) else {
+                    break;
+                };
+                if left == 0.0 {
+                    continue;
+                }
+                let ms = clock_ms_of(left);
+                assert!(
+                    ms == last || ms == last + 1,
+                    "the clock ran {last} ms → {ms} ms"
+                );
+                last = ms;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        last
+    }
+
+    /// WAV bytes holding the clock's first `ms` (its 44-byte header included).
+    fn clock_bytes_through(ms: u64) -> usize {
+        44 + usize::try_from(ms * CLOCK_RATE / 1000 * 4).unwrap()
+    }
+
+    /// A requested transcode whose connection drops mid-song (live: a proxy
+    /// cut it, "error decoding response body", the song then ended 157 s
+    /// early with no word) opens again where its audio stopped, at that
+    /// whole second with the rest dropped through the preroll, so the song
+    /// plays on to its end with nothing repeated or skipped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dropped_transcode_resumes_where_it_stopped_and_plays_to_the_end() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        server.cut_live_answers(clock_bytes_through(3_000), Some(1));
+        let (engine, ended, mut mixer) = clock_engine_with_completion(&server, None).await;
+
+        let last = play_to_the_end(&mut mixer, &ended, std::time::Duration::from_secs(20));
+        let lost = engine.lock().await.take_stream_lost();
+        let requests = server.requests();
+        engine.lock().await.stop().await;
+
+        assert_eq!(ended.load(Ordering::SeqCst), 1, "the song ended once");
+        assert!(last >= CLOCK_MS - 5, "played to its end: {last}");
+        assert_eq!(
+            requests
+                .iter()
+                .map(LoggedRequest::time_offset)
+                .collect::<Vec<_>>(),
+            [None, Some("3".to_owned())],
+            "one resume, at 3 s"
+        );
+        assert!(!lost, "nothing was lost");
+    }
+
+    /// A server that drops every stream makes the resume give up after its
+    /// attempts (3, with a growing wait between them), so it can't loop or
+    /// hammer the server: the song then ends where its audio stopped, as
+    /// before, and the UI is told once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_transcode_dropped_every_time_gives_up_after_its_attempts() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        server.cut_live_answers(clock_bytes_through(1_000), None);
+        let (engine, ended, mut mixer) = clock_engine_with_completion(&server, None).await;
+
+        let last = play_to_the_end(&mut mixer, &ended, std::time::Duration::from_secs(20));
+        let lost = engine.lock().await.take_stream_lost();
+        let lost_again = engine.lock().await.take_stream_lost();
+        let requests = server.requests();
+        engine.lock().await.stop().await;
+
+        assert_eq!(ended.load(Ordering::SeqCst), 1, "the song ended");
+        assert!(last.abs_diff(4_000) <= 5, "where its audio stopped: {last}");
+        assert_eq!(
+            requests
+                .iter()
+                .map(LoggedRequest::time_offset)
+                .collect::<Vec<_>>(),
+            [
+                None,
+                Some("1".to_owned()),
+                Some("2".to_owned()),
+                Some("3".to_owned())
+            ],
+            "three resumes, then no more"
+        );
+        assert!(lost, "the UI is told");
+        assert!(!lost_again, "once");
+    }
+
+    /// A stream that ends cleanly is the song's end, never a drop: no
+    /// request follows it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_transcode_that_ends_cleanly_is_not_resumed() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        let (engine, ended, mut mixer) = clock_engine_with_completion(&server, None).await;
+
+        let last = play_to_the_end(&mut mixer, &ended, std::time::Duration::from_secs(20));
+        let lost = engine.lock().await.take_stream_lost();
+        let requests = server.requests().len();
+        engine.lock().await.stop().await;
+
+        assert_eq!(ended.load(Ordering::SeqCst), 1);
+        assert!(last >= CLOCK_MS - 5, "{last}");
+        assert_eq!(requests, 1, "nothing reopened");
+        assert!(!lost);
+    }
+
+    /// A connection that drops within the song's last moments (inside the
+    /// end tolerance) is its end too: nothing is left worth a new transcode.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_drop_at_the_songs_end_is_its_end() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        server.cut_live_answers(clock_bytes_through(CLOCK_MS - 5), Some(1));
+        let (engine, ended, mut mixer) = clock_engine_with_completion(&server, None).await;
+
+        play_to_the_end(&mut mixer, &ended, std::time::Duration::from_secs(20));
+        let lost = engine.lock().await.take_stream_lost();
+        let requests = server.requests().len();
+        engine.lock().await.stop().await;
+
+        assert_eq!(ended.load(Ordering::SeqCst), 1);
+        assert_eq!(requests, 1, "nothing reopened");
+        assert!(!lost);
+    }
+
+    /// A transcode the server forced on its own (no `format` in nokkvi's
+    /// URL) is never reopened by nokkvi: a drop ends it as before.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dropped_transcode_nokkvi_did_not_ask_for_is_not_resumed() {
+        let server = spawn_clock_server(ClockReply::Live).await;
+        server.cut_live_answers(clock_bytes_through(2_000), None);
+        let url = format!(
+            "{}/rest/stream?id=s1&u=nk&t=token&s=salt&f=json&v=1.8.0&c=nokkvi&_=1",
+            server.base
+        );
+        let (engine, ended, mut mixer) = clock_engine_with_completion(&server, Some(url)).await;
+
+        let last = play_to_the_end(&mut mixer, &ended, std::time::Duration::from_secs(20));
+        let lost = engine.lock().await.take_stream_lost();
+        let requests = server.requests();
+        engine.lock().await.stop().await;
+
+        assert_eq!(ended.load(Ordering::SeqCst), 1);
+        assert!(last.abs_diff(2_000) <= 5, "{last}");
+        assert!(
+            requests.iter().all(|r| r.time_offset().is_none()),
+            "nothing reopened at an offset: {requests:?}"
+        );
+        assert!(!lost);
     }
 }

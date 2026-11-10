@@ -1,6 +1,6 @@
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use anyhow::{Context, Result};
@@ -398,6 +398,11 @@ impl RecvTimeout {
 /// to wait for channel data without blocking the async executor directly.
 struct AsyncNetworkBuffer {
     rx: mpsc::Receiver<Bytes>,
+    /// Set when the body ended in an error (a dropped connection, a proxy
+    /// cutting it, a 15 s stall) rather than at its clean end. The reader
+    /// still sees an end of stream; the decoder asks this to tell a drop
+    /// from the song's real end ([`AudioDecoder::was_cut`]).
+    cut: Arc<AtomicBool>,
     leftover: Bytes,
     cancel: CancellationToken,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -415,6 +420,8 @@ impl AsyncNetworkBuffer {
         let (tx, rx) = mpsc::channel::<Bytes>(64);
         let cancel = CancellationToken::new();
         let child_cancel = cancel.clone();
+        let cut = Arc::new(AtomicBool::new(false));
+        let cut_by_task = cut.clone();
 
         let task = tokio::spawn(async move {
             use futures::stream::StreamExt;
@@ -442,6 +449,7 @@ impl AsyncNetworkBuffer {
                         // here today — kept as defense-in-depth so this stays correct
                         // if a future reqwest attaches the URL to body/stream errors.
                         warn!(" [NETWORK BUFFER] Stream error: {}", e.without_url());
+                        cut_by_task.store(true, Ordering::Release);
                         return;
                     }
                     Ok(None) => {
@@ -453,6 +461,7 @@ impl AsyncNetworkBuffer {
                             timeout_secs = STREAM_READ_TIMEOUT.as_secs(),
                             " [NETWORK BUFFER] Read timeout — aborting stalled radio stream"
                         );
+                        cut_by_task.store(true, Ordering::Release);
                         return;
                     }
                 }
@@ -461,11 +470,18 @@ impl AsyncNetworkBuffer {
 
         Self {
             rx,
+            cut,
             leftover: first,
             cancel,
             task: Some(task),
             recv_timeout,
         }
+    }
+
+    /// The flag the body's task sets when it ended in an error (see the
+    /// field doc).
+    fn cut_flag(&self) -> Arc<AtomicBool> {
+        self.cut.clone()
     }
 }
 
@@ -754,6 +770,17 @@ pub struct AudioDecoder {
     /// answer is read through, so an answer that turns out to be the song's
     /// own file is read on without the offset ([`RangeUrl`]).
     range_url: Option<RangeUrl>,
+    /// A once-through stream's drop flag ([`AsyncNetworkBuffer`]): set when
+    /// its body ended in an error, not at its clean end.
+    stream_cut: Option<Arc<AtomicBool>>,
+    /// Frames decoded since the stream opened, those dropped afterwards
+    /// (preroll, leading trim) included: with `offset_secs`, where in the
+    /// song the decoded audio ends ([`Self::stream_end_ms`]).
+    decoded_frames: u64,
+    /// Resumes of a dropped stream spent on this track without a long
+    /// healthy stretch between them (the engine's decode loop keeps the
+    /// count, see `resume_dropped_stream`).
+    resume_attempts_used: u32,
 }
 
 /// Leading-silence trim state (M8). The scan lives inside the registry-backed
@@ -1116,6 +1143,9 @@ impl AudioDecoder {
             seek_preroll_frames: 0,
             offset_secs: 0,
             range_url: None,
+            stream_cut: None,
+            decoded_frames: 0,
+            resume_attempts_used: 0,
         }
     }
 
@@ -1270,6 +1300,43 @@ impl AudioDecoder {
         self.eof = true;
         self.frame_buffer.clear();
         self.seek_preroll_frames = 0;
+    }
+
+    /// Whether the open stream's body ended in an error (a dropped
+    /// connection, a stall) rather than at its clean end. Only a stream read
+    /// once through can tell; a sized one retries its ranges instead.
+    pub fn was_cut(&self) -> bool {
+        self.stream_cut
+            .as_ref()
+            .is_some_and(|cut| cut.load(Ordering::Acquire))
+    }
+
+    /// Where in the song the audio decoded so far ends (ms): the stream's
+    /// offset plus every frame decoded from it.
+    pub fn stream_end_ms(&self) -> u64 {
+        self.offset_secs
+            .saturating_mul(1000)
+            .saturating_add(self.decoded_ms())
+    }
+
+    /// How much audio the open stream decoded (ms).
+    pub fn decoded_ms(&self) -> u64 {
+        match u64::from(self.format.sample_rate()) {
+            0 => 0,
+            rate => self.decoded_frames.saturating_mul(1000) / rate,
+        }
+    }
+
+    /// Resumes of a dropped stream already spent on this track (see the
+    /// field doc).
+    pub fn resume_attempts_used(&self) -> u32 {
+        self.resume_attempts_used
+    }
+
+    /// Record the resumes spent on this track, carried from the stream this
+    /// one resumed.
+    pub fn set_resume_attempts_used(&mut self, used: u32) {
+        self.resume_attempts_used = used;
     }
 
     async fn open_input(&mut self) -> Result<()> {
@@ -1768,6 +1835,7 @@ impl AudioDecoder {
         let recv_timeout = RecvTimeout::new(PROBE_RECV_TIMEOUT);
         let buffered_response =
             AsyncNetworkBuffer::new_async(response, first, recv_timeout.clone());
+        self.stream_cut = Some(buffered_response.cut_flag());
 
         let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
             let interval_usize = interval.get();
@@ -1995,6 +2063,8 @@ impl AudioDecoder {
         self.smoothed_bitrate_kbps = 0.0;
         self.live_codec = None;
         self.range_url = None;
+        self.stream_cut = None;
+        self.decoded_frames = 0;
     }
 
     /// Extract format hint from URL (file extension or query parameter)
@@ -2204,6 +2274,9 @@ impl AudioDecoder {
 
                     let mut decoded_bytes = interleaved.as_slice();
                     let bytes_per_frame = channels * std::mem::size_of::<f32>();
+                    self.decoded_frames = self
+                        .decoded_frames
+                        .saturating_add((decoded_bytes.len() / bytes_per_frame.max(1)) as u64);
 
                     // M8 leading-silence trim (content-aware — the decoder's
                     // gapless trim is format bookkeeping, this drops musical
@@ -2260,6 +2333,7 @@ impl AudioDecoder {
                     // Zero-fill to maintain time sync and prevent buffer
                     // starvation; frames before a seek's target are dropped.
                     let dur = packet.dur.get();
+                    self.decoded_frames = self.decoded_frames.saturating_add(dur);
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
                         dur - take_seek_preroll(&mut self.seek_preroll_frames, dur),
@@ -2277,6 +2351,7 @@ impl AudioDecoder {
                     // Zero-fill to maintain time sync and prevent buffer
                     // starvation; frames before a seek's target are dropped.
                     let dur = packet.dur.get();
+                    self.decoded_frames = self.decoded_frames.saturating_add(dur);
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
                         dur - take_seek_preroll(&mut self.seek_preroll_frames, dur),
@@ -3125,6 +3200,7 @@ pub(crate) mod tests {
 
         let buf = AsyncNetworkBuffer {
             rx,
+            cut: Arc::new(AtomicBool::new(false)),
             leftover: Bytes::new(),
             cancel,
             task: Some(task),
@@ -4844,6 +4920,14 @@ pub(crate) mod tests {
         /// of the song's length is off).
         pub(crate) fn set_header_secs(&self, secs: u64) {
             self.state.lock().header_secs = secs;
+        }
+
+        /// Cut the next `count` `Live` answers (every one with `None`) after
+        /// `bytes` bytes of their body, as a dropped connection does.
+        pub(crate) fn cut_live_answers(&self, bytes: usize, count: Option<u32>) {
+            let mut state = self.state.lock();
+            state.cut_after = Some(bytes);
+            state.cuts_left = count;
         }
 
         /// Every request read so far, in order.
