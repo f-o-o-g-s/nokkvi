@@ -490,7 +490,7 @@ define_labeled_enum! {
         /// Every song streams as its own file (the default).
         #[default]
         Original { label: "Original", wire: "original" },
-        /// Bigger songs stream as Opus (gapless joins stay seamless).
+        /// Bigger songs stream as Opus.
         Opus { label: "Opus", wire: "opus" },
         /// Bigger songs stream as MP3 (a piped MP3 carries no gapless info,
         /// so joins can gain a short gap).

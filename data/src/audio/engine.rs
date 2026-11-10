@@ -1927,6 +1927,15 @@ impl CustomAudioEngine {
         self.skip_fade_window_pending() || self.crossfade.skip_fade
     }
 
+    /// Whether an AUTO crossfade is blending right now, by the engine's phase
+    /// or the renderer's (they flip a task hop apart). [`Self::reset_next_track`]
+    /// cancels such a blend back to its outgoing; a manual-skip blend is
+    /// spared by the reset and does not count here. Its prepared decoder has
+    /// already left the slot: it is the blend's incoming.
+    pub fn auto_crossfade_live(&self) -> bool {
+        !self.crossfade.skip_fade && self.crossfade.is_crossfade_live(&self.renderer)
+    }
+
     /// Get volume (0.0-1.0)
     pub fn volume(&self) -> f64 {
         self.volume
@@ -4430,6 +4439,18 @@ impl CustomAudioEngine {
         self.renderer.lock().force_crossfade_active_for_test()
     }
 
+    /// Test-only: [`Self::force_live_auto_crossfade_for_test`], but the blend
+    /// is a manual skip's (Next / Previous / a click under Fade on Skip =
+    /// Crossfade), whose incoming is the queue's current track.
+    #[cfg(test)]
+    pub(crate) fn force_live_skip_crossfade_for_test(
+        &mut self,
+    ) -> crate::audio::streaming_source::StreamingSource {
+        let keepalive = self.force_live_auto_crossfade_for_test();
+        self.crossfade.skip_fade = true;
+        keepalive
+    }
+
     /// Test-only: mark the current source as an infinite (radio) stream so
     /// cross-module tests can drive the radio arm of the skip-fade gates
     /// (the `channels` field is private to this module).
@@ -4508,7 +4529,7 @@ impl CustomAudioEngine {
         // reads its crossfade-active flag, drops the guard, and returns a plain
         // bool BEFORE the `cancel_crossfade().await` below (which re-locks the
         // renderer) — so no `parking_lot` guard ever straddles the await.
-        if !self.crossfade.skip_fade && self.crossfade.is_crossfade_live(&self.renderer) {
+        if self.auto_crossfade_live() {
             self.cancel_crossfade().await;
         }
         self.gapless.lock().await.clear();

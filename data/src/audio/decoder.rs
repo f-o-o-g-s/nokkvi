@@ -23,10 +23,10 @@ use tokio_util::{
 };
 use tracing::{debug, error, info, trace, warn};
 
-use super::range_http_reader::RangeHttpReader;
+use super::range_http_reader::{CHUNK_SIZE, ContentRange, RangeHttpReader};
 use crate::{
     audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry},
-    utils::url_redaction::redact_subsonic_url,
+    utils::{artwork_url::requests_transcode, url_redaction::redact_subsonic_url},
 };
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
@@ -72,17 +72,6 @@ fn serves_ranges(headers: &reqwest::header::HeaderMap) -> bool {
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("bytes"))
 }
 
-/// A `Content-Range` header (`bytes 0-262143/3216574`, `bytes */0`): the
-/// first byte sent, when it names one, and the whole length, when known.
-fn content_range(headers: &reqwest::header::HeaderMap) -> Option<(Option<u64>, Option<u64>)> {
-    let value = headers.get(reqwest::header::CONTENT_RANGE)?.to_str().ok()?;
-    let (range, total) = value.trim().strip_prefix("bytes")?.trim().split_once('/')?;
-    let start = range
-        .split_once('-')
-        .and_then(|(start, _)| start.trim().parse().ok());
-    Some((start, total.trim().parse().ok()))
-}
-
 /// Whether an answer's body is a JSON or XML document (a Subsonic error
 /// envelope), which no audio stream, ICY radio included, is served as.
 fn is_document_answer(headers: &reqwest::header::HeaderMap) -> bool {
@@ -110,15 +99,6 @@ fn x_content_duration_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     (secs.is_finite() && secs > 0.0).then(|| (secs * 1000.0).round() as u64)
 }
 
-/// Whether `url` asks the server for a transcode: a `/rest/stream` request
-/// carrying a `format` param (only the Streaming Quality setting puts one
-/// there, `utils::artwork_url::build_stream_url`).
-fn requests_transcode(url: &str) -> bool {
-    url::Url::parse(url).is_ok_and(|url| {
-        url.path().ends_with("/rest/stream") && url.query_pairs().any(|(key, _)| key == "format")
-    })
-}
-
 /// What the one GET of a requested transcode answered, judged from its
 /// status and headers alone (see `AudioDecoder::open_requested_transcode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +111,13 @@ enum TranscodeAnswer {
     /// Nothing to play: a 2xx with `Content-Length: 0`, or a 416 (a range
     /// asked of an empty entry).
     Empty,
+    /// A 206 for another range than the one asked for (it starts elsewhere,
+    /// or the server capped it): the range reader could never fill its
+    /// chunks from this server.
+    WrongRange,
+    /// A 206 whose `Content-Range` names no total length: nothing to size the
+    /// stream by, and its body is only the first slice.
+    PartialWithoutLength,
     /// The answer serves byte ranges, `total` bytes long: read it with Range
     /// requests like a file.
     Sized { total: u64 },
@@ -138,11 +125,16 @@ enum TranscodeAnswer {
     Stream,
 }
 
-/// Judge a requested transcode's answer. The length decides only together
-/// with ranges: a 206 names the whole length in its `Content-Range` (its own
-/// `Content-Length` is the slice), a 200 counts as sized only beside
-/// `Accept-Ranges: bytes` (Go sizes a tiny live answer, such as the
-/// headers-only Ogg past the end of a song, next to `Accept-Ranges: none`).
+/// Judge a requested transcode's answer to its `Range: bytes=0-<chunk - 1>`
+/// GET. Only a 206 for exactly that range is sized: it names the whole
+/// length in its `Content-Range` (its own `Content-Length` is the slice).
+/// Navidrome answers every range it can serve with a 206, so a 200 means a
+/// live transcode or something on the way that stripped the Range header;
+/// later Range requests would be stripped too, so a 200 is read once
+/// through, except when it is the whole file in one chunk with
+/// `Accept-Ranges: bytes` (then it is all in hand). Go sizes a tiny live
+/// answer, such as the headers-only Ogg past the end of a song, next to
+/// `Accept-Ranges: none`, which stays a stream.
 fn classify_transcode_answer(
     status: reqwest::StatusCode,
     headers: &reqwest::header::HeaderMap,
@@ -160,14 +152,24 @@ fn classify_transcode_answer(
         return TranscodeAnswer::Empty;
     }
     if status == reqwest::StatusCode::PARTIAL_CONTENT {
-        return match content_range(headers).and_then(|(_, total)| total) {
-            Some(total) if total > 0 => TranscodeAnswer::Sized { total },
-            Some(_) => TranscodeAnswer::Empty,
-            None => TranscodeAnswer::Refused(status),
+        let range = ContentRange::of(headers);
+        return match range.and_then(|range| range.total) {
+            None => TranscodeAnswer::PartialWithoutLength,
+            Some(0) => TranscodeAnswer::Empty,
+            Some(total)
+                if range.is_some_and(|range| {
+                    range.start == Some(0) && range.end == Some(CHUNK_SIZE.min(total) - 1)
+                }) =>
+            {
+                TranscodeAnswer::Sized { total }
+            }
+            Some(_) => TranscodeAnswer::WrongRange,
         };
     }
     match header_content_length(headers) {
-        Some(total) if serves_ranges(headers) => TranscodeAnswer::Sized { total },
+        Some(total) if serves_ranges(headers) && total <= CHUNK_SIZE => {
+            TranscodeAnswer::Sized { total }
+        }
         Some(_) | None => TranscodeAnswer::Stream,
     }
 }
@@ -1317,7 +1319,7 @@ impl AudioDecoder {
             // can cause a stale connection to be reused on reconnect.
             .pool_max_idle_per_host(0)
             .build()
-            .context("Failed to create radio HTTP client")
+            .context("Failed to create the streaming HTTP client")
     }
 
     /// The source for `response` read once from front to back: a station's
@@ -1421,13 +1423,11 @@ impl AudioDecoder {
     /// reader's first chunk, so nothing is downloaded twice and the stream
     /// seeks like a file.
     async fn open_requested_transcode(&mut self) -> Result<OpenedStream> {
-        // A whole chunk: the length isn't known until the answer.
-        let first_chunk_len = RangeHttpReader::first_chunk_len(u64::MAX);
         let response = Self::stream_client()?
             .get(&self.url)
             .header(
                 reqwest::header::RANGE,
-                format!("bytes=0-{}", first_chunk_len - 1),
+                format!("bytes=0-{}", CHUNK_SIZE - 1),
             )
             .send()
             .await
@@ -1453,16 +1453,19 @@ impl AudioDecoder {
                 anyhow::bail!("the server sent an error instead of the song: {message}")
             }
             TranscodeAnswer::Empty => anyhow::bail!(EMPTY_TRANSCODE),
+            TranscodeAnswer::WrongRange => anyhow::bail!(
+                "the server sent another part of the stream than the one asked for (HTTP 206), \
+                 so it can't be read in parts"
+            ),
+            TranscodeAnswer::PartialWithoutLength => anyhow::bail!(
+                "the server sent the start of the stream with no total length (HTTP 206), \
+                 so it can't be played"
+            ),
             TranscodeAnswer::Sized { total } => {
-                // A 200 sends the body from its first byte; a 206 says where
-                // its slice starts.
-                let from_start = response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-                    || content_range(response.headers()).is_some_and(|(start, _)| start == Some(0));
-                let first_chunk = if from_start {
-                    read_prefix(response, RangeHttpReader::first_chunk_len(total)).await
-                } else {
-                    Vec::new()
-                };
+                // Exactly the first chunk (a 206 for the range asked), or the
+                // whole one-chunk file (a 200): either way bytes 0.. of it.
+                let first_chunk =
+                    read_prefix(response, RangeHttpReader::first_chunk_len(total)).await;
                 debug!(
                     " [DECODER] The requested transcode is served in ranges: {} bytes \
                      ({} of the first chunk in hand)",
@@ -3284,28 +3287,6 @@ pub(crate) mod tests {
     // A requested transcode (Streaming Quality): one GET, no HEAD
     // =========================================================================
 
-    #[test]
-    fn only_a_stream_request_with_a_format_param_asks_for_a_transcode() {
-        for (url, asks) in [
-            (
-                "http://srv/rest/stream?id=s1&format=opus&maxBitRate=128&u=a&t=b&s=c&f=json",
-                true,
-            ),
-            (
-                "http://srv/rest/stream?id=s1&format=mp3&maxBitRate=96",
-                true,
-            ),
-            ("https://srv/navidrome/rest/stream?id=s1&format=opus", true),
-            ("http://srv/rest/stream?id=s1&u=a&t=b&s=c&f=json&_=1", false),
-            ("http://srv/rest/stream?id=s1&f=json", false),
-            ("http://radio.example/live.mp3?format=mp3", false),
-            ("/home/me/song.flac", false),
-            ("", false),
-        ] {
-            assert_eq!(requests_transcode(url), asks, "{url}");
-        }
-    }
-
     fn headers(pairs: &[(&'static str, &'static str)]) -> reqwest::header::HeaderMap {
         let mut map = reqwest::header::HeaderMap::new();
         for (name, value) in pairs {
@@ -3328,11 +3309,46 @@ pub(crate) mod tests {
                 ]),
                 TranscodeAnswer::Sized { total: 3_216_574 },
             ),
-            // The range ignored, but the answer serves ranges and is sized.
+            // A small file answered whole: the range asked for covered it all.
+            (
+                StatusCode::PARTIAL_CONTENT,
+                headers(&[
+                    ("content-range", "bytes 0-4169/4170"),
+                    ("content-length", "4170"),
+                    ("accept-ranges", "bytes"),
+                ]),
+                TranscodeAnswer::Sized { total: 4170 },
+            ),
+            // The Range header stripped on the way, but the whole file fits
+            // in the first chunk: it is all in hand, so it stays sized.
             (
                 StatusCode::OK,
                 headers(&[("accept-ranges", "bytes"), ("content-length", "4170")]),
                 TranscodeAnswer::Sized { total: 4170 },
+            ),
+            // The Range header stripped on the way, a file bigger than one
+            // chunk: later Range requests would be stripped too, so it is
+            // read once through, not sized.
+            (
+                StatusCode::OK,
+                headers(&[("accept-ranges", "bytes"), ("content-length", "300000")]),
+                TranscodeAnswer::Stream,
+            ),
+            // A 206 for another range than asked.
+            (
+                StatusCode::PARTIAL_CONTENT,
+                headers(&[("content-range", "bytes 1-262144/3216574")]),
+                TranscodeAnswer::WrongRange,
+            ),
+            (
+                StatusCode::PARTIAL_CONTENT,
+                headers(&[("content-range", "bytes 0-999/3216574")]),
+                TranscodeAnswer::WrongRange,
+            ),
+            (
+                StatusCode::PARTIAL_CONTENT,
+                headers(&[("content-range", "bytes 0-262143/*")]),
+                TranscodeAnswer::PartialWithoutLength,
             ),
             // A live transcode: no length, ranges refused.
             (
@@ -3435,6 +3451,18 @@ pub(crate) mod tests {
         Empty,
         /// A 200 whose chunked body ends at once.
         EmptyChunked,
+        /// Something on the way stripped the Range header: 200, the whole
+        /// body, `Accept-Ranges: bytes` and its length.
+        RangeDropped,
+        /// A 206 for the range one byte later than asked.
+        WrongStart,
+        /// A 206 for only the first 1000 bytes of the range asked.
+        Capped,
+        /// A tiny live answer Go sized itself: 200, `Accept-Ranges: none`,
+        /// a Content-Length, the whole body.
+        LiveTiny,
+        /// A 206 whose `Content-Range` total is `*`.
+        PartialNoTotal,
     }
 
     /// Bigger than the range reader's 256 KB chunk, so reading it to the end
@@ -3452,12 +3480,20 @@ pub(crate) mod tests {
     pub(crate) async fn spawn_stream_server(
         reply: TranscodeReply,
     ) -> (String, Arc<parking_lot::Mutex<Vec<LoggedRequest>>>) {
+        spawn_stream_server_with(reply, two_chunk_body()).await
+    }
+
+    /// [`spawn_stream_server`] serving `body` (the file and every transcode).
+    pub(crate) async fn spawn_stream_server_with(
+        reply: TranscodeReply,
+        body: Vec<u8>,
+    ) -> (String, Arc<parking_lot::Mutex<Vec<LoggedRequest>>>) {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
         };
 
-        let body: Arc<Vec<u8>> = Arc::new(two_chunk_body());
+        let body: Arc<Vec<u8>> = Arc::new(body);
         let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let logged = log.clone();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3557,6 +3593,58 @@ pub(crate) mod tests {
                                 .to_owned(),
                             b"0\r\n\r\n".to_vec(),
                         ),
+                        Some(TranscodeReply::RangeDropped) => (
+                            "200 OK",
+                            format!(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n\
+                                 Content-Length: {}\r\nX-Content-Duration: 245.5\r\n",
+                                body.len()
+                            ),
+                            if head { Vec::new() } else { body.to_vec() },
+                        ),
+                        Some(TranscodeReply::LiveTiny) => (
+                            "200 OK",
+                            format!(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: none\r\n\
+                                 Content-Length: {}\r\nX-Content-Duration: 245.5\r\n",
+                                body.len()
+                            ),
+                            if head { Vec::new() } else { body.to_vec() },
+                        ),
+                        Some(TranscodeReply::WrongStart) => {
+                            let end = 262_144.min(body.len() - 1);
+                            (
+                                "206 Partial Content",
+                                format!(
+                                    "Content-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n\
+                                     Content-Range: bytes 1-{end}/{}\r\nContent-Length: {}\r\n",
+                                    body.len(),
+                                    end
+                                ),
+                                body[1..=end].to_vec(),
+                            )
+                        }
+                        Some(TranscodeReply::Capped) => (
+                            "206 Partial Content",
+                            format!(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n\
+                                 Content-Range: bytes 0-999/{}\r\nContent-Length: 1000\r\n",
+                                body.len()
+                            ),
+                            body[..1000].to_vec(),
+                        ),
+                        Some(TranscodeReply::PartialNoTotal) => {
+                            let end = 262_143.min(body.len() - 1);
+                            (
+                                "206 Partial Content",
+                                format!(
+                                    "Content-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n\
+                                     Content-Range: bytes 0-{end}/*\r\nContent-Length: {}\r\n",
+                                    end + 1
+                                ),
+                                body[..=end].to_vec(),
+                            )
+                        }
                         Some(TranscodeReply::Cached) | None => {
                             let last = body.len() - 1;
                             let slice = request
@@ -3760,6 +3848,126 @@ pub(crate) mod tests {
             );
             assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
         }
+    }
+
+    /// A proxy that strips the Range header gets the whole body back as a
+    /// 200. Later Range requests would be stripped too, so a file bigger than
+    /// one chunk is read once through on that one answer (the bytes already
+    /// read go first), never sized: sized, every later chunk would come back
+    /// as the file's start.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_whose_range_was_dropped_on_the_way_streams_once_through() {
+        let (base, log) = spawn_stream_server(TranscodeReply::RangeDropped).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the answer must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+        assert_eq!(decoder.byte_len(), None);
+        drain_to_eof(&mut decoder);
+        assert!(decoder.is_eof());
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+    }
+
+    /// The same answer for a file that fits in one chunk is the whole file
+    /// in hand: it stays sized and seekable, and nothing more is asked for.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_small_answer_whose_range_was_dropped_is_sized_from_what_is_in_hand() {
+        let body = transcode_body().to_vec();
+        let (base, log) =
+            spawn_stream_server_with(TranscodeReply::RangeDropped, body.clone()).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the answer must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(body.len() as u64));
+        assert!(tokio::task::block_in_place(|| decoder.seek(100)));
+        drain_to_eof(&mut decoder);
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+    }
+
+    /// A small cached transcode answers the first-chunk range with all of
+    /// itself: one request in total, open and play through included.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_small_cached_transcode_opens_with_one_request_in_total() {
+        let body = transcode_body().to_vec();
+        let (base, log) = spawn_stream_server_with(TranscodeReply::Cached, body.clone()).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the cached transcode must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(body.len() as u64));
+        drain_to_eof(&mut decoder);
+        let log = log.lock().clone();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].range.as_deref(), Some("bytes=0-262143"));
+    }
+
+    /// A tiny live answer Go sized itself (`Accept-Ranges: none` beside a
+    /// length, like the headers-only Ogg past a song's end) is no file to
+    /// read in ranges: it stays a once-through stream.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_tiny_live_answer_with_a_length_stays_unsized() {
+        let (base, log) =
+            spawn_stream_server_with(TranscodeReply::LiveTiny, transcode_body().to_vec()).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the answer must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+        assert_eq!(decoder.byte_len(), None);
+        drain_to_eof(&mut decoder);
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+    }
+
+    /// A 206 for another range than the one asked for (starting elsewhere,
+    /// or capped short) fails the open with that said, after the one GET:
+    /// the range reader could never fill its chunks from such a server.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_206_for_another_range_than_asked_fails_the_open() {
+        for reply in [TranscodeReply::WrongStart, TranscodeReply::Capped] {
+            let (base, log) = spawn_stream_server(reply).await;
+
+            let mut decoder = AudioDecoder::default();
+            let error = decoder
+                .init(&song_url(&base, true))
+                .await
+                .expect_err("the wrong range is no stream");
+
+            assert!(format!("{error}").contains("another part"), "{error:#}");
+            assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+        }
+    }
+
+    /// A 206 whose total is `*` names no length: the open fails and says so
+    /// (it used to read as the server refusing the stream with a 206).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_206_without_a_total_length_fails_and_says_so() {
+        let (base, _log) = spawn_stream_server(TranscodeReply::PartialNoTotal).await;
+
+        let mut decoder = AudioDecoder::default();
+        let error = decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect_err("a slice with no length is no stream");
+
+        let text = format!("{error}");
+        assert!(text.contains("no total length"), "{error:#}");
+        assert!(!text.contains("refused"), "{error:#}");
     }
 
     /// A song streamed as its file (no `format`) still opens exactly as

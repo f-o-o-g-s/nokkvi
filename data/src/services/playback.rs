@@ -1124,6 +1124,77 @@ mod tests {
         assert!(!session.stream_url_for("f1", None).contains("format="));
     }
 
+    /// Every URL a session builds, for every setting and kind of song, asks
+    /// either for the file (no `format`, no `maxBitRate`) or for opus / mp3
+    /// together with the setting's cap; never `format=raw`, never a cap
+    /// alone, never `estimateContentLength`.
+    #[test]
+    fn every_built_url_asks_for_opus_or_mp3_with_its_cap_or_for_the_file() {
+        use crate::types::{
+            player_settings::{StreamFormat, StreamMaxBitrate},
+            stream_quality::StreamQuality,
+        };
+        let songs = [
+            flac_song("f1"),
+            Song {
+                suffix: Some("mp3".to_string()),
+                bitrate: Some(320),
+                ..make_song("m1")
+            },
+            Song {
+                suffix: Some("ape".to_string()),
+                channels: Some(6),
+                ..make_song("a1")
+            },
+            make_song("u1"),
+        ];
+        let mut transcodes = 0;
+        for format in [
+            StreamFormat::Original,
+            StreamFormat::Opus,
+            StreamFormat::Mp3,
+        ] {
+            for cap in StreamMaxBitrate::ALL {
+                let session = session("http://server").with_quality(StreamQuality {
+                    format,
+                    max_bitrate: cap,
+                });
+                for song in &songs {
+                    let url = session.stream_url(song);
+                    let pairs: Vec<(String, String)> = url::Url::parse(&url)
+                        .expect("a URL")
+                        .query_pairs()
+                        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                        .collect();
+                    let value = |key: &str| {
+                        pairs
+                            .iter()
+                            .filter(|(k, _)| k == key)
+                            .map(|(_, v)| v.as_str())
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(pairs[0].0, "id", "{url}");
+                    assert!(!url.contains("estimateContentLength"), "{url}");
+                    match value("format").as_slice() {
+                        [] => assert!(value("maxBitRate").is_empty(), "a cap alone: {url}"),
+                        [wire] => {
+                            assert!(matches!(*wire, "opus" | "mp3"), "{url}");
+                            assert_ne!(format, StreamFormat::Original, "{url}");
+                            let kbps = cap.kbps().to_string();
+                            assert_eq!(value("maxBitRate"), [kbps.as_str()], "{url}");
+                            transcodes += 1;
+                        }
+                        many => panic!("{} formats: {url}", many.len()),
+                    }
+                }
+            }
+        }
+        assert!(
+            transcodes > 0,
+            "the FLAC and the APE transcode under Opus and MP3"
+        );
+    }
+
     /// A session with no quality given streams every song as its file.
     #[test]
     fn a_session_without_a_quality_streams_every_song_as_its_file() {

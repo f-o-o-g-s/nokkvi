@@ -128,6 +128,12 @@ impl PlaybackController {
                         return Ok(());
                     };
                     let mut engine = ea.lock().await;
+                    // The Streaming Quality as of now, under the engine lock: a
+                    // settings push holds this lock while it changes the setting
+                    // and drops the prepared track, so one landing between the
+                    // snapshot above and here must not leave the fresh load on
+                    // the old setting.
+                    let session = session.with_quality(qvm.stream_quality());
                     // Phase 1 lock-discipline: hold the outer `nav` mutex only
                     // for the queue-mutation half of the work. Drop it before
                     // running the engine ops so concurrent navigator calls
@@ -226,6 +232,80 @@ impl PlaybackController {
             .await;
         drop(engine);
         Ok(())
+    }
+
+    /// Apply a settings load to the engine and to the stream URL builder.
+    /// Every settings save and config.toml hot reload runs this (the UI's
+    /// `handle_player_settings_loaded`), so each step must be a no-op when
+    /// its value didn't change: the engine setters compare, and the
+    /// Streaming Quality push ([`Self::push_stream_quality`]) does too.
+    /// `visualizer_enabled` is the UI's feed decision (`visualizer_feed_wanted`)
+    /// and `eq_state` its shared EQ gains.
+    pub async fn apply_player_settings(
+        &self,
+        settings: &crate::types::player_settings::LivePlayerSettings,
+        visualizer_enabled: bool,
+        eq_state: crate::audio::EqState,
+    ) {
+        let mut engine = self.audio_engine.lock().await;
+        Self::push_stream_quality(
+            &self.queue_service,
+            &mut engine,
+            crate::types::stream_quality::StreamQuality::of(settings),
+        )
+        .await;
+        engine
+            .set_crossfade_enabled(settings.crossfade_enabled)
+            .await;
+        engine.set_bit_perfect(settings.bit_perfect).await;
+        engine.set_crossfade_duration(settings.crossfade_duration_secs);
+        engine.set_crossfade_curve(settings.crossfade_curve);
+        engine.set_crossfade_min_track_secs(settings.crossfade_min_track_secs);
+        engine
+            .set_crossfade_album_gapless(settings.crossfade_album_gapless)
+            .await;
+        engine.set_smooth_track_starts(settings.smooth_track_starts);
+        engine.set_transport_fades(
+            settings.fade_on_pause,
+            settings.fade_pause_ms,
+            settings.fade_on_stop,
+            settings.fade_stop_ms,
+        );
+        engine.set_fade_radio_transitions(settings.fade_radio_transitions);
+        engine.set_skip_fade(settings.fade_on_skip, settings.fade_skip_secs);
+        engine.set_skip_silence(settings.skip_silence).await;
+        engine.set_crossfade_offset(settings.crossfade_offset_secs);
+        engine
+            .set_crossfade_bar_snap(settings.crossfade_bar_snap)
+            .await;
+        engine.set_volume_normalization(
+            settings.volume_normalization,
+            settings.normalization_level.target_level(),
+            settings.replay_gain_preamp_db,
+            settings.replay_gain_fallback_db,
+            settings.replay_gain_fallback_to_agc,
+            settings.replay_gain_prevent_clipping,
+        );
+        engine.set_eq_state(eq_state);
+        engine.set_visualizer_enabled(visualizer_enabled);
+    }
+
+    /// Put `quality` in force for every stream URL built from now on, under
+    /// the engine lock the caller holds (so a transition that also holds it
+    /// sees the setting and the reset together). On a real change the
+    /// prepared next track is dropped so the next song opens with the new
+    /// params, except while an AUTO crossfade blends: the reset would cancel
+    /// the blend back to its outgoing, and its prepared track has already
+    /// left the slot (it is the incoming), so the next prep, after the blend,
+    /// reads the new setting anyway. The song playing keeps its stream.
+    pub(crate) async fn push_stream_quality(
+        queue: &QueueService,
+        engine: &mut CustomAudioEngine,
+        quality: crate::types::stream_quality::StreamQuality,
+    ) {
+        let effect = queue.set_stream_quality(quality);
+        let blending = engine.auto_crossfade_live();
+        effect.only_if(!blending).apply_locked(engine).await;
     }
 
     /// The session a requested play streams from: an error when there is
@@ -373,6 +453,9 @@ impl PlaybackController {
         };
 
         let mut engine = self.audio_engine.lock().await;
+        // Re-stamped under the engine lock, like the completion's (a push
+        // between the snapshot and the lock would otherwise be missed).
+        let session = session.with_quality(self.queue_service.stream_quality());
         let queue_navigator = self.queue_navigator.lock().await;
         let skip_fade = engine.skip_fade_mode();
 
@@ -446,6 +529,8 @@ impl PlaybackController {
         };
 
         let mut engine = self.audio_engine.lock().await;
+        // Re-stamped under the engine lock (see `next`).
+        let session = session.with_quality(self.queue_service.stream_quality());
         let queue_navigator = self.queue_navigator.lock().await;
         let skip_fade = engine.skip_fade_mode();
 
@@ -2760,5 +2845,180 @@ mod tests {
             "engine Arc strong count did not reach zero: completion_callback \
              still holds a strong reference (cycle not broken)"
         );
+    }
+
+    // ── Settings load: the Streaming Quality push ───────────────────────────
+
+    use crate::types::{
+        player_settings::{LivePlayerSettings, StreamFormat, StreamMaxBitrate},
+        settings::PersistedPlayerSettings,
+    };
+
+    /// The live settings a fresh install loads.
+    fn shipped_settings() -> LivePlayerSettings {
+        use crate::services::settings_tables::{
+            dump_columns_tab_player_settings, dump_general_tab_player_settings,
+            dump_interface_tab_player_settings, dump_playback_tab_player_settings,
+        };
+        let persisted = PersistedPlayerSettings::default();
+        let mut live = LivePlayerSettings::default();
+        dump_general_tab_player_settings(&persisted, &mut live);
+        dump_interface_tab_player_settings(&persisted, &mut live);
+        dump_playback_tab_player_settings(&persisted, &mut live);
+        dump_columns_tab_player_settings(&persisted, &mut live);
+        live
+    }
+
+    fn streaming(format: StreamFormat, cap: StreamMaxBitrate) -> LivePlayerSettings {
+        LivePlayerSettings {
+            stream_format: format,
+            stream_max_bitrate: cap,
+            ..shipped_settings()
+        }
+    }
+
+    /// A controller that already took the shipped settings once, so a later
+    /// load changes only what the test changes.
+    async fn settled_fixture() -> Result<ClickFixture> {
+        let fx = click_fixture().await?;
+        fx.playback
+            .apply_player_settings(&shipped_settings(), false, crate::audio::EqState::default())
+            .await;
+        Ok(fx)
+    }
+
+    async fn load(fx: &ClickFixture, settings: &LivePlayerSettings) {
+        fx.playback
+            .apply_player_settings(settings, false, crate::audio::EqState::default())
+            .await;
+    }
+
+    async fn epoch(fx: &ClickFixture) -> u64 {
+        fx.playback.audio_engine().lock().await.next_track_epoch()
+    }
+
+    async fn flac_url(fx: &ClickFixture) -> String {
+        let flac = crate::types::song::Song {
+            suffix: Some("flac".to_string()),
+            bitrate: Some(900),
+            ..click_song("f1")
+        };
+        fx.queue
+            .stream_session()
+            .await
+            .expect("a session")
+            .stream_url(&flac)
+    }
+
+    /// A settings load puts the Streaming Quality in force for the URLs
+    /// built after it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_settings_load_puts_the_streaming_quality_in_force() -> Result<()> {
+        let fx = settled_fixture().await?;
+        assert!(!flac_url(&fx).await.contains("format="));
+
+        load(
+            &fx,
+            &streaming(StreamFormat::Opus, StreamMaxBitrate::Kbps128),
+        )
+        .await;
+
+        assert!(flac_url(&fx).await.contains("&format=opus&maxBitRate=128&"));
+        Ok(())
+    }
+
+    /// A real change drops the prepared next track once; the same settings
+    /// loaded again (every save re-delivers them) drop nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_streaming_quality_change_resets_the_next_track_once() -> Result<()> {
+        let fx = settled_fixture().await?;
+        let before = epoch(&fx).await;
+        let opus = streaming(StreamFormat::Opus, StreamMaxBitrate::Kbps128);
+
+        load(&fx, &opus).await;
+        assert_eq!(epoch(&fx).await, before + 1);
+        load(&fx, &opus).await;
+        assert_eq!(
+            epoch(&fx).await,
+            before + 1,
+            "an unchanged load resets nothing"
+        );
+        Ok(())
+    }
+
+    /// Under Original the cap is ignored, so clicking through Max Bitrate
+    /// there drops nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_max_bitrate_change_under_original_keeps_the_prepared_next_track() -> Result<()> {
+        let fx = settled_fixture().await?;
+        let before = epoch(&fx).await;
+
+        for cap in StreamMaxBitrate::ALL {
+            load(&fx, &streaming(StreamFormat::Original, cap)).await;
+        }
+
+        assert_eq!(epoch(&fx).await, before);
+        Ok(())
+    }
+
+    /// A change while an AUTO crossfade blends must not cancel the blend
+    /// (the incoming cut out mid fade-in, the outgoing jumped back to full
+    /// volume, and the incoming restarted from 0:00 later). The setting is
+    /// still in force for the URLs built next.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_streaming_quality_change_during_an_auto_crossfade_keeps_the_blend() -> Result<()> {
+        let fx = settled_fixture().await?;
+        let _keepalive = {
+            let engine = fx.playback.audio_engine();
+            let mut engine = engine.lock().await;
+            engine.force_live_auto_crossfade_for_test()
+        };
+        let before = epoch(&fx).await;
+
+        load(
+            &fx,
+            &streaming(StreamFormat::Opus, StreamMaxBitrate::Kbps128),
+        )
+        .await;
+
+        {
+            let engine = fx.playback.audio_engine();
+            let engine = engine.lock().await;
+            assert!(engine.auto_crossfade_live(), "the blend must go on");
+            assert_eq!(engine.next_track_epoch(), before);
+        }
+        assert!(flac_url(&fx).await.contains("&format=opus&maxBitRate=128&"));
+        Ok(())
+    }
+
+    /// A manual skip's blend is spared by the reset anyway, and the slot
+    /// may hold a prep of the song AFTER its target built under the old
+    /// setting, so a change there still drops the prepared track.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_streaming_quality_change_during_a_skip_blend_still_drops_the_prepared_track()
+    -> Result<()> {
+        let fx = settled_fixture().await?;
+        let _keepalive = {
+            let engine = fx.playback.audio_engine();
+            let mut engine = engine.lock().await;
+            engine.force_live_skip_crossfade_for_test()
+        };
+        let before = epoch(&fx).await;
+
+        load(
+            &fx,
+            &streaming(StreamFormat::Opus, StreamMaxBitrate::Kbps128),
+        )
+        .await;
+
+        let engine = fx.playback.audio_engine();
+        let engine = engine.lock().await;
+        assert_eq!(engine.next_track_epoch(), before + 1);
+        assert_eq!(
+            engine.queue_track_source(),
+            Some("http://example.test/next"),
+            "the skip blend's incoming is still the queue's track"
+        );
+        Ok(())
     }
 }

@@ -252,6 +252,14 @@ impl QueueService {
     /// changed, so the next song opens with the new params; an unchanged push
     /// (every other settings save re-pushes it) leaves the prepared track
     /// alone.
+    /// The Streaming Quality now in force. A path that took its
+    /// [`Self::stream_session`] before locking the engine re-stamps the
+    /// session with this under the lock, where a settings push can't land
+    /// in between.
+    pub fn stream_quality(&self) -> StreamQuality {
+        self.stream_quality.get()
+    }
+
     pub fn set_stream_quality(&self, quality: StreamQuality) -> NextTrackResetEffect {
         // Stored before the caller applies the reset: a gapless prep takes its
         // ticket (the next-track epoch) before it reads the session, so one

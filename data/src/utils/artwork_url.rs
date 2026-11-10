@@ -161,6 +161,16 @@ pub fn build_stream_url(
     )
 }
 
+/// Whether `url` asks the server for a transcode: a `/rest/stream` request
+/// carrying a `format` param, which only [`build_stream_url`] puts there (for
+/// the Streaming Quality setting). The decoder opens such a URL with one GET;
+/// the waveform scan skips the song it plays.
+pub fn requests_transcode(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| {
+        url.path().ends_with("/rest/stream") && url.query_pairs().any(|(key, _)| key == "format")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,6 +388,45 @@ mod tests {
             .query_pairs()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.into_owned())
+    }
+
+    #[test]
+    fn only_a_stream_request_with_a_format_param_asks_for_a_transcode() {
+        for (url, asks) in [
+            (
+                "http://srv/rest/stream?id=s1&format=opus&maxBitRate=128&u=a&t=b&s=c&f=json",
+                true,
+            ),
+            (
+                "http://srv/rest/stream?id=s1&format=mp3&maxBitRate=96",
+                true,
+            ),
+            ("https://srv/navidrome/rest/stream?id=s1&format=opus", true),
+            ("http://srv/rest/stream?id=s1&u=a&t=b&s=c&f=json&_=1", false),
+            ("http://srv/rest/stream?id=s1&f=json", false),
+            ("http://radio.example/live.mp3?format=mp3", false),
+            ("/home/me/song.flac", false),
+            ("", false),
+        ] {
+            assert_eq!(requests_transcode(url), asks, "{url}");
+        }
+    }
+
+    /// Only a `format` KEY counts: the same text inside another param's
+    /// encoded value (a title, a path) is not a request for a transcode.
+    #[test]
+    fn a_format_hidden_inside_an_encoded_value_is_no_transcode_request() {
+        for url in [
+            "http://srv/rest/stream?id=s1&title=a%26format%3Dopus&u=a",
+            "http://srv/rest/stream?id=s1%26format%3Dmp3&u=a",
+            "http://srv/rest/stream?id=s1&xformat=opus",
+            "http://srv/rest/stream?id=s1&u=a#format=opus",
+        ] {
+            assert!(!requests_transcode(url), "{url}");
+        }
+        assert!(requests_transcode(
+            "http://srv/rest/stream?id=s1&title=a%26b&format=opus&maxBitRate=128"
+        ));
     }
 
     #[test]

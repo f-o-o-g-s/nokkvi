@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - A new Streaming Quality section in Settings → Playback holds two rows: Stream Format (Original, Opus or MP3) and Max Bitrate (64 to 320 kbps).
-- With Stream Format set to Opus or MP3, lossless songs and songs well above Max Bitrate now stream from your server as a smaller copy.
+- With Stream Format set to Opus or MP3, lossless songs above Max Bitrate and other songs well above it now stream from your server as a smaller copy.
 - A Streaming Quality change applies from the next song, leaving the song playing as it is.
 - The Waveform seek bar shows a plain line for songs streamed as a smaller copy, unless it already holds their waveform.
 

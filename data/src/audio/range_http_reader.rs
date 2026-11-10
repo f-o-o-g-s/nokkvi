@@ -38,7 +38,8 @@ use symphonia::core::io::MediaSource;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-const CHUNK_SIZE: u64 = 256 * 1024; // 256KB chunks
+/// The reader's chunk: 256 KB, fetched with one Range request each.
+pub(super) const CHUNK_SIZE: u64 = 256 * 1024;
 /// Maximum chunks to keep in cache (~4MB total).
 /// Larger cache reduces re-fetches during sequential playback and decoder backtracks.
 const MAX_CACHED_CHUNKS: usize = 16;
@@ -180,6 +181,54 @@ fn update_refilling(resident: usize, capacity: usize, refilling: bool) -> bool {
         false // window full (or at EOF)
     } else {
         refilling // within the hysteresis band — hold
+    }
+}
+
+/// A `Content-Range` header's parts (`bytes 0-262143/3216574`,
+/// `bytes */0`, `bytes 0-9/*`): the first and last byte sent, and the whole
+/// length, each when the header names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ContentRange {
+    pub(super) start: Option<u64>,
+    pub(super) end: Option<u64>,
+    pub(super) total: Option<u64>,
+}
+
+impl ContentRange {
+    pub(super) fn of(headers: &reqwest::header::HeaderMap) -> Option<Self> {
+        let value = headers.get(reqwest::header::CONTENT_RANGE)?.to_str().ok()?;
+        let (range, total) = value.trim().strip_prefix("bytes")?.trim().split_once('/')?;
+        let (start, end) = range.split_once('-').map_or((None, None), |(start, end)| {
+            (start.trim().parse().ok(), end.trim().parse().ok())
+        });
+        Some(Self {
+            start,
+            end,
+            total: total.trim().parse().ok(),
+        })
+    }
+}
+
+/// Whether an answer to the Range request for bytes `fetch_start..fetch_end`
+/// of a `content_length`-byte file is that chunk: a 206 whose
+/// `Content-Range` is exactly the range asked for, or, for the first chunk
+/// of a file that fits in one chunk, a 200 (the whole file, from a server or
+/// proxy that ignores Range). Anything else (a 200 for a later chunk, which
+/// would store the file's start in the middle; a 206 that starts elsewhere
+/// or was capped short, which would end the read early) is not.
+fn answer_is_chunk(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    fetch_start: u64,
+    fetch_end: u64,
+    content_length: u64,
+) -> bool {
+    if status == reqwest::StatusCode::PARTIAL_CONTENT {
+        ContentRange::of(headers).is_some_and(|range| {
+            range.start == Some(fetch_start) && range.end == Some(fetch_end - 1)
+        })
+    } else {
+        status == reqwest::StatusCode::OK && fetch_start == 0 && fetch_end == content_length
     }
 }
 
@@ -325,12 +374,24 @@ impl RangeHttpReader {
 
             match result {
                 Ok(response) => {
-                    if !response.status().is_success()
-                        && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-                    {
+                    let status = response.status();
+                    if !status.is_success() {
                         return Err(std::io::Error::other(format!(
-                            "HTTP Range request failed with status: {}",
-                            response.status()
+                            "HTTP Range request failed with status: {status}"
+                        )));
+                    }
+                    // Not a retry: a server that answers another part once
+                    // answers it every time.
+                    if !answer_is_chunk(
+                        status,
+                        response.headers(),
+                        fetch_start,
+                        fetch_end,
+                        self.content_length,
+                    ) {
+                        return Err(std::io::Error::other(format!(
+                            "HTTP Range request for chunk {chunk_idx} was answered with \
+                             another part of the stream ({status})"
                         )));
                     }
 
@@ -348,10 +409,13 @@ impl RangeHttpReader {
                     })?;
                     let read_elapsed = read_start.elapsed();
 
-                    if bytes.is_empty() {
+                    // Shorter than its range (empty, or the transfer cut off):
+                    // stored, it would end the read early.
+                    if bytes.len() as u64 != fetch_end - fetch_start {
                         tracing::warn!(
-                            "⚠️ [HTTP] Chunk {} returned empty response (expected {} bytes), treating as error",
+                            "⚠️ [HTTP] Chunk {} returned {} bytes (expected {}), treating as error",
                             chunk_idx,
+                            bytes.len(),
                             fetch_end - fetch_start
                         );
                         if attempt < MAX_RETRIES - 1 {
@@ -641,12 +705,17 @@ async fn fetch_chunk_async(
         .send()
         .await
         .ok()?;
-    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-    {
+    if !answer_is_chunk(
+        response.status(),
+        response.headers(),
+        fetch_start,
+        fetch_end,
+        content_length,
+    ) {
         return None;
     }
     let bytes = response.bytes().await.ok()?;
-    Some(bytes.to_vec())
+    (bytes.len() as u64 == fetch_end - fetch_start).then(|| bytes.to_vec())
 }
 
 impl Read for RangeHttpReader {
@@ -753,6 +822,185 @@ mod tests {
         let mut out = Vec::new();
         reader.read_to_end(&mut out).expect("read the seeded chunk");
         assert_eq!(out, body);
+    }
+
+    /// How [`spawn_chunk_server`] answers a Range request.
+    #[derive(Clone, Copy)]
+    enum ChunkReply {
+        /// Like `http.ServeContent`: a 206 for exactly the range asked for.
+        WellBehaved,
+        /// The Range header stripped on the way: 200 and the whole file.
+        IgnoresRange,
+        /// A 206 for the range one byte later than asked.
+        WrongStart,
+        /// A 206 for only the first 1000 bytes of the range asked.
+        Capped,
+    }
+
+    /// A server answering Range requests for `body` per `reply`. Returns the
+    /// URL and the number of requests served.
+    async fn spawn_chunk_server(
+        reply: ChunkReply,
+        body: Vec<u8>,
+    ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let body = Arc::new(body);
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = served.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let len = socket.read(&mut buf).await.unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buf[..len]).into_owned();
+                    let (start, end) = text
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("range")
+                                .then(|| value.trim().to_owned())
+                        })
+                        .and_then(|r| {
+                            let (start, end) = r.strip_prefix("bytes=")?.split_once('-')?;
+                            Some((start.parse::<usize>().ok()?, end.parse::<usize>().ok()?))
+                        })
+                        .unwrap_or((0, body.len() - 1));
+                    let end = end.min(body.len() - 1);
+                    let (status, range, payload) = match reply {
+                        ChunkReply::WellBehaved => (
+                            "206 Partial Content",
+                            Some((start, end)),
+                            &body[start..=end],
+                        ),
+                        ChunkReply::IgnoresRange => ("200 OK", None, &body[..]),
+                        ChunkReply::WrongStart => {
+                            let (s, e) = (start + 1, (end + 1).min(body.len() - 1));
+                            ("206 Partial Content", Some((s, e)), &body[s..=e])
+                        }
+                        ChunkReply::Capped => {
+                            let e = (start + 999).min(end);
+                            ("206 Partial Content", Some((start, e)), &body[start..=e])
+                        }
+                    };
+                    let mut headers = format!(
+                        "HTTP/1.1 {status}\r\nAccept-Ranges: bytes\r\nContent-Length: {}\r\n",
+                        payload.len()
+                    );
+                    if let Some((s, e)) = range {
+                        headers
+                            .push_str(&format!("Content-Range: bytes {s}-{e}/{}\r\n", body.len()));
+                    }
+                    headers.push_str("Connection: close\r\n\r\n");
+                    let _ = socket.write_all(headers.as_bytes()).await;
+                    let _ = socket.write_all(payload).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}/rest/stream?id=s1"), served)
+    }
+
+    fn body_of(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// Read all of `reader` the way the decoder does (on a runtime thread).
+    fn read_all(reader: &mut RangeHttpReader) -> std::io::Result<Vec<u8>> {
+        let mut out = Vec::new();
+        tokio::task::block_in_place(|| reader.read_to_end(&mut out))?;
+        Ok(out)
+    }
+
+    /// A server that answers ranges properly is read whole, its short last
+    /// chunk included.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_well_behaved_server_is_read_whole_short_last_chunk_included() {
+        let body = body_of(CHUNK_SIZE as usize + 1_000);
+        let (url, _served) = spawn_chunk_server(ChunkReply::WellBehaved, body.clone()).await;
+        let mut reader = RangeHttpReader::new(url, body.len() as u64);
+
+        assert_eq!(read_all(&mut reader).expect("read it all"), body);
+    }
+
+    /// A one-chunk file whose Range header was stripped comes back whole as
+    /// a 200: that is its first chunk, so it is taken.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_one_chunk_file_answered_whole_is_its_first_chunk() {
+        let body = body_of(5_000);
+        let (url, _served) = spawn_chunk_server(ChunkReply::IgnoresRange, body.clone()).await;
+        let mut reader = RangeHttpReader::new(url, body.len() as u64);
+
+        assert_eq!(read_all(&mut reader).expect("read it all"), body);
+    }
+
+    /// A later chunk answered with the whole file (a 200) must not be stored
+    /// as that chunk: the decoder would get the file's start in the middle.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_later_chunk_answered_with_the_whole_file_is_an_error() {
+        let body = body_of(CHUNK_SIZE as usize * 2);
+        let (url, _served) = spawn_chunk_server(ChunkReply::IgnoresRange, body.clone()).await;
+        let mut reader = RangeHttpReader::with_first_chunk(
+            url,
+            body.len() as u64,
+            body[..CHUNK_SIZE as usize].to_vec(),
+        );
+
+        assert!(read_all(&mut reader).is_err());
+    }
+
+    /// A 206 that starts at another byte than asked is no chunk.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_206_that_does_not_start_at_the_byte_asked_is_an_error() {
+        let body = body_of(CHUNK_SIZE as usize + 1_000);
+        let (url, _served) = spawn_chunk_server(ChunkReply::WrongStart, body.clone()).await;
+        let mut reader = RangeHttpReader::new(url, body.len() as u64);
+
+        assert!(read_all(&mut reader).is_err());
+    }
+
+    /// A 206 the server capped short of the range asked must not be stored
+    /// as a short chunk: the read would end there and the track stop partway.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_capped_206_is_an_error_not_a_short_read() {
+        let body = body_of(CHUNK_SIZE as usize + 1_000);
+        let (url, _served) = spawn_chunk_server(ChunkReply::Capped, body.clone()).await;
+        let mut reader = RangeHttpReader::new(url, body.len() as u64);
+
+        assert!(read_all(&mut reader).is_err());
+    }
+
+    /// The read-ahead task takes chunks by the same rule: only the range it
+    /// asked for.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_read_ahead_takes_only_the_range_it_asked_for() {
+        let body = body_of(CHUNK_SIZE as usize * 2 + 1_000);
+        let total = body.len() as u64;
+        let client = reqwest::Client::new();
+        for (reply, takes) in [
+            (ChunkReply::WellBehaved, true),
+            (ChunkReply::IgnoresRange, false),
+            (ChunkReply::WrongStart, false),
+            (ChunkReply::Capped, false),
+        ] {
+            let (url, _served) = spawn_chunk_server(reply, body.clone()).await;
+            let fetched = fetch_chunk_async(&client, &url, 1, total).await;
+            assert_eq!(
+                fetched.is_some(),
+                takes,
+                "chunk 1 under {:?}",
+                std::mem::discriminant(&reply)
+            );
+            if let Some(bytes) = fetched {
+                assert_eq!(bytes, body[CHUNK_SIZE as usize..CHUNK_SIZE as usize * 2]);
+            }
+        }
     }
 
     /// Only the whole first chunk is taken: a short one would leave a hole

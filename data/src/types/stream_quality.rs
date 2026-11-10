@@ -21,6 +21,16 @@ pub struct StreamQuality {
 }
 
 impl StreamQuality {
+    /// What the setting asks of the server: the cap counts only beside a
+    /// format, so every Original reads the same (Original at the default
+    /// cap) and a Max Bitrate change under Original is no change.
+    pub fn effective(self) -> Self {
+        match self.format {
+            StreamFormat::Original => Self::default(),
+            StreamFormat::Opus | StreamFormat::Mp3 => self,
+        }
+    }
+
     /// The setting as `settings` holds it.
     pub fn of(settings: &LivePlayerSettings) -> Self {
         Self {
@@ -56,8 +66,7 @@ pub struct StreamParams {
     pub max_bitrate_kbps: u32,
 }
 
-/// File suffixes of lossless audio nokkvi decodes itself. Each one is far
-/// above any cap, so it is always transcoded when a format is chosen.
+/// File suffixes of lossless audio nokkvi decodes itself.
 const LOSSLESS_SUFFIXES: &[&str] = &["flac", "wav", "wave", "aif", "aiff", "aifc"];
 
 /// File suffixes nokkvi decodes, from the Symphonia features enabled in
@@ -77,8 +86,10 @@ const DECODABLE_SUFFIXES: &[&str] = &[
 /// 2. More than 2 channels: MP3 at the cap, whatever format was chosen
 ///    (nokkvi's Opus decoder is stereo-only, and Navidrome keeps 5.1 in Opus;
 ///    its MP3 encoder downmixes). Unknown channels count as stereo.
-/// 3. A lossless suffix, or one nokkvi cannot decode: the chosen format at
-///    the cap.
+/// 3. A suffix nokkvi cannot decode: the chosen format at the cap. A
+///    lossless suffix: as it is when its known bitrate is at or under the cap
+///    (a mono or quiet FLAC would come out no smaller, and lossy), otherwise
+///    (above the cap, or no known bitrate) the chosen format at the cap.
 /// 4. Any other song with no known bitrate (missing or 0): as it is.
 /// 5. Above 1.25 times the cap: the chosen format at the cap; otherwise as
 ///    it is. The margin keeps a VBR album that straddles the cap from
@@ -107,10 +118,16 @@ pub fn stream_params(song: &Song, quality: StreamQuality) -> Option<StreamParams
         .map(str::trim)
         .filter(|suffix| !suffix.is_empty())
         .map(str::to_ascii_lowercase);
-    if let Some(suffix) = suffix.as_deref()
-        && (LOSSLESS_SUFFIXES.contains(&suffix) || !DECODABLE_SUFFIXES.contains(&suffix))
-    {
-        return at_cap(chosen);
+    if let Some(suffix) = suffix.as_deref() {
+        if !DECODABLE_SUFFIXES.contains(&suffix) {
+            return at_cap(chosen);
+        }
+        if LOSSLESS_SUFFIXES.contains(&suffix) {
+            return match song.bitrate {
+                Some(kbps) if kbps > 0 && kbps <= cap => None,
+                Some(_) | None => at_cap(chosen),
+            };
+        }
     }
     match song.bitrate {
         None | Some(0) => None,
@@ -135,10 +152,12 @@ impl SharedStreamQuality {
         Self::decode(self.0.load(Ordering::SeqCst))
     }
 
-    /// Put `quality` in force; whether it differs from the one it replaced.
+    /// Put `quality` in force; whether it asks the server for anything other
+    /// than the one it replaced did ([`StreamQuality::effective`]: a cap
+    /// change under Original is none).
     pub fn replace(&self, quality: StreamQuality) -> bool {
-        let packed = Self::encode(quality);
-        self.0.swap(packed, Ordering::SeqCst) != packed
+        let previous = Self::decode(self.0.swap(Self::encode(quality), Ordering::SeqCst));
+        previous.effective() != quality.effective()
     }
 
     /// The format in the high half, the cap's kbps in the low half.
@@ -261,10 +280,14 @@ mod tests {
         );
     }
 
+    /// A lossless file above the cap, or one whose bitrate isn't known, is
+    /// transcoded to the chosen format.
     #[test]
-    fn a_lossless_file_is_transcoded_to_the_chosen_format_whatever_its_bitrate() {
-        for suffix in ["flac", "FLAC", "wav", "wave", "aif", "aiff", "aifc"] {
-            for bitrate in [None, Some(0), Some(100), Some(1_411)] {
+    fn a_lossless_file_above_the_cap_or_of_unknown_bitrate_is_transcoded() {
+        for suffix in [
+            "flac", "FLAC", " flac ", "wav", "wave", "aif", "aiff", "aifc",
+        ] {
+            for bitrate in [None, Some(0), Some(129), Some(1_411)] {
                 assert_eq!(
                     stream_params(&song(Some(suffix), bitrate, Some(2)), OPUS_128),
                     transcode(TranscodeFormat::Opus, 128),
@@ -279,6 +302,31 @@ mod tests {
             ),
             transcode(TranscodeFormat::Mp3, 320)
         );
+    }
+
+    /// A lossless file whose known bitrate is at or under the cap (a mono or
+    /// quiet FLAC) streams as it is: a transcode would come out no smaller,
+    /// and lossy.
+    #[test]
+    fn a_lossless_file_at_or_under_the_cap_streams_as_it_is() {
+        for (cap, at) in [
+            (StreamMaxBitrate::Kbps128, 128),
+            (StreamMaxBitrate::Kbps320, 320),
+            (StreamMaxBitrate::Kbps64, 64),
+        ] {
+            for suffix in ["flac", "WAV", " aiff "] {
+                for bitrate in [1, at - 1, at] {
+                    assert_eq!(
+                        stream_params(
+                            &song(Some(suffix), Some(bitrate), Some(2)),
+                            quality(StreamFormat::Opus, cap)
+                        ),
+                        None,
+                        "{suffix} at {bitrate} kbps, cap {cap:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -317,6 +365,9 @@ mod tests {
             (StreamMaxBitrate::Kbps128, 160, 161),
             (StreamMaxBitrate::Kbps64, 80, 81),
             (StreamMaxBitrate::Kbps96, 120, 121),
+            (StreamMaxBitrate::Kbps160, 200, 201),
+            (StreamMaxBitrate::Kbps192, 240, 241),
+            (StreamMaxBitrate::Kbps256, 320, 321),
             (StreamMaxBitrate::Kbps320, 400, 401),
         ] {
             let q = quality(StreamFormat::Opus, cap);
@@ -352,26 +403,56 @@ mod tests {
         );
     }
 
+    /// The suffix is read trimmed and in any case.
     #[test]
-    fn a_transcode_is_never_raw_and_never_a_cap_alone() {
-        let songs = [
-            song(Some("flac"), Some(900), Some(2)),
-            song(Some("mp3"), Some(320), Some(2)),
-            song(Some("ape"), None, Some(6)),
-        ];
-        let mut transcodes = 0;
-        for format in [StreamFormat::Opus, StreamFormat::Mp3] {
-            for cap in StreamMaxBitrate::ALL {
-                for song in &songs {
-                    if let Some(params) = stream_params(song, quality(format, cap)) {
-                        assert!(matches!(params.format.wire(), "opus" | "mp3"), "{params:?}");
-                        assert_eq!(params.max_bitrate_kbps, cap.kbps());
-                        transcodes += 1;
-                    }
-                }
-            }
+    fn a_suffix_with_spaces_or_capitals_is_read_as_its_format() {
+        assert_eq!(
+            stream_params(&song(Some(" FLAC "), Some(900), Some(2)), OPUS_128),
+            transcode(TranscodeFormat::Opus, 128)
+        );
+        assert_eq!(
+            stream_params(&song(Some(" Mp3 "), Some(128), Some(2)), OPUS_128),
+            None,
+            "a lossy file under the cap, not an undecodable format"
+        );
+        assert_eq!(
+            stream_params(&song(Some("APE"), Some(64), Some(2)), OPUS_128),
+            transcode(TranscodeFormat::Opus, 128)
+        );
+    }
+
+    /// A lossy file nokkvi decodes, well above the cap, is transcoded like
+    /// any other: an ALAC `.m4a` (judged by its bitrate) or a high Vorbis.
+    #[test]
+    fn an_m4a_or_ogg_at_900_kbps_is_transcoded() {
+        for suffix in ["m4a", "ogg"] {
+            assert_eq!(
+                stream_params(&song(Some(suffix), Some(900), Some(2)), OPUS_128),
+                transcode(TranscodeFormat::Opus, 128),
+                "{suffix}"
+            );
         }
-        assert!(transcodes > 0, "the FLAC and the APE always transcode");
+    }
+
+    /// Under Original the cap is ignored, so a Max Bitrate change there is
+    /// no change at all (it would otherwise drop the prepared next track for
+    /// nothing).
+    #[test]
+    fn a_max_bitrate_change_under_original_is_no_change() {
+        let shared = SharedStreamQuality::new(StreamQuality::default());
+        for cap in StreamMaxBitrate::ALL {
+            assert!(
+                !shared.replace(quality(StreamFormat::Original, cap)),
+                "Original at {cap:?}"
+            );
+        }
+        assert!(shared.replace(OPUS_128), "a format is a change");
+        assert!(
+            shared.replace(quality(StreamFormat::Opus, StreamMaxBitrate::Kbps320)),
+            "a cap under Opus is a change"
+        );
+        assert!(shared.replace(quality(StreamFormat::Original, StreamMaxBitrate::Kbps64)));
+        assert!(!shared.replace(quality(StreamFormat::Original, StreamMaxBitrate::Kbps192)));
     }
 
     #[test]

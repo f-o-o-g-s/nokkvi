@@ -2517,79 +2517,22 @@ impl Nokkvi {
             settings.normalization_level
         );
 
-        // Push crossfade + normalization settings to the audio engine (accumulated, not early-returned)
+        // Push the engine settings and the Streaming Quality to the backend
+        // (accumulated, not early-returned). Every step is a no-op when its
+        // value didn't change, which matters because every settings save
+        // lands here.
         let crossfade_task = if let Some(shell) = &self.app_service {
             let shell = shell.clone();
-            let enabled = settings.crossfade_enabled;
-            let bit_perfect = settings.bit_perfect;
-            let duration_secs = settings.crossfade_duration_secs;
-            let curve = settings.crossfade_curve;
-            let min_track_secs = settings.crossfade_min_track_secs;
-            let album_gapless = settings.crossfade_album_gapless;
-            let smooth_starts = settings.smooth_track_starts;
-            let fade_on_pause = settings.fade_on_pause;
-            let fade_pause_ms = settings.fade_pause_ms;
-            let fade_on_stop = settings.fade_on_stop;
-            let fade_stop_ms = settings.fade_stop_ms;
-            let fade_radio = settings.fade_radio_transitions;
-            let fade_on_skip = settings.fade_on_skip;
-            let fade_skip_secs = settings.fade_skip_secs;
-            let skip_silence = settings.skip_silence;
-            let crossfade_offset = settings.crossfade_offset_secs;
-            let bar_snap = settings.crossfade_bar_snap;
-            let mode = settings.volume_normalization;
-            let norm_target = settings.normalization_level.target_level();
-            let preamp_db = settings.replay_gain_preamp_db;
-            let fallback_db = settings.replay_gain_fallback_db;
-            let fallback_to_agc = settings.replay_gain_fallback_to_agc;
-            let prevent_clipping = settings.replay_gain_prevent_clipping;
+            let engine_settings = settings.clone();
             let eq_state = self.playback.eq_state.clone();
-            let stream_quality = nokkvi_data::types::stream_quality::StreamQuality::of(&settings);
             Task::perform(
                 async move {
-                    let engine = shell.audio_engine();
-                    let mut engine_guard = engine.lock().await;
-                    // Streaming Quality: every load re-pushes it, and only a
-                    // real change resets the prepared next track (so the next
-                    // song opens with the new params). The playing song keeps
-                    // its stream.
                     shell
-                        .queue()
-                        .set_stream_quality(stream_quality)
-                        .apply_locked(&mut engine_guard)
+                        .playback()
+                        .apply_player_settings(&engine_settings, viz_active, eq_state)
                         .await;
-                    engine_guard.set_crossfade_enabled(enabled).await;
-                    engine_guard.set_bit_perfect(bit_perfect).await;
-                    engine_guard.set_crossfade_duration(duration_secs);
-                    engine_guard.set_crossfade_curve(curve);
-                    engine_guard.set_crossfade_min_track_secs(min_track_secs);
-                    engine_guard
-                        .set_crossfade_album_gapless(album_gapless)
-                        .await;
-                    engine_guard.set_smooth_track_starts(smooth_starts);
-                    engine_guard.set_transport_fades(
-                        fade_on_pause,
-                        fade_pause_ms,
-                        fade_on_stop,
-                        fade_stop_ms,
-                    );
-                    engine_guard.set_fade_radio_transitions(fade_radio);
-                    engine_guard.set_skip_fade(fade_on_skip, fade_skip_secs);
-                    engine_guard.set_skip_silence(skip_silence).await;
-                    engine_guard.set_crossfade_offset(crossfade_offset);
-                    engine_guard.set_crossfade_bar_snap(bar_snap).await;
-                    engine_guard.set_volume_normalization(
-                        mode,
-                        norm_target,
-                        preamp_db,
-                        fallback_db,
-                        fallback_to_agc,
-                        prevent_clipping,
-                    );
-                    engine_guard.set_eq_state(eq_state);
-                    engine_guard.set_visualizer_enabled(viz_active);
                 },
-                |_| Message::NoOp,
+                |()| Message::NoOp,
             )
         } else {
             Task::none()

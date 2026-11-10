@@ -1274,7 +1274,18 @@ impl AppService {
             .stream_session()
             .await
             .context("no server to stream from")?;
-        let Some(stream_url) = crate::services::waveform::scan_url(&session, &song) else {
+        // The stream the engine plays for the queue's track: a song already
+        // playing is judged by the stream it actually opened.
+        let playing_source = self
+            .playback
+            .audio_engine()
+            .lock()
+            .await
+            .queue_track_source()
+            .map(str::to_owned);
+        let Some(stream_url) =
+            crate::services::waveform::scan_url(&session, &song, playing_source.as_deref())
+        else {
             debug!(song = %song.id, "waveform scan skipped: the song streams as a transcode");
             return Ok(crate::services::waveform::ScanEnd::SkippedTranscode);
         };
