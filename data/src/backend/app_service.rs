@@ -2463,7 +2463,7 @@ impl AppService {
             } else {
                 engine.stop().await;
                 engine
-                    .set_source(String::new(), crate::audio::SourceKind::Track, None)
+                    .set_source(String::new(), crate::audio::SourceKind::Track, None, None)
                     .await;
                 ClearQueueOutcome::EngineStopped
             }
@@ -3360,7 +3360,9 @@ mod tests {
         {
             let engine_arc = app.audio_engine();
             let mut engine = engine_arc.lock().await;
-            engine.load_track_with_rg(engine_source, None, None).await;
+            engine
+                .load_track_with_rg(engine_source, None, None, None)
+                .await;
             engine.force_playing_for_test();
         }
         (app, db_path)

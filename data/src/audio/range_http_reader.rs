@@ -232,12 +232,37 @@ fn answer_is_chunk(
     }
 }
 
+/// The URL a [`RangeHttpReader`] fetches its ranges from, shared with its
+/// read-ahead task and with the decoder that built it, which can point it
+/// elsewhere ([`Self::set`]): a request at an offset answered with the song's
+/// own file is read on from the file's own URL, without the offset (the
+/// server answers the offset URL by its own rules, a cache entry or a live
+/// transcode, the next time it is asked).
+#[derive(Clone)]
+pub(super) struct RangeUrl(Arc<parking_lot::RwLock<String>>);
+
+impl RangeUrl {
+    fn new(url: String) -> Self {
+        Self(Arc::new(parking_lot::RwLock::new(url)))
+    }
+
+    /// The URL the next range is fetched from.
+    fn get(&self) -> String {
+        self.0.read().clone()
+    }
+
+    /// Fetch every later range from `url`.
+    pub(super) fn set(&self, url: String) {
+        *self.0.write() = url;
+    }
+}
+
 /// HTTP reader with Range request support for random access.
 pub(super) struct RangeHttpReader {
     /// Blocking client for the synchronous read-path miss-fallback.
     client: reqwest::blocking::Client,
     /// URL to fetch from.
-    url: String,
+    url: RangeUrl,
     /// Total content length.
     content_length: u64,
     /// Current read position.
@@ -262,7 +287,7 @@ impl RangeHttpReader {
     pub(super) fn new(url: String, content_length: u64) -> Self {
         Self {
             client: Self::create_client(),
-            url,
+            url: RangeUrl::new(url),
             content_length,
             position: 0,
             store: Arc::new(Mutex::new(ChunkStore::new())),
@@ -286,6 +311,11 @@ impl RangeHttpReader {
             reader.store.lock().insert(0, Arc::new(first_chunk));
         }
         reader
+    }
+
+    /// The handle to the URL this reader fetches from ([`RangeUrl`]).
+    pub(super) fn url_handle(&self) -> RangeUrl {
+        self.url.clone()
     }
 
     /// Bytes `0..first_chunk_len(content_length)` make up the first chunk.
@@ -366,11 +396,8 @@ impl RangeHttpReader {
                 MAX_RETRIES
             );
 
-            let result = self
-                .client
-                .get(&self.url)
-                .header("Range", &range_header)
-                .send();
+            let url = self.url.get();
+            let result = self.client.get(&url).header("Range", &range_header).send();
 
             match result {
                 Ok(response) => {
@@ -592,7 +619,7 @@ impl RangeHttpReader {
 /// so `abort()` on `Drop` stops it promptly. Never holds the store `Mutex`
 /// across an `.await`.
 async fn prefetch_loop(
-    url: String,
+    url: RangeUrl,
     content_length: u64,
     store: Arc<Mutex<ChunkStore>>,
     read_cursor: Arc<AtomicU64>,
@@ -654,9 +681,10 @@ async fn prefetch_loop(
                 continue;
             }
 
+            let chunk_url = url.get();
             let fetched = tokio::select! {
                 _ = cancel.cancelled() => return,
-                bytes = fetch_chunk_async(&client, &url, idx, content_length) => bytes,
+                bytes = fetch_chunk_async(&client, &chunk_url, idx, content_length) => bytes,
             };
 
             match fetched {

@@ -2204,12 +2204,12 @@ fn prev_track_rewinds_a_transcode_the_engine_reopens() {
 /// stream playing; the next tick says so once, as a warning, in plain words.
 #[test]
 fn a_failed_reopen_says_so_once_as_a_warning() {
-    use nokkvi_data::types::toast::ToastLevel;
+    use nokkvi_data::{audio::engine::SeekFailure, types::toast::ToastLevel};
     let mut app = test_app();
     let before = app.toast.toasts.len();
 
     let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
-        seek_failure: Some("the server is busy with other transcodes".to_string()),
+        seek_failure: Some(SeekFailure::Busy),
         ..reopenable_transcode_tick()
     });
     let after_failure = app.toast.toasts.len();
@@ -2221,8 +2221,34 @@ fn a_failed_reopen_says_so_once_as_a_warning() {
     assert_eq!(toast.level, ToastLevel::Warning);
     assert_eq!(
         toast.message,
-        "Couldn't seek: the server is busy with other transcodes"
+        "Couldn't seek: the server is busy. Try again in a few seconds."
     );
+}
+
+/// Each kind of failed seek reads as one plain sentence, never the
+/// decoder's or the server's own text.
+#[test]
+fn each_failed_seek_says_one_plain_sentence() {
+    use nokkvi_data::audio::engine::SeekFailure;
+    for (failure, text) in [
+        (
+            SeekFailure::Busy,
+            "Couldn't seek: the server is busy. Try again in a few seconds.",
+        ),
+        (
+            SeekFailure::NoAnswer,
+            "Couldn't seek: the server didn't answer.",
+        ),
+        (SeekFailure::Other, "Couldn't seek in this song."),
+    ] {
+        let mut app = test_app();
+        let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+            seek_failure: Some(failure),
+            ..reopenable_transcode_tick()
+        });
+        let toast = app.toast.toasts.back().expect("the toast");
+        assert_eq!(toast.message, text, "{failure:?}");
+    }
 }
 
 // ============================================================================

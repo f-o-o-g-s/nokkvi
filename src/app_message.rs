@@ -197,7 +197,7 @@ pub struct PlaybackStateUpdate {
     /// Why a seek that reopened the stream failed since the last tick
     /// (`CustomAudioEngine::take_seek_failure`); the old stream played on.
     /// Shown once as a warning.
-    pub seek_failure: Option<String>,
+    pub seek_failure: Option<nokkvi_data::audio::engine::SeekFailure>,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.

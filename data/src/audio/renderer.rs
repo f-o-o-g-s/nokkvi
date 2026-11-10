@@ -2895,6 +2895,15 @@ impl AudioRenderer {
         source
     }
 
+    /// Test-only: lose the device-less output again (it stays detached, so
+    /// nothing opens a real one): the next `init` that builds a stream fails,
+    /// as it does when the audio device can't be opened.
+    #[cfg(test)]
+    pub(crate) fn drop_output_for_test(&mut self) {
+        self.output = None;
+        self.detached_output = true;
+    }
+
     /// Test-only: the normalization gain the primary stream applies to the
     /// samples being written now.
     #[cfg(test)]

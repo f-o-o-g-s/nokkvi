@@ -23,7 +23,7 @@ use tokio_util::{
 };
 use tracing::{debug, error, info, trace, warn};
 
-use super::range_http_reader::{CHUNK_SIZE, ContentRange, RangeHttpReader};
+use super::range_http_reader::{CHUNK_SIZE, ContentRange, RangeHttpReader, RangeUrl};
 use crate::{
     audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry},
     utils::{
@@ -46,6 +46,48 @@ impl std::fmt::Display for StreamPastEnd {
 }
 
 impl std::error::Error for StreamPastEnd {}
+
+/// The server refused a transcode because it is busy: HTTP 429, its limit of
+/// concurrent transcodes. Worth trying again in a moment. Carries the
+/// server's own message when its answer had one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerBusy {
+    pub message: Option<String>,
+}
+
+impl std::fmt::Display for ServerBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "the server is busy with other transcodes (HTTP 429 Too Many Requests); try again \
+             shortly",
+        )?;
+        match &self.message {
+            Some(message) => write!(f, ": {message}"),
+            None => Ok(()),
+        }
+    }
+}
+
+impl std::error::Error for ServerBusy {}
+
+/// No answer from the server: the request could not reach it, or its
+/// answer did not come within the open's time ([`AudioDecoder::set_answer_timeout`]).
+/// Holds the cause, without the URL (it carries the credential).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoAnswer(pub String);
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the server didn't answer: {}", self.0)
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
+/// Whether `error`, or anything in its chain, is a `T`.
+pub fn error_is<T: std::error::Error + 'static>(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<T>())
+}
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
 fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
@@ -200,9 +242,10 @@ const EMPTY_TRANSCODE: &str = "the server couldn't transcode this song: it sent 
 /// (not a 2xx), with the server's own message when its body had one. Never
 /// names the URL (it carries the credential).
 fn refused_transcode_error(status: reqwest::StatusCode, message: Option<String>) -> anyhow::Error {
-    let what = if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        format!("the server is busy with other transcodes (HTTP {status}); try again shortly")
-    } else if status.is_redirection() {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return ServerBusy { message }.into();
+    }
+    let what = if status.is_redirection() {
         format!("the server sent the stream elsewhere (HTTP {status}), which nokkvi won't follow")
     } else {
         format!("the server refused the stream (HTTP {status})")
@@ -211,6 +254,11 @@ fn refused_transcode_error(status: reqwest::StatusCode, message: Option<String>)
         Some(message) => anyhow::anyhow!("{what}: {message}"),
         None => anyhow::anyhow!(what),
     }
+}
+
+/// The error for an answer that did not come within `timeout`.
+fn no_answer_within(timeout: std::time::Duration) -> anyhow::Error {
+    NoAnswer(format!("no answer within {} ms", timeout.as_millis())).into()
 }
 
 /// Up to `limit` bytes from the front of `response`'s body, fewer when the
@@ -255,8 +303,9 @@ struct OpenedStream {
     hint: Option<String>,
     recv_timeout: Option<RecvTimeout>,
     header_duration_ms: Option<u64>,
-    /// The answer declared a length small enough to be a container's headers
-    /// alone ([`PAST_END_ANSWER_MAX_BYTES`]).
+    /// The whole answer is in hand and small enough to be a container's
+    /// headers alone ([`PAST_END_ANSWER_MAX_BYTES`]), judged by the bytes
+    /// read, never by a `Content-Length` (a proxy may send it chunked).
     tiny: bool,
 }
 
@@ -587,6 +636,52 @@ impl StreamFacts {
     }
 }
 
+/// What it takes to open a decoder's track again elsewhere in the song,
+/// read off the playing decoder ([`AudioDecoder::reopen_hints`]) so the open
+/// itself needs no lock on it: a seek's reopen runs while the old stream
+/// plays on, a cut stream's resume while its ring drains. The new decoder
+/// keeps the track's own URL (so its `format` / `maxBitRate`), its kind and
+/// what the caller said of the song.
+#[derive(Clone)]
+pub struct ReopenHints {
+    url: String,
+    source_kind: SourceKind,
+    expected_duration_ms: Option<u64>,
+    expected_file_size: Option<u64>,
+    live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+}
+
+impl ReopenHints {
+    /// The track's own URL (no `timeOffset`).
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// A new decoder on the track, opened at `position_ms` of the song
+    /// ([`AudioDecoder::open_at`] at its whole second) and brought to it
+    /// exactly ([`AudioDecoder::land_on`]). `answer_timeout` bounds the wait
+    /// for the server's answer ([`AudioDecoder::set_answer_timeout`]); the
+    /// decoder it returns waits as long as any other afterwards.
+    pub async fn open_at(
+        &self,
+        position_ms: u64,
+        answer_timeout: Option<std::time::Duration>,
+    ) -> Result<AudioDecoder> {
+        let mut decoder = AudioDecoder::new(self.live_icy_metadata.clone());
+        decoder.set_source_kind(self.source_kind);
+        decoder.set_expected_duration_ms(self.expected_duration_ms);
+        decoder.set_expected_file_size(self.expected_file_size);
+        decoder.set_answer_timeout(answer_timeout);
+        let opened = decoder.open_at(&self.url, position_ms / 1000).await;
+        decoder.set_answer_timeout(None);
+        opened?;
+        if !tokio::task::block_in_place(|| decoder.land_on(position_ms)) {
+            anyhow::bail!("the stream could not move to {position_ms} ms");
+        }
+        Ok(decoder)
+    }
+}
+
 /// Audio decoder using symphonia
 pub struct AudioDecoder {
     format_reader: Option<Box<dyn FormatReader>>,
@@ -617,6 +712,19 @@ pub struct AudioDecoder {
     /// Server-reported track duration in ms, used to sanity-check the probed
     /// duration in `open_input`. `None` for radio and engine-internal loads.
     expected_duration_ms: Option<u64>,
+    /// The song's file size on disk (`Song::expected_file_size`), stamped
+    /// beside `expected_duration_ms`. A sized answer to a request at an
+    /// offset whose length is exactly this is the song's own file (which
+    /// ignores the offset); any other length is a transcode the server's
+    /// cache holds for that offset. `None` when unknown: the probed length
+    /// decides then ([`sized_answer_is_the_file`]).
+    expected_file_size: Option<u64>,
+    /// How long a requested transcode's open waits for the answer's headers
+    /// and its first bytes ([`Self::set_answer_timeout`]); `None` waits as
+    /// long as the stream client allows. A seek's reopen and a cut stream's
+    /// resume set a shorter one: they run while the old stream plays, or
+    /// while the ring drains.
+    answer_timeout: Option<std::time::Duration>,
     /// Maps the real timeline onto Symphonia's internal one for `seek()`.
     /// 1.0 except when `sanitize_probed_duration` overrode the probe: the
     /// format reader still believes the probed total, so coarse seeks must be
@@ -642,6 +750,10 @@ pub struct AudioDecoder {
     /// from the start, and for an answer that ignored the offset (the song's
     /// own file). `url` never carries it.
     offset_secs: u64,
+    /// The URL handle of the range reader a requested transcode's sized
+    /// answer is read through, so an answer that turns out to be the song's
+    /// own file is read on without the offset ([`RangeUrl`]).
+    range_url: Option<RangeUrl>,
 }
 
 /// Leading-silence trim state (M8). The scan lives inside the registry-backed
@@ -863,11 +975,56 @@ fn answer_starts_at_song_start(
     offset_secs: u64,
 ) -> bool {
     let offset_ms = offset_secs.saturating_mul(1000);
-    whole_song_ms.is_some_and(|whole_ms| {
+    whole_song_ms.filter(|&ms| ms > 0).is_some_and(|whole_ms| {
         probed_ms > 0
             && probed_ms.saturating_mul(2) >= whole_ms.saturating_mul(2).saturating_sub(offset_ms)
     })
 }
+
+/// Whether a sized answer (`answer_len` bytes) to a request at
+/// `offset_secs` is the song's own file, which ignores the offset, rather
+/// than a transcode the server's cache holds for that offset. By the song's
+/// size on disk when it is known (`file_size`, `Song.size`): Navidrome
+/// serves the file at exactly that length, and the UI's `StreamOrigin`
+/// trusts the same comparison, so what the clock does and what the badge
+/// shows agree. Without a size, by the probed length
+/// ([`answer_starts_at_song_start`]).
+fn sized_answer_is_the_file(
+    answer_len: Option<u64>,
+    file_size: Option<u64>,
+    probed_ms: u64,
+    whole_song_ms: Option<u64>,
+    offset_secs: u64,
+) -> bool {
+    match file_size.filter(|&size| size > 0) {
+        Some(size) => answer_len == Some(size),
+        None => answer_starts_at_song_start(probed_ms, whole_song_ms, offset_secs),
+    }
+}
+
+/// How near the whole song's end an offset must be for an answer with no
+/// audio in it to be the song's end ([`offset_is_past_end`]): the server's
+/// length is whole seconds of a DB value, and an encoder's last frames can
+/// run short of it.
+const PAST_END_SLACK_MS: u64 = 2_000;
+
+/// Whether an answer with no audio in it, to a request at `offset_secs`,
+/// is the song's end: the offset is within [`PAST_END_SLACK_MS`] of the
+/// whole song's length, or beyond it. Anywhere else in the song it is a
+/// transcode that failed (ffmpeg wrote nothing), and an unknown length can't
+/// prove an end.
+fn offset_is_past_end(offset_secs: u64, whole_song_ms: Option<u64>) -> bool {
+    whole_song_ms.filter(|&ms| ms > 0).is_some_and(|whole_ms| {
+        offset_secs
+            .saturating_mul(1000)
+            .saturating_add(PAST_END_SLACK_MS)
+            >= whole_ms
+    })
+}
+
+/// The error an answer with no audio in it reports, at an offset short of
+/// the song's end: the server failed to transcode from there.
+const NO_AUDIO_FROM_OFFSET: &str = "the server sent no audio from that point in the song";
 
 /// Ratio that maps the real (displayed) timeline onto Symphonia's internal
 /// one after `sanitize_probed_duration` overrode the probe.
@@ -950,12 +1107,15 @@ impl AudioDecoder {
             delivery: StreamDelivery::Sized,
             byte_len: None,
             expected_duration_ms: None,
+            expected_file_size: None,
+            answer_timeout: None,
             seek_scale: 1.0,
             live_icy_metadata,
             live_codec: None,
             leading_trim: LeadingTrim::Off,
             seek_preroll_frames: 0,
             offset_secs: 0,
+            range_url: None,
         }
     }
 
@@ -964,6 +1124,24 @@ impl AudioDecoder {
     /// no trustworthy metadata exists (radio, engine-internal fallback loads).
     pub fn set_expected_duration_ms(&mut self, expected_ms: Option<u64>) {
         self.expected_duration_ms = expected_ms;
+    }
+
+    /// Stamp the song's file size on disk before `init()` (see the field
+    /// doc); `None` when unknown.
+    pub fn set_expected_file_size(&mut self, size: Option<u64>) {
+        self.expected_file_size = size.filter(|&size| size > 0);
+    }
+
+    /// The song's file size the caller stamped
+    /// ([`Self::set_expected_file_size`]).
+    pub fn expected_file_size(&self) -> Option<u64> {
+        self.expected_file_size
+    }
+
+    /// Bound how long a requested transcode's open waits for its answer
+    /// (see the field doc).
+    pub fn set_answer_timeout(&mut self, timeout: Option<std::time::Duration>) {
+        self.answer_timeout = timeout;
     }
 
     /// Say what this decoder is for before `init()`: a queue song
@@ -1050,6 +1228,33 @@ impl AudioDecoder {
     /// field doc): its position is that much ahead of what it decoded.
     pub fn offset_secs(&self) -> u64 {
         self.offset_secs
+    }
+
+    /// What it takes to open this decoder's track again elsewhere in the
+    /// song, without holding it ([`ReopenHints`]).
+    pub fn reopen_hints(&self) -> ReopenHints {
+        ReopenHints {
+            url: self.url.clone(),
+            source_kind: self.source_kind,
+            expected_duration_ms: self.expected_duration_ms,
+            expected_file_size: self.expected_file_size,
+            live_icy_metadata: self.live_icy_metadata.clone(),
+        }
+    }
+
+    /// Bring a freshly opened stream to `target_ms` of the song: a stream
+    /// sized from the song's start (the song's own file, which ignored the
+    /// offset, or a cache entry from the start) seeks within its bytes; one
+    /// that starts at its offset drops the milliseconds between the offset
+    /// and the target through its preroll. Blocking (a range seek can
+    /// fetch): run under `block_in_place`. False when the range seek failed.
+    pub fn land_on(&mut self, target_ms: u64) -> bool {
+        if self.delivery == StreamDelivery::Sized && self.offset_secs == 0 {
+            target_ms == 0 || self.seek(target_ms)
+        } else {
+            self.skip_ms(target_ms.saturating_sub(self.offset_secs.saturating_mul(1000)));
+            true
+        }
     }
 
     /// Drop the next `ms` of decoded audio, in whole frames, through the seek
@@ -1355,6 +1560,12 @@ impl AudioDecoder {
         // `gapless: true` makes the decoder drop the container-declared encoder
         // delay and padding, so album tracks join seamlessly (see
         // `symphonia_registry::probe_and_make_decoder`).
+        // The whole song's length, as the server says (`X-Content-Duration`
+        // names the whole song even on a stream opened at an offset), else
+        // the caller's metadata.
+        let whole_song_ms = header_duration_ms
+            .or(self.expected_duration_ms)
+            .filter(|&ms| ms > 0);
         let probed = tokio::task::block_in_place(|| {
             symphonia_registry::probe_and_make_decoder(mss, &hint, true)
         });
@@ -1362,12 +1573,20 @@ impl AudioDecoder {
             Ok(probed) => probed,
             // Past the song's end the server sends a container's headers
             // alone; a probe that finds no audio in that is the song's end.
+            // Short of the end, the server failed to transcode from there.
             Err(e) if self.offset_secs > 0 && tiny_answer => {
-                debug!(
-                    " [DECODER] The answer at {}s holds no audio ({e:#}): past the song's end",
+                if offset_is_past_end(self.offset_secs, whole_song_ms) {
+                    debug!(
+                        " [DECODER] The answer at {}s holds no audio ({e:#}): past the song's end",
+                        self.offset_secs
+                    );
+                    return Err(StreamPastEnd.into());
+                }
+                warn!(
+                    " [DECODER] The answer at {}s holds no audio ({e:#}), short of the song's end",
                     self.offset_secs
                 );
-                return Err(StreamPastEnd.into());
+                return Err(anyhow::anyhow!(NO_AUDIO_FROM_OFFSET));
             }
             Err(e) => {
                 error!(
@@ -1399,22 +1618,29 @@ impl AudioDecoder {
                 .context("Selected track id missing from probed format")?,
         );
 
-        // The whole song's length, as the server says (`X-Content-Duration`
-        // names the whole song even on a stream opened at an offset), else
-        // the caller's metadata.
-        let whole_song_ms = header_duration_ms.or(self.expected_duration_ms);
         if self.offset_secs > 0
             && self.delivery == StreamDelivery::Sized
-            && answer_starts_at_song_start(probed_ms, whole_song_ms, self.offset_secs)
+            && sized_answer_is_the_file(
+                self.byte_len,
+                self.expected_file_size,
+                probed_ms,
+                whole_song_ms,
+                self.offset_secs,
+            )
         {
             // A request that resolves to the song's own file is answered
-            // with the whole file, whatever its offset.
+            // with the whole file, whatever its offset. Read on from the
+            // file's own URL: asked again with the offset, the server answers
+            // by its own rules (a cache entry, a live transcode).
             info!(
                 " [DECODER] The server sent the song's own file for an offset of {}s: \
                  reading it from the song's start",
                 self.offset_secs
             );
             self.offset_secs = 0;
+            if let Some(range_url) = &self.range_url {
+                range_url.set(self.url.clone());
+            }
         }
 
         let duration_ms = if self.offset_secs > 0 {
@@ -1593,32 +1819,37 @@ impl AudioDecoder {
     /// ([`StreamPastEnd`]), not a failed transcode.
     async fn open_requested_transcode(&mut self) -> Result<OpenedStream> {
         let request_url = with_time_offset(&self.url, self.offset_secs);
-        let past_end_or_failed = |offset_secs: u64| -> anyhow::Error {
-            if offset_secs > 0 {
-                StreamPastEnd.into()
-            } else {
-                anyhow::anyhow!(EMPTY_TRANSCODE)
-            }
-        };
-        let response = Self::stream_client()?
+        // The answer's headers and first bytes come by this, when the caller
+        // bounded the open ([`Self::set_answer_timeout`]).
+        let deadline = self
+            .answer_timeout
+            .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
+        let sent = Self::stream_client()?
             .get(&request_url)
             .header(
                 reqwest::header::RANGE,
                 format!("bytes=0-{}", CHUNK_SIZE - 1),
             )
-            .send()
-            .await
+            .send();
+        let sent = match deadline {
+            Some((deadline, timeout)) => tokio::time::timeout_at(deadline, sent)
+                .await
+                .map_err(|_| no_answer_within(timeout))?,
+            None => sent.await,
+        };
+        let response = sent
             // The error would carry the credentialed URL.
-            .map_err(reqwest::Error::without_url)
+            .map_err(|e| anyhow::Error::new(NoAnswer(e.without_url().to_string())))
             .context("Failed to open the stream connection")?;
         let header_duration_ms = x_content_duration_ms(response.headers());
+        // The whole song's length, for telling an answer with no audio past
+        // the song's end from one that failed mid-song.
+        let whole_song_ms = header_duration_ms.or(self.expected_duration_ms);
         let content_type_hint = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .and_then(format_hint_from_content_type);
-        let tiny = declared_content_length(response.headers())
-            .is_some_and(|len| len <= PAST_END_ANSWER_MAX_BYTES);
 
         match classify_transcode_answer(response.status(), response.headers()) {
             TranscodeAnswer::Refused(status) => Err(refused_transcode_error(
@@ -1631,7 +1862,7 @@ impl AudioDecoder {
                     .unwrap_or_else(|| "an error with no message".to_owned());
                 anyhow::bail!("the server sent an error instead of the song: {message}")
             }
-            TranscodeAnswer::Empty => Err(past_end_or_failed(self.offset_secs)),
+            TranscodeAnswer::Empty => Err(self.no_audio_error(whole_song_ms)),
             TranscodeAnswer::WrongRange => anyhow::bail!(
                 "the server sent another part of the stream than the one asked for (HTTP 206), \
                  so it can't be read in parts"
@@ -1643,17 +1874,38 @@ impl AudioDecoder {
             TranscodeAnswer::Sized { total } => {
                 // Exactly the first chunk (a 206 for the range asked), or the
                 // whole one-chunk file (a 200): either way bytes 0.. of it.
-                let first_chunk =
-                    read_prefix(response, RangeHttpReader::first_chunk_len(total)).await;
+                let wanted = RangeHttpReader::first_chunk_len(total);
+                let first_chunk = match deadline {
+                    Some((deadline, timeout)) => {
+                        tokio::time::timeout_at(deadline, read_prefix(response, wanted))
+                            .await
+                            .map_err(|_| no_answer_within(timeout))?
+                    }
+                    None => read_prefix(response, wanted).await,
+                };
                 debug!(
                     " [DECODER] The requested transcode is served in ranges: {} bytes \
                      ({} of the first chunk in hand)",
                     total,
                     first_chunk.len()
                 );
+                // Small enough to be a container's headers alone, all of it
+                // in hand.
+                let tiny = total <= PAST_END_ANSWER_MAX_BYTES && first_chunk.len() as u64 == total;
                 self.delivery = StreamDelivery::Sized;
                 self.byte_len = Some(total);
-                let reader = RangeHttpReader::with_first_chunk(request_url, total, first_chunk);
+                // At an offset, an answer exactly the song's size is its own
+                // file, which ignored the offset: read it on from the file's
+                // own URL from the start (the classification after the probe
+                // agrees). Without a size the probe decides, and moves the
+                // reader then (`range_url`).
+                let reader_url = if self.offset_secs > 0 && self.expected_file_size == Some(total) {
+                    self.url.clone()
+                } else {
+                    request_url
+                };
+                let reader = RangeHttpReader::with_first_chunk(reader_url, total, first_chunk);
+                self.range_url = Some(reader.url_handle());
                 let media_source: Box<dyn MediaSource> = Box::new(reader);
                 Ok(OpenedStream {
                     mss: MediaSourceStream::new(media_source, Default::default()),
@@ -1666,21 +1918,43 @@ impl AudioDecoder {
             TranscodeAnswer::Stream => {
                 let mut response = response;
                 // The first bytes, so an empty body (ffmpeg wrote nothing)
-                // reads as that, not as a format the probe can't make out.
-                let first = loop {
-                    match response
-                        .chunk()
-                        .await
+                // reads as that, not as a format the probe can't make out. At
+                // an offset, read past the size of a container's headers
+                // alone, or to the end: whether the answer is only that is
+                // told by the bytes it really holds, never by a
+                // `Content-Length`, which a proxy may drop.
+                let wanted = if self.offset_secs > 0 {
+                    PAST_END_ANSWER_MAX_BYTES + 1
+                } else {
+                    1
+                };
+                let mut first = Vec::new();
+                let mut ended = false;
+                while (first.len() as u64) < wanted {
+                    let chunk = response.chunk();
+                    let chunk = match deadline {
+                        Some((deadline, timeout)) => tokio::time::timeout_at(deadline, chunk)
+                            .await
+                            .map_err(|_| no_answer_within(timeout))?,
+                        None => chunk.await,
+                    };
+                    match chunk
                         .map_err(reqwest::Error::without_url)
                         .context("Failed to read the stream")?
                     {
-                        Some(chunk) if chunk.is_empty() => {}
-                        Some(chunk) => break chunk,
-                        None => return Err(past_end_or_failed(self.offset_secs)),
+                        Some(chunk) => first.extend_from_slice(&chunk),
+                        None => {
+                            ended = true;
+                            break;
+                        }
                     }
-                };
+                }
+                if first.is_empty() {
+                    return Err(self.no_audio_error(whole_song_ms));
+                }
+                let tiny = ended && first.len() as u64 <= PAST_END_ANSWER_MAX_BYTES;
                 let (mss, hint, recv_timeout) =
-                    self.once_through_source(response, false, first, None);
+                    self.once_through_source(response, false, Bytes::from(first), None);
                 Ok(OpenedStream {
                     mss,
                     hint,
@@ -1689,6 +1963,21 @@ impl AudioDecoder {
                     tiny,
                 })
             }
+        }
+    }
+
+    /// The error an answer with no audio in it reports: from the song's
+    /// start, the server couldn't transcode the song; at an offset at or
+    /// near the song's end, the song is over ([`StreamPastEnd`]); at any
+    /// other offset, the server failed to transcode from there (a failed
+    /// seek, not an end).
+    fn no_audio_error(&self, whole_song_ms: Option<u64>) -> anyhow::Error {
+        if self.offset_secs == 0 {
+            anyhow::anyhow!(EMPTY_TRANSCODE)
+        } else if offset_is_past_end(self.offset_secs, whole_song_ms) {
+            StreamPastEnd.into()
+        } else {
+            anyhow::anyhow!(NO_AUDIO_FROM_OFFSET)
         }
     }
 
@@ -1705,6 +1994,7 @@ impl AudioDecoder {
         self.seek_preroll_frames = 0;
         self.smoothed_bitrate_kbps = 0.0;
         self.live_codec = None;
+        self.range_url = None;
     }
 
     /// Extract format hint from URL (file extension or query parameter)
@@ -4393,8 +4683,14 @@ pub(crate) mod tests {
     /// header names the length of the part it holds, as the transcode of
     /// that part would.
     pub(crate) fn clock_wav_from(offset_secs: u64) -> Vec<u8> {
-        let first = offset_secs.min(CLOCK_SECS) * CLOCK_RATE;
-        let frames = CLOCK_SECS * CLOCK_RATE - first;
+        clock_wav_at(CLOCK_RATE, offset_secs)
+    }
+
+    /// [`clock_wav_from`] at sample rate `rate` (the song's own file at
+    /// 44.1 kHz where its transcode plays at 48 kHz).
+    pub(crate) fn clock_wav_at(rate: u64, offset_secs: u64) -> Vec<u8> {
+        let first = offset_secs.min(CLOCK_SECS) * rate;
+        let frames = CLOCK_SECS * rate - first;
         let data_len = u32::try_from(frames * 4).unwrap();
         let mut wav = Vec::with_capacity(44 + data_len as usize);
         wav.extend_from_slice(b"RIFF");
@@ -4403,14 +4699,14 @@ pub(crate) mod tests {
         wav.extend_from_slice(&16_u32.to_le_bytes());
         wav.extend_from_slice(&1_u16.to_le_bytes()); // PCM
         wav.extend_from_slice(&2_u16.to_le_bytes()); // stereo
-        wav.extend_from_slice(&(CLOCK_RATE as u32).to_le_bytes());
-        wav.extend_from_slice(&(CLOCK_RATE as u32 * 4).to_le_bytes());
+        wav.extend_from_slice(&(rate as u32).to_le_bytes());
+        wav.extend_from_slice(&(rate as u32 * 4).to_le_bytes());
         wav.extend_from_slice(&4_u16.to_le_bytes()); // block align
         wav.extend_from_slice(&16_u16.to_le_bytes()); // bits per sample
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&data_len.to_le_bytes());
-        for frame in first..CLOCK_SECS * CLOCK_RATE {
-            let ms = i16::try_from(frame * 1000 / CLOCK_RATE).unwrap();
+        for frame in first..CLOCK_SECS * rate {
+            let ms = i16::try_from(frame * 1000 / rate).unwrap();
             wav.extend_from_slice(&ms.to_le_bytes());
             wav.extend_from_slice(&ms.to_le_bytes());
         }
@@ -4468,16 +4764,60 @@ pub(crate) mod tests {
         /// The song's own file, which a request that resolves to it is sent
         /// whatever its offset: a 206 for the Range asked, from byte 0.
         Raw,
+        /// [`Self::Raw`], the file being 44.1 kHz where the transcode is
+        /// 48 kHz.
+        Raw44k,
         /// Past the song's end: the headers-only Ogg Navidrome sends for an
         /// Opus transcode (`Content-Length: 266`, `Accept-Ranges: none`).
         /// Only a request with an offset; any other is answered `Live`.
         PastEndOgg,
+        /// The same headers-only Ogg sent chunked, with no Content-Length (a
+        /// proxy on the way re-chunked it). Only a request with an offset.
+        PastEndOggChunked,
         /// Past the song's end, an MP3 transcode's way: a 200 with
         /// `Content-Length: 0`. Only a request with an offset.
         PastEndEmpty,
+        /// A 416 for the range asked (an empty cache entry). Only a request
+        /// with an offset.
+        Unsatisfiable,
         /// The server's transcode limit: 429 with an envelope. Only a
         /// request with an offset.
         TooBusy,
+        /// No answer at all: the request is read and the socket held open.
+        /// Only a request with an offset.
+        Stall,
+    }
+
+    impl ClockReply {
+        /// Whether this reply is only ever given to a request carrying an
+        /// offset (a first open from the song's start is answered `Live`).
+        fn needs_an_offset(self) -> bool {
+            match self {
+                Self::PastEndOgg
+                | Self::PastEndOggChunked
+                | Self::PastEndEmpty
+                | Self::Unsatisfiable
+                | Self::TooBusy
+                | Self::Stall => true,
+                Self::Live | Self::CachedAtOffset | Self::Raw | Self::Raw44k => false,
+            }
+        }
+    }
+
+    /// What a [`ClockServer`] does, switchable between requests.
+    #[derive(Debug, Clone, Copy)]
+    struct ClockState {
+        reply: ClockReply,
+        /// Held before the answer's headers go out.
+        delay: std::time::Duration,
+        /// `X-Content-Duration`, in whole seconds ([`CLOCK_SECS`] unless a
+        /// test says otherwise).
+        header_secs: u64,
+        /// A `Live` answer's body is cut (the connection closed with no
+        /// final chunk) after this many bytes of the WAV.
+        cut_after: Option<usize>,
+        /// How many more `Live` answers are cut; `None` cuts every one.
+        cuts_left: Option<u32>,
     }
 
     /// A Navidrome-shaped server for the clock song: it reads `timeOffset`,
@@ -4486,13 +4826,24 @@ pub(crate) mod tests {
     pub(crate) struct ClockServer {
         pub(crate) base: String,
         log: Arc<parking_lot::Mutex<Vec<LoggedRequest>>>,
-        reply: Arc<parking_lot::Mutex<ClockReply>>,
+        state: Arc<parking_lot::Mutex<ClockState>>,
     }
 
     impl ClockServer {
         /// Answer every request from now on as `reply` says.
         pub(crate) fn set_reply(&self, reply: ClockReply) {
-            *self.reply.lock() = reply;
+            self.state.lock().reply = reply;
+        }
+
+        /// Hold every answer's headers back for `delay` from now on.
+        pub(crate) fn set_answer_delay(&self, delay: std::time::Duration) {
+            self.state.lock().delay = delay;
+        }
+
+        /// Send `X-Content-Duration: <secs>` from now on (a server whose idea
+        /// of the song's length is off).
+        pub(crate) fn set_header_secs(&self, secs: u64) {
+            self.state.lock().header_secs = secs;
         }
 
         /// Every request read so far, in order.
@@ -4516,6 +4867,22 @@ pub(crate) mod tests {
     pub(crate) const OPUS_HEADERS_ONLY: &[u8] =
         include_bytes!("../../testdata/opus_headers_only_past_end.ogg");
 
+    /// `body` in HTTP/1.1 chunked encoding, in 16 KB chunks; with
+    /// `terminated` false the final zero chunk is left out (the transfer was
+    /// cut).
+    fn chunked(body: &[u8], terminated: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        for chunk in body.chunks(16 * 1024) {
+            out.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            out.extend_from_slice(chunk);
+            out.extend_from_slice(b"\r\n");
+        }
+        if terminated {
+            out.extend_from_slice(b"0\r\n\r\n");
+        }
+        out
+    }
+
     /// Start a [`ClockServer`] answering as `reply` says.
     pub(crate) async fn spawn_clock_server(reply: ClockReply) -> ClockServer {
         use tokio::{
@@ -4524,14 +4891,20 @@ pub(crate) mod tests {
         };
 
         let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
-        let reply = Arc::new(parking_lot::Mutex::new(reply));
-        let (logged, replying) = (log.clone(), reply.clone());
+        let state = Arc::new(parking_lot::Mutex::new(ClockState {
+            reply,
+            delay: std::time::Duration::ZERO,
+            header_secs: CLOCK_SECS,
+            cut_after: None,
+            cuts_left: None,
+        }));
+        let (logged, shared) = (log.clone(), state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 let logged = logged.clone();
-                let reply = *replying.lock();
+                let shared = shared.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
                     let len = socket.read(&mut buf).await.unwrap_or(0);
@@ -4546,42 +4919,56 @@ pub(crate) mod tests {
                                 .then(|| value.trim().to_owned())
                         }),
                     };
-                    logged.lock().push(request.clone());
                     let offset: u64 = request
                         .time_offset()
                         .and_then(|value| value.parse().ok())
                         .unwrap_or(0);
-                    let reply = match reply {
-                        ClockReply::PastEndOgg | ClockReply::PastEndEmpty | ClockReply::TooBusy
-                            if offset == 0 =>
-                        {
+                    // Read the state and take a cut together with logging
+                    // the request, so a test sees both at once.
+                    let (reply, delay, header_secs, cut) = {
+                        let mut state = shared.lock();
+                        let reply = if state.reply.needs_an_offset() && offset == 0 {
                             ClockReply::Live
-                        }
-                        other => other,
+                        } else {
+                            state.reply
+                        };
+                        let cut = match (reply, state.cut_after, state.cuts_left) {
+                            (ClockReply::Live, Some(bytes), None) => Some(bytes),
+                            (ClockReply::Live, Some(bytes), Some(left)) if left > 0 => {
+                                state.cuts_left = Some(left - 1);
+                                Some(bytes)
+                            }
+                            _ => None,
+                        };
+                        logged.lock().push(request.clone());
+                        (reply, state.delay, state.header_secs, cut)
                     };
-                    let duration = format!("X-Content-Duration: {CLOCK_SECS}\r\n");
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let duration = format!("X-Content-Duration: {header_secs}\r\n");
                     let (status, headers, payload): (&str, String, Vec<u8>) = match reply {
                         ClockReply::Live => {
-                            let mut chunked = Vec::new();
-                            for chunk in clock_wav_from(offset).chunks(16 * 1024) {
-                                chunked
-                                    .extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
-                                chunked.extend_from_slice(chunk);
-                                chunked.extend_from_slice(b"\r\n");
-                            }
-                            chunked.extend_from_slice(b"0\r\n\r\n");
+                            let wav = clock_wav_from(offset);
+                            let body = match cut {
+                                Some(bytes) => chunked(&wav[..bytes.min(wav.len())], false),
+                                None => chunked(&wav, true),
+                            };
                             (
                                 "200 OK",
                                 format!(
                                     "Content-Type: audio/wav\r\nAccept-Ranges: none\r\n{duration}\
                                      Transfer-Encoding: chunked\r\n"
                                 ),
-                                chunked,
+                                body,
                             )
                         }
-                        ClockReply::CachedAtOffset | ClockReply::Raw => {
-                            let body =
-                                clock_wav_from(if reply == ClockReply::Raw { 0 } else { offset });
+                        ClockReply::CachedAtOffset | ClockReply::Raw | ClockReply::Raw44k => {
+                            let body = match reply {
+                                ClockReply::Raw => clock_wav_from(0),
+                                ClockReply::Raw44k => clock_wav_at(44_100, 0),
+                                _ => clock_wav_from(offset),
+                            };
                             let last = body.len() - 1;
                             let (start, end) = request
                                 .range
@@ -4615,12 +5002,25 @@ pub(crate) mod tests {
                             ),
                             OPUS_HEADERS_ONLY.to_vec(),
                         ),
+                        ClockReply::PastEndOggChunked => (
+                            "200 OK",
+                            format!(
+                                "Content-Type: audio/ogg\r\nAccept-Ranges: none\r\n{duration}\
+                                 Transfer-Encoding: chunked\r\n"
+                            ),
+                            chunked(OPUS_HEADERS_ONLY, true),
+                        ),
                         ClockReply::PastEndEmpty => (
                             "200 OK",
                             format!(
                                 "Content-Type: audio/mpeg\r\nAccept-Ranges: none\r\n{duration}\
                                  Content-Length: 0\r\n"
                             ),
+                            Vec::new(),
+                        ),
+                        ClockReply::Unsatisfiable => (
+                            "416 Range Not Satisfiable",
+                            format!("{duration}Content-Length: 0\r\n"),
                             Vec::new(),
                         ),
                         ClockReply::TooBusy => {
@@ -4633,6 +5033,11 @@ pub(crate) mod tests {
                                 ),
                                 envelope.to_vec(),
                             )
+                        }
+                        ClockReply::Stall => {
+                            // Hold the connection open, answering nothing.
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            return;
                         }
                     };
                     let head = format!("HTTP/1.1 {status}\r\n{headers}Connection: close\r\n\r\n");
@@ -4647,7 +5052,7 @@ pub(crate) mod tests {
         ClockServer {
             base: format!("http://{addr}"),
             log,
-            reply,
+            state,
         }
     }
 
@@ -4778,5 +5183,281 @@ pub(crate) mod tests {
         assert_eq!(requests[1].time_offset(), None, "{requests:?}");
         assert_eq!(decoder.offset_secs(), 0);
         assert_eq!(next_clock_ms(&mut decoder), 0);
+    }
+
+    // =========================================================================
+    // Telling the song's file from a cache entry, and an empty answer
+    // =========================================================================
+
+    /// A sized answer to a request at an offset is the song's own file when
+    /// its length is exactly the song's size on disk (Navidrome serves the
+    /// file at that size, which `Song.size` holds), and a cache entry for the
+    /// offset at any other length, whatever the probe makes of it. Only
+    /// without a size does the probed length decide, and it can't tell
+    /// without a whole-song length or a probed one.
+    #[test]
+    fn a_sized_answer_is_the_file_when_it_is_exactly_the_songs_size() {
+        // (answer length, song size, probed ms, whole song ms, offset s,
+        //  is the file, why)
+        type Row = (
+            Option<u64>,
+            Option<u64>,
+            u64,
+            Option<u64>,
+            u64,
+            bool,
+            &'static str,
+        );
+        let rows: [Row; 11] = [
+            (
+                Some(5_000_000),
+                Some(5_000_000),
+                4_000,
+                Some(10_000),
+                6,
+                true,
+                "the song's size, though the probe looks like an entry",
+            ),
+            (
+                Some(3_000_000),
+                Some(5_000_000),
+                10_000,
+                Some(10_000),
+                1,
+                false,
+                "another size, though the probe looks like the file",
+            ),
+            (
+                None,
+                Some(5_000_000),
+                10_000,
+                Some(10_000),
+                1,
+                false,
+                "no answer length to compare with the size",
+            ),
+            (
+                Some(5_000_000),
+                Some(0),
+                10_000,
+                Some(10_000),
+                4,
+                true,
+                "a zero size is no size: the probe decides",
+            ),
+            (
+                Some(1),
+                None,
+                10_000,
+                None,
+                4,
+                false,
+                "no whole-song length: can't tell",
+            ),
+            (
+                Some(1),
+                None,
+                10_000,
+                Some(0),
+                4,
+                false,
+                "a zero whole-song length: can't tell",
+            ),
+            (
+                Some(1),
+                None,
+                0,
+                Some(10_000),
+                4,
+                false,
+                "no probed length: can't tell",
+            ),
+            (
+                Some(1),
+                None,
+                9_501,
+                Some(10_000),
+                1,
+                true,
+                "offset 1: the file probed 0.499 s short",
+            ),
+            (
+                Some(1),
+                None,
+                10_499,
+                Some(10_000),
+                1,
+                true,
+                "offset 1: the file probed 0.499 s long",
+            ),
+            (
+                Some(1),
+                None,
+                9_499,
+                Some(10_000),
+                1,
+                false,
+                "offset 1: the entry probed 0.499 s long",
+            ),
+            (
+                Some(1),
+                None,
+                8_501,
+                Some(10_000),
+                1,
+                false,
+                "offset 1: the entry probed 0.499 s short",
+            ),
+        ];
+        for (answer_len, size, probed_ms, whole_ms, offset, expected, why) in rows {
+            assert_eq!(
+                sized_answer_is_the_file(answer_len, size, probed_ms, whole_ms, offset),
+                expected,
+                "{why}"
+            );
+        }
+    }
+
+    /// The song's size decides where the probe would get it wrong: a server
+    /// whose `X-Content-Duration` is off makes the file look like an entry,
+    /// and an entry look like the file.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_songs_size_tells_the_file_from_an_entry_whatever_the_probe_says() {
+        let file_size = clock_wav_from(0).len() as u64;
+
+        let server = spawn_clock_server(ClockReply::Raw).await;
+        server.set_header_secs(20);
+        let mut decoder = AudioDecoder::default();
+        decoder.set_expected_file_size(Some(file_size));
+        decoder
+            .open_at(&server.song_url("s1"), 6)
+            .await
+            .expect("the file opens");
+        assert_eq!(
+            decoder.offset_secs(),
+            0,
+            "the file starts at the song's start"
+        );
+        assert_eq!(next_clock_ms(&mut decoder), 0);
+
+        let server = spawn_clock_server(ClockReply::CachedAtOffset).await;
+        server.set_header_secs(5);
+        let mut decoder = AudioDecoder::default();
+        decoder.set_expected_file_size(Some(file_size));
+        decoder
+            .open_at(&server.song_url("s1"), 1)
+            .await
+            .expect("the entry opens");
+        assert_eq!(decoder.offset_secs(), 1, "the entry starts at its offset");
+        assert_eq!(next_clock_ms(&mut decoder), 1_000);
+    }
+
+    /// An answer with no audio in it in the middle of the song is no end:
+    /// the server failed to transcode from there (ffmpeg wrote nothing, an
+    /// empty cache entry). It fails the open, so a seek keeps the old stream
+    /// playing, instead of ending the song.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_answer_mid_song_fails_the_open_instead_of_ending_the_song() {
+        for reply in [
+            ClockReply::PastEndEmpty,
+            ClockReply::PastEndOgg,
+            ClockReply::PastEndOggChunked,
+            ClockReply::Unsatisfiable,
+        ] {
+            let server = spawn_clock_server(reply).await;
+            let mut decoder = AudioDecoder::default();
+            let error = decoder
+                .open_at(&server.song_url("s1"), 3)
+                .await
+                .expect_err("no audio from 3 s");
+
+            assert!(!error.is::<StreamPastEnd>(), "{reply:?}: {error:#}");
+            assert!(!decoder.is_initialized(), "{reply:?}");
+        }
+    }
+
+    /// Within the song's last seconds the same answers are its end, however
+    /// they arrive: with a length, chunked with none (a proxy on the way),
+    /// empty, or a 416. A headers-only answer is told by the bytes read, not
+    /// by its `Content-Length`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_answer_near_the_end_is_the_end_however_it_is_sent() {
+        for reply in [
+            ClockReply::PastEndEmpty,
+            ClockReply::PastEndOgg,
+            ClockReply::PastEndOggChunked,
+            ClockReply::Unsatisfiable,
+        ] {
+            let server = spawn_clock_server(reply).await;
+            let mut decoder = AudioDecoder::default();
+            let error = decoder
+                .open_at(&server.song_url("s1"), 9)
+                .await
+                .expect_err("no audio from 9 s");
+
+            assert!(error.is::<StreamPastEnd>(), "{reply:?}: {error:#}");
+        }
+    }
+
+    /// A request at an offset answered with the song's own file goes on
+    /// reading that file without the offset: the server answers the offset
+    /// URL by its own rules later (a cache entry, a live transcode), which
+    /// would hand the range reader another stream than the one it reads.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_file_answered_for_an_offset_is_read_on_without_the_offset() {
+        for file_size in [None, Some(clock_wav_from(0).len() as u64)] {
+            let server = spawn_clock_server(ClockReply::Raw).await;
+            let mut decoder = AudioDecoder::default();
+            decoder.set_expected_file_size(file_size);
+            decoder
+                .open_at(&server.song_url("s1"), 6)
+                .await
+                .expect("the file opens");
+            let opened = server.requests().len();
+            assert!(
+                tokio::task::block_in_place(|| decoder.seek(9_000)),
+                "{file_size:?}: the file seeks within itself"
+            );
+            assert_eq!(next_clock_ms(&mut decoder), 9_000, "{file_size:?}");
+
+            // Known by its size, the file is read from its own URL from the
+            // first range on; told by the probe, from the probe on.
+            let skip = if file_size.is_some() { 1 } else { opened };
+            let later: Vec<_> = server.requests().into_iter().skip(skip).collect();
+            assert!(!later.is_empty(), "{file_size:?}: a later range was read");
+            assert!(
+                later.iter().all(|r| r.time_offset().is_none()),
+                "{file_size:?}: later reads ask for the file: {later:?}"
+            );
+        }
+    }
+
+    /// The server's transcode limit and a server that doesn't answer are
+    /// told apart from other failures, so a seek can say which it was.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_busy_server_and_no_answer_are_told_apart() {
+        let server = spawn_clock_server(ClockReply::TooBusy).await;
+        let mut decoder = AudioDecoder::default();
+        let busy = decoder
+            .open_at(&server.song_url("s1"), 4)
+            .await
+            .expect_err("busy");
+        assert!(error_is::<ServerBusy>(&busy), "{busy:#}");
+        assert!(!error_is::<NoAnswer>(&busy), "{busy:#}");
+
+        let server = spawn_clock_server(ClockReply::Stall).await;
+        let mut decoder = AudioDecoder::default();
+        decoder.set_answer_timeout(Some(std::time::Duration::from_millis(300)));
+        let started = std::time::Instant::now();
+        let silent = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            decoder.open_at(&server.song_url("s1"), 4),
+        )
+        .await
+        .expect("the open gives up within its own time")
+        .expect_err("no answer");
+        assert!(error_is::<NoAnswer>(&silent), "{silent:#}");
+        assert!(!error_is::<ServerBusy>(&silent), "{silent:#}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 }

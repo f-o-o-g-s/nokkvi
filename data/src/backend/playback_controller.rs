@@ -868,6 +868,7 @@ impl PlaybackController {
             url: String,
             replay_gain: Option<crate::types::song::ReplayGain>,
             expected_duration_ms: Option<u64>,
+            expected_file_size: Option<u64>,
             directives: crate::audio::engine::PreparedTransitionDirectives,
         }
         let (prep, is_repeat_track): (Option<PeekedPrep>, bool) = {
@@ -928,6 +929,7 @@ impl PlaybackController {
                         url,
                         replay_gain: next_song.replay_gain.clone(),
                         expected_duration_ms: next_song.expected_duration_ms(),
+                        expected_file_size: next_song.expected_file_size(),
                         directives: crate::audio::engine::PreparedTransitionDirectives {
                             suppress_crossfade,
                             duration_override_ms,
@@ -946,6 +948,7 @@ impl PlaybackController {
             url,
             replay_gain,
             expected_duration_ms,
+            expected_file_size,
             directives,
         }) = prep
         else {
@@ -986,6 +989,7 @@ impl PlaybackController {
                 // This is the slow part - downloads ~20MB of audio
                 let mut decoder = crate::audio::AudioDecoder::default();
                 decoder.set_expected_duration_ms(expected_duration_ms);
+                decoder.set_expected_file_size(expected_file_size);
                 // M8: transition decoders opt into the leading-silence trim
                 // (user-initiated loads stay honest; bit-perfect gated off
                 // engine-side in `transition_prep_cfg`).
@@ -1596,6 +1600,7 @@ async fn complete_skip_fade(
     // Phase 2 — the slow network part, no locks held.
     let mut decoder = crate::audio::AudioDecoder::default();
     decoder.set_expected_duration_ms(plan.song.expected_duration_ms());
+    decoder.set_expected_file_size(plan.song.expected_file_size());
     let built = decoder.init(&plan.stream_url).await;
 
     // Phase 3 — brief engine lock to fire (or fall back).
@@ -2016,7 +2021,7 @@ mod tests {
             .await;
         let engine_arc = fx.playback.audio_engine();
         let mut e = engine_arc.lock().await;
-        e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=a&_=1", None, None)
+        e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=a&_=1", None, None, None)
             .await;
         e.force_playing_for_test();
         let seq = fx
@@ -2630,7 +2635,7 @@ mod tests {
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
-            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None)
+            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None, None)
                 .await;
             e.force_playing_for_test();
             e.plan_skip_fade().await;
@@ -2667,7 +2672,7 @@ mod tests {
         {
             let engine_arc = fx.playback.audio_engine();
             let mut e = engine_arc.lock().await;
-            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None)
+            e.load_track_with_rg("http://127.0.0.1:9/rest/stream?id=b&_=1", None, None, None)
                 .await;
             e.force_playing_for_test();
         }
@@ -2843,7 +2848,7 @@ mod tests {
             let mut e = engine_arc.lock().await;
             // Stage a station as the live source, then mark the engine playing
             // — `load_track_with_rg` does no network I/O on a stopped engine.
-            e.load_track_with_rg(STATION, None, None).await;
+            e.load_track_with_rg(STATION, None, None, None).await;
             e.force_playing_for_test();
         }
 
@@ -3180,10 +3185,16 @@ mod tests {
         }
         let while_held = server.requests().len() - opened;
         let shown = engine.lock().await.position();
-        tokio::time::sleep(
-            crate::audio::engine::SEEK_SETTLE + std::time::Duration::from_millis(500),
-        )
-        .await;
+        // Wait for the settle's reopen to reach the server, with a deadline
+        // rather than a fixed grace (a loaded machine runs the tracked task
+        // late), then give a stray second request time to show.
+        let deadline = std::time::Instant::now()
+            + crate::audio::engine::SEEK_SETTLE
+            + std::time::Duration::from_secs(5);
+        while server.requests().len() == opened && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let after: Vec<_> = server.requests().into_iter().skip(opened).collect();
         let position = engine.lock().await.position();
         engine.lock().await.stop().await;
@@ -3204,7 +3215,11 @@ mod tests {
             1,
             "one reopen: {after:?}"
         );
-        assert_eq!(after[0].time_offset().as_deref(), Some("4"), "{after:?}");
+        assert_eq!(
+            after.first().and_then(|r| r.time_offset()).as_deref(),
+            Some("4"),
+            "{after:?}"
+        );
         assert_eq!(position, 4_000);
         Ok(())
     }

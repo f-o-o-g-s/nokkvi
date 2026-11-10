@@ -285,6 +285,21 @@ struct MprisUpdate<'a> {
     random: bool,
 }
 
+/// What a seek whose reopen failed says (the old stream played on): one
+/// plain sentence per kind of failure, never the decoder's or the server's
+/// own text (the log has that).
+pub(crate) fn seek_failure_text(failure: nokkvi_data::audio::engine::SeekFailure) -> &'static str {
+    match failure {
+        nokkvi_data::audio::engine::SeekFailure::Busy => {
+            "Couldn't seek: the server is busy. Try again in a few seconds."
+        }
+        nokkvi_data::audio::engine::SeekFailure::NoAnswer => {
+            "Couldn't seek: the server didn't answer."
+        }
+        nokkvi_data::audio::engine::SeekFailure::Other => "Couldn't seek in this song.",
+    }
+}
+
 impl Nokkvi {
     /// One edge-hold auto-scroll step for an in-progress within-list reorder
     /// drag: nudge the active surface's viewport toward the edge the cursor sits
@@ -605,8 +620,8 @@ impl Nokkvi {
 
         // A seek that reopened the stream failed (a busy server, the
         // network); the old stream played on. The engine hands it over once.
-        if let Some(reason) = seek_failure {
-            self.toast_warn(format!("Couldn't seek: {reason}"));
+        if let Some(failure) = seek_failure {
+            self.toast_warn(seek_failure_text(failure));
         }
 
         // Whether this update's POSITION is still current. A different seek

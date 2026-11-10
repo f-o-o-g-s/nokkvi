@@ -220,6 +220,16 @@ impl Song {
         (self.duration > 0).then(|| u64::from(self.duration) * 1000)
     }
 
+    /// The song's file size on disk in bytes, as the server scanned it
+    /// (`None` when the server sent none). Navidrome serves the song's own
+    /// file at exactly this length, so a sized stream of any other length is
+    /// something it made from the file; the decoder tells the file from a
+    /// transcode its cache holds by it (and the UI's `StreamOrigin` does
+    /// too).
+    pub fn expected_file_size(&self) -> Option<u64> {
+        (self.size > 0).then_some(self.size)
+    }
+
     /// Construct a minimal Song for unit tests. All optional fields default to `None`.
     #[cfg(test)]
     pub fn test_default(id: &str, title: &str) -> Self {

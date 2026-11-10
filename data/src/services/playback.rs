@@ -164,11 +164,21 @@ impl<'a> StagedSong<'a> {
     /// any older one, and before `play()`, whose fresh-start branch
     /// consumes it.
     pub(crate) async fn load(&self, engine: &mut CustomAudioEngine) -> Result<()> {
-        let (replay_gain, expected_duration_ms) = self.song.map_or((None, None), |song| {
-            (song.replay_gain.clone(), song.expected_duration_ms())
-        });
+        let (replay_gain, expected_duration_ms, expected_file_size) =
+            self.song.map_or((None, None, None), |song| {
+                (
+                    song.replay_gain.clone(),
+                    song.expected_duration_ms(),
+                    song.expected_file_size(),
+                )
+            });
         engine
-            .load_track_with_rg(self.url, replay_gain, expected_duration_ms)
+            .load_track_with_rg(
+                self.url,
+                replay_gain,
+                expected_duration_ms,
+                expected_file_size,
+            )
             .await;
         if let Some(start_ms) = self.start_ms {
             engine.set_pending_start_ms(start_ms);
