@@ -275,6 +275,28 @@ pub(crate) fn settings_template(
     user_id: &str,
     username: &str,
 ) -> PlayerSettings {
+    token_player(rows, user_id, username).map_or_else(PlayerSettings::default, |row| {
+        PlayerSettings {
+            transcoding_id: row.transcoding_id.clone(),
+            max_bit_rate: row.max_bit_rate,
+            report_real_path: row.report_real_path,
+            scrobble_enabled: row.scrobble_enabled,
+        }
+    })
+}
+
+/// The player Navidrome registered for nokkvi's token requests: client
+/// `nokkvi`, no key, named the way `core/players.go` `Register` names it
+/// (`nokkvi [<user agent>]`; it finds the row by user, client and user
+/// agent), the session user's, and of several the most recently seen. Its
+/// settings apply to every stream a token session plays. Another install's
+/// keyed player whose key a logout revoked carries another name and is
+/// skipped.
+pub(crate) fn token_player<'a>(
+    rows: &'a [PlayerRow],
+    user_id: &str,
+    username: &str,
+) -> Option<&'a PlayerRow> {
     rows.iter()
         .filter(|row| {
             row.client == PLAYER_CLIENT
@@ -293,12 +315,6 @@ pub(crate) fn settings_template(
         .max_by_key(|row| {
             chrono::DateTime::parse_from_rfc3339(&row.last_seen)
                 .map_or(i64::MIN, |seen| seen.timestamp_millis())
-        })
-        .map_or_else(PlayerSettings::default, |row| PlayerSettings {
-            transcoding_id: row.transcoding_id.clone(),
-            max_bit_rate: row.max_bit_rate,
-            report_real_path: row.report_real_path,
-            scrobble_enabled: row.scrobble_enabled,
         })
 }
 

@@ -500,7 +500,23 @@ impl Nokkvi {
                 let live_transcode = engine.is_live_transcode();
                 let seek_failure = engine.take_seek_failure();
                 let stream_lost = engine.take_stream_lost();
+                let seek_kind = engine.seek_kind();
                 drop(engine);
+                // A stream that opened has a codec; the facts of one that
+                // never did (nothing loaded, a load that failed) are blank.
+                let opened = queue_stream
+                    .as_ref()
+                    .filter(|stream| stream.codec.is_some());
+                let stream_status = crate::state::StreamStatus {
+                    codec: opened.and_then(|stream| stream.codec.clone()),
+                    live_bitrate: engine_live_bitrate,
+                    delivery: opened.map(|stream| stream.delivery),
+                    origin: StreamOrigin::Unknown,
+                    seek_kind,
+                    requested_transcode: queue_source
+                        .as_deref()
+                        .is_some_and(nokkvi_data::utils::artwork_url::requests_transcode),
+                };
 
                 let qm_arc = shell.queue().queue_manager();
                 let qm = qm_arc.lock().await;
@@ -645,6 +661,7 @@ impl Nokkvi {
                     next_track_epoch,
                     seek_failure,
                     stream_lost,
+                    stream_status,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -687,6 +704,7 @@ impl Nokkvi {
             next_track_epoch,
             seek_failure,
             stream_lost,
+            stream_status,
         } = update;
 
         // A seek that reopened the stream failed (a busy server, the
@@ -793,6 +811,16 @@ impl Nokkvi {
         self.playback.sample_rate = sample_rate;
         self.playback.seekable = seekable;
         self.playback.live_transcode = live_transcode;
+        // A `Pending` tick (the engine does not describe the song yet) keeps
+        // the origin the last tick found, as the badge does.
+        let origin = match stream_origin {
+            StreamOrigin::Pending => self.playback.stream.origin,
+            origin => origin,
+        };
+        self.playback.stream = crate::state::StreamStatus {
+            origin,
+            ..stream_status
+        };
         // Honest bit-perfect badge. Engaged only when the CURRENTLY-PLAYING
         // stream was actually built bit-perfect (build-time fact from the
         // renderer — NOT the live setting, which a mid-track toggle flips before
@@ -2190,7 +2218,14 @@ impl Nokkvi {
         // verb and Previous's rewind check first, so this backstop fires on a
         // deliberate act that beat the tick (never a held key): say why.
         if !self.seek_available() {
-            self.toast_info("Can't seek: the server is transcoding this song");
+            // A smaller copy nokkvi asked for refuses only on a server
+            // without `transcodeOffset`; any other live transcode is one the
+            // server chose on its own (a transcoding set on nokkvi's player).
+            self.toast_info(if self.playback.stream.requested_transcode {
+                "Can't seek in a smaller copy on this server"
+            } else {
+                "Can't seek: your server is choosing this song's format"
+            });
             return Task::none();
         }
         // Mark the seek explicitly: advance last_position to the seek target so

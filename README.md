@@ -20,7 +20,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 
 **Platform:** Linux only. Built and tested on Arch Linux (Wayland/Hyprland) with PipeWire v<!-- pipewire-version -->1.6.10<!-- /pipewire-version --> and Navidrome v<!-- navidrome-version -->0.64.2<!-- /navidrome-version -->. No Windows or macOS support.
 
-**Network:** Built and tested on LAN. Nokkvi streams your original files and can't ask for a smaller version yet, so FLAC over a slow remote connection can keep stopping to buffer. To listen remotely, set a transcoding for Nokkvi's player in Navidrome under Settings > Players (those tracks play fine, but you can't seek within them).
+**Network:** Built and tested on LAN. Nokkvi streams your original files by default, so FLAC over a slow remote connection can keep stopping to buffer. For remote listening, pick a smaller copy in Settings > Playback > Streaming Quality, and you can still seek in it as long as your server supports that (Navidrome 0.64 does). A transcoding forced on Nokkvi's player in Navidrome under Settings > Players still plays fine, but you can't seek within those tracks.
 
 ## 📖 Documentation
 

@@ -287,6 +287,36 @@ impl AppService {
         &self.settings_service
     }
 
+    /// What nokkvi's own player row on the server forces on its streams (a
+    /// transcoding, a max bit rate), for the read-only row in Settings →
+    /// Playback → Streaming Quality; `None` when it forces nothing or there
+    /// is no such row ([`AuthGateway::own_player`] says which row that is).
+    /// The forced transcoding's own row names its format. Read only: nokkvi
+    /// never writes either row.
+    pub async fn server_player_override(
+        &self,
+    ) -> Result<Option<crate::types::player_override::PlayerOverride>> {
+        use crate::types::player_override::{ForcedTranscoding, PlayerOverride, positive_kbps};
+        let Some(player) = self.auth_gateway.own_player(&self.storage).await? else {
+            return Ok(None);
+        };
+        let forced = if player.transcoding_id.is_empty() {
+            None
+        } else {
+            let transcoding = self
+                .auth_gateway
+                .build_native_api(crate::services::api::transcodings::TranscodingsApiService::new)
+                .await?
+                .get(&player.transcoding_id)
+                .await?;
+            Some(ForcedTranscoding {
+                format: transcoding.target_format,
+                default_bitrate_kbps: positive_kbps(transcoding.default_bit_rate),
+            })
+        };
+        Ok(PlayerOverride::of(forced, player.max_bit_rate))
+    }
+
     /// Make this session's `/rest` requests send an OpenSubsonic API key when
     /// the server offers keys. See [`AuthGateway::establish_api_key`]; errs
     /// only when the session is left with no `/rest` credential, which must
@@ -3532,6 +3562,57 @@ mod tests {
         assert!(!withdrawn, "a server without the extension turns it off");
         assert!(!next_session, "the next session starts without it");
         drop(next_login);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// What nokkvi's own player row forces, end to end: the token session's
+    /// player forces a transcoding, whose own row names its format, and caps
+    /// the bit rate; the result says MP3 at the cap.
+    #[tokio::test]
+    async fn the_server_player_override_names_the_forced_format_and_cap() {
+        use crate::services::api::test_server::{Recorded, ScriptedServer};
+        let server = ScriptedServer::start(|r: &Recorded| {
+            if r.is("GET", "/api/player") {
+                return (
+                    200,
+                    r#"[{"id":"auto","name":"nokkvi [nokkvi]","client":"nokkvi",
+                         "userAgent":"nokkvi","userName":"alice",
+                         "lastSeen":"2026-11-10T08:00:00Z","transcodingId":"t-mp3",
+                         "maxBitRate":96,"hasApiKey":false}]"#
+                        .to_owned(),
+                );
+            }
+            if r.is("GET", "/api/transcoding/t-mp3") {
+                return (
+                    200,
+                    r#"{"id":"t-mp3","name":"mp3 audio","targetFormat":"mp3","defaultBitRate":192}"#
+                        .to_owned(),
+                );
+            }
+            (404, r#""not found""#.to_owned())
+        })
+        .await;
+        let db_path = test_db_path("test_app_server_player_override");
+        let storage = StateStorage::new(db_path.clone()).expect("redb open");
+        let app = AppService::new_with_storage(storage)
+            .await
+            .expect("app service");
+        app.auth()
+            .resume_session(
+                server.base_url.clone(),
+                "alice".to_string(),
+                "jwt".to_string(),
+                "u=alice&s=salt&t=token".to_string(),
+            )
+            .await
+            .expect("resume");
+
+        let found = app.server_player_override().await.expect("read");
+
+        let found = found.expect("an override");
+        assert_eq!(found.summary(), "MP3 at 96 kbps");
+        assert!(server.requests().iter().all(|r| r.method == "GET"));
+        drop(app);
         let _ = std::fs::remove_file(&db_path);
     }
 }

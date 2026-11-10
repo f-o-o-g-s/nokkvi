@@ -198,6 +198,10 @@ pub struct PlaybackStateUpdate {
     /// (`CustomAudioEngine::take_seek_failure`); the old stream played on.
     /// Shown once as a warning.
     pub seek_failure: Option<nokkvi_data::audio::engine::SeekFailure>,
+    /// The stream that plays: codec, live bitrate, delivery, how a seek
+    /// moves, whether nokkvi asked for the transcode (`origin` is left at
+    /// its default: `stream_origin` above carries it).
+    pub stream_status: crate::state::StreamStatus,
     /// A requested transcode's stream dropped and could not be resumed
     /// since the last tick (`CustomAudioEngine::take_stream_lost`): its song
     /// ended early. Shown once as a warning.
@@ -1645,6 +1649,10 @@ pub enum Message {
     ResumeSession,
     /// Response from pinging the server to fetch its native application version
     ServerVersionFetched(Option<String>),
+    /// What nokkvi's own player row on the server forces on its streams
+    /// (`AppService::server_player_override`); `None` when it forces
+    /// nothing, or the read failed (the Settings row then stays hidden).
+    PlayerOverrideFetched(Option<nokkvi_data::types::player_override::PlayerOverride>),
     /// Response from probing the server's advertised OpenSubsonic extensions
     /// (`getOpenSubsonicExtensions`); `None` when the probe failed —
     /// extension-gated features stay hidden (fail-safe).

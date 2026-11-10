@@ -4,7 +4,9 @@
 //! starts + pause/resume/stop transport fades + the M8 content-aware overlap
 //! knobs — skip-silence, gap/overlap trim, bar-snap), Volume Normalization
 //! (mode dropdown + AGC target knob + ReplayGain knobs), Streaming Quality
-//! (stream format + max bitrate), Scrobbling, Radio Scrobbling, Rating
+//! (stream format + max bitrate, then a read-only row for what nokkvi's
+//! player row on the server forces, only while it forces something),
+//! Scrobbling, Radio Scrobbling, Rating
 //! Reminder (enable + conditional timing/percentage), and Playlists. Flat
 //! rows come from `define_settings!` via `build_playback_tab_settings_items`.
 //! The conditional AGC target-level knob, the four ReplayGain knobs (only
@@ -216,6 +218,26 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         },
         macro_rows.take("general.stream_format"),
         macro_rows.take("general.stream_max_bitrate"),
+    ]);
+
+    // What nokkvi's own player row on the server forces (a transcoding, a
+    // max bit rate) beats the two rows above for every stream: say so,
+    // read-only, only while it forces something. nokkvi never writes the
+    // row; the subtitle says where to change it.
+    if let Some(found) = &data.server_player_override {
+        items.push(SettingItem::text(
+            SettingMeta::new(
+                "general.server_player_override",
+                "Set by Your Server",
+                "Streaming Quality",
+            )
+            .with_subtitle(found.description()),
+            &found.summary(),
+            "",
+        ));
+    }
+
+    items.extend([
         // --- Scrobbling ---
         SettingsEntry::Header {
             label: "Scrobbling",

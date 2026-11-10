@@ -406,6 +406,11 @@ pub struct Nokkvi {
     pub pending_expand: crate::state::PendingExpandState,
     /// Extracted backend server version (e.g. from Navidrome)
     pub server_version: Option<String>,
+    /// What nokkvi's own player row on the server forces on its streams (a
+    /// transcoding, a max bit rate), read at login and whenever Settings
+    /// opens (`AppService::server_player_override`); shown read-only under
+    /// Streaming Quality. `None` when it forces nothing or the read failed.
+    pub server_player_override: Option<nokkvi_data::types::player_override::PlayerOverride>,
     /// OpenSubsonic extension names advertised by the connected server
     /// (`getOpenSubsonicExtensions`, fetched at login/resume). `None` until
     /// the probe lands — extension-gated features fail safe (hidden).
@@ -535,6 +540,7 @@ impl Default for Nokkvi {
             playlist_appends: crate::state::PlaylistAppendQueue::default(),
             pending_expand: crate::state::PendingExpandState::default(),
             server_version: None,
+            server_player_override: None,
             open_subsonic_extensions: None,
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),

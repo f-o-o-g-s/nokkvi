@@ -465,6 +465,37 @@ impl AuthGateway {
         Ok(outcome)
     }
 
+    /// nokkvi's own player row on the server, whose transcoding and max bit
+    /// rate apply to every stream this session plays. A session that sends
+    /// an API key plays as the player its key is on: the one recorded in
+    /// redb for this server, user and owner (`api_key_players`). A token
+    /// session plays as the player Navidrome registered for nokkvi's
+    /// requests ([`api_key::token_player`]). `None` when there is no such
+    /// row (or the recorded one is gone). Read only: nothing here writes a
+    /// player. A regular user can read their own rows.
+    pub async fn own_player(
+        &self,
+        storage: &StateStorage,
+    ) -> Result<Option<crate::services::api::players::PlayerRow>> {
+        let session = self.key_session().await;
+        let client = session.client.clone().context("Not authenticated")?;
+        let players = PlayersApiService::new(client);
+        if api_key::is_api_key_credential(&session.credential) {
+            let Some(player_id) =
+                api_key::recorded_player_id(storage, &session.owner(), &session.user_id)?
+            else {
+                return Ok(None);
+            };
+            return match timed(players.get(&player_id)).await {
+                Ok(row) => Ok(Some(row)),
+                Err(e) if NokkviError::is_not_found(&e) => Ok(None),
+                Err(e) => Err(e),
+            };
+        }
+        let rows = timed(players.list()).await?;
+        Ok(api_key::token_player(&rows, &session.user_id, &session.username).cloned())
+    }
+
     /// Revoke the API key on nokkvi's player for this session's server and
     /// user (an explicit logout). The player stays, with its settings, and
     /// the next login puts a new key on it. Nothing to do when nokkvi has no
@@ -1292,5 +1323,103 @@ mod tests {
         gateway.revoke_api_key(&storage).await.expect("revoke");
 
         assert!(server.requests().is_empty());
+    }
+
+    // ── nokkvi's own player row, read only ──────────────────────────────────
+
+    /// The rows a server lists for alice: the player Navidrome registered for
+    /// nokkvi's token requests (a 96 kbps cap and an MP3 transcoding), another
+    /// client's, another install's keyed player, and an older token player.
+    const ALICE_PLAYERS: &str = r#"[
+        {"id":"web","name":"NavidromeUI [Firefox/Linux]","client":"NavidromeUI",
+         "userAgent":"Firefox/Linux","userName":"alice","lastSeen":"2026-11-10T09:00:00Z",
+         "transcodingId":"t-aac","maxBitRate":64,"hasApiKey":false},
+        {"id":"keyed","name":"nokkvi (other-host)","client":"nokkvi","userAgent":"nokkvi",
+         "userName":"alice","lastSeen":"2026-11-10T09:00:00Z","transcodingId":"t-flac",
+         "maxBitRate":32,"hasApiKey":true},
+        {"id":"old","name":"nokkvi [nokkvi/Linux]","client":"nokkvi","userAgent":"nokkvi/Linux",
+         "userName":"alice","lastSeen":"2026-10-01T09:00:00Z","maxBitRate":48,
+         "hasApiKey":false},
+        {"id":"auto","name":"nokkvi [nokkvi]","client":"nokkvi","userAgent":"nokkvi",
+         "userName":"alice","lastSeen":"2026-11-10T08:00:00Z","transcodingId":"t-mp3",
+         "maxBitRate":96,"hasApiKey":false}
+    ]"#;
+
+    /// A server answering the player list with [`ALICE_PLAYERS`] and the
+    /// keyed player `p-key` with a 128 kbps cap.
+    async fn players_server() -> ScriptedServer {
+        ScriptedServer::start(|r: &Recorded| {
+            if r.is("GET", "/api/player") {
+                return (200, ALICE_PLAYERS.to_owned());
+            }
+            if r.is("GET", "/api/player/p-key") {
+                return (
+                    200,
+                    r#"{"id":"p-key","name":"nokkvi (desk)","client":"nokkvi","userName":"alice",
+                        "maxBitRate":128,"hasApiKey":true}"#
+                        .to_owned(),
+                );
+            }
+            (404, r#""not found""#.to_owned())
+        })
+        .await
+    }
+
+    /// A token session plays as the player Navidrome registered for nokkvi's
+    /// requests: client nokkvi, no key, named `nokkvi [<user agent>]`, the
+    /// most recently seen; nothing is written.
+    #[tokio::test]
+    async fn a_token_session_reads_the_player_navidrome_registered_for_it() {
+        let server = players_server().await;
+        let gateway = gateway_on(&server, TOKEN_PAIR).await;
+        let (storage, _dir) = storage();
+
+        let row = gateway
+            .own_player(&storage)
+            .await
+            .expect("read")
+            .expect("a row");
+
+        assert_eq!(row.id, "auto");
+        assert_eq!(row.transcoding_id, "t-mp3");
+        assert_eq!(row.max_bit_rate, 96);
+        assert!(
+            server.requests().iter().all(|r| r.method == "GET"),
+            "read only: {:?}",
+            server.requests()
+        );
+    }
+
+    /// A keyed session plays as the player its key is on, the one recorded
+    /// for this server and user; nothing is written.
+    #[tokio::test]
+    async fn a_keyed_session_reads_the_player_its_key_is_on() {
+        let server = players_server().await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let (storage, _dir) = storage();
+        record(&storage, &server, "p-key");
+
+        let row = gateway
+            .own_player(&storage)
+            .await
+            .expect("read")
+            .expect("a row");
+
+        assert_eq!(row.id, "p-key");
+        assert_eq!(row.max_bit_rate, 128);
+        assert!(server.requests().iter().all(|r| r.method == "GET"));
+    }
+
+    /// A keyed session with no record, or whose recorded player is gone,
+    /// has no row to read.
+    #[tokio::test]
+    async fn a_keyed_session_without_its_player_has_no_row() {
+        let server = players_server().await;
+        let gateway = gateway_on(&server, KEYED).await;
+        let (storage, _dir) = storage();
+        assert!(gateway.own_player(&storage).await.expect("read").is_none());
+
+        record(&storage, &server, "p-gone");
+        assert!(gateway.own_player(&storage).await.expect("read").is_none());
     }
 }

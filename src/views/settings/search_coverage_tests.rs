@@ -59,6 +59,7 @@ fn all_variants() -> Vec<SettingsViewData> {
         fade_on_skip: "Boundary Fade".into(),
         rating_reminder_enabled: true,
         rating_reminder_trigger: "Percentage Played".into(),
+        server_player_override: nokkvi_data::types::player_override::PlayerOverride::of(None, 96),
         ..Default::default()
     };
     vec![

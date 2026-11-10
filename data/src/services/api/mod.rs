@@ -27,3 +27,4 @@ pub mod subsonic;
 pub mod tags;
 #[cfg(test)]
 pub(crate) mod test_server;
+pub mod transcodings;

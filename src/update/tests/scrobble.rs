@@ -35,6 +35,7 @@ fn threshold_crossing_update(song_id: &str, pos: u32, dur: u32) -> PlaybackState
         next_track_epoch: 0,
         seek_failure: None,
         stream_lost: false,
+        stream_status: crate::state::StreamStatus::default(),
         station_id: None,
     }
 }

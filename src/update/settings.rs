@@ -170,6 +170,7 @@ impl Nokkvi {
             love_change_notification_enabled: self.settings.love_change_notification_enabled,
             rating_reminder_trigger: self.settings.rating_reminder_trigger.as_label().into(),
             rating_reminder_percent: i64::from(self.settings.rating_reminder_percent),
+            server_player_override: self.server_player_override.clone(),
         };
 
         crate::views::SettingsViewData {
@@ -186,6 +187,36 @@ impl Nokkvi {
             dynamic_accent: self.settings.dynamic_accent,
             dynamic_visualizer: self.settings.dynamic_visualizer,
         }
+    }
+
+    /// Read what nokkvi's own player row on the server forces
+    /// ([`Message::PlayerOverrideFetched`]). Asked at login and whenever the
+    /// Settings view opens, never polled; a failed read is silent (the row
+    /// stays hidden).
+    pub(crate) fn fetch_player_override_task(&self) -> Task<Message> {
+        self.shell_task(
+            |shell| async move { shell.server_player_override().await },
+            |result: anyhow::Result<_>| {
+                Message::PlayerOverrideFetched(result.unwrap_or_else(|e| {
+                    tracing::debug!(" [SETTINGS] Couldn't read nokkvi's player row: {e:#}");
+                    None
+                }))
+            },
+        )
+    }
+
+    /// Keep what the server's player row forces, for the read-only row in
+    /// Settings → Playback → Streaming Quality.
+    pub(crate) fn handle_player_override_fetched(
+        &mut self,
+        player_override: Option<nokkvi_data::types::player_override::PlayerOverride>,
+    ) -> Task<Message> {
+        if self.server_player_override != player_override {
+            self.server_player_override = player_override;
+            self.settings_page.config_dirty = true;
+            self.refresh_settings_entries_if_dirty();
+        }
+        Task::none()
     }
 
     /// Central dispatcher for every Settings-view message: routes nav /

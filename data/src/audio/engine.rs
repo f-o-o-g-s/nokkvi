@@ -184,6 +184,22 @@ impl SeekFailure {
 /// under the engine lock.
 pub const REOPEN_ANSWER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How a seek on the track the queue names would move, for the outside
+/// (`nokkvi status`): within the stream's bytes, by opening the stream again
+/// at an offset, or not at all ([`CustomAudioEngine::seek_kind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SeekKind {
+    /// Within its bytes (HTTP ranges, or a local file).
+    Range,
+    /// By opening the track again at `timeOffset` (a transcode nokkvi asked
+    /// for, on a server that honours the offset).
+    Reopen,
+    /// Not at all (a live transcode it can't reopen, a station, nothing
+    /// loaded).
+    #[default]
+    None,
+}
+
 /// How the playing decoder reaches a seek target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecoderSeek {
@@ -2299,6 +2315,20 @@ impl CustomAudioEngine {
                 Self::reads_in_ranges(stream)
                     || source.is_some_and(|source| self.reopens_by_offset(stream.delivery, source))
             }
+        }
+    }
+
+    /// How a seek on the track the queue names moves ([`SeekKind`]): the
+    /// way [`Self::seekable`] and [`Self::seek_reopens`] judge it. While a
+    /// skip's decoder builds the target is not known yet and reads `Range`,
+    /// as it reads seekable; with nothing loaded, `None`.
+    pub fn seek_kind(&self) -> SeekKind {
+        if self.queue_track_source().is_some_and(str::is_empty) || !self.seekable() {
+            SeekKind::None
+        } else if self.seek_reopens() {
+            SeekKind::Reopen
+        } else {
+            SeekKind::Range
         }
     }
 

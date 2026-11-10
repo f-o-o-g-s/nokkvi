@@ -924,6 +924,35 @@ mod tests {
         }
     }
 
+    /// What nokkvi's player row on the server forces closes the Streaming
+    /// Quality section, read-only, only while it forces something: a forced
+    /// transcoding, or a max bit rate alone.
+    #[test]
+    fn playback_items_structure_streaming_quality_ends_with_the_servers_override() {
+        use nokkvi_data::types::player_override::{ForcedTranscoding, PlayerOverride};
+
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        let forced = Some(ForcedTranscoding {
+            format: "mp3".to_owned(),
+            default_bitrate_kbps: Some(192),
+        });
+        for found in [PlayerOverride::of(forced, 0), PlayerOverride::of(None, 96)] {
+            let data = PlaybackSettingsData {
+                server_player_override: found,
+                ..Default::default()
+            };
+            assert_section_keys(
+                &build_playback_items(&data),
+                "Streaming Quality",
+                &[
+                    "general.stream_format",
+                    "general.stream_max_bitrate",
+                    "general.server_player_override",
+                ],
+            );
+        }
+    }
+
     /// Find the first `SettingItem` matching `key` and assert it carries the
     /// "Enter ↵" dialog/picker flag (`needs_enter_hint == true`). Used by the
     /// regression tests below for tier-0 defect #0.3.

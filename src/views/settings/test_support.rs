@@ -59,3 +59,11 @@ pub(crate) fn assert_section_keys(
         "section '{header_label}': item keys diverge from the expected ordered set",
     );
 }
+
+/// The Playback tab's entries for `data` (its builder is private to the
+/// settings module).
+pub(crate) fn playback_entries(
+    data: &nokkvi_data::types::settings_data::PlaybackSettingsData,
+) -> Vec<SettingsEntry> {
+    super::items_playback::build_playback_items(data)
+}

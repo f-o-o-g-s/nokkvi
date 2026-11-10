@@ -84,6 +84,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
         next_track_epoch: 0,
         seek_failure: None,
         stream_lost: false,
+        stream_status: crate::state::StreamStatus::default(),
         station_id: None,
     }
 }
@@ -2779,4 +2780,44 @@ fn a_lost_stream_says_so_once() {
     let toast = app.toast.toasts.back().expect("the toast");
     assert_eq!(toast.level, ToastLevel::Warning);
     assert_eq!(toast.message, "The server stopped sending this song.");
+}
+
+// ============================================================================
+// A refused seek says why: the server chose the format, or can't seek it
+// ============================================================================
+
+/// The refusal toast of a seek on a live transcode, by whether nokkvi asked
+/// for that transcode.
+fn refusal_toast(requested_transcode: bool) -> nokkvi_data::types::toast::Toast {
+    let mut app = test_app();
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        stream_status: crate::state::StreamStatus {
+            requested_transcode,
+            ..crate::state::StreamStatus::default()
+        },
+        ..live_transcode_tick()
+    });
+    let _ = app.handle_seek(30.0);
+    app.toast.toasts.back().cloned().expect("the refusal toast")
+}
+
+/// A transcode the server forced on its own (a transcoding set on nokkvi's
+/// player in Navidrome) can't be reopened by nokkvi: the toast names the
+/// server's choice.
+#[test]
+fn a_refused_seek_on_a_transcode_the_server_chose_says_so() {
+    assert_eq!(
+        refusal_toast(false).message,
+        "Can't seek: your server is choosing this song's format"
+    );
+}
+
+/// A smaller copy nokkvi asked for, on a server without `transcodeOffset`:
+/// the toast says this server can't seek in it.
+#[test]
+fn a_refused_seek_on_a_smaller_copy_says_this_server_cant() {
+    assert_eq!(
+        refusal_toast(true).message,
+        "Can't seek in a smaller copy on this server"
+    );
 }

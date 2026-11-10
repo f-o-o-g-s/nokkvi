@@ -12,10 +12,15 @@ All notable changes to this project will be documented in this file.
 - A Streaming Quality change applies from the next song, leaving the song playing as it is.
 - The Waveform seek bar shows a plain line for songs streamed as a smaller copy, unless it already holds their waveform.
 - You can now seek in a song streamed as a smaller copy, when your server supports it.
+- A seek in a smaller copy that the server can't answer now says why, and the song keeps playing where it was.
 - When the connection drops partway through a smaller copy, nokkvi now picks the song up again where it stopped.
 - If the server keeps dropping a smaller copy, nokkvi now says the server stopped sending the song instead of skipping on silently.
+- Streaming Quality now shows when your server's player settings force a format or a bitrate limit for nokkvi.
+- `nokkvi status` now reports the playing stream's codec, bitrate, sample rate and delivery, whether it is the original file, and how it seeks.
 
 ### Changed
+
+- A seek refused in a song your server transcodes on its own now says the server is choosing its format.
 
 ### Fixed
 

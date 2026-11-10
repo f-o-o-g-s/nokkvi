@@ -1781,6 +1781,7 @@ impl Nokkvi {
             session_user_id: _,
             screen: _,
             server_version: _,
+            server_player_override: _,
             open_subsonic_extensions: _,
             // Password, error and in-progress flag; URL and username stay.
             login_page: _,
@@ -1987,6 +1988,7 @@ impl Nokkvi {
         self.screen = crate::Screen::Login;
         self.login_page.reset_for_session();
         self.server_version = None;
+        self.server_player_override = None;
         self.open_subsonic_extensions = None;
         self.rules_editor.reset_for_session();
 

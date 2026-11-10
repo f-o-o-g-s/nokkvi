@@ -404,6 +404,16 @@ keyword_table! {
             "compress",
             "downsample",
         ],
+        "general.server_player_override" => &[
+            "player",
+            "players",
+            "server transcoding",
+            "forced format",
+            "bitrate limit",
+            "max bitrate",
+            "navidrome",
+            "transcode",
+        ],
         "general.stream_max_bitrate" => &[
             "kbps",
             "bit rate",

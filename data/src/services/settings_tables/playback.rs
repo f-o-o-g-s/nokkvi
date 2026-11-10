@@ -1070,6 +1070,7 @@ mod tests {
             love_change_notification_enabled: false,
             rating_reminder_trigger: "On Scrobble".into(),
             rating_reminder_percent: 75,
+            server_player_override: None,
         }
     }
 
@@ -2081,6 +2082,7 @@ mod tests {
             love_change_notification_enabled: live.love_change_notification_enabled,
             rating_reminder_trigger: live.rating_reminder_trigger.as_label().into(),
             rating_reminder_percent: i64::from(live.rating_reminder_percent),
+            server_player_override: None,
         };
 
         for e in build_playback_tab_settings_items(&data) {

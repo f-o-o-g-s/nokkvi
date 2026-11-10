@@ -56,6 +56,44 @@ impl StreamOrigin {
     }
 }
 
+/// What the tick tells of the stream that plays (the queue's track, or a
+/// station), for `nokkvi status` and the seek refusal's wording. Read off
+/// the engine with the rest of the tick; the queue's track only once the
+/// engine describes it (otherwise the last one's stays).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamStatus {
+    /// The codec the decoder decodes (`flac`, `opus`, ...), `None` with
+    /// nothing open.
+    pub codec: Option<String>,
+    /// The decoder's live compressed bitrate (kbps), 0 until it decoded a
+    /// packet; a seek that reopens the stream starts it over.
+    pub live_bitrate: u32,
+    /// How the bytes arrive, `None` with nothing open.
+    pub delivery: Option<StreamDelivery>,
+    /// Whether the stream is the song's own file ([`StreamOrigin`]); a
+    /// `Pending` tick keeps the last verdict.
+    pub origin: StreamOrigin,
+    /// How a seek on it moves.
+    pub seek_kind: nokkvi_data::audio::engine::SeekKind,
+    /// Whether nokkvi asked the server for this transcode (its URL carries
+    /// `format`): a live transcode nokkvi did not ask for is one the server
+    /// chose on its own.
+    pub requested_transcode: bool,
+}
+
+impl Default for StreamStatus {
+    fn default() -> Self {
+        Self {
+            codec: None,
+            live_bitrate: 0,
+            delivery: None,
+            origin: StreamOrigin::Unknown,
+            seek_kind: nokkvi_data::audio::engine::SeekKind::None,
+            requested_transcode: false,
+        }
+    }
+}
+
 /// Honest bit-perfect status for the now-playing indicator. Derived from the
 /// bit-perfect mode, the track's rate, and the REAL device clock rate (read
 /// from `/proc/asound`, not nokkvi's requested rate — which lies when PipeWire
@@ -223,6 +261,8 @@ pub struct PlaybackState {
     /// Whether the playing song is the server's live transcode, from the
     /// last tick. Such a stream is never shown as bit-perfect.
     pub live_transcode: bool,
+    /// The stream that plays, from the last tick ([`StreamStatus`]).
+    pub stream: StreamStatus,
     /// Throttle timestamp for volume persistence to storage
     pub volume_persist_throttle: Option<std::time::Instant>,
     /// Set while volume saves keep failing, so only the first failure of a
@@ -267,6 +307,8 @@ impl PlaybackState {
         self.playing = false;
         self.paused = false;
         self.position = 0;
+        // Nothing plays any more, so no stream is described.
+        self.stream = StreamStatus::default();
     }
 }
 
@@ -292,6 +334,7 @@ impl Default for PlaybackState {
             bitrate: 0,
             seekable: true,
             live_transcode: false,
+            stream: StreamStatus::default(),
             volume_persist_throttle: None,
             volume_save_failing: false,
             play_attempt: super::StaleDropGen::default(),

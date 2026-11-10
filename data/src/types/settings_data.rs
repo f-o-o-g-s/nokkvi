@@ -313,6 +313,10 @@ pub struct PlaybackSettingsData {
     pub rating_reminder_trigger: Cow<'static, str>,
     /// Percent of the track played that fires the reminder (percentage mode).
     pub rating_reminder_percent: i64,
+    /// What nokkvi's own player row on the server forces on its streams
+    /// (`AppService::server_player_override`), shown read-only under
+    /// Streaming Quality; `None` hides the row.
+    pub server_player_override: Option<crate::types::player_override::PlayerOverride>,
 }
 
 impl Default for PlaybackSettingsData {
@@ -365,6 +369,7 @@ impl Default for PlaybackSettingsData {
             love_change_notification_enabled: false,
             rating_reminder_trigger: Cow::Borrowed("test-default"),
             rating_reminder_percent: 0,
+            server_player_override: None,
         }
     }
 }

@@ -25,6 +25,7 @@ pub mod lyrics;
 pub mod next_track_reset;
 pub mod one_shot_shuffle;
 pub mod paged_buffer;
+pub mod player_override;
 pub mod player_settings;
 pub mod player_settings_schema;
 pub mod playlist;
