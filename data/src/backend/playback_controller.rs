@@ -289,7 +289,7 @@ impl PlaybackController {
                     .get_song(&song_id)
                     .cloned();
                 if let Some(song) = song {
-                    let stream_url = session.stream_url(&song.id);
+                    let stream_url = session.stream_url(&song);
                     let staged =
                         StagedSong::new(&song.id, &stream_url, Some(&song), StageStart::Play);
                     return self.stage_and_name(audio, staged, None).await;
@@ -333,7 +333,7 @@ impl PlaybackController {
             drop(queue_manager);
 
             if let Some(song) = song {
-                let stream_url = session.stream_url(&song.id);
+                let stream_url = session.stream_url(&song);
 
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await;
@@ -755,7 +755,7 @@ impl PlaybackController {
                 let next_song = peeked.song().clone();
                 let reason = peeked.reason();
                 drop(peeked); // explicit: clears queued; gapless prep proceeds with the captured data
-                let url = session.stream_url(&next_song.id);
+                let url = session.stream_url(&next_song);
                 // The per-transition verdicts ride down to
                 // `store_prepared_decoder` (the engine boundary carries no
                 // Song metadata). An unresolvable current song can't prove a
@@ -922,7 +922,7 @@ impl PlaybackController {
 
         // 2. Build stream URL for the target song
         let song = &songs[play_index];
-        let stream_url = session.stream_url(&song.id);
+        let stream_url = session.stream_url(song);
 
         // 3-4. Load, play (or blend, per "Fade on Skip"), discharge the
         //      set_queue reset, and update the navigator so consume mode
@@ -1084,12 +1084,11 @@ impl PlaybackController {
         self.queue_service.refresh_from_queue().await;
 
         // 3. Build stream URL and play
-        let stream_url = session.stream_url(&song_id);
-
         let song = {
             let qm = queue_manager.lock().await;
             qm.get_song(&song_id).cloned()
         };
+        let stream_url = session.stream_url_for(&song_id, song.as_ref());
 
         self.load_play_and_set_current(&stream_url, song, reposition_effect, song_id)
             .await?;
@@ -1247,7 +1246,7 @@ impl PlaybackController {
                 let stream_url = self
                     .require_stream_session()
                     .await?
-                    .stream_url(&new_song_id);
+                    .stream_url_for(&new_song_id, song.as_ref());
 
                 // Always swap the engine source to the new current so the
                 // engine never keeps streaming (or stays cued on) the deleted
@@ -1333,7 +1332,10 @@ impl PlaybackController {
             .get_song(song_id)
             .cloned();
 
-        let stream_url = self.require_stream_session().await?.stream_url(song_id);
+        let stream_url = self
+            .require_stream_session()
+            .await?
+            .stream_url_for(song_id, song.as_ref());
 
         // The offset is consumed inside play()'s fresh-start branch — at once
         // when the engine was playing, otherwise at the user's next Play.
@@ -2375,7 +2377,11 @@ mod tests {
             )
             .await?;
         }
-        let queue = QueueService::new(auth, storage_q)?;
+        let queue = QueueService::new(
+            auth,
+            storage_q,
+            crate::types::stream_quality::StreamQuality::default(),
+        )?;
         let settings = SettingsService::new(storage_s)?;
         let tm = Arc::new(TaskManager::new());
         let (playback, _loop_rx, _qc_rx) =

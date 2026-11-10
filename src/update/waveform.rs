@@ -140,7 +140,15 @@ impl Nokkvi {
                     }
                     Ok(ScanEnd::Cancelled) => {}
                     Ok(ScanEnd::NotInQueue) => state.song_gone(song_id),
-                    Ok(ScanEnd::Truncated { .. } | ScanEnd::TooSlow { .. }) => {
+                    // A transcoded song (Streaming Quality) is not scanned:
+                    // settled for this play like a scan that came out
+                    // unusable, so the bar draws its line and nothing is
+                    // planned again until the next play.
+                    Ok(
+                        ScanEnd::Truncated { .. }
+                        | ScanEnd::TooSlow { .. }
+                        | ScanEnd::SkippedTranscode,
+                    ) => {
                         state.gave_up.insert(song_id);
                     }
                     Err(e) => {

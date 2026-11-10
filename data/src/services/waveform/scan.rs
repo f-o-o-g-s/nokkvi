@@ -52,6 +52,10 @@ pub enum ScanEnd {
     TooSlow { speed: f64 },
     /// The song left the queue before its scan could start.
     NotInQueue,
+    /// Not scanned: under the Streaming Quality setting the song streams as
+    /// a transcode, and a scan would download it a second time on the link
+    /// the setting is there to spare (`super::scan_url`).
+    SkippedTranscode,
 }
 
 /// One read from a PCM source.

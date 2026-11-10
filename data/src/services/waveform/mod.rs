@@ -5,7 +5,9 @@
 //! `~/.cache/nokkvi/waveforms/` ([`cache`]). The scan ([`scan`]) requests the
 //! exact stream URL playback uses: with no transcoding on nokkvi's player the
 //! server sends the original file, and with one it serves the same transcode
-//! playback gets, so the envelope matches what is heard. With Navidrome's
+//! playback gets, so the envelope matches what is heard. A song nokkvi's own
+//! Streaming Quality setting streams as a transcode is not scanned
+//! ([`scan_url`]). With Navidrome's
 //! transcode cache on (its default), the scan also reads the same cache
 //! entry, in progress or finished, so it starts no second ffmpeg run. A scan that runs too slowly stops
 //! scanning for the rest of the session, so a slow link never trades
@@ -29,12 +31,28 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use self::cache::WaveformCache;
-use crate::types::waveform::Waveform;
+use crate::{
+    services::playback::StreamSession,
+    types::{song::Song, waveform::Waveform},
+};
 
 /// The cache is pruned back to [`CACHE_TARGET_BYTES`] (least recently used
 /// first) once it grows past this. ~2 KB a song: tens of thousands of songs.
 const CACHE_MAX_BYTES: u64 = 64 << 20;
 const CACHE_TARGET_BYTES: u64 = 48 << 20;
+
+/// The URL a waveform scan of `song` reads: the exact stream URL playback
+/// uses, so the envelope matches what is heard. `None` when the song streams
+/// as a transcode under `session`'s Streaming Quality: the scan would fetch
+/// the whole song a second time over the slow or metered link the setting is
+/// for, so it is skipped and the seek bar draws as for a song with no
+/// envelope.
+pub fn scan_url(session: &StreamSession, song: &Song) -> Option<String> {
+    session
+        .transcode_for(song)
+        .is_none()
+        .then(|| session.stream_url(song))
+}
 
 /// What a cache lookup for a queue song found.
 #[derive(Debug, Clone)]
@@ -176,7 +194,8 @@ impl WaveformService {
                     "waveform scan ended short of the song; not cached"
                 );
             }
-            ScanEnd::Cancelled | ScanEnd::NotInQueue => {}
+            // `scan_stream` ends none of these.
+            ScanEnd::Cancelled | ScanEnd::NotInQueue | ScanEnd::SkippedTranscode => {}
         }
         Ok(end)
     }
@@ -307,6 +326,54 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(end, ScanEnd::Ready(_)), "{end:?}");
+    }
+
+    fn session_streaming(format: crate::types::player_settings::StreamFormat) -> StreamSession {
+        StreamSession::new("http://server".into(), "u=a&t=b&s=c".into())
+            .expect("a session")
+            .with_quality(crate::types::stream_quality::StreamQuality {
+                format,
+                max_bitrate: crate::types::player_settings::StreamMaxBitrate::Kbps128,
+            })
+    }
+
+    fn flac_song() -> Song {
+        Song {
+            suffix: Some("flac".into()),
+            bitrate: Some(900),
+            ..Song::test_default("f1", "Flac")
+        }
+    }
+
+    /// Under Opus or MP3 a song that streams as a transcode is not scanned:
+    /// the scan would fetch the whole song a second time over the link the
+    /// setting is there to spare.
+    #[test]
+    fn a_song_that_streams_as_a_transcode_is_not_scanned() {
+        use crate::types::player_settings::StreamFormat;
+        for format in [StreamFormat::Opus, StreamFormat::Mp3] {
+            assert_eq!(scan_url(&session_streaming(format), &flac_song()), None);
+        }
+    }
+
+    /// A song that streams as its file still scans, from playback's own URL:
+    /// under Original, and under Opus for a song already under the cap.
+    #[test]
+    fn a_song_that_streams_as_its_file_scans_from_playbacks_url() {
+        use crate::types::player_settings::StreamFormat;
+        let original = session_streaming(StreamFormat::Original);
+        let url = scan_url(&original, &flac_song()).expect("an original scans");
+        assert_eq!(StreamSession::song_id_of(&url), Some("f1"));
+        assert!(!url.contains("format="), "{url}");
+
+        let small_mp3 = Song {
+            suffix: Some("mp3".into()),
+            bitrate: Some(128),
+            ..Song::test_default("m1", "Mp3")
+        };
+        let url = scan_url(&session_streaming(StreamFormat::Opus), &small_mp3)
+            .expect("a song under the cap streams, and scans, as its file");
+        assert!(!url.contains("format="), "{url}");
     }
 
     #[tokio::test]

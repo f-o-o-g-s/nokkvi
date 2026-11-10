@@ -152,7 +152,11 @@ mod tests {
         let storage_q = StateStorage::new(temp.path().join("queue.redb"))?;
         let storage_s = StateStorage::new(temp.path().join("settings.redb"))?;
         let auth = AuthGateway::new()?;
-        let queue = QueueService::new(auth, storage_q)?;
+        let queue = QueueService::new(
+            auth,
+            storage_q,
+            crate::types::stream_quality::StreamQuality::default(),
+        )?;
         let settings = SettingsService::new(storage_s)?;
         let tm = Arc::new(TaskManager::new());
         let (playback, _loop_rx, _qc_rx) =

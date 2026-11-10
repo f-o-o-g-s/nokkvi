@@ -187,6 +187,42 @@ fn a_failed_or_short_scan_gives_up_for_this_play_only() {
     assert!(app.waveform.gave_up.is_empty());
 }
 
+/// A song the Streaming Quality setting streams as a transcode is not
+/// scanned: it is settled for this play (the bar draws as for any song with no
+/// envelope) instead of being planned again on every tick, the session keeps
+/// scanning other songs, and the next play asks again.
+#[test]
+fn a_song_streamed_as_a_transcode_is_settled_for_this_play_without_a_scan() {
+    let mut app = playing("a");
+    app.waveform.follow(Some("a"));
+    app.waveform.not_cached.insert("a".into());
+    send(
+        &mut app,
+        WaveformMessage::Scanned {
+            job: 0,
+            song_id: "a".into(),
+            end: Ok(ScanEnd::SkippedTranscode),
+            scanning: true,
+        },
+    );
+    assert!(app.waveform.gave_up.contains("a"));
+    assert!(app.waveform.shown.is_none());
+    assert!(!app.waveform.scans_off, "other songs still scan");
+    let now = std::time::Instant::now();
+    for position in [3, 60, 600] {
+        assert!(
+            !matches!(
+                app.waveform.plan(position, now),
+                Some(crate::state::WaveformJob::Scan(ref id) | crate::state::WaveformJob::Lookup(ref id))
+                    if id == "a"
+            ),
+            "the skipped song is planned again at {position}s"
+        );
+    }
+    app.waveform.follow(Some("b"));
+    assert!(app.waveform.gave_up.is_empty(), "the next play asks again");
+}
+
 #[test]
 fn a_next_song_answer_for_a_song_no_longer_playing_is_ignored() {
     let mut app = playing("b");

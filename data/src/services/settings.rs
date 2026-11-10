@@ -661,6 +661,14 @@ impl SettingsManager {
         self.save()
     }
 
+    /// The Streaming Quality setting the queue's stream URLs start from.
+    pub fn stream_quality(&self) -> crate::types::stream_quality::StreamQuality {
+        crate::types::stream_quality::StreamQuality {
+            format: self.settings.player.stream_format,
+            max_bitrate: self.settings.player.stream_max_bitrate,
+        }
+    }
+
     pub fn set_queue_show_default_playlist(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.queue_show_default_playlist = enabled;
         self.save()

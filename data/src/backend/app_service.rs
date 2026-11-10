@@ -183,8 +183,16 @@ impl AppService {
         Self::migrate_radio_creds_to_config(&storage);
 
         let auth_gateway = AuthGateway::new()?;
-        let queue_service = QueueService::new(auth_gateway.clone(), storage.clone())?;
         let settings_service = SettingsService::new(storage.clone())?;
+        // The queue builds every stream URL, so it starts from the persisted
+        // Streaming Quality; later changes arrive through the settings push.
+        let stream_quality = settings_service
+            .settings_manager()
+            .lock()
+            .await
+            .stream_quality();
+        let queue_service =
+            QueueService::new(auth_gateway.clone(), storage.clone(), stream_quality)?;
 
         // Initialize the queue service with persisted data
         queue_service.initialize().await;
@@ -1266,13 +1274,17 @@ impl AppService {
             .stream_session()
             .await
             .context("no server to stream from")?;
+        let Some(stream_url) = crate::services::waveform::scan_url(&session, &song) else {
+            debug!(song = %song.id, "waveform scan skipped: the song streams as a transcode");
+            return Ok(crate::services::waveform::ScanEnd::SkippedTranscode);
+        };
         let (server_url, _) = self.auth_gateway.server_config().await;
         self.waveforms
             .scan(
                 &server_url,
                 &crate::services::waveform::WaveformIdentity::of(&song),
                 song.expected_duration_ms(),
-                &session.stream_url(&song.id),
+                &stream_url,
                 cancel,
             )
             .await

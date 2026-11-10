@@ -2544,10 +2544,20 @@ impl Nokkvi {
             let fallback_to_agc = settings.replay_gain_fallback_to_agc;
             let prevent_clipping = settings.replay_gain_prevent_clipping;
             let eq_state = self.playback.eq_state.clone();
+            let stream_quality = nokkvi_data::types::stream_quality::StreamQuality::of(&settings);
             Task::perform(
                 async move {
                     let engine = shell.audio_engine();
                     let mut engine_guard = engine.lock().await;
+                    // Streaming Quality: every load re-pushes it, and only a
+                    // real change resets the prepared next track (so the next
+                    // song opens with the new params). The playing song keeps
+                    // its stream.
+                    shell
+                        .queue()
+                        .set_stream_quality(stream_quality)
+                        .apply_locked(&mut engine_guard)
+                        .await;
                     engine_guard.set_crossfade_enabled(enabled).await;
                     engine_guard.set_bit_perfect(bit_perfect).await;
                     engine_guard.set_crossfade_duration(duration_secs);

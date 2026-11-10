@@ -45,6 +45,7 @@ pub mod song;
 pub mod song_pool;
 pub mod song_source;
 pub mod sort_mode;
+pub mod stream_quality;
 pub mod theme_file;
 pub mod toast;
 pub mod toml_settings;

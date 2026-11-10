@@ -50,6 +50,11 @@ fn refuses_ranges(headers: &reqwest::header::HeaderMap) -> bool {
 /// the header itself: reqwest's `content_length()` is the body's size, which
 /// a HEAD answer never has.
 fn header_content_length(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    declared_content_length(headers).filter(|&len| len > 0)
+}
+
+/// The `Content-Length` header as declared, 0 included.
+fn declared_content_length(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     headers
         .get(reqwest::header::CONTENT_LENGTH)?
         .to_str()
@@ -57,7 +62,39 @@ fn header_content_length(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .trim()
         .parse()
         .ok()
-        .filter(|&len| len > 0)
+}
+
+/// Whether an answer says it serves byte ranges (`Accept-Ranges: bytes`).
+fn serves_ranges(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(reqwest::header::ACCEPT_RANGES)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("bytes"))
+}
+
+/// A `Content-Range` header (`bytes 0-262143/3216574`, `bytes */0`): the
+/// first byte sent, when it names one, and the whole length, when known.
+fn content_range(headers: &reqwest::header::HeaderMap) -> Option<(Option<u64>, Option<u64>)> {
+    let value = headers.get(reqwest::header::CONTENT_RANGE)?.to_str().ok()?;
+    let (range, total) = value.trim().strip_prefix("bytes")?.trim().split_once('/')?;
+    let start = range
+        .split_once('-')
+        .and_then(|(start, _)| start.trim().parse().ok());
+    Some((start, total.trim().parse().ok()))
+}
+
+/// Whether an answer's body is a JSON or XML document (a Subsonic error
+/// envelope), which no audio stream, ICY radio included, is served as.
+fn is_document_answer(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| {
+            let lowered = ct.to_ascii_lowercase();
+            lowered.starts_with("application/json")
+                || lowered.starts_with("text/xml")
+                || lowered.starts_with("application/xml")
+        })
 }
 
 /// The stream's length in ms from an `X-Content-Duration` header (seconds,
@@ -71,6 +108,133 @@ fn x_content_duration_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .parse()
         .ok()?;
     (secs.is_finite() && secs > 0.0).then(|| (secs * 1000.0).round() as u64)
+}
+
+/// Whether `url` asks the server for a transcode: a `/rest/stream` request
+/// carrying a `format` param (only the Streaming Quality setting puts one
+/// there, `utils::artwork_url::build_stream_url`).
+fn requests_transcode(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| {
+        url.path().ends_with("/rest/stream") && url.query_pairs().any(|(key, _)| key == "format")
+    })
+}
+
+/// What the one GET of a requested transcode answered, judged from its
+/// status and headers alone (see `AudioDecoder::open_requested_transcode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscodeAnswer {
+    /// Not a 2xx (a 3xx redirect the client wouldn't follow, a 429, a 4xx or
+    /// 5xx), or a 206 that names no length: an error.
+    Refused(reqwest::StatusCode),
+    /// A 2xx whose body is JSON or XML: a Subsonic error envelope, not audio.
+    ErrorEnvelope,
+    /// Nothing to play: a 2xx with `Content-Length: 0`, or a 416 (a range
+    /// asked of an empty entry).
+    Empty,
+    /// The answer serves byte ranges, `total` bytes long: read it with Range
+    /// requests like a file.
+    Sized { total: u64 },
+    /// No usable length (a live transcode): read once, front to back.
+    Stream,
+}
+
+/// Judge a requested transcode's answer. The length decides only together
+/// with ranges: a 206 names the whole length in its `Content-Range` (its own
+/// `Content-Length` is the slice), a 200 counts as sized only beside
+/// `Accept-Ranges: bytes` (Go sizes a tiny live answer, such as the
+/// headers-only Ogg past the end of a song, next to `Accept-Ranges: none`).
+fn classify_transcode_answer(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> TranscodeAnswer {
+    if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        return TranscodeAnswer::Empty;
+    }
+    if !status.is_success() {
+        return TranscodeAnswer::Refused(status);
+    }
+    if is_document_answer(headers) {
+        return TranscodeAnswer::ErrorEnvelope;
+    }
+    if declared_content_length(headers) == Some(0) {
+        return TranscodeAnswer::Empty;
+    }
+    if status == reqwest::StatusCode::PARTIAL_CONTENT {
+        return match content_range(headers).and_then(|(_, total)| total) {
+            Some(total) if total > 0 => TranscodeAnswer::Sized { total },
+            Some(_) => TranscodeAnswer::Empty,
+            None => TranscodeAnswer::Refused(status),
+        };
+    }
+    match header_content_length(headers) {
+        Some(total) if serves_ranges(headers) => TranscodeAnswer::Sized { total },
+        Some(_) | None => TranscodeAnswer::Stream,
+    }
+}
+
+/// The error an empty answer to a requested transcode reports: ffmpeg on the
+/// server wrote nothing (Navidrome still answers 200).
+const EMPTY_TRANSCODE: &str = "the server couldn't transcode this song: it sent no audio";
+
+/// The error for a requested transcode the server answered with `status`
+/// (not a 2xx), with the server's own message when its body had one. Never
+/// names the URL (it carries the credential).
+fn refused_transcode_error(status: reqwest::StatusCode, message: Option<String>) -> anyhow::Error {
+    let what = if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        format!("the server is busy with other transcodes (HTTP {status}); try again shortly")
+    } else if status.is_redirection() {
+        format!("the server sent the stream elsewhere (HTTP {status}), which nokkvi won't follow")
+    } else {
+        format!("the server refused the stream (HTTP {status})")
+    };
+    match message {
+        Some(message) => anyhow::anyhow!("{what}: {message}"),
+        None => anyhow::anyhow!(what),
+    }
+}
+
+/// Up to `limit` bytes from the front of `response`'s body, fewer when the
+/// body ends first or a read fails (the caller only uses a whole prefix).
+async fn read_prefix(mut response: reqwest::Response, limit: u64) -> Vec<u8> {
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut bytes = Vec::new();
+    while bytes.len() < limit {
+        match response.chunk().await {
+            Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(e) => {
+                debug!(
+                    " [DECODER] Reading the answer's first bytes stopped: {}",
+                    e.without_url()
+                );
+                break;
+            }
+        }
+    }
+    bytes.truncate(limit);
+    bytes
+}
+
+/// The server's message from a Subsonic error envelope in `response`'s body
+/// (read up to 64 KB), when the body is one.
+async fn envelope_message(response: reqwest::Response) -> Option<String> {
+    if !is_document_answer(response.headers()) {
+        return None;
+    }
+    let body = read_prefix(response, 64 * 1024).await;
+    crate::services::api::subsonic::failed_envelope_error(&String::from_utf8_lossy(&body))
+        .map(|error| error.message)
+}
+
+/// What a stream open hands the probe: the source, a format hint, the
+/// receive timeout of a once-through stream's buffer (dropped to
+/// `READ_RECV_TIMEOUT` after the probe), and the server's length for the
+/// stream (`X-Content-Duration`).
+struct OpenedStream {
+    mss: MediaSourceStream<'static>,
+    hint: Option<String>,
+    recv_timeout: Option<RecvTimeout>,
+    header_duration_ms: Option<u64>,
 }
 
 /// Bounded backoff (ms) between transient-I/O-error retries inside
@@ -163,7 +327,13 @@ struct AsyncNetworkBuffer {
 }
 
 impl AsyncNetworkBuffer {
-    pub(crate) fn new_async(response: reqwest::Response, recv_timeout: RecvTimeout) -> Self {
+    /// Buffer `response`'s body. `first` holds bytes already read from it,
+    /// which `Read` serves before anything the task receives.
+    pub(crate) fn new_async(
+        response: reqwest::Response,
+        first: Bytes,
+        recv_timeout: RecvTimeout,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<Bytes>(64);
         let cancel = CancellationToken::new();
         let child_cancel = cancel.clone();
@@ -213,7 +383,7 @@ impl AsyncNetworkBuffer {
 
         Self {
             rx,
-            leftover: Bytes::new(),
+            leftover: first,
             cancel,
             task: Some(task),
             recv_timeout,
@@ -792,8 +962,18 @@ impl AudioDecoder {
 
         // Determine if URL is HTTP/HTTPS or file path (the scheme is
         // case-insensitive; a stream URL must never reach the file branch,
-        // whose error would carry the URL and its credential)
-        let (mss, hint_from_data) = if crate::utils::server_url::has_http_scheme(&self.url) {
+        // whose error would carry the URL and its credential). A queue song
+        // whose URL asks for a transcode opens with one GET (no HEAD, no
+        // probes); every other URL keeps the sizing sequence below.
+        let (mss, hint_from_data) = if crate::utils::server_url::has_http_scheme(&self.url)
+            && self.source_kind == SourceKind::Track
+            && requests_transcode(&self.url)
+        {
+            let opened = self.open_requested_transcode().await?;
+            radio_recv_timeout = opened.recv_timeout;
+            header_duration_ms = opened.header_duration_ms;
+            (opened.mss, opened.hint)
+        } else if crate::utils::server_url::has_http_scheme(&self.url) {
             // HTTP stream - use Range requests for instant playback
             let init_start = std::time::Instant::now();
             trace!(
@@ -842,21 +1022,16 @@ impl AudioDecoder {
                         // a persisted queue. Content-type is a safe discriminator:
                         // no audio stream, including ICY radio, is served as
                         // JSON/XML, so this cannot reject a working stream.
-                        if let Some(ct) = headers
-                            .get(reqwest::header::CONTENT_TYPE)
-                            .and_then(|v| v.to_str().ok())
-                        {
-                            let lowered = ct.to_ascii_lowercase();
-                            if lowered.starts_with("application/json")
-                                || lowered.starts_with("text/xml")
-                                || lowered.starts_with("application/xml")
-                            {
-                                anyhow::bail!(
-                                    "server returned an error response instead of audio \
+                        if is_document_answer(headers) {
+                            let ct = headers
+                                .get(reqwest::header::CONTENT_TYPE)
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or_default();
+                            anyhow::bail!(
+                                "server returned an error response instead of audio \
                                  (content-type {ct}); the track may no longer exist \
                                  on the server"
-                                );
-                            }
+                            );
                         }
                         is_radio = is_radio_response(headers);
                         header_duration_ms = x_content_duration_ms(headers);
@@ -998,32 +1173,8 @@ impl AudioDecoder {
                     if station { "live" } else { "length-less track" }
                 );
 
-                let url_copy = self.url.clone();
-
-                // Radio-path client: no global timeout (stream is infinite by design),
-                // but add connect / per-read / keepalive guards matching MPD defaults.
-                // See: CurlInputPlugin.cxx CURLOPT_CONNECTTIMEOUT / LOW_SPEED_TIME /
-                //      CURLOPT_TCP_KEEPALIVE.
-                let client = reqwest::Client::builder()
-                    .user_agent(crate::USER_AGENT)
-                    // A length-less queue song's URL carries the credential.
-                    .redirect(crate::utils::redirects::guard_credential_urls())
-                    // G2 fix: abort DNS/SYN hangs quickly (matches MPD CONNECTTIMEOUT=10s).
-                    .connect_timeout(std::time::Duration::from_secs(10))
-                    // G1 fix (reqwest layer): abort stalled transfers where bytes stop
-                    // flowing. Complements the per-chunk timeout in the producer task.
-                    .read_timeout(std::time::Duration::from_secs(15))
-                    // Detect half-open sockets after NAT timeout, suspend/resume, Wi-Fi
-                    // handover (MPD CURLOPT_TCP_KEEPALIVE/KEEPIDLE default 60s, we use
-                    // 30s as a more desktop-friendly value).
-                    .tcp_keepalive(std::time::Duration::from_secs(30))
-                    // Radio is a single long-lived socket; pooling has no benefit and
-                    // can cause a stale connection to be reused on reconnect.
-                    .pool_max_idle_per_host(0)
-                    .build()
-                    .context("Failed to create radio HTTP client")?;
-
-                let mut request = client.get(&url_copy);
+                let client = Self::stream_client()?;
+                let mut request = client.get(&self.url);
                 if station {
                     request = request.header("Icy-MetaData", "1");
                 }
@@ -1040,77 +1191,11 @@ impl AudioDecoder {
                 header_duration_ms =
                     header_duration_ms.or_else(|| x_content_duration_ms(response.headers()));
 
-                // An answer with ICY headers is a station whatever the caller
-                // loaded it as.
-                self.delivery = if station || is_radio_response(response.headers()) {
-                    StreamDelivery::Live
-                } else {
-                    info!(
-                        " [DECODER] The server sent this track without a length (a live \
-                         transcode): playing it once through, with no seeking"
-                    );
-                    StreamDelivery::Unsized
-                };
-                self.byte_len = None;
-
-                let content_type = response
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-
-                if let Some(ct) = content_type.as_ref()
-                    && let Some(format_from_ct) = format_hint_from_content_type(ct)
-                {
-                    detected_format = Some(format_from_ct);
-                }
-
-                if detected_format.is_none() {
-                    detected_format = format_hint_from_radio_url(&self.url);
-                }
-
-                if let Some(ref format) = detected_format {
-                    trace!(" [DECODER] Detected format for the stream: {}", format);
-                }
-
-                // Check for ICY metadata
-                use icy_metadata::IcyHeaders;
-                let icy_headers = IcyHeaders::parse_from_headers(response.headers());
-                let interval = icy_headers.metadata_interval();
-
-                // Buffer the response using a dedicated async tokio task
-                let recv_timeout = RecvTimeout::new(PROBE_RECV_TIMEOUT);
-                radio_recv_timeout = Some(recv_timeout.clone());
-                let buffered_response = AsyncNetworkBuffer::new_async(response, recv_timeout);
-
-                let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
-                    let interval_usize = interval.get();
-                    trace!(
-                        " [DECODER] ICY Metadata detected! Interval: {}",
-                        interval_usize
-                    );
-                    let atomic_meta = self.live_icy_metadata.clone();
-
-                    let icy_reader = IcyStreamReader {
-                        inner: buffered_response,
-                        metaint: interval_usize,
-                        bytes_until_meta: interval_usize,
-                        callback: Box::new(move |title| {
-                            trace!(" [DECODER] ICY Callback fired! Result: {:?}", title);
-                            if let Ok(mut guard) = atomic_meta.try_write() {
-                                *guard = Some(title);
-                            } else {
-                                warn!(" [DECODER] ICY Failed to acquire try_write!");
-                            }
-                        }),
-                    };
-                    Box::new(ReadOnlySource::new(icy_reader))
-                } else {
-                    trace!(" [DECODER] No ICY Interval detected in headers!");
-                    Box::new(ReadOnlySource::new(buffered_response))
-                };
-
-                MediaSourceStream::new(media_source, Default::default())
+                let (mss, format, recv_timeout) =
+                    self.once_through_source(response, station, Bytes::new(), detected_format);
+                detected_format = format;
+                radio_recv_timeout = Some(recv_timeout);
+                mss
             };
 
             (mss, detected_format)
@@ -1207,6 +1292,221 @@ impl AudioDecoder {
 
         trace!(" [DECODER] Initialization complete!");
         Ok(())
+    }
+
+    /// The client for a stream read once from front to back (a station, or a
+    /// queue song sent without a length): no overall timeout, since the
+    /// stream may run for hours, but connect / per-read / keepalive guards
+    /// matching MPD's defaults (CurlInputPlugin.cxx CURLOPT_CONNECTTIMEOUT /
+    /// LOW_SPEED_TIME / CURLOPT_TCP_KEEPALIVE).
+    fn stream_client() -> Result<reqwest::Client> {
+        reqwest::Client::builder()
+            .user_agent(crate::USER_AGENT)
+            // A length-less queue song's URL carries the credential.
+            .redirect(crate::utils::redirects::guard_credential_urls())
+            // G2 fix: abort DNS/SYN hangs quickly (matches MPD CONNECTTIMEOUT=10s).
+            .connect_timeout(std::time::Duration::from_secs(10))
+            // G1 fix (reqwest layer): abort stalled transfers where bytes stop
+            // flowing. Complements the per-chunk timeout in the producer task.
+            .read_timeout(std::time::Duration::from_secs(15))
+            // Detect half-open sockets after NAT timeout, suspend/resume, Wi-Fi
+            // handover (MPD CURLOPT_TCP_KEEPALIVE/KEEPIDLE default 60s, we use
+            // 30s as a more desktop-friendly value).
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            // Radio is a single long-lived socket; pooling has no benefit and
+            // can cause a stale connection to be reused on reconnect.
+            .pool_max_idle_per_host(0)
+            .build()
+            .context("Failed to create radio HTTP client")
+    }
+
+    /// The source for `response` read once from front to back: a station's
+    /// live stream (`station`, or an answer with ICY headers), otherwise a
+    /// queue song sent without a length. `first` holds bytes already read
+    /// from the body. Returns the source, the format hint (the answer's
+    /// content type first, then `detected_format`, then the URL's look) and
+    /// the buffer's receive timeout, which the caller drops to
+    /// `READ_RECV_TIMEOUT` once the probe is done.
+    fn once_through_source(
+        &mut self,
+        response: reqwest::Response,
+        station: bool,
+        first: Bytes,
+        mut detected_format: Option<String>,
+    ) -> (MediaSourceStream<'static>, Option<String>, RecvTimeout) {
+        // An answer with ICY headers is a station whatever the caller
+        // loaded it as.
+        self.delivery = if station || is_radio_response(response.headers()) {
+            StreamDelivery::Live
+        } else {
+            info!(
+                " [DECODER] The server sent this track without a length (a live \
+                 transcode): playing it once through, with no seeking"
+            );
+            StreamDelivery::Unsized
+        };
+        self.byte_len = None;
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        if let Some(ct) = content_type.as_ref()
+            && let Some(format_from_ct) = format_hint_from_content_type(ct)
+        {
+            detected_format = Some(format_from_ct);
+        }
+
+        if detected_format.is_none() {
+            detected_format = format_hint_from_radio_url(&self.url);
+        }
+
+        if let Some(ref format) = detected_format {
+            trace!(" [DECODER] Detected format for the stream: {}", format);
+        }
+
+        // Check for ICY metadata
+        use icy_metadata::IcyHeaders;
+        let icy_headers = IcyHeaders::parse_from_headers(response.headers());
+        let interval = icy_headers.metadata_interval();
+
+        // Buffer the response using a dedicated async tokio task
+        let recv_timeout = RecvTimeout::new(PROBE_RECV_TIMEOUT);
+        let buffered_response =
+            AsyncNetworkBuffer::new_async(response, first, recv_timeout.clone());
+
+        let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
+            let interval_usize = interval.get();
+            trace!(
+                " [DECODER] ICY Metadata detected! Interval: {}",
+                interval_usize
+            );
+            let atomic_meta = self.live_icy_metadata.clone();
+
+            let icy_reader = IcyStreamReader {
+                inner: buffered_response,
+                metaint: interval_usize,
+                bytes_until_meta: interval_usize,
+                callback: Box::new(move |title| {
+                    trace!(" [DECODER] ICY Callback fired! Result: {:?}", title);
+                    if let Ok(mut guard) = atomic_meta.try_write() {
+                        *guard = Some(title);
+                    } else {
+                        warn!(" [DECODER] ICY Failed to acquire try_write!");
+                    }
+                }),
+            };
+            Box::new(ReadOnlySource::new(icy_reader))
+        } else {
+            trace!(" [DECODER] No ICY Interval detected in headers!");
+            Box::new(ReadOnlySource::new(buffered_response))
+        };
+
+        (
+            MediaSourceStream::new(media_source, Default::default()),
+            detected_format,
+            recv_timeout,
+        )
+    }
+
+    /// Open a queue song whose URL asks for a transcode with ONE GET: no
+    /// HEAD (it carries no length or ranges for a transcode, and with the
+    /// server's transcode cache off it starts an ffmpeg run that is thrown
+    /// away) and no sizing probes. The GET asks for the range reader's first
+    /// chunk: a live transcode ignores the range and streams whole, while an
+    /// answer the server can serve in ranges (its cache, or the file itself)
+    /// sends exactly that chunk with the whole length, which becomes the range
+    /// reader's first chunk, so nothing is downloaded twice and the stream
+    /// seeks like a file.
+    async fn open_requested_transcode(&mut self) -> Result<OpenedStream> {
+        // A whole chunk: the length isn't known until the answer.
+        let first_chunk_len = RangeHttpReader::first_chunk_len(u64::MAX);
+        let response = Self::stream_client()?
+            .get(&self.url)
+            .header(
+                reqwest::header::RANGE,
+                format!("bytes=0-{}", first_chunk_len - 1),
+            )
+            .send()
+            .await
+            // The error would carry the credentialed URL.
+            .map_err(reqwest::Error::without_url)
+            .context("Failed to open the stream connection")?;
+        let header_duration_ms = x_content_duration_ms(response.headers());
+        let content_type_hint = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(format_hint_from_content_type);
+
+        match classify_transcode_answer(response.status(), response.headers()) {
+            TranscodeAnswer::Refused(status) => Err(refused_transcode_error(
+                status,
+                envelope_message(response).await,
+            )),
+            TranscodeAnswer::ErrorEnvelope => {
+                let message = envelope_message(response)
+                    .await
+                    .unwrap_or_else(|| "an error with no message".to_owned());
+                anyhow::bail!("the server sent an error instead of the song: {message}")
+            }
+            TranscodeAnswer::Empty => anyhow::bail!(EMPTY_TRANSCODE),
+            TranscodeAnswer::Sized { total } => {
+                // A 200 sends the body from its first byte; a 206 says where
+                // its slice starts.
+                let from_start = response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+                    || content_range(response.headers()).is_some_and(|(start, _)| start == Some(0));
+                let first_chunk = if from_start {
+                    read_prefix(response, RangeHttpReader::first_chunk_len(total)).await
+                } else {
+                    Vec::new()
+                };
+                debug!(
+                    " [DECODER] The requested transcode is served in ranges: {} bytes \
+                     ({} of the first chunk in hand)",
+                    total,
+                    first_chunk.len()
+                );
+                self.delivery = StreamDelivery::Sized;
+                self.byte_len = Some(total);
+                let reader =
+                    RangeHttpReader::with_first_chunk(self.url.clone(), total, first_chunk);
+                let media_source: Box<dyn MediaSource> = Box::new(reader);
+                Ok(OpenedStream {
+                    mss: MediaSourceStream::new(media_source, Default::default()),
+                    hint: content_type_hint.or_else(|| Self::extract_format_hint(&self.url)),
+                    recv_timeout: None,
+                    header_duration_ms,
+                })
+            }
+            TranscodeAnswer::Stream => {
+                let mut response = response;
+                // The first bytes, so an empty body (ffmpeg wrote nothing)
+                // reads as that, not as a format the probe can't make out.
+                let first = loop {
+                    match response
+                        .chunk()
+                        .await
+                        .map_err(reqwest::Error::without_url)
+                        .context("Failed to read the stream")?
+                    {
+                        Some(chunk) if chunk.is_empty() => {}
+                        Some(chunk) => break chunk,
+                        None => anyhow::bail!(EMPTY_TRANSCODE),
+                    }
+                };
+                let (mss, hint, recv_timeout) =
+                    self.once_through_source(response, false, first, None);
+                Ok(OpenedStream {
+                    mss,
+                    hint,
+                    recv_timeout: Some(recv_timeout),
+                    header_duration_ms,
+                })
+            }
+        }
     }
 
     fn close_input(&mut self) {
@@ -2978,6 +3278,511 @@ pub(crate) mod tests {
         );
         assert_eq!(decoder.delivery(), StreamDelivery::Sized);
         assert_eq!(decoder.byte_len(), Some(SIZED_FILE.len() as u64));
+    }
+
+    // =========================================================================
+    // A requested transcode (Streaming Quality): one GET, no HEAD
+    // =========================================================================
+
+    #[test]
+    fn only_a_stream_request_with_a_format_param_asks_for_a_transcode() {
+        for (url, asks) in [
+            (
+                "http://srv/rest/stream?id=s1&format=opus&maxBitRate=128&u=a&t=b&s=c&f=json",
+                true,
+            ),
+            (
+                "http://srv/rest/stream?id=s1&format=mp3&maxBitRate=96",
+                true,
+            ),
+            ("https://srv/navidrome/rest/stream?id=s1&format=opus", true),
+            ("http://srv/rest/stream?id=s1&u=a&t=b&s=c&f=json&_=1", false),
+            ("http://srv/rest/stream?id=s1&f=json", false),
+            ("http://radio.example/live.mp3?format=mp3", false),
+            ("/home/me/song.flac", false),
+            ("", false),
+        ] {
+            assert_eq!(requests_transcode(url), asks, "{url}");
+        }
+    }
+
+    fn headers(pairs: &[(&'static str, &'static str)]) -> reqwest::header::HeaderMap {
+        let mut map = reqwest::header::HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, value.parse().unwrap());
+        }
+        map
+    }
+
+    #[test]
+    fn a_transcode_answer_is_judged_by_its_status_and_headers() {
+        use reqwest::StatusCode;
+        let cases = [
+            // The server's cache (or the raw file) answering the range asked for.
+            (
+                StatusCode::PARTIAL_CONTENT,
+                headers(&[
+                    ("content-range", "bytes 0-262143/3216574"),
+                    ("content-length", "262144"),
+                    ("accept-ranges", "bytes"),
+                ]),
+                TranscodeAnswer::Sized { total: 3_216_574 },
+            ),
+            // The range ignored, but the answer serves ranges and is sized.
+            (
+                StatusCode::OK,
+                headers(&[("accept-ranges", "bytes"), ("content-length", "4170")]),
+                TranscodeAnswer::Sized { total: 4170 },
+            ),
+            // A live transcode: no length, ranges refused.
+            (
+                StatusCode::OK,
+                headers(&[("accept-ranges", "none"), ("content-type", "audio/ogg")]),
+                TranscodeAnswer::Stream,
+            ),
+            // A tiny live answer Go sized itself (an offset past the end) is
+            // still no file to read in ranges.
+            (
+                StatusCode::OK,
+                headers(&[("accept-ranges", "none"), ("content-length", "266")]),
+                TranscodeAnswer::Stream,
+            ),
+            // A length alone, ranges never mentioned.
+            (
+                StatusCode::OK,
+                headers(&[("content-length", "4170")]),
+                TranscodeAnswer::Stream,
+            ),
+            (StatusCode::OK, headers(&[]), TranscodeAnswer::Stream),
+            (
+                StatusCode::OK,
+                headers(&[("accept-ranges", "none"), ("content-length", "0")]),
+                TranscodeAnswer::Empty,
+            ),
+            (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                headers(&[("content-range", "bytes */0")]),
+                TranscodeAnswer::Empty,
+            ),
+            (
+                StatusCode::OK,
+                headers(&[("content-type", "application/json; charset=utf-8")]),
+                TranscodeAnswer::ErrorEnvelope,
+            ),
+            (
+                StatusCode::OK,
+                headers(&[("content-type", "text/xml")]),
+                TranscodeAnswer::ErrorEnvelope,
+            ),
+            (
+                StatusCode::FOUND,
+                headers(&[("location", "http://elsewhere.invalid/")]),
+                TranscodeAnswer::Refused(StatusCode::FOUND),
+            ),
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                headers(&[("content-type", "application/json"), ("retry-after", "5")]),
+                TranscodeAnswer::Refused(StatusCode::TOO_MANY_REQUESTS),
+            ),
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                headers(&[]),
+                TranscodeAnswer::Refused(StatusCode::INTERNAL_SERVER_ERROR),
+            ),
+        ];
+        for (status, headers, want) in cases {
+            assert_eq!(
+                classify_transcode_answer(status, &headers),
+                want,
+                "{status} {headers:?}"
+            );
+        }
+    }
+
+    /// One request a [`spawn_stream_server`] read.
+    #[derive(Debug, Clone)]
+    pub(crate) struct LoggedRequest {
+        pub(crate) method: String,
+        /// Path and query, as sent.
+        pub(crate) target: String,
+        pub(crate) range: Option<String>,
+    }
+
+    impl LoggedRequest {
+        fn asks_for_transcode(&self) -> bool {
+            self.target.contains("&format=")
+        }
+    }
+
+    /// How [`spawn_stream_server`] answers a request whose query asks for a
+    /// transcode (`format=`). A request without one always gets the song's
+    /// file, the way Navidrome serves it (`http.ServeContent`).
+    #[derive(Clone, Copy)]
+    pub(crate) enum TranscodeReply {
+        /// A live transcode: 200, chunked, `Accept-Ranges: none`,
+        /// `X-Content-Duration`; any Range header ignored; a HEAD gets the
+        /// headers alone.
+        Live,
+        /// A cached transcode, served like a file: Range honoured.
+        Cached,
+        /// A Subsonic error envelope in a 200 (Navidrome's way).
+        SubsonicError,
+        /// A redirect to another host.
+        RedirectOffServer,
+        /// 429 + an envelope: the server's transcode limit is reached.
+        TooBusy,
+        /// A 200 with `Content-Length: 0`: ffmpeg wrote nothing.
+        Empty,
+        /// A 200 whose chunked body ends at once.
+        EmptyChunked,
+    }
+
+    /// Bigger than the range reader's 256 KB chunk, so reading it to the end
+    /// takes more than the first chunk: the transcode body's frames
+    /// repeated (no Xing header, so nothing in it names a length).
+    pub(crate) fn two_chunk_body() -> Vec<u8> {
+        transcode_body().repeat(70)
+    }
+
+    /// A Navidrome-shaped `/rest/stream` server that logs every request
+    /// (method, path + query, Range) and answers by query: `reply` for a
+    /// transcode request, the file (`two_chunk_body`, served like
+    /// `http.ServeContent`) for any other. Returns the server's base URL and
+    /// the log.
+    pub(crate) async fn spawn_stream_server(
+        reply: TranscodeReply,
+    ) -> (String, Arc<parking_lot::Mutex<Vec<LoggedRequest>>>) {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let body: Arc<Vec<u8>> = Arc::new(two_chunk_body());
+        let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let logged = log.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let logged = logged.clone();
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let len = socket.read(&mut buf).await.unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buf[..len]).into_owned();
+                    let mut first = text.lines().next().unwrap_or("").split_whitespace();
+                    let method = first.next().unwrap_or("").to_owned();
+                    let target = first.next().unwrap_or("").to_owned();
+                    let range = text.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("range")
+                            .then(|| value.trim().to_owned())
+                    });
+                    let request = LoggedRequest {
+                        method,
+                        target,
+                        range,
+                    };
+                    logged.lock().push(request.clone());
+                    let head = request.method == "HEAD";
+
+                    let answer = if request.asks_for_transcode() {
+                        Some(reply)
+                    } else {
+                        None
+                    };
+                    let (status, mut headers, payload): (&str, String, Vec<u8>) = match answer {
+                        Some(TranscodeReply::Live) => {
+                            let mut headers = String::from(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: none\r\n\
+                                 X-Content-Duration: 245.5\r\n",
+                            );
+                            if head {
+                                ("200 OK", headers, Vec::new())
+                            } else {
+                                headers.push_str("Transfer-Encoding: chunked\r\n");
+                                let mut chunked = Vec::new();
+                                for chunk in body.chunks(4096) {
+                                    chunked.extend_from_slice(
+                                        format!("{:x}\r\n", chunk.len()).as_bytes(),
+                                    );
+                                    chunked.extend_from_slice(chunk);
+                                    chunked.extend_from_slice(b"\r\n");
+                                }
+                                chunked.extend_from_slice(b"0\r\n\r\n");
+                                ("200 OK", headers, chunked)
+                            }
+                        }
+                        Some(TranscodeReply::SubsonicError) => {
+                            let envelope = br#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"navidrome","error":{"code":70,"message":"data not found"}}}"#;
+                            (
+                                "200 OK",
+                                format!(
+                                    "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                                    envelope.len()
+                                ),
+                                envelope.to_vec(),
+                            )
+                        }
+                        Some(TranscodeReply::RedirectOffServer) => (
+                            "302 Found",
+                            "Location: http://elsewhere.invalid/rest/stream?id=s1\r\n\
+                             Content-Length: 0\r\n"
+                                .to_owned(),
+                            Vec::new(),
+                        ),
+                        Some(TranscodeReply::TooBusy) => {
+                            let envelope = br#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"navidrome","error":{"code":0,"message":"too many concurrent transcodes"}}}"#;
+                            (
+                                "429 Too Many Requests",
+                                format!(
+                                    "Content-Type: application/json\r\nRetry-After: 5\r\n\
+                                     Content-Length: {}\r\n",
+                                    envelope.len()
+                                ),
+                                envelope.to_vec(),
+                            )
+                        }
+                        Some(TranscodeReply::Empty) => (
+                            "200 OK",
+                            "Content-Type: audio/ogg\r\nAccept-Ranges: none\r\n\
+                             Content-Length: 0\r\nX-Content-Duration: 245.5\r\n"
+                                .to_owned(),
+                            Vec::new(),
+                        ),
+                        Some(TranscodeReply::EmptyChunked) => (
+                            "200 OK",
+                            "Content-Type: audio/ogg\r\nAccept-Ranges: none\r\n\
+                             Transfer-Encoding: chunked\r\nX-Content-Duration: 245.5\r\n"
+                                .to_owned(),
+                            b"0\r\n\r\n".to_vec(),
+                        ),
+                        Some(TranscodeReply::Cached) | None => {
+                            let last = body.len() - 1;
+                            let slice = request
+                                .range
+                                .as_deref()
+                                .and_then(|r| r.strip_prefix("bytes="))
+                                .and_then(|r| r.split_once('-'))
+                                .map(|(start, end)| {
+                                    let start: usize = start.parse().unwrap();
+                                    let end =
+                                        end.parse::<usize>().map_or(last, |end| end.min(last));
+                                    (start, end)
+                                });
+                            let mut headers = String::from(
+                                "Content-Type: audio/mpeg\r\nAccept-Ranges: bytes\r\n\
+                                 X-Content-Duration: 245.5\r\n",
+                            );
+                            match slice {
+                                Some((start, end)) => {
+                                    headers.push_str(&format!(
+                                        "Content-Range: bytes {start}-{end}/{}\r\n\
+                                         Content-Length: {}\r\n",
+                                        body.len(),
+                                        end - start + 1
+                                    ));
+                                    let payload = if head {
+                                        Vec::new()
+                                    } else {
+                                        body[start..=end].to_vec()
+                                    };
+                                    ("206 Partial Content", headers, payload)
+                                }
+                                None => {
+                                    headers
+                                        .push_str(&format!("Content-Length: {}\r\n", body.len()));
+                                    let payload = if head { Vec::new() } else { body.to_vec() };
+                                    ("200 OK", headers, payload)
+                                }
+                            }
+                        }
+                    };
+                    headers.push_str("Connection: close\r\n\r\n");
+                    let _ = socket
+                        .write_all(format!("HTTP/1.1 {status}\r\n{headers}").as_bytes())
+                        .await;
+                    let _ = socket.write_all(&payload).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), log)
+    }
+
+    /// A queue song's stream URL on `base`, asking for an Opus 128 transcode
+    /// when `transcode` is set, with the token credential a real one carries.
+    fn song_url(base: &str, transcode: bool) -> String {
+        let params = if transcode {
+            "&format=opus&maxBitRate=128"
+        } else {
+            ""
+        };
+        format!("{base}/rest/stream?id=s1{params}&u=nk&t=token&s=salt&f=json&v=1.8.0&c=nokkvi")
+    }
+
+    /// Opening a requested transcode is one GET: no HEAD (with the server's
+    /// transcode cache off, a HEAD starts an ffmpeg run that is thrown away)
+    /// and no probes. A live answer streams once through, unsized, its length
+    /// from the GET's `X-Content-Duration`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_opens_with_one_get_and_no_head() {
+        let (base, log) = spawn_stream_server(TranscodeReply::Live).await;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the transcode must open");
+
+        let log = log.lock().clone();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].method, "GET", "{log:?}");
+        assert!(log[0].asks_for_transcode(), "{log:?}");
+        assert_eq!(decoder.delivery(), StreamDelivery::Unsized);
+        assert_eq!(decoder.byte_len(), None);
+        assert_eq!(decoder.duration(), 245_500);
+        drain_to_eof(&mut decoder);
+        assert!(decoder.is_eof(), "the transcode plays through to its end");
+    }
+
+    /// A transcode the server already holds whole (its cache) answers the
+    /// GET's first-chunk range sized. That one answer is the range reader's
+    /// first chunk, so nothing is downloaded twice, and every later read is a
+    /// Range request like a file's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_answered_in_ranges_reads_on_with_range_requests() {
+        let (base, log) = spawn_stream_server(TranscodeReply::Cached).await;
+        let total = two_chunk_body().len() as u64;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect("the cached transcode must open");
+
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(total));
+        drain_to_eof(&mut decoder);
+
+        let log = log.lock().clone();
+        assert!(log.iter().all(|r| r.method == "GET"), "no HEAD: {log:?}");
+        assert!(
+            log.iter().all(|r| r.range.is_some()),
+            "only Range reads: {log:?}"
+        );
+        assert_eq!(log[0].range.as_deref(), Some("bytes=0-262143"), "{log:?}");
+        assert_eq!(
+            log.iter()
+                .filter(|r| r.range.as_deref() == Some("bytes=0-262143"))
+                .count(),
+            1,
+            "the first chunk is fetched once: {log:?}"
+        );
+        assert!(
+            log.iter().any(|r| r
+                .range
+                .as_deref()
+                .is_some_and(|r| r.starts_with("bytes=262144-"))),
+            "the rest comes in by Range: {log:?}"
+        );
+    }
+
+    /// Navidrome answers a Subsonic error with HTTP 200 and an error envelope.
+    /// The open fails with the server's own message, after that one GET.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_answered_with_a_subsonic_error_fails_with_its_message() {
+        let (base, log) = spawn_stream_server(TranscodeReply::SubsonicError).await;
+
+        let mut decoder = AudioDecoder::default();
+        let error = decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect_err("an error envelope is no audio");
+
+        assert!(format!("{error}").contains("data not found"), "{error:#}");
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+    }
+
+    /// A redirect the client won't follow (it leaves the server) is an error,
+    /// not audio, and nothing reaches the other host.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_that_redirects_off_the_server_fails() {
+        let (base, log) = spawn_stream_server(TranscodeReply::RedirectOffServer).await;
+
+        let mut decoder = AudioDecoder::default();
+        let error = decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect_err("a redirect is no audio");
+
+        assert!(format!("{error}").contains("302"), "{error:#}");
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+        assert!(
+            !format!("{error:#}").contains("token"),
+            "the credential stays out of the error: {error:#}"
+        );
+    }
+
+    /// The server's transcode limit answers 429. The open fails and says the
+    /// server is busy, after that one GET.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requested_transcode_refused_as_too_busy_fails_and_says_so() {
+        let (base, log) = spawn_stream_server(TranscodeReply::TooBusy).await;
+
+        let mut decoder = AudioDecoder::default();
+        let error = decoder
+            .init(&song_url(&base, true))
+            .await
+            .expect_err("a 429 is no audio");
+
+        assert!(format!("{error}").contains("busy"), "{error:#}");
+        assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+    }
+
+    /// When ffmpeg writes nothing, Navidrome still answers 200 with an empty
+    /// body. That reads as the server failing to transcode the song, not as a
+    /// format probe failure, whether the empty body is sized or chunked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_answer_to_a_requested_transcode_says_the_server_could_not_transcode() {
+        for reply in [TranscodeReply::Empty, TranscodeReply::EmptyChunked] {
+            let (base, log) = spawn_stream_server(reply).await;
+
+            let mut decoder = AudioDecoder::default();
+            let error = decoder
+                .init(&song_url(&base, true))
+                .await
+                .expect_err("an empty answer is no audio");
+
+            assert!(
+                format!("{error}").contains("the server couldn't transcode this song"),
+                "{error:#}"
+            );
+            assert_eq!(log.lock().len(), 1, "{:?}", log.lock());
+        }
+    }
+
+    /// A song streamed as its file (no `format`) still opens exactly as
+    /// before: the HEAD sizes it, then the reader's Range GET.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_song_streamed_as_its_file_still_opens_with_the_head_first() {
+        let (base, log) = spawn_stream_server(TranscodeReply::Live).await;
+        let total = two_chunk_body().len() as u64;
+
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&song_url(&base, false))
+            .await
+            .expect("the file must open");
+
+        let log = log.lock().clone();
+        assert_eq!(log[0].method, "HEAD", "{log:?}");
+        assert_eq!(log[0].range, None, "{log:?}");
+        assert_eq!(log[1].method, "GET", "{log:?}");
+        assert_eq!(log[1].range.as_deref(), Some("bytes=0-262143"), "{log:?}");
+        assert!(log.iter().all(|r| !r.asks_for_transcode()), "{log:?}");
+        assert_eq!(decoder.delivery(), StreamDelivery::Sized);
+        assert_eq!(decoder.byte_len(), Some(total));
     }
 
     /// The header's parse: Navidrome writes seconds as a float (Go's `'G'`

@@ -2181,7 +2181,10 @@ fn stream_url_of(id: &str) -> String {
         "u=nk&t=token&s=salt".to_string(),
     )
     .expect("a server and a credential make a session")
-    .stream_url(id)
+    .stream_url(&nokkvi_data::types::song::Song {
+        id: id.to_string(),
+        ..Default::default()
+    })
 }
 
 /// The tick `handle_tick` builds for `song` while the engine reports

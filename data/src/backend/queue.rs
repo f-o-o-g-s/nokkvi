@@ -16,6 +16,7 @@ use crate::{
         queue_sort_mode::QueueSortFields,
         reactive::{ReactiveInt, ReactiveVecProperty},
         song::{Song, SongCover},
+        stream_quality::{SharedStreamQuality, StreamQuality},
     },
     utils::artwork_url,
 };
@@ -221,12 +222,18 @@ pub struct QueueService {
 
     // Dependencies
     auth_gateway: Arc<Mutex<Option<AuthGateway>>>,
+
+    /// The Streaming Quality setting every [`Self::stream_session`] takes a
+    /// snapshot of. Seeded from the settings at construction; the UI pushes
+    /// each later change through [`Self::set_stream_quality`].
+    stream_quality: Arc<SharedStreamQuality>,
 }
 
 impl QueueService {
     pub fn new(
         auth_gateway: AuthGateway,
         storage: crate::services::state_storage::StateStorage,
+        stream_quality: StreamQuality,
     ) -> Result<Self> {
         let queue_manager = QueueManager::new(storage)?;
         Ok(Self {
@@ -235,7 +242,30 @@ impl QueueService {
             current_index: ReactiveInt::new(0),
             total_count: ReactiveInt::new(0),
             auth_gateway: Arc::new(Mutex::new(Some(auth_gateway))),
+            stream_quality: Arc::new(SharedStreamQuality::new(stream_quality)),
         })
+    }
+
+    /// Put the Streaming Quality setting in force for every stream URL built
+    /// from now on. The playing song keeps the stream it has. The returned
+    /// effect resets the prepared next track only when the setting really
+    /// changed, so the next song opens with the new params; an unchanged push
+    /// (every other settings save re-pushes it) leaves the prepared track
+    /// alone.
+    pub fn set_stream_quality(&self, quality: StreamQuality) -> NextTrackResetEffect {
+        // Stored before the caller applies the reset: a gapless prep takes its
+        // ticket (the next-track epoch) before it reads the session, so one
+        // whose ticket outlives this reset is refused at its store, and one
+        // that takes its ticket after the reset reads the new quality.
+        let changed = self.stream_quality.replace(quality);
+        if changed {
+            tracing::info!(
+                format = %quality.format,
+                max_bitrate_kbps = quality.max_bitrate.kbps(),
+                "Streaming Quality changed; it applies from the next song"
+            );
+        }
+        NextTrackResetEffect::new().only_if(changed)
     }
 
     /// Re-read the queue from storage after a login claimed another session's
@@ -288,6 +318,7 @@ impl QueueService {
     pub async fn stream_session(&self) -> Option<crate::services::playback::StreamSession> {
         let (server_url, credential) = self.get_server_config().await;
         crate::services::playback::StreamSession::new(server_url, credential)
+            .map(|session| session.with_quality(self.stream_quality.get()))
     }
 
     /// Helper to get server URL and credential
@@ -469,7 +500,8 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let storage = StateStorage::new(temp.path().join("queue.redb")).expect("storage");
         let auth = AuthGateway::new().expect("auth gateway");
-        let service = QueueService::new(auth, storage).expect("queue service");
+        let service =
+            QueueService::new(auth, storage, StreamQuality::default()).expect("queue service");
         (service, temp)
     }
 
@@ -737,5 +769,116 @@ mod tests {
             "moving the playing song must update current_index to its new position"
         );
         assert_eq!(service.songs.get().len(), 4);
+    }
+
+    // ── Streaming Quality push ──────────────────────────────────────────────
+
+    use crate::types::{
+        player_settings::{StreamFormat, StreamMaxBitrate},
+        stream_quality::StreamQuality,
+    };
+
+    const OPUS_128: StreamQuality = StreamQuality {
+        format: StreamFormat::Opus,
+        max_bitrate: StreamMaxBitrate::Kbps128,
+    };
+
+    /// A service whose stream URLs start from `quality`, with a session to
+    /// stream from (never reached: these tests only build URLs).
+    async fn service_streaming_at(quality: StreamQuality) -> (QueueService, TempDir) {
+        let temp = TempDir::new().expect("temp dir");
+        let storage = StateStorage::new(temp.path().join("queue.redb")).expect("storage");
+        let auth = AuthGateway::new().expect("auth gateway");
+        auth.resume_session(
+            "http://127.0.0.1:9".to_string(),
+            "alice".to_string(),
+            "jwt".to_string(),
+            "u=alice&s=salt&t=token".to_string(),
+        )
+        .await
+        .expect("resume");
+        let service = QueueService::new(auth, storage, quality).expect("queue service");
+        (service, temp)
+    }
+
+    /// Push `quality` and say whether that threw the engine's prepared next
+    /// track away (its next-track epoch moved).
+    async fn push_resets_the_next_track(
+        service: &QueueService,
+        engine: &Mutex<crate::audio::engine::CustomAudioEngine>,
+        quality: StreamQuality,
+    ) -> bool {
+        let before = engine.lock().await.next_track_epoch();
+        service.set_stream_quality(quality).apply_to(engine).await;
+        let after = engine.lock().await.next_track_epoch();
+        assert!(
+            after.wrapping_sub(before) <= 1,
+            "at most one reset per push"
+        );
+        before != after
+    }
+
+    /// Every settings save re-pushes the Streaming Quality. A push of the
+    /// value already in force must keep the prepared next track, or every
+    /// unrelated save would throw it away and rebuild it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unchanged_stream_quality_push_keeps_the_prepared_next_track() {
+        let (service, _temp) = service_streaming_at(OPUS_128).await;
+        let engine = Mutex::new(crate::audio::engine::CustomAudioEngine::new());
+
+        assert!(!push_resets_the_next_track(&service, &engine, OPUS_128).await);
+        assert!(!push_resets_the_next_track(&service, &engine, OPUS_128).await);
+    }
+
+    /// A real change resets the prepared next track once, so the next song
+    /// opens with the new params; pushing the new value again does nothing.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_changed_stream_quality_push_resets_the_next_track_once() {
+        let (service, _temp) = service_streaming_at(OPUS_128).await;
+        let engine = Mutex::new(crate::audio::engine::CustomAudioEngine::new());
+        let mp3 = StreamQuality {
+            format: StreamFormat::Mp3,
+            ..OPUS_128
+        };
+
+        assert!(push_resets_the_next_track(&service, &engine, mp3).await);
+        assert!(!push_resets_the_next_track(&service, &engine, mp3).await);
+        let lower_cap = StreamQuality {
+            max_bitrate: StreamMaxBitrate::Kbps96,
+            ..mp3
+        };
+        assert!(push_resets_the_next_track(&service, &engine, lower_cap).await);
+    }
+
+    /// Stream URLs follow the quality the service started from, then the
+    /// last one pushed.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_stream_session_builds_urls_under_the_quality_last_pushed() {
+        let (service, _temp) = service_streaming_at(OPUS_128).await;
+        let flac = Song {
+            suffix: Some("flac".to_string()),
+            bitrate: Some(900),
+            ..Song::test_default("f1", "Flac")
+        };
+        let url = |service: &QueueService| {
+            let service = service.clone();
+            let flac = flac.clone();
+            async move {
+                service
+                    .stream_session()
+                    .await
+                    .expect("a session")
+                    .stream_url(&flac)
+            }
+        };
+
+        assert!(url(&service).await.contains("&format=opus&maxBitRate=128&"));
+        let _ = service.set_stream_quality(StreamQuality {
+            format: StreamFormat::Mp3,
+            max_bitrate: StreamMaxBitrate::Kbps192,
+        });
+        assert!(url(&service).await.contains("&format=mp3&maxBitRate=192&"));
+        let _ = service.set_stream_quality(StreamQuality::default());
+        assert!(!url(&service).await.contains("format="));
     }
 }

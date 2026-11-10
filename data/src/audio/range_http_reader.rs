@@ -224,6 +224,26 @@ impl RangeHttpReader {
         }
     }
 
+    /// A reader whose first chunk (bytes `0..min(CHUNK_SIZE, content_length)`)
+    /// is already in hand, so the first read needs no request: the decoder's
+    /// one GET for a requested transcode asks for exactly that range.
+    /// `first_chunk` is used only when it is that whole chunk; anything else
+    /// is dropped and the chunk fetched on demand as usual.
+    pub(super) fn with_first_chunk(url: String, content_length: u64, first_chunk: Vec<u8>) -> Self {
+        let reader = Self::new(url, content_length);
+        if first_chunk.len() as u64 == Self::first_chunk_len(content_length)
+            && !first_chunk.is_empty()
+        {
+            reader.store.lock().insert(0, Arc::new(first_chunk));
+        }
+        reader
+    }
+
+    /// Bytes `0..first_chunk_len(content_length)` make up the first chunk.
+    pub(super) fn first_chunk_len(content_length: u64) -> u64 {
+        CHUNK_SIZE.min(content_length)
+    }
+
     /// Create a new blocking HTTP client with optimal settings for streaming.
     ///
     /// Built on a thread of its own: reqwest's blocking client waits for its
@@ -717,6 +737,42 @@ mod tests {
 
     fn arc(bytes: &[u8]) -> Arc<Vec<u8>> {
         Arc::new(bytes.to_vec())
+    }
+
+    /// A reader handed its whole first chunk serves it with no request (the
+    /// URL here is unreachable): the decoder's one GET for a requested
+    /// transcode already fetched exactly those bytes.
+    #[test]
+    fn a_reader_handed_its_first_chunk_reads_it_without_a_request() {
+        let body: Vec<u8> = (0..5_000u32).map(|i| (i % 251) as u8).collect();
+        let mut reader = RangeHttpReader::with_first_chunk(
+            "http://127.0.0.1:9/rest/stream?id=s1".to_string(),
+            body.len() as u64,
+            body.clone(),
+        );
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).expect("read the seeded chunk");
+        assert_eq!(out, body);
+    }
+
+    /// Only the whole first chunk is taken: a short one would leave a hole
+    /// the reader serves as if it were the file.
+    #[test]
+    fn a_partial_first_chunk_is_not_taken() {
+        let reader = RangeHttpReader::with_first_chunk(
+            "http://127.0.0.1:9/rest/stream?id=s1".to_string(),
+            CHUNK_SIZE * 2,
+            vec![7; 1_000],
+        );
+        assert!(!reader.store.lock().contains(0));
+        let first = RangeHttpReader::with_first_chunk(
+            "http://127.0.0.1:9/rest/stream?id=s1".to_string(),
+            CHUNK_SIZE * 2,
+            vec![7; CHUNK_SIZE as usize],
+        );
+        assert!(first.store.lock().contains(0));
+        assert_eq!(RangeHttpReader::first_chunk_len(1_000), 1_000);
+        assert_eq!(RangeHttpReader::first_chunk_len(CHUNK_SIZE * 3), CHUNK_SIZE);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! `AlbumsService::fetch_album_artwork` against the bare reqwest client; there
 //! is no client-side cache, so URL form is the only thing that matters here.
 
-use crate::types::song::Song;
+use crate::types::{song::Song, stream_quality::StreamParams};
 
 /// Navidrome cover-art ID kind prefixes — the set `ParseArtworkID` accepts
 /// (`model/artwork_id.go` `artworkKindMap`: mf, ar, al, pl, dc, ra). An ID that
@@ -126,20 +126,39 @@ pub fn build_song_artwork_url(song: &Song, server_url: &str, subsonic_credential
 /// * `song_id` - The song ID
 /// * `server_url` - Base Navidrome server URL
 /// * `subsonic_credential` - Pre-formatted credential string
+/// * `transcode` - The transcode to ask for (`format` + `maxBitRate`), or
+///   `None` for the file as it is
 ///
 /// # Returns
 /// Complete stream URL string, or empty string if credentials are missing
-pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &str) -> String {
+pub fn build_stream_url(
+    song_id: &str,
+    server_url: &str,
+    subsonic_credential: &str,
+    transcode: Option<StreamParams>,
+) -> String {
     if song_id.is_empty() || subsonic_credential.is_empty() {
         return String::new();
     }
+    // Right after the id, which stays the first param
+    // (`StreamSession::song_id_of` reads it from there). The format and the
+    // cap always travel together, and "raw" is never sent.
+    let transcode = transcode.map_or_else(String::new, |params| {
+        format!(
+            "&format={}&maxBitRate={}",
+            params.format.wire(),
+            params.max_bitrate_kbps
+        )
+    });
 
     let cache_bust = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
 
     let standard = crate::services::api::subsonic::STANDARD_PARAMS;
-    format!("{server_url}/rest/stream?id={song_id}&{subsonic_credential}&{standard}&_={cache_bust}")
+    format!(
+        "{server_url}/rest/stream?id={song_id}{transcode}&{subsonic_credential}&{standard}&_={cache_bust}"
+    )
 }
 
 #[cfg(test)]
@@ -331,15 +350,82 @@ mod tests {
     #[test]
     fn stream_url_empty_on_missing_inputs() {
         assert_eq!(
-            build_stream_url("", "http://srv", "u=x"),
+            build_stream_url("", "http://srv", "u=x", None),
             "",
             "empty song_id"
         );
         assert_eq!(
-            build_stream_url("id", "http://srv", ""),
+            build_stream_url("id", "http://srv", "", None),
             "",
             "empty credential"
         );
+    }
+
+    use crate::types::stream_quality::{StreamParams, TranscodeFormat};
+
+    /// The query keys of `url`, in order.
+    fn query_keys(url: &str) -> Vec<String> {
+        url::Url::parse(url)
+            .expect("a URL")
+            .query_pairs()
+            .map(|(key, _)| key.into_owned())
+            .collect()
+    }
+
+    fn query_value(url: &str, key: &str) -> Option<String> {
+        url::Url::parse(url)
+            .expect("a URL")
+            .query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    }
+
+    #[test]
+    fn a_stream_url_without_a_transcode_asks_for_the_file_as_before() {
+        let url = build_stream_url("s1", "http://srv", "u=x&t=tok&s=salt", None);
+        assert!(
+            url.starts_with("http://srv/rest/stream?id=s1&u=x&t=tok&s=salt&f=json"),
+            "{url}"
+        );
+        let keys = query_keys(&url);
+        assert!(!keys.iter().any(|k| k == "format"), "{url}");
+        assert!(!keys.iter().any(|k| k == "maxBitRate"), "{url}");
+    }
+
+    #[test]
+    fn a_transcode_rides_after_the_id_with_its_format_and_cap_together() {
+        for (format, wire) in [
+            (TranscodeFormat::Opus, "opus"),
+            (TranscodeFormat::Mp3, "mp3"),
+        ] {
+            for kbps in [64, 128, 320] {
+                let url = build_stream_url(
+                    "s1",
+                    "http://srv",
+                    "u=x&t=tok&s=salt",
+                    Some(StreamParams {
+                        format,
+                        max_bitrate_kbps: kbps,
+                    }),
+                );
+                let keys = query_keys(&url);
+                assert_eq!(keys.first().map(String::as_str), Some("id"), "{url}");
+                assert_eq!(
+                    crate::services::playback::StreamSession::song_id_of(&url),
+                    Some("s1"),
+                    "{url}"
+                );
+                assert_eq!(query_value(&url, "format").as_deref(), Some(wire), "{url}");
+                assert_eq!(
+                    query_value(&url, "maxBitRate"),
+                    Some(kbps.to_string()),
+                    "{url}"
+                );
+                assert_eq!(keys.iter().filter(|k| *k == "format").count(), 1, "{url}");
+                assert!(!url.contains("format=raw"), "{url}");
+                assert!(!url.contains("estimateContentLength"), "{url}");
+            }
+        }
     }
 
     // ── Per-Song Artwork URL Invariants ──
