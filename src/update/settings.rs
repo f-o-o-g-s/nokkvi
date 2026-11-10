@@ -146,6 +146,8 @@ impl Nokkvi {
             crossfade_offset_secs: i64::from(self.settings.crossfade_offset_secs),
             crossfade_bar_snap: self.settings.crossfade_bar_snap,
             rewind_on_previous: self.settings.rewind_on_previous,
+            stream_format: self.settings.stream_format.as_label().into(),
+            stream_max_bitrate: self.settings.stream_max_bitrate.as_label().into(),
             volume_normalization: self.settings.volume_normalization.as_label().into(),
             normalization_level: self.settings.normalization_level.as_label().into(),
             replay_gain_preamp_db: self.settings.replay_gain_preamp_db.round() as i64,

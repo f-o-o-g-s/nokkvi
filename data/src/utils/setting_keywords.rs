@@ -393,6 +393,28 @@ keyword_table! {
         ],
         "general.rewind_on_previous" => &["restart track", "back button", "skip back"],
 
+        // ── Playback · Streaming Quality ─────────────────────────────────────
+        "general.stream_format" => &[
+            "transcode",
+            "transcoding",
+            "codec",
+            "data saver",
+            "mobile data",
+            "bandwidth",
+            "compress",
+            "downsample",
+        ],
+        "general.stream_max_bitrate" => &[
+            "kbps",
+            "bit rate",
+            "bandwidth",
+            "data saver",
+            "mobile data",
+            "transcode",
+            "compression",
+            "quality",
+        ],
+
         // ── Playback · Volume Normalization ──────────────────────────────────
         "general.volume_normalization" => {
             &["loudness", "replaygain", "rg", "agc", "leveling", "gain"]

@@ -477,6 +477,107 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// What nokkvi asks the server to stream a queue song as: the file as it
+    /// is (Original), or a smaller Opus or MP3 copy the server makes on the
+    /// fly, capped at [`StreamMaxBitrate`]. Which songs actually get the
+    /// copy is decided per song by `types::stream_quality::stream_params`.
+    ///
+    /// Serializes to lowercase strings for redb storage and config.toml.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum StreamFormat {
+        /// Every song streams as its own file (the default).
+        #[default]
+        Original { label: "Original", wire: "original" },
+        /// Bigger songs stream as Opus (gapless joins stay seamless).
+        Opus { label: "Opus", wire: "opus" },
+        /// Bigger songs stream as MP3 (a piped MP3 carries no gapless info,
+        /// so joins can gain a short gap).
+        Mp3 { label: "MP3", wire: "mp3" },
+    }
+}
+
+define_labeled_enum! {
+    /// The bitrate cap a transcoded stream is asked for (Navidrome's
+    /// `maxBitRate`, in kbps). Used only when [`StreamFormat`] is not
+    /// Original.
+    ///
+    /// Serializes as the plain number of kbps (`stream_max_bitrate = 128` in
+    /// config.toml, `128` in redb); only the listed rates load.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum StreamMaxBitrate {
+        Kbps64 { label: "64 kbps", wire: "64" },
+        Kbps96 { label: "96 kbps", wire: "96" },
+        /// The default: Opus at 128 kbps is hard to tell from the original.
+        #[default]
+        Kbps128 { label: "128 kbps", wire: "128" },
+        Kbps160 { label: "160 kbps", wire: "160" },
+        Kbps192 { label: "192 kbps", wire: "192" },
+        Kbps256 { label: "256 kbps", wire: "256" },
+        Kbps320 { label: "320 kbps", wire: "320" },
+    }
+}
+
+impl StreamMaxBitrate {
+    /// Every rate, lowest first (the row's order).
+    pub const ALL: [Self; 7] = [
+        Self::Kbps64,
+        Self::Kbps96,
+        Self::Kbps128,
+        Self::Kbps160,
+        Self::Kbps192,
+        Self::Kbps256,
+        Self::Kbps320,
+    ];
+
+    /// The cap in kbps, as the stream URL's `maxBitRate` carries it.
+    pub const fn kbps(self) -> u32 {
+        match self {
+            Self::Kbps64 => 64,
+            Self::Kbps96 => 96,
+            Self::Kbps128 => 128,
+            Self::Kbps160 => 160,
+            Self::Kbps192 => 192,
+            Self::Kbps256 => 256,
+            Self::Kbps320 => 320,
+        }
+    }
+
+    /// The rate for `kbps`, or `None` for a number that is not one of the
+    /// listed rates.
+    pub fn from_kbps(kbps: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|rate| rate.kbps() == kbps)
+    }
+
+    /// The listed rate a hand-written number loads as: the highest one at
+    /// or below `kbps`, and the lowest (64) for anything under that. A cap
+    /// is never raised past what was written, except up to the floor.
+    pub fn at_most(kbps: i64) -> Self {
+        Self::ALL
+            .into_iter()
+            .rev()
+            .find(|rate| i64::from(rate.kbps()) <= kbps)
+            .unwrap_or(Self::Kbps64)
+    }
+}
+
+impl Serialize for StreamMaxBitrate {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(self.kbps())
+    }
+}
+
+/// Any whole number loads (snapped by [`StreamMaxBitrate::at_most`]), so a
+/// hand-edited `stream_max_bitrate = 200` in config.toml becomes 192 instead
+/// of making the whole `[settings]` section unreadable; this snap is the
+/// key's load-time clamp (`every_numeric_setting_is_clamped_on_load`).
+impl<'de> Deserialize<'de> for StreamMaxBitrate {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        i64::deserialize(deserializer).map(Self::at_most)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -802,5 +903,84 @@ mod tests {
         }
         assert_eq!(LyricsAlignment::LABELS, ["Left", "Center", "Right"]);
         assert_eq!(LyricsAlignment::default(), LyricsAlignment::Center);
+    }
+
+    #[test]
+    fn stream_format_round_trips_its_wire_and_labels_and_defaults_to_original() {
+        for (format, wire, label) in [
+            (StreamFormat::Original, "original", "Original"),
+            (StreamFormat::Opus, "opus", "Opus"),
+            (StreamFormat::Mp3, "mp3", "MP3"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&format).unwrap(),
+                format!("\"{wire}\"")
+            );
+            assert_eq!(format.to_string(), wire, "Display is the wire string");
+            assert_eq!(StreamFormat::from_label(label), format);
+            let back: StreamFormat = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+            assert_eq!(back, format);
+        }
+        assert_eq!(StreamFormat::LABELS, ["Original", "Opus", "MP3"]);
+        assert_eq!(StreamFormat::default(), StreamFormat::Original);
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct BitrateWrapper {
+        stream_max_bitrate: StreamMaxBitrate,
+    }
+
+    #[test]
+    fn stream_max_bitrate_is_a_plain_number_on_both_wires_and_defaults_to_128() {
+        for (rate, kbps, label) in [
+            (StreamMaxBitrate::Kbps64, 64, "64 kbps"),
+            (StreamMaxBitrate::Kbps96, 96, "96 kbps"),
+            (StreamMaxBitrate::Kbps128, 128, "128 kbps"),
+            (StreamMaxBitrate::Kbps160, 160, "160 kbps"),
+            (StreamMaxBitrate::Kbps192, 192, "192 kbps"),
+            (StreamMaxBitrate::Kbps256, 256, "256 kbps"),
+            (StreamMaxBitrate::Kbps320, 320, "320 kbps"),
+        ] {
+            assert_eq!(rate.kbps(), kbps);
+            assert_eq!(StreamMaxBitrate::from_kbps(kbps), Some(rate));
+            assert_eq!(StreamMaxBitrate::from_label(label), rate);
+            assert_eq!(rate.to_string(), kbps.to_string(), "Display is the wire");
+            assert_eq!(serde_json::to_string(&rate).unwrap(), kbps.to_string());
+            let w = BitrateWrapper {
+                stream_max_bitrate: rate,
+            };
+            let line = format!("stream_max_bitrate = {kbps}");
+            assert_eq!(toml::to_string(&w).unwrap().trim(), line);
+            let back: BitrateWrapper = toml::from_str(&line).unwrap();
+            assert_eq!(back.stream_max_bitrate, rate);
+        }
+        assert_eq!(
+            StreamMaxBitrate::LABELS,
+            [
+                "64 kbps", "96 kbps", "128 kbps", "160 kbps", "192 kbps", "256 kbps", "320 kbps"
+            ]
+        );
+        assert_eq!(StreamMaxBitrate::default(), StreamMaxBitrate::Kbps128);
+    }
+
+    #[test]
+    fn a_hand_written_max_bitrate_loads_as_the_listed_rate_at_or_below_it() {
+        assert_eq!(StreamMaxBitrate::from_kbps(200), None);
+        for (written, loads) in [
+            ("200", StreamMaxBitrate::Kbps192),
+            ("319", StreamMaxBitrate::Kbps256),
+            ("1000000", StreamMaxBitrate::Kbps320),
+            ("63", StreamMaxBitrate::Kbps64),
+            ("0", StreamMaxBitrate::Kbps64),
+            ("-5", StreamMaxBitrate::Kbps64),
+        ] {
+            let w: BitrateWrapper = toml::from_str(&format!("stream_max_bitrate = {written}"))
+                .unwrap_or_else(|e| panic!("{written} must load: {e}"));
+            assert_eq!(w.stream_max_bitrate, loads, "{written}");
+            let json: StreamMaxBitrate = serde_json::from_str(written).unwrap();
+            assert_eq!(json, loads, "{written} from redb");
+        }
+        // Not a number at all is still an error, like any other mistyped key.
+        assert!(toml::from_str::<BitrateWrapper>("stream_max_bitrate = \"128\"").is_err());
     }
 }

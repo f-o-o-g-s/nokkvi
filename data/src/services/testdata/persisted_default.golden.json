@@ -51,6 +51,8 @@
   "crossfade_offset_secs": 0,
   "crossfade_bar_snap": false,
   "rewind_on_previous": false,
+  "stream_format": "original",
+  "stream_max_bitrate": 128,
   "default_playlist_id": null,
   "default_playlist_name": "",
   "quick_add_to_playlist": false,

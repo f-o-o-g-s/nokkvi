@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A new Streaming Quality section in Settings → Playback holds two rows: Stream Format (Original, Opus or MP3) and Max Bitrate (64 to 320 kbps).
+
 ### Changed
 
 ### Fixed

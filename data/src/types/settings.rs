@@ -9,10 +9,11 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StripClickAction, StripSeparator,
-            TheaterControls, TrackArtwork, TrackInfoDisplay, VerboseConfig, VisualizationMode,
-            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
+            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StreamFormat, StreamMaxBitrate,
+            StripClickAction, StripSeparator, TheaterControls, TrackArtwork, TrackInfoDisplay,
+            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -235,6 +236,15 @@ crate::player_settings_schema! {
     /// played past the threshold (default false).
     #[serde(default)]
     same rewind_on_previous: bool = false,
+    /// What queue songs stream as: Original (the default) plays every file
+    /// as it is; Opus / MP3 ask the server for a smaller copy of the songs
+    /// `types::stream_quality::stream_params` picks.
+    #[serde(default)]
+    same stream_format: StreamFormat = StreamFormat::Original,
+    /// The bitrate cap a smaller copy is asked for (default 128 kbps). Used
+    /// only when `stream_format` is not Original.
+    #[serde(default)]
+    same stream_max_bitrate: StreamMaxBitrate = StreamMaxBitrate::Kbps128,
     /// Default playlist ID for quick-add (None = no default)
     #[serde(default)]
     same default_playlist_id: Option<String> = None,
@@ -565,6 +575,8 @@ impl PersistedPlayerSettings {
         for gain in &mut self.eq_gains {
             *gain = crate::audio::eq::clamp_gain(*gain);
         }
+        // `stream_max_bitrate` needs nothing here: a hand-written number
+        // snaps to a listed rate as it deserializes (`StreamMaxBitrate::at_most`).
     }
 }
 

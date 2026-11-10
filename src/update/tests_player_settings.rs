@@ -191,6 +191,8 @@ fn build_settings_view_data_reads_from_substruct() {
     app.settings.quick_add_to_playlist = true;
     app.settings.default_playlist_name = "MyPL".to_string();
     app.settings.queue_show_default_playlist = true;
+    app.settings.stream_format = nokkvi_data::types::player_settings::StreamFormat::Opus;
+    app.settings.stream_max_bitrate = nokkvi_data::types::player_settings::StreamMaxBitrate::Kbps96;
 
     let data = app.build_settings_view_data();
 
@@ -211,6 +213,8 @@ fn build_settings_view_data_reads_from_substruct() {
     assert!(data.playback.quick_add_to_playlist);
     assert_eq!(data.playback.default_playlist_name.as_ref(), "MyPL");
     assert!(data.playback.queue_show_default_playlist);
+    assert_eq!(data.playback.stream_format.as_ref(), "Opus");
+    assert_eq!(data.playback.stream_max_bitrate.as_ref(), "96 kbps");
 }
 
 #[test]
@@ -306,6 +310,13 @@ fn live_controls_start_at_their_persisted_defaults() {
     assert_eq!(
         app.settings.similar_artists_deezer,
         persisted.similar_artists_deezer
+    );
+    // The Streaming Quality rows read Original / 128 kbps until the load,
+    // like a fresh install.
+    assert_eq!(app.settings.stream_format, persisted.stream_format);
+    assert_eq!(
+        app.settings.stream_max_bitrate,
+        persisted.stream_max_bitrate
     );
 }
 

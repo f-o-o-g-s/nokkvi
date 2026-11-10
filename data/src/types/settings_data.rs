@@ -266,6 +266,10 @@ pub struct PlaybackSettingsData {
     pub crossfade_bar_snap: bool,
     /// Whether Previous restarts the current track past the threshold (default false).
     pub rewind_on_previous: bool,
+    /// Stream format label ("Original" / "Opus" / "MP3").
+    pub stream_format: Cow<'static, str>,
+    /// Max bitrate label ("64 kbps" … "320 kbps").
+    pub stream_max_bitrate: Cow<'static, str>,
     /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)")
     pub volume_normalization: Cow<'static, str>,
     pub normalization_level: Cow<'static, str>,
@@ -337,6 +341,8 @@ impl Default for PlaybackSettingsData {
             crossfade_offset_secs: 0,
             crossfade_bar_snap: false,
             rewind_on_previous: false,
+            stream_format: Cow::Borrowed("test-default"),
+            stream_max_bitrate: Cow::Borrowed("test-default"),
             volume_normalization: Cow::Borrowed("test-default"),
             normalization_level: Cow::Borrowed("test-default"),
             replay_gain_preamp_db: 0,

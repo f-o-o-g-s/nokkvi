@@ -240,6 +240,8 @@ fn synonyms_reach_rows_whose_text_lacks_the_word() {
         ("oscilloscope", "Line Thickness"),
         ("palette", "Browse Themes…"),
         ("shortcut", "Play / Pause"),
+        ("transcode", "Stream Format"),
+        ("bandwidth", "Max Bitrate"),
     ] {
         let hits = search(query);
         assert!(

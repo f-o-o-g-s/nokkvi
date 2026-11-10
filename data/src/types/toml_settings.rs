@@ -14,9 +14,9 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StripClickAction, TheaterControls,
-            TrackArtwork, TrackInfoDisplay, VerboseConfig, VisualizationMode,
-            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            ScrollbarVisibility, SeekbarStyle, SlotRowHeight, StreamFormat, StreamMaxBitrate,
+            StripClickAction, TheaterControls, TrackArtwork, TrackInfoDisplay, VerboseConfig,
+            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         view_columns::ViewColumns,
@@ -229,6 +229,12 @@ pub struct TomlSettings {
     /// Whether the Previous button restarts the current track (instead of
     /// stepping back) once it has played past the threshold. Default false.
     pub rewind_on_previous: bool,
+    /// What queue songs stream as: "original" (the default), "opus" or "mp3".
+    pub stream_format: StreamFormat,
+    /// The bitrate cap, in kbps, a transcoded stream is asked for (64, 96,
+    /// 128, 160, 192, 256 or 320; default 128). Used only when
+    /// `stream_format` is not "original".
+    pub stream_max_bitrate: StreamMaxBitrate,
     /// Volume normalization mode (default: Off). On-disk key is
     /// `volume_normalization_mode`.
     #[serde(rename = "volume_normalization_mode")]
@@ -427,6 +433,8 @@ impl Default for TomlSettings {
             crossfade_offset_secs: 0,
             crossfade_bar_snap: false,
             rewind_on_previous: false,
+            stream_format: StreamFormat::Original,
+            stream_max_bitrate: StreamMaxBitrate::Kbps128,
             volume_normalization: VolumeNormalizationMode::default(),
             normalization_level: NormalizationLevel::default(),
             replay_gain_preamp_db: 0.0,

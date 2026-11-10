@@ -1,9 +1,10 @@
 //! Playback tab setting entries.
 //!
-//! Contains six sections: Transitions (crossfade), Fading (smooth track
+//! Contains eight sections: Transitions (crossfade), Fading (smooth track
 //! starts + pause/resume/stop transport fades + the M8 content-aware overlap
 //! knobs — skip-silence, gap/overlap trim, bar-snap), Volume Normalization
-//! (mode dropdown + AGC target knob + ReplayGain knobs), Scrobbling, Rating
+//! (mode dropdown + AGC target knob + ReplayGain knobs), Streaming Quality
+//! (stream format + max bitrate), Scrobbling, Radio Scrobbling, Rating
 //! Reminder (enable + conditional timing/percentage), and Playlists. Flat
 //! rows come from `define_settings!` via `build_playback_tab_settings_items`.
 //! The conditional AGC target-level knob, the four ReplayGain knobs (only
@@ -46,6 +47,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     const TRANSITIONS: &str = "assets/icons/audio-waveform.svg";
     const FADING: &str = "assets/icons/blend.svg";
     const NORMALIZATION: &str = "assets/icons/sliders-vertical.svg";
+    const STREAMING: &str = "assets/icons/globe.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
     const CHECK: &str = "assets/icons/check.svg";
     const LOGOUT: &str = "assets/icons/log-out.svg";
@@ -205,6 +207,15 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     }
 
     items.extend([
+        // --- Streaming Quality ---
+        // Max Bitrate shows whatever the format: its subtitle says it is
+        // used only when the format isn't Original.
+        SettingsEntry::Header {
+            label: "Streaming Quality",
+            icon: STREAMING,
+        },
+        macro_rows.take("general.stream_format"),
+        macro_rows.take("general.stream_max_bitrate"),
         // --- Scrobbling ---
         SettingsEntry::Header {
             label: "Scrobbling",

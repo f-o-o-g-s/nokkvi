@@ -13,8 +13,8 @@ use crate::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             EnterBehavior, LyricsAlignment, LyricsBackdropBlur, LyricsMode, LyricsWordHighlight,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            SlotRowHeight, StripClickAction, TheaterControls, TrackArtwork, TrackInfoDisplay,
-            VolumeNormalizationMode,
+            SlotRowHeight, StreamFormat, StreamMaxBitrate, StripClickAction, TheaterControls,
+            TrackArtwork, TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -648,6 +648,16 @@ impl SettingsManager {
 
     pub fn set_rewind_on_previous(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rewind_on_previous = enabled;
+        self.save()
+    }
+
+    pub fn set_stream_format(&mut self, format: StreamFormat) -> Result<()> {
+        self.settings.player.stream_format = format;
+        self.save()
+    }
+
+    pub fn set_stream_max_bitrate(&mut self, cap: StreamMaxBitrate) -> Result<()> {
+        self.settings.player.stream_max_bitrate = cap;
         self.save()
     }
 
@@ -1595,6 +1605,8 @@ mod sentinel_roundtrip_tests {
             crossfade_offset_secs: -2,                        // default 0
             crossfade_bar_snap: true,                         // default false
             rewind_on_previous: true,                         // default false
+            stream_format: StreamFormat::Mp3,                 // default Original
+            stream_max_bitrate: StreamMaxBitrate::Kbps320,    // default Kbps128
 
             // Playlists
             quick_add_to_playlist: true,       // default false
@@ -1851,6 +1863,13 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.skip_silence, ui_ps2.skip_silence);
         assert_eq!(ui_ps1.crossfade_offset_secs, ui_ps2.crossfade_offset_secs);
         assert_eq!(ui_ps1.crossfade_bar_snap, ui_ps2.crossfade_bar_snap);
+
+        // Streaming quality: the sentinel's values reach the live settings
+        // and survive config.toml.
+        assert_eq!(ui_ps1.stream_format, StreamFormat::Mp3);
+        assert_eq!(ui_ps1.stream_max_bitrate, StreamMaxBitrate::Kbps320);
+        assert_eq!(ui_ps1.stream_format, ui_ps2.stream_format);
+        assert_eq!(ui_ps1.stream_max_bitrate, ui_ps2.stream_max_bitrate);
 
         // Rating reminder
         assert_eq!(
@@ -3199,8 +3218,8 @@ mod load_clamp_tests {
             CROSSFADE_OFFSET_MIN_SECS, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
             RATING_REMINDER_PERCENT_MAX, RATING_REMINDER_PERCENT_MIN, REPLAY_GAIN_DB_MAX,
             REPLAY_GAIN_DB_MIN, SCROBBLE_THRESHOLD_MAX, SCROBBLE_THRESHOLD_MIN, SEEK_STEP_MAX_SECS,
-            SEEK_STEP_MIN_SECS, SFX_VOLUME_MAX, SFX_VOLUME_MIN, TRANSPORT_FADE_MS_MAX,
-            TRANSPORT_FADE_MS_MIN,
+            SEEK_STEP_MIN_SECS, SFX_VOLUME_MAX, SFX_VOLUME_MIN, StreamMaxBitrate,
+            TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN,
         },
         settings::{
             PersistedPlayerSettings, RADIO_SCROBBLE_THRESHOLD_MAX, RADIO_SCROBBLE_THRESHOLD_MIN,
@@ -3291,6 +3310,13 @@ mod load_clamp_tests {
                 "rating_reminder_percent",
                 RATING_REMINDER_PERCENT_MIN.into(),
                 RATING_REMINDER_PERCENT_MAX.into(),
+            ),
+            // Snapped to a listed rate as it deserializes
+            // (`StreamMaxBitrate::at_most`), not in `validate`.
+            (
+                "stream_max_bitrate",
+                StreamMaxBitrate::Kbps64.kbps().into(),
+                StreamMaxBitrate::Kbps320.kbps().into(),
             ),
         ]
     }
