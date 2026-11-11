@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `nokkvi love` and `nokkvi rate` now refuse during radio playback instead of starring or rating the last queue song.
+
 ### Removed
 
 ## v0.29.0 — 2026-11-10

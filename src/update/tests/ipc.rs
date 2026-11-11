@@ -1275,6 +1275,46 @@ fn love_pushes_an_in_window_toast() {
     assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Success);
 }
 
+/// During radio playback `scrobble.current_song_id` still names the last
+/// queue song, so `love` and `rate` must refuse instead of starring or rating
+/// a track that isn't the one on air.
+#[test]
+fn love_and_rate_during_radio_return_unavailable() {
+    for (verb, args) in [("love", json!({})), ("rate", json!({"delta": "+1"}))] {
+        let mut app = test_app();
+        app.scrobble.current_song_id = Some("last-queue-song".into());
+        app.playback.title = "Chillhop Music".into();
+        app.active_playback =
+            crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+                station: nokkvi_data::types::radio_station::RadioStation {
+                    id: "r".into(),
+                    name: "n".into(),
+                    stream_url: "u".into(),
+                    home_page_url: None,
+                    cover_art: None,
+                },
+                icy_artist: None,
+                icy_title: None,
+                icy_url: None,
+            });
+        let (incoming, rx) = make_incoming_with_args(verb, args);
+
+        let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+        drop(dispatched);
+
+        let resp = rx.blocking_recv().expect("responder must fire");
+        let err = resp
+            .error
+            .unwrap_or_else(|| panic!("{verb} must error during radio"));
+        assert_eq!(err.code, "unavailable", "{verb}");
+        assert!(err.message.contains("radio"), "{verb}: {}", err.message);
+        assert!(
+            app.toast.toasts.is_empty(),
+            "{verb} must not toast a change it refused"
+        );
+    }
+}
+
 #[test]
 fn rate_with_no_playing_track_returns_no_playing_track_error() {
     let resp = drive_with_args("rate", json!({"delta": "+1"}));

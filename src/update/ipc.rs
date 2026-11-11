@@ -144,6 +144,7 @@
 //! |               |           | `name`). Read.                                 |
 //! | `love`        | act       | `{"loved":bool}`; toggle star on playing track.|
 //! |               |           | `no_playing_track` error if nothing playing.   |
+//! |               |           | `unavailable` during radio.                    |
 //! | `rate`        | act_str   | `{"rating":0..5}`; arg `delta` `"+N"`/`"-N"`    |
 //! |               |           | (delta, clamped 0..=5) or `"0".."5"` absolute. |
 //! |               |           | Same playing-track rules as `love`.            |
@@ -791,9 +792,18 @@ fn guard_queue_sync(app: &Nokkvi) -> Result<(), (&'static str, String)> {
 }
 
 /// Resolve the song id of whatever's currently playing, returning the
-/// `no_playing_track` IPC error when nothing's loaded. Used by every
+/// `no_playing_track` IPC error when nothing's loaded and `unavailable`
+/// during radio playback. Used by every
 /// playing-track-scoped verb (`love`, `rate`, future `current` queries).
 fn current_playing_song_id(app: &Nokkvi) -> Result<String, (&'static str, String)> {
+    // Under radio `scrobble.current_song_id` still names the last queue song,
+    // and a station has no library track to star or rate.
+    if app.active_playback.is_radio() {
+        return Err((
+            "unavailable",
+            "love and rate are not available during radio playback".to_string(),
+        ));
+    }
     app.scrobble
         .current_song_id
         .clone()
