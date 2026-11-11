@@ -753,7 +753,7 @@ impl ArtistsPage {
 
         // The name in tracked capitals. iced has no letter-spacing, so each
         // letter is its own text and the row's spacing is the tracking.
-        let name_size = m.metadata_size;
+        let name_size = m.subtitle_size;
         let mut name = Row::new()
             .spacing((name_size * SECTION_NAME_TRACKING).round())
             .align_y(Alignment::Center);
@@ -779,24 +779,22 @@ impl ArtistsPage {
                 ..Default::default()
             });
 
-        let mut heading = Row::<Element<'_, ArtistsMessage>>::new()
+        // The count and the year span read as one right-hand note, joined
+        // the way the artwork pill joins its facts.
+        let note = match header.years_label() {
+            Some(years) => format!(
+                "{} \u{2022} {years}",
+                header.group.count_label(header.count)
+            ),
+            None => header.group.count_label(header.count),
+        };
+        let heading = Row::<Element<'_, ArtistsMessage>>::new()
             .spacing(SECTION_HEADER_SPACING)
             .align_y(Alignment::Center)
             .width(Length::Fill)
             .push(name.boxed())
             .push(rule.boxed())
-            .push(
-                slot_list_text(
-                    header.group.count_label(header.count),
-                    m.metadata_size,
-                    style.subtext_color,
-                )
-                .boxed(),
-            );
-        if let Some(years) = header.years_label() {
-            heading =
-                heading.push(slot_list_text(years, m.metadata_size, style.subtext_color).boxed());
-        }
+            .push(slot_list_text(note, m.metadata_size, style.subtext_color).boxed());
 
         // The album rows' leading geometry (indent, sub-index column, spacing
         // 4), so the chevron sits where their numbers do and the name starts

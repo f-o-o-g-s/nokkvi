@@ -356,7 +356,9 @@ define_settings! {
                 label: "Group Artist Albums by Release Type",
                 category: "Application",
                 subtitle: Some(
-                    "On: an expanded artist's albums sit under headers (Albums, EPs,                      Singles, Live, Compilations… Appears On) that play or fold their                      section · Off: one list, newest first",
+                    "On: an expanded artist's albums sit under headers (Albums, EPs, Singles, \
+                     Live, Compilations, Appears On and more) that play or fold their \
+                     section · Off: one list, newest first",
                 ),
                 default: true,
                 read_field: |d| d.group_artist_albums,
