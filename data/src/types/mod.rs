@@ -10,6 +10,7 @@ pub mod artist;
 pub mod artist_recs;
 pub mod batch;
 pub mod collage_artwork;
+pub mod discography;
 pub mod error;
 pub mod filter;
 pub mod genre;

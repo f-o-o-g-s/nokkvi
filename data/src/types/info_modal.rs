@@ -50,6 +50,10 @@ pub enum InfoModalItem {
         name: String,
         album_artist: Option<String>,
         release_type: Option<String>,
+        /// The `albumversion` tag ("Deluxe Edition").
+        version: Option<String>,
+        /// The `recordlabel` tag's values.
+        record_label: Option<String>,
         genre: Option<String>,
         genres: Option<String>,
         duration: Option<f64>,
@@ -257,6 +261,8 @@ impl InfoModalItem {
                 name,
                 album_artist,
                 release_type,
+                version,
+                record_label,
                 genre,
                 genres,
                 duration,
@@ -280,6 +286,8 @@ impl InfoModalItem {
                 rows.push(("Title".into(), name.clone()));
                 push_opt_str(&mut rows, "Album Artist", album_artist);
                 push_opt_str(&mut rows, "Release Type", release_type);
+                push_opt_str(&mut rows, "Version", version);
+                push_opt_str(&mut rows, "Record Label", record_label);
                 // Prefer multi-genre string ("Black Metal • Heavy Metal") over single genre
                 if let Some(g) = genres {
                     if !g.is_empty() {
@@ -646,6 +654,8 @@ impl InfoModalItem {
             name: album.name.clone(),
             album_artist: Some(album.artist.clone()),
             release_type: album.release_type.clone(),
+            version: album.version.clone(),
+            record_label: album.record_label.clone(),
             genre: album.genre.clone(),
             genres: album.genres.clone(),
             duration: album.duration,
@@ -857,6 +867,11 @@ mod tests {
             comment: Some("a comment".to_string()),
             tags: vec![("Media".to_string(), "CD".to_string())],
             participants: vec![("Producer".to_string(), "Someone".to_string())],
+            album_artist_ids: vec!["ar-7".to_string()],
+            release_types: vec![crate::types::discography::ReleaseType::Ep],
+            version: Some("Deluxe Edition".to_string()),
+            record_label: Some("Warp".to_string()),
+            explicit: true,
             release_date: Some("1999-05-05".to_string()),
             original_date: Some("1999-01-01".to_string()),
             original_year: Some(1999),
@@ -869,6 +884,8 @@ mod tests {
             name,
             album_artist,
             release_type,
+            version,
+            record_label,
             genre,
             genres,
             duration,
@@ -896,6 +913,8 @@ mod tests {
         assert_eq!(name, "Distinctive Name");
         assert_eq!(album_artist.as_deref(), Some("The Artist"));
         assert_eq!(release_type.as_deref(), Some("EP"));
+        assert_eq!(version.as_deref(), Some("Deluxe Edition"));
+        assert_eq!(record_label.as_deref(), Some("Warp"));
         assert_eq!(genre.as_deref(), Some("Rock"));
         assert_eq!(genres.as_deref(), Some("Rock • Pop"));
         assert_eq!(duration, Some(2400.0));

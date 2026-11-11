@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
+
 ### Changed
 
 ### Fixed

@@ -68,6 +68,19 @@ pub struct AlbumUIViewData {
     pub comment: Option<String>,
     pub tags: Vec<(String, String)>,
     pub participants: Vec<(String, String)>,
+    /// Ids of the album's album artists (the `albumartist` participants, else
+    /// `albumArtistId`); empty when the server names none. Tells an artist's
+    /// own albums from the ones they only appear on.
+    pub album_artist_ids: Vec<String>,
+    /// The album's MusicBrainz release types, normalized (`releasetype` tag,
+    /// else `mbzAlbumType`); a tagger's junk values are dropped.
+    pub release_types: Vec<crate::types::discography::ReleaseType>,
+    /// The `albumversion` tag ("Deluxe Edition").
+    pub version: Option<String>,
+    /// The `recordlabel` tag's values.
+    pub record_label: Option<String>,
+    /// The `explicitstatus` tag marks the album explicit.
+    pub explicit: bool,
     /// Raw release date string from Navidrome (ISO 8601, e.g. "2023-11-05")
     pub release_date: Option<String>,
     /// Raw original date string (e.g. "1973-03-24" for a remaster's original release)
@@ -124,6 +137,17 @@ impl AlbumUIViewData {
         // Flatten participants into sorted (role, names) pairs
         let participants = crate::backend::flatten_participants(album.participants.as_ref());
 
+        let album_artist_ids = Self::album_artist_ids(album);
+        let release_types = crate::types::discography::release_types(
+            album.tags.as_ref(),
+            album.mbz_album_type.as_deref(),
+        );
+        let version =
+            crate::types::discography::first_tag_value(album.tags.as_ref(), "albumversion");
+        let record_label =
+            crate::types::discography::joined_tag_values(album.tags.as_ref(), "recordlabel");
+        let explicit = crate::types::discography::is_explicit(album.tags.as_ref());
+
         let name = album.name.clone();
         let artist = album.display_artist().to_string();
         let searchable_lower = crate::utils::search::build_searchable_lower(&[&name, &artist]);
@@ -156,12 +180,43 @@ impl AlbumUIViewData {
             comment: album.comment.clone(),
             tags,
             participants,
+            album_artist_ids,
+            release_types,
+            version,
+            record_label,
+            explicit,
             release_date: album.release_date.clone(),
             original_date: album.original_date.clone(),
             original_year: album.max_original_year,
             image: album.image.clone(),
             searchable_lower,
         }
+    }
+
+    /// The ids of the album's album artists: its `albumartist` participants,
+    /// or `albumArtistId` alone when the server sent no participants.
+    fn album_artist_ids(album: &Album) -> Vec<String> {
+        let from_participants: Vec<String> = album
+            .participants
+            .as_ref()
+            .and_then(|roles| roles.get("albumartist"))
+            .map(|artists| {
+                artists
+                    .iter()
+                    .map(|artist| artist.id.clone())
+                    .filter(|id| !id.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !from_participants.is_empty() {
+            return from_participants;
+        }
+        album
+            .album_artist_id
+            .iter()
+            .filter(|id| !id.is_empty())
+            .cloned()
+            .collect()
     }
 
     /// Flatten album tags HashMap into sorted (label, value) pairs for display.
