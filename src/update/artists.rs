@@ -834,9 +834,7 @@ impl Nokkvi {
                 if self.library_play_adds_to_queue() {
                     let name = self
                         .artists_page
-                        .expansion
-                        .children
-                        .iter()
+                        .expanded_albums()
                         .find(|a| a.id == album_id)
                         .map_or_else(|| "album".to_string(), |a| a.name.clone());
                     return self.shell_fire_and_forget_task(
@@ -901,12 +899,11 @@ impl Nokkvi {
                     )
                 } else {
                     // Album within expanded artist
-                    Self::find_current_rating(
-                        &self.artists_page.expansion.children,
-                        &item_id,
-                        |a| &a.id,
-                        |a| a.rating,
-                    )
+                    self.artists_page
+                        .expanded_albums()
+                        .find(|a| a.id == item_id)
+                        .and_then(|a| a.rating)
+                        .unwrap_or(0)
                 };
                 return self.set_item_rating_task(item_id, kind, new_rating, current);
             }

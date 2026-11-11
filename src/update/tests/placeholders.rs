@@ -107,7 +107,7 @@ fn artists_and_expanded_albums_get_placeholders() {
     app.library.artists.set_from_vec(vec![artist]);
     // An album only the expanded artist lists, in no album buffer.
     app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.children = vec![album("a9", Some(DIVISION_BELL))];
+    app.artists_page.expansion.children = vec![album("a9", Some(DIVISION_BELL)).into()];
 
     app.claim_minis(["ar1".to_string(), "a9".to_string()]);
 

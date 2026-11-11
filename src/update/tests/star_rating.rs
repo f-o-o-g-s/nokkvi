@@ -98,7 +98,11 @@ fn album_starred_propagates_to_artists_expansion() {
 
     let _ = app.handle_album_starred_status_updated("a1".to_string(), true);
     assert!(
-        app.artists_page.expansion.children[0].is_starred,
+        app.artists_page
+            .expanded_albums()
+            .next()
+            .unwrap()
+            .is_starred,
         "artists expansion album should be starred"
     );
 }

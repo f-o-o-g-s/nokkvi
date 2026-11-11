@@ -19,7 +19,7 @@ use crate::{
     app_message::{HotkeyMessage, Message},
     update::modals::ActiveModal,
     views,
-    views::expansion::SlotListEntry,
+    views::{DiscographyRow, expansion::SlotListEntry},
 };
 
 impl Nokkvi {
@@ -182,8 +182,12 @@ impl Nokkvi {
                     |a| &a.id,
                 ) {
                     let item = match entry {
-                        SlotListEntry::Child(album, _) => {
+                        SlotListEntry::Child(DiscographyRow::Album(album), _) => {
                             InfoModalItem::from_album_view_data(album, None)
+                        }
+                        // A release-type section header has nothing to show.
+                        SlotListEntry::Child(DiscographyRow::Section(_), _) => {
+                            return Task::none();
                         }
                         SlotListEntry::Parent(artist) => {
                             InfoModalItem::from_artist_view_data(artist)

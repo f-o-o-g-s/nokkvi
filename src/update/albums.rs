@@ -312,9 +312,7 @@ impl Nokkvi {
             )
             .chain(
                 self.artists_page
-                    .expansion
-                    .children
-                    .iter()
+                    .expanded_albums()
                     .chain(self.genres_page.expansion.children.iter())
                     .map(|a| (a.id.as_str(), &a.image)),
             )

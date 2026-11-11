@@ -14,7 +14,10 @@ use nokkvi_data::{
     types::artist_recs::ArtistRec,
 };
 
-use super::{super::expansion::SlotListEntry, ArtistsMessage, ArtistsPage, ArtistsViewData};
+use super::{
+    super::expansion::SlotListEntry, ArtistsMessage, ArtistsPage, ArtistsViewData, DiscographyRow,
+    SectionHeader, discography,
+};
 use crate::widgets::{
     self,
     context_menu::LibraryContextEntry,
@@ -197,10 +200,17 @@ impl ArtistsPage {
                         row,
                     )
                 }
-                SlotListEntry::Child(album, _parent_artist_id) => {
-                    let sub_index_label =
-                        self.expansion
-                            .child_sub_index_label(ctx.item_index, artists, |a| &a.id);
+                SlotListEntry::Child(DiscographyRow::Section(header), _parent_artist_id) => {
+                    let row = Self::render_section_header_row(header, &ctx, data.stable_viewport);
+                    crate::widgets::slot_list::wrap_with_select_column_for(
+                        select_header_visible,
+                        &ctx,
+                        ArtistsMessage::SlotList,
+                        row,
+                    )
+                }
+                SlotListEntry::Child(DiscographyRow::Album(album), _parent_artist_id) => {
+                    let sub_index_label = self.album_sub_index_label(ctx.item_index, artists);
                     let row = self.render_album_child_row(
                         album,
                         &ctx,
@@ -629,6 +639,154 @@ impl ArtistsPage {
         )
     }
 
+    /// The dotted sub-index of the album row at flattened `flat_index`, e.g.
+    /// `"236.3"`: the expanded artist's number, then the album's place among
+    /// the artist's albums. Section headers take no number, and a folded
+    /// section's albums keep theirs.
+    pub(crate) fn album_sub_index_label(
+        &self,
+        flat_index: usize,
+        artists: &[ArtistUIViewData],
+    ) -> String {
+        // For a child row this is also its index in `expansion.children`.
+        let child_idx = self
+            .expansion
+            .count_children_before(flat_index, artists, |a| &a.id);
+        let artist_number = flat_index.saturating_sub(child_idx);
+        let album_number = discography::album_ordinal(&self.expansion.children, child_idx);
+        format!("{artist_number}.{album_number}")
+    }
+
+    /// Render a release-type section header: a full slot on the album rows'
+    /// chassis (same depth fill, focus ring, hover and opacity fall-off), so
+    /// it navigates and highlights like any other row.
+    ///
+    /// Layout: `[indent] [chevron, in the sub-index column] [SECTION NAME]
+    /// [hairline rule ⋯] [count] [years]`. The name starts on the album rows'
+    /// thumbnail rail (or their title rail with the thumbnail column off).
+    fn render_section_header_row<'a>(
+        header: &SectionHeader,
+        ctx: &crate::widgets::slot_list::SlotListRowContext,
+        stable_viewport: bool,
+    ) -> Element<'a, ArtistsMessage> {
+        use iced::widget::{Space, text};
+
+        use crate::{
+            theme,
+            widgets::slot_list::{
+                SLOT_LIST_INDEX_WIDTH, SLOT_LIST_SLOT_PADDING, child_slot_button,
+                slot_list_static_icon_color, slot_list_text,
+            },
+        };
+
+        let style = ctx.slot_style(false, false, 1);
+        let m = ctx.metrics;
+
+        // On a loud-fill row every tint gives way to the row's own ink.
+        let accent = slot_list_static_icon_color(style, theme::accent_bright(), ctx.opacity);
+        let chevron_color = slot_list_static_icon_color(style, theme::fg2(), ctx.opacity);
+        let rule_color = slot_list_static_icon_color(
+            style,
+            theme::accent_fill(),
+            ctx.opacity * SECTION_RULE_ALPHA,
+        );
+
+        let chevron_path = if header.is_collapsed() {
+            "assets/icons/chevron-right.svg"
+        } else {
+            "assets/icons/chevron-down.svg"
+        };
+        let chevron_size = (m.metadata_size * 1.15).round();
+        let chevron = container(
+            crate::embedded_svg::svg_widget(chevron_path)
+                .width(Length::Fixed(chevron_size))
+                .height(Length::Fixed(chevron_size))
+                .style(move |_theme, _status| iced::widget::svg::Style {
+                    color: Some(chevron_color),
+                }),
+        )
+        .width(Length::Fixed(SLOT_LIST_INDEX_WIDTH))
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center);
+
+        // The name in tracked capitals. iced has no letter-spacing, so each
+        // letter is its own text and the row's spacing is the tracking.
+        let name_size = m.metadata_size;
+        let mut name = Row::new()
+            .spacing((name_size * SECTION_NAME_TRACKING).round())
+            .align_y(Alignment::Center);
+        for letter in header.group.label().to_uppercase().chars() {
+            name = name.push(if letter == ' ' {
+                Space::new()
+                    .width(Length::Fixed((name_size * 0.3).round()))
+                    .boxed()
+            } else {
+                text(letter.to_string())
+                    .size(name_size)
+                    .font(theme::weighted_ui_font(iced::font::Weight::Bold))
+                    .color(accent)
+                    .boxed()
+            });
+        }
+
+        let rule = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(move |_| container::Style {
+                background: Some(rule_color.into()),
+                ..Default::default()
+            });
+
+        let mut heading = Row::<Element<'_, ArtistsMessage>>::new()
+            .spacing(SECTION_HEADER_SPACING)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .push(name.boxed())
+            .push(rule.boxed())
+            .push(
+                slot_list_text(
+                    header.group.count_label(header.count),
+                    m.metadata_size,
+                    style.subtext_color,
+                )
+                .boxed(),
+            );
+        if let Some(years) = header.years_label() {
+            heading =
+                heading.push(slot_list_text(years, m.metadata_size, style.subtext_color).boxed());
+        }
+
+        // The album rows' leading geometry (indent, sub-index column, spacing
+        // 4), so the chevron sits where their numbers do and the name starts
+        // on the rail of their next column (the thumbnail, else the title).
+        let content = Row::<Element<'_, ArtistsMessage>>::new()
+            .push(
+                container(text(""))
+                    .width(Length::Fixed(SECTION_HEADER_INDENT))
+                    .boxed(),
+            )
+            .push(chevron.boxed())
+            .push(heading.boxed())
+            .spacing(4.0)
+            .padding(iced::Padding {
+                left: SLOT_LIST_SLOT_PADDING,
+                right: SECTION_HEADER_RIGHT_INSET,
+                top: 4.0,
+                bottom: 4.0,
+            })
+            .align_y(Alignment::Center)
+            .height(Length::Fill);
+
+        child_slot_button(
+            content,
+            ctx,
+            style,
+            stable_viewport,
+            ArtistsMessage::SlotList,
+        )
+    }
+
     /// Render a child album row in the slot list (indented, simpler layout)
     fn render_album_child_row<'a>(
         &self,
@@ -709,6 +867,24 @@ pub(crate) fn bio_link_label(url: &str) -> String {
         })
         .unwrap_or_else(|| "Read more".to_string())
 }
+
+/// The section header's hairline rule: the accent at the strength of the
+/// pill's "SIMILAR ARTISTS" rules, so both headers read as one house style.
+const SECTION_RULE_ALPHA: f32 = SIMILAR_RULE_ALPHA;
+
+/// Tracking between the section name's capitals, as a share of the font size.
+const SECTION_NAME_TRACKING: f32 = 0.14;
+
+/// The album rows' leading indent (`child_leading_indent(1)` in
+/// `views/expansion.rs`), so the chevron sits in their sub-index column.
+const SECTION_HEADER_INDENT: f32 = 15.0;
+
+/// Gap between the name, the rule, the count and the years.
+const SECTION_HEADER_SPACING: f32 = 10.0;
+
+/// Right inset, so the count and years end short of the row's edge the way
+/// the album rows' heart does.
+const SECTION_HEADER_RIGHT_INSET: f32 = 14.0;
 
 /// How strongly the accent tints the hairlines either side of the "SIMILAR
 /// ARTISTS" header. The theme's `border()` is a dark groove on the artwork

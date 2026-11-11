@@ -4,7 +4,11 @@ use iced::Task;
 use nokkvi_data::types::ItemKind;
 use tracing::{debug, error};
 
-use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
+use crate::{
+    Nokkvi, View,
+    app_message::Message,
+    views::{DiscographyRow, expansion::SlotListEntry},
+};
 
 /// Run `$body` once against every in-memory collection that can hold the
 /// affected song, binding `$items` to the collection's mutable slice and
@@ -176,9 +180,9 @@ impl Nokkvi {
                 .artists_page
                 .expansion
                 .resolve_center(&self.library.artists, &self.artists_page.common, |a| &a.id)
-                .map(|entry| {
-                    CenterItem::Rateable(match entry {
-                        SlotListEntry::Child(album, _) => CenterItemInfo {
+                .map(|entry| match entry {
+                    SlotListEntry::Child(DiscographyRow::Album(album), _) => {
+                        CenterItem::Rateable(CenterItemInfo {
                             id: album.id.clone(),
                             name: album.name.clone(),
                             artist: album.artist.clone(),
@@ -186,17 +190,22 @@ impl Nokkvi {
                             starred: album.is_starred,
                             rating: album.rating.unwrap_or(0),
                             kind: ItemKind::Album,
-                        },
-                        SlotListEntry::Parent(artist) => CenterItemInfo {
-                            id: artist.id.clone(),
-                            name: artist.name.clone(),
-                            artist: String::new(),
-                            artist_id: None,
-                            starred: artist.is_starred,
-                            rating: artist.rating.unwrap_or(0),
-                            kind: ItemKind::Artist,
-                        },
-                    })
+                        })
+                    }
+                    // A release-type section header: Shift+A enqueues its
+                    // albums, nothing stars or rates it.
+                    SlotListEntry::Child(DiscographyRow::Section(header), _) => {
+                        CenterItem::Named(header.group.label().to_string())
+                    }
+                    SlotListEntry::Parent(artist) => CenterItem::Rateable(CenterItemInfo {
+                        id: artist.id.clone(),
+                        name: artist.name.clone(),
+                        artist: String::new(),
+                        artist_id: None,
+                        starred: artist.is_starred,
+                        rating: artist.rating.unwrap_or(0),
+                        kind: ItemKind::Artist,
+                    }),
                 }),
             View::Playlists => self
                 .playlists_page
@@ -453,9 +462,7 @@ impl Nokkvi {
         // Update expanded child albums in artists/genres views
         if let Some(album) = self
             .artists_page
-            .expansion
-            .children
-            .iter_mut()
+            .expanded_albums_mut()
             .find(|a| a.id == album_id)
         {
             album.is_starred = new_starred_status;
@@ -619,9 +626,7 @@ impl Nokkvi {
         // Update expanded child albums in artists/genres views
         if let Some(album) = self
             .artists_page
-            .expansion
-            .children
-            .iter_mut()
+            .expanded_albums_mut()
             .find(|a| a.id == album_id)
         {
             album.rating = rating_opt;

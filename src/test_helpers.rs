@@ -434,7 +434,7 @@ pub(crate) fn expand_albums_with(app: &mut Nokkvi, id: &str, children: Vec<SongU
 pub(crate) fn expand_artists_with(app: &mut Nokkvi, id: &str, children: Vec<AlbumUIViewData>) {
     app.artists_page.expansion.expanded_id = Some(id.into());
     app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = children;
+    app.artists_page.expansion.children = children.into_iter().map(Into::into).collect();
 }
 
 /// Set up a Genres expansion with the given id and child albums.

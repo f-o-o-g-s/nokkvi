@@ -23,7 +23,9 @@ pub(crate) mod sort_api;
 
 // Re-export commonly used items
 pub(crate) use albums::{AlbumsAction, AlbumsMessage, AlbumsPage, AlbumsViewData};
-pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsViewData};
+pub(crate) use artists::{
+    ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsViewData, DiscographyRow,
+};
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use harbour::{HarbourMessage, HarbourPage, HarbourViewData};
@@ -240,7 +242,13 @@ pub(crate) trait HasCommonAction {
 ///   the centered row when nothing is multi-selected; `row` is its
 ///   `SlotListEntry`, `row_idx` its flattened index, `force` Ctrl+Enter's
 ///   one-shot shuffle.
-/// - `batch_item` — maps a row to its `BatchItem` for the batch actions.
+/// - `children_loaded: Msg => |id, loaded| …` — the rows to store when the
+///   expanded parent's children arrive; most views store `loaded` as it came,
+///   Artists sorts its albums into release-type sections first.
+/// - `batch: |rows| …` — the `BatchPayload` for the batch actions; `rows`
+///   iterates the selected (or centered) rows in display order. Most views
+///   map each row to one `BatchItem`; an Artists section header stands for
+///   all of its albums.
 ///
 /// Rules this macro owns, so the four views can't drift apart again:
 /// - Enter / Ctrl+Enter with a multi-selection plays the selection, in
@@ -261,7 +269,7 @@ pub(crate) trait HasCommonAction {
 ///     id_fn: |a| &a.id,
 ///     expand_center: AlbumsMessage::ExpandCenter => AlbumsAction::ExpandAlbum,
 ///     collapse: AlbumsMessage::CollapseExpansion,
-///     children_loaded: AlbumsMessage::TracksLoaded,
+///     children_loaded: AlbumsMessage::TracksLoaded => |id, tracks| tracks,
 ///     sort_selected: AlbumsMessage::SortModeSelected => AlbumsAction::SortModeChanged,
 ///     toggle_sort: AlbumsMessage::ToggleSortOrder => AlbumsAction::SortOrderChanged,
 ///     search_changed: AlbumsMessage::SearchQueryChanged => AlbumsAction::SearchChanged,
@@ -269,7 +277,7 @@ pub(crate) trait HasCommonAction {
 ///     slot_list: AlbumsMessage::SlotList,
 ///     on_center: |center| …,
 ///     activate: |row, row_idx, force| …,
-///     batch_item: Self::batch_item,
+///     batch: |rows| rows.map(Self::batch_item).collect(),
 ///     play_selection: AlbumsAction::PlaySelection,
 ///     add_to_queue: AlbumsAction::AddBatchToQueue,
 ///     refresh: AlbumsAction::RefreshViewData,
@@ -290,7 +298,7 @@ macro_rules! impl_expansion_update {
         id_fn: $id_fn:expr,
         expand_center: $expand_msg:path => $expand_action:expr,
         collapse: $collapse_msg:path,
-        children_loaded: $children_msg:path,
+        children_loaded: $children_msg:path => |$loaded_id:ident, $loaded:ident| $children:expr,
         sort_selected: $sort_msg:path => $sort_action:expr,
         toggle_sort: $toggle_msg:path => $sort_order_action:expr,
         search_changed: $search_msg:path => $search_action:expr,
@@ -298,7 +306,7 @@ macro_rules! impl_expansion_update {
         slot_list: $slot_list:path,
         on_center: |$center:ident| $on_center:expr,
         activate: |$row:ident, $row_idx:ident, $force:ident| $activate:expr,
-        batch_item: $batch_item:expr,
+        batch: |$batch_rows:ident| $batch:expr,
         play_selection: $play_selection:path,
         add_to_queue: $add_to_queue:path,
         refresh: $refresh_action:expr,
@@ -328,8 +336,9 @@ macro_rules! impl_expansion_update {
                 $self.expansion.collapse($items, $id_fn, &mut $self.common);
                 Ok((Task::none(), $action_none))
             }
-            $children_msg(id, children) => {
-                $self.expansion.set_children(id, children, $items, &mut $self.common);
+            $children_msg($loaded_id, $loaded) => {
+                let children = $children;
+                $self.expansion.set_children($loaded_id, children, $items, &mut $self.common);
                 Ok((Task::none(), $action_none))
             }
 
@@ -401,12 +410,8 @@ macro_rules! impl_expansion_update {
                 Slot::ActivateCenter($force) => match $self.common.activation_batch() {
                     // A multi-selection plays as one batch, in display order.
                     Some(selected) => {
-                        let payload = $self
-                            .expansion
-                            .rows_at(selected, $items, $id_fn)
-                            .map($batch_item)
-                            .collect();
-                        (Task::none(), $play_selection(payload, $force))
+                        let $batch_rows = $self.expansion.rows_at(selected, $items, $id_fn);
+                        (Task::none(), $play_selection($batch, $force))
                     }
                     None => {
                         let len = $self.expansion.flattened_len($items);
@@ -438,12 +443,8 @@ macro_rules! impl_expansion_update {
                     if targets.is_empty() {
                         (Task::none(), $action_none)
                     } else {
-                        let payload = $self
-                            .expansion
-                            .rows_at(targets, $items, $id_fn)
-                            .map($batch_item)
-                            .collect();
-                        (Task::none(), $add_to_queue(payload))
+                        let $batch_rows = $self.expansion.rows_at(targets, $items, $id_fn);
+                        (Task::none(), $add_to_queue($batch))
                     }
                 }
                 Slot::RefreshViewData => (Task::none(), $refresh_action),

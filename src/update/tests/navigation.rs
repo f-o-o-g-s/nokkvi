@@ -954,7 +954,7 @@ enter_with_selection_plays_it!(
     action: crate::views::ArtistsAction::PlaySelection,
     parents: vec![make_artist("ar1", "One"), make_artist("ar2", "Two")],
     expanded: "ar1",
-    children: vec![make_album("a1", "Record", "One")],
+    children: vec![make_album("a1", "Record", "One").into()],
     expected: vec![(TrawlSeedKind::Album, "a1"), (TrawlSeedKind::Artist, "ar2")],
     clicked: crate::views::ArtistsAction::PlayArtist(ref index, false) if index == "1",
 );

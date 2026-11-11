@@ -809,7 +809,7 @@ fn every_held_list_answers_the_shared_lookups() {
     app.harbour.recently_added = vec![album("al-recent", hashed("al-recent"))];
     app.harbour.most_played_albums = vec![album("al-most", hashed("al-most"))];
     app.harbour.random_album = Some(album("al-rand", hashed("al-rand")));
-    app.artists_page.expansion.children = vec![album("al-child", hashed("al-child"))];
+    app.artists_page.expansion.children = vec![album("al-child", hashed("al-child")).into()];
     app.genres_page.expansion.children = vec![album("al-gchild", hashed("al-gchild"))];
     let mut lib_artist = artist("ar-lib", false);
     lib_artist.image.thumb_hash = Some("ar-lib-hash".into());

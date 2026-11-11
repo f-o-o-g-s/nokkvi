@@ -173,12 +173,16 @@ fn album_star_propagates_to_albums_list() {
 #[test]
 fn album_star_propagates_to_artist_expansion() {
     let mut app = test_app();
-    app.artists_page.expansion.children = vec![make_album("a1", "My Album", "Artist")];
+    app.artists_page.expansion.children = vec![make_album("a1", "My Album", "Artist").into()];
     app.artists_page.expansion.expanded_id = Some("artist-1".to_string());
 
     let _ = app.handle_album_starred_status_updated("a1".to_string(), true);
     assert!(
-        app.artists_page.expansion.children[0].is_starred,
+        app.artists_page
+            .expanded_albums()
+            .next()
+            .unwrap()
+            .is_starred,
         "album star must propagate to artist expansion"
     );
 }
@@ -202,14 +206,14 @@ fn album_rating_propagates_to_all_views() {
     app.library
         .albums
         .set_from_vec(vec![make_album("a1", "My Album", "Artist")]);
-    app.artists_page.expansion.children = vec![make_album("a1", "My Album", "Artist")];
+    app.artists_page.expansion.children = vec![make_album("a1", "My Album", "Artist").into()];
     app.genres_page.expansion.children = vec![make_album("a1", "My Album", "Artist")];
 
     let _ = app.handle_album_rating_updated("a1".to_string(), 5);
 
     assert_eq!(app.library.albums[0].rating, Some(5), "albums list");
     assert_eq!(
-        app.artists_page.expansion.children[0].rating,
+        app.artists_page.expanded_albums().next().unwrap().rating,
         Some(5),
         "artist expansion"
     );

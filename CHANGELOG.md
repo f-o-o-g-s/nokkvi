@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- An expanded artist's albums are grouped under release-type headers: Albums, EPs, Singles, Live, Compilations and more, with Appears On last.
+- An artist with only plain albums keeps the flat album list.
 - Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
 
 ### Changed

@@ -69,7 +69,7 @@ fn every_artists_row_menu_entry_has_an_action() {
         for entry in clickable(offered) {
             let mut page = ArtistsPage::new();
             page.expansion.expanded_id = Some("ar1".into());
-            page.expansion.children = vec![make_album("a1", "Record", "Band")];
+            page.expansion.children = vec![make_album("a1", "Record", "Band").into()];
 
             let (_, action) = page.update(
                 ArtistsMessage::ContextMenuAction(row, entry),

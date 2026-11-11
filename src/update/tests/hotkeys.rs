@@ -212,10 +212,13 @@ fn album_rating_updated_propagates_to_artists_expansion_children() {
     let mut app = test_app();
     let mut album = make_album("a1", "Expanded Album", "Artist");
     album.rating = None;
-    app.artists_page.expansion.children = vec![album];
+    app.artists_page.expansion.children = vec![album.into()];
 
     let _ = app.handle_album_rating_updated("a1".to_string(), 5);
-    assert_eq!(app.artists_page.expansion.children[0].rating, Some(5));
+    assert_eq!(
+        app.artists_page.expanded_albums().next().unwrap().rating,
+        Some(5)
+    );
 }
 
 #[test]

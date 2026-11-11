@@ -23,6 +23,7 @@ mod boat;
 mod components;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod discography;
 mod dynamic_accent;
 mod editor;
 mod focused_row;

@@ -7,17 +7,19 @@
 //! Module layout:
 //! - `mod.rs`: types (Page, Message, Action, ViewData), trait impls, tests
 //!   for column declarations
+//! - `discography.rs`: the rows under an expanded artist (albums plus the
+//!   release-type section headers) and the walks over them
 //! - `update.rs`: `impl ArtistsPage { fn update }` + the toggle-column test
 //! - `view.rs`: `impl ArtistsPage { fn view, fn render_artist_row,
 //!   fn render_album_child_row }`. The Stars / Plays auto-show-on-sort
 //!   decision is centralized in `crate::views::auto_show_on_sort`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use iced::widget::image;
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
-    types::ItemKind,
+    types::{ItemKind, discography::DiscographyGroup},
 };
 
 use super::expansion::ExpansionState;
@@ -26,17 +28,28 @@ use crate::{
     widgets::{SlotListPageState, view_header::SortMode},
 };
 
+pub(crate) mod discography;
 mod update;
 mod view;
+
+pub(crate) use discography::{DiscographyRow, SectionHeader};
 
 /// Artists page local state
 #[derive(Debug)]
 pub struct ArtistsPage {
     pub common: SlotListPageState,
-    /// Inline expansion state (artist → albums)
-    pub expansion: ExpansionState<AlbumUIViewData>,
+    /// Inline expansion state (artist → albums, under release-type section
+    /// headers when the artist's discography has more than plain albums)
+    pub expansion: ExpansionState<DiscographyRow>,
     /// Per-column visibility toggles surfaced via the columns-cog dropdown.
     pub column_visibility: ArtistsColumnVisibility,
+    /// Sort an expanded artist's albums into release-type sections (General →
+    /// Group Artist Albums by Release Type). Off keeps the server's flat
+    /// list. The root copies the setting in before every `update`.
+    pub group_by_release_type: bool,
+    /// The sections the user folded this session, by kind: the next artist's
+    /// albums (and a reload of this one's) arrive with those sections folded.
+    pub collapsed_sections: HashSet<DiscographyGroup>,
 }
 
 // Toggleable artists columns. The artist name is always shown; everything
@@ -230,6 +243,8 @@ impl Default for ArtistsPage {
             ),
             expansion: ExpansionState::default(),
             column_visibility: ArtistsColumnVisibility::default(),
+            group_by_release_type: true,
+            collapsed_sections: HashSet::new(),
         }
     }
 }
@@ -237,6 +252,17 @@ impl Default for ArtistsPage {
 impl ArtistsPage {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Every album under the expanded artist, in display order, the ones
+    /// folded into a collapsed section included.
+    pub fn expanded_albums(&self) -> impl Iterator<Item = &AlbumUIViewData> {
+        discography::albums(&self.expansion.children)
+    }
+
+    /// [`Self::expanded_albums`], mutably, for star / rating / play-count sync.
+    pub fn expanded_albums_mut(&mut self) -> impl Iterator<Item = &mut AlbumUIViewData> {
+        discography::albums_mut(&mut self.expansion.children)
     }
 
     /// Convert sort mode to API string for server requests.

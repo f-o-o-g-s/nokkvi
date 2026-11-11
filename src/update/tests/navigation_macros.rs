@@ -75,7 +75,7 @@ macro_rules! for_each_expandable_entity {
             view_const:              crate::View::Artists,
             children_loaded_msg:     crate::views::ArtistsMessage::AlbumsLoaded,
             children_loaded_arg:     vec![make_album("a1", "Album One", "Artist Two")],
-            expansion_child:         vec![make_album("a1", "Album", "Artist")],
+            expansion_child:         vec![make_album("a1", "Album", "Artist").into()],
             handle_view_fn:          handle_artists,
             try_resolve_fn:          try_resolve_pending_expand_artist,
             handle_navigate_fn:      handle_navigate_and_expand_artist,
