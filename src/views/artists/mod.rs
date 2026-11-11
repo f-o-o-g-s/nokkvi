@@ -45,7 +45,8 @@ pub struct ArtistsPage {
     pub column_visibility: ArtistsColumnVisibility,
     /// Sort an expanded artist's albums into release-type sections (General →
     /// Group Artist Albums by Release Type). Off keeps the server's flat
-    /// list. The root copies the setting in before every `update`.
+    /// list. The root hands the setting in on every settings load
+    /// ([`Self::set_grouping`]).
     pub group_by_release_type: bool,
     /// The sections the user folded this session, by kind: the next artist's
     /// albums (and a reload of this one's) arrive with those sections folded.

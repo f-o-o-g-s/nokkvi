@@ -60,25 +60,6 @@ impl ReleaseType {
         })
     }
 
-    /// Whether this is one of MusicBrainz's primary types.
-    pub fn is_primary(self) -> bool {
-        match self {
-            Self::Album | Self::Ep | Self::Single | Self::Broadcast | Self::Other => true,
-            Self::Compilation
-            | Self::Soundtrack
-            | Self::Spokenword
-            | Self::Interview
-            | Self::Audiobook
-            | Self::AudioDrama
-            | Self::Live
-            | Self::Remix
-            | Self::DjMix
-            | Self::Mixtape
-            | Self::Demo
-            | Self::FieldRecording => false,
-        }
-    }
-
     /// The type as a row tag reads it.
     pub fn label(self) -> &'static str {
         match self {
