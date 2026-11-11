@@ -336,6 +336,22 @@ struct Reopening {
     generation: u64,
 }
 
+/// A seek's reopen that has landed.
+#[derive(Clone, Copy)]
+struct LandedReopen {
+    /// The position it landed on (ms).
+    pos: u64,
+    at: std::time::Instant,
+    /// The source generation it landed under.
+    generation: u64,
+}
+
+/// How long after a seek's reopen landed a seek to the same spot counts as
+/// its repeat (one seek-bar click often sends two): the stream already
+/// stands there, and a second reopen would be a second transcode on the
+/// server.
+const REPEAT_SEEK_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Whether a track at `url` can seek by opening it again at an offset
 /// ([`CustomAudioEngine::reopens_by_offset`]).
 fn reopens_by_offset_with(offset_supported: bool, delivery: StreamDelivery, url: &str) -> bool {
@@ -2114,6 +2130,9 @@ pub struct CustomAudioEngine {
     reopening: Option<Reopening>,
     /// The last [`ReopenTicket`]'s serial.
     reopen_serial: u64,
+    /// Where and when a seek's reopen last landed: a repeat of that seek
+    /// right behind it is skipped ([`REPEAT_SEEK_WINDOW`]).
+    landed_reopen: Option<LandedReopen>,
 
     /// Why the last seek that reopened the stream failed (a busy server, the
     /// network), for the UI tick to show once ([`Self::take_seek_failure`]).
@@ -2165,6 +2184,7 @@ impl CustomAudioEngine {
             settling_seek: None,
             reopening: None,
             reopen_serial: 0,
+            landed_reopen: None,
             seek_failure: None,
             reopen_answer_timeout: REOPEN_ANSWER_TIMEOUT,
         }
@@ -3476,6 +3496,16 @@ impl CustomAudioEngine {
         let Some(candidate) = self.reopen_candidate().await else {
             return SeekBegun::Done(self.complete_seek(position_ms, None, seek_start).await);
         };
+        // The repeat of a seek whose reopen just landed (one seek-bar click
+        // often sends two): the stream already stands there.
+        if self.landed_reopen.is_some_and(|landed| {
+            landed.pos == position_ms.min(self.duration)
+                && landed.generation == self.channels.source_generation.current()
+                && landed.at.elapsed() < REPEAT_SEEK_WINDOW
+        }) {
+            debug!("🔍 [SEEK] Repeat of the seek that just landed at {position_ms}ms — skipped");
+            return SeekBegun::Done(SeekOutcome::Settled);
+        }
         self.reopen_serial += 1;
         self.reopening = Some(Reopening {
             serial: self.reopen_serial,
@@ -3865,6 +3895,11 @@ impl CustomAudioEngine {
             drop(pending_swap);
             self.stream = facts;
         }
+        self.landed_reopen = Some(LandedReopen {
+            pos,
+            at: std::time::Instant::now(),
+            generation: self.channels.source_generation.current(),
+        });
         debug!("🔍 [SEEK] Reopened at {pos}ms");
     }
 
@@ -5468,6 +5503,11 @@ impl CustomAudioEngine {
     }
 
     /// Test-only: shorten how long a seek's reopen waits for its answer.
+    #[cfg(test)]
+    pub(crate) fn forget_landed_reopen_for_test(&mut self) {
+        self.landed_reopen = None;
+    }
+
     #[cfg(test)]
     pub(crate) fn set_reopen_answer_timeout_for_test(&mut self, timeout: std::time::Duration) {
         self.reopen_answer_timeout = timeout;
@@ -12376,6 +12416,37 @@ mod tests {
             assert_eq!(landed, 6_400, "older first: {older_lands_first}");
             assert!(heard.abs_diff(6_400) <= 20, "{heard}");
         }
+    }
+
+    /// One click on the seek bar often reaches the engine as two seeks to
+    /// the same spot. On a track that reopens, the second would be a second
+    /// transcode on the server for a stream that already stands there: it
+    /// is skipped. A seek to the same spot later on (the song has played on
+    /// since) reopens as usual.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_repeat_of_the_seek_that_just_landed_asks_the_server_nothing() {
+        let (mut engine, server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        play_out(&mut mixer, 1_000);
+
+        engine.seek(6_400).await;
+        let outcome = engine.seek(6_400).await;
+        let after_repeat = offsets_after(&server, 1);
+        let position = engine.position();
+        let heard = next_heard_ms(&mut mixer);
+        engine.forget_landed_reopen_for_test();
+        engine.seek(6_400).await;
+        let after_later = offsets_after(&server, 1);
+        engine.stop().await;
+
+        assert_eq!(after_repeat, [Some("6".to_owned())], "one request");
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert_eq!(position, 6_400);
+        assert!(heard.abs_diff(6_400) <= 20, "{heard}");
+        assert_eq!(
+            after_later,
+            [Some("6".to_owned()), Some("6".to_owned())],
+            "a later seek to the same spot reopens"
+        );
     }
 
     /// A relative seek that starts settling while an earlier seek's reopen
