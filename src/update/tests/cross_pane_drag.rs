@@ -38,7 +38,11 @@
 //!    `slot_list_view_with_drag`), so the constant doesn't exist.
 
 use crate::{
-    test_helpers::{make_queue_song, make_song, test_app},
+    test_helpers::{
+        albums_indexed, artists_indexed, expand_albums_with, expand_artists_with,
+        expand_genres_with, genres_indexed, make_album, make_queue_song, make_song, seed_albums,
+        seed_artists, seed_genres, test_app,
+    },
     views,
     widgets::{HoveredSlot, SlotListPageMessage},
 };
@@ -700,5 +704,123 @@ fn compute_editor_drop_slot_is_none_for_empty_editor_without_hover() {
         app.compute_editor_drop_slot(),
         None,
         "empty editor with no hovered slot must resolve no drop target"
+    );
+}
+
+// ============================================================================
+// A drag out of an expanded list: the pressed index is a FLATTENED index
+// ============================================================================
+
+/// Put a single-row drag of flattened row `flat_idx` in flight.
+fn drag_row(app: &mut crate::Nokkvi, flat_idx: usize) {
+    app.cross_pane_drag.active = Some(crate::state::CrossPaneDragState {
+        origin: iced::Point::new(0.0, 0.0),
+        cursor: iced::Point::new(0.0, 0.0),
+        center_index: Some(flat_idx),
+        selection_count: 1,
+    });
+}
+
+fn drag_title(app: &crate::Nokkvi) -> Option<String> {
+    app.drag_preview_row().map(|row| row.title)
+}
+
+/// The pressed index counts the expanded artist's album rows, so it only
+/// equals the artist's own index above the expansion. Indexing the artist
+/// list with it named the wrong artist (or nothing) on the drag label.
+#[test]
+fn the_drag_label_names_the_row_under_an_expanded_artist() {
+    let mut app = test_app();
+    seed_artists(&mut app, artists_indexed(3));
+    expand_artists_with(
+        &mut app,
+        "ar0",
+        vec![
+            make_album("x1", "First LP", "Artist 0"),
+            make_album("x2", "Second LP", "Artist 0"),
+        ],
+    );
+    open_browsing_panel(&mut app, views::BrowsingView::Artists);
+
+    drag_row(&mut app, 0);
+    assert_eq!(drag_title(&app).as_deref(), Some("Artist 0"));
+    drag_row(&mut app, 2);
+    assert_eq!(
+        drag_title(&app).as_deref(),
+        Some("Second LP"),
+        "an album row under the expanded artist is labelled as that album",
+    );
+    drag_row(&mut app, 3);
+    assert_eq!(
+        drag_title(&app).as_deref(),
+        Some("Artist 1"),
+        "the artist below the expansion, not the artist list's fourth row",
+    );
+    drag_row(&mut app, 4);
+    assert_eq!(drag_title(&app).as_deref(), Some("Artist 2"));
+}
+
+#[test]
+fn the_drag_label_names_the_row_under_an_expanded_album() {
+    let mut app = test_app();
+    seed_albums(&mut app, albums_indexed(2));
+    expand_albums_with(
+        &mut app,
+        "a0",
+        vec![make_song("t1", "Opening Track", "Artist")],
+    );
+    open_browsing_panel(&mut app, views::BrowsingView::Albums);
+
+    drag_row(&mut app, 1);
+    assert_eq!(drag_title(&app).as_deref(), Some("Opening Track"));
+    drag_row(&mut app, 2);
+    assert_eq!(drag_title(&app).as_deref(), Some("Album 1"));
+}
+
+#[test]
+fn the_drag_label_names_the_row_under_an_expanded_genre() {
+    let mut app = test_app();
+    seed_genres(&mut app, genres_indexed(2));
+    expand_genres_with(
+        &mut app,
+        "uuid-0",
+        vec![make_album("x1", "Genre LP", "Someone")],
+    );
+    open_browsing_panel(&mut app, views::BrowsingView::Genres);
+
+    drag_row(&mut app, 1);
+    assert_eq!(drag_title(&app).as_deref(), Some("Genre LP"));
+    drag_row(&mut app, 2);
+    assert_eq!(drag_title(&app).as_deref(), Some("Genre 1"));
+}
+
+/// The drop marks the dragged row so `AddCenterToQueue` takes it. Bounded by
+/// the parent count, a row whose flattened index reached past the artist
+/// list was never marked, and the drop queued whatever row was focused.
+#[test]
+fn a_drop_marks_an_expanded_row_past_the_parent_count() {
+    let mut app = test_app();
+    populate_queue(&mut app, 3);
+    seed_artists(&mut app, artists_indexed(2));
+    expand_artists_with(
+        &mut app,
+        "ar0",
+        vec![
+            make_album("x1", "First LP", "Artist 0"),
+            make_album("x2", "Second LP", "Artist 0"),
+            make_album("x3", "Third LP", "Artist 0"),
+        ],
+    );
+    open_browsing_panel(&mut app, views::BrowsingView::Artists);
+    app.queue_page.common.slot_list.hovered_slot = Some(queue_hover(&app, 0, 0));
+
+    // Flattened row 3 is "Third LP"; the artist list holds two rows.
+    drag_row(&mut app, 3);
+    let _ = app.handle_cross_pane_drag_released();
+
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(3),
+        "the dropped album row is the one the add-to-queue takes",
     );
 }

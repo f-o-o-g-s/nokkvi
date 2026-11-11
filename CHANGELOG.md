@@ -27,6 +27,8 @@ All notable changes to this project will be documented in this file.
 - With crossfade off, seeking to a song's last second while paused no longer starts the next song playing.
 - Clicking a song just as the playing one changes no longer leaves the queue one song past the click.
 - Stop pressed just as a song changes gaplessly no longer starts the next song.
+- Dragging a row to the queue from under an expanded album, artist or genre now shows that row on the drag label.
+- Dropping a row dragged from far down an expanded album, artist or genre now queues that row, not the highlighted one.
 
 ### Removed
 

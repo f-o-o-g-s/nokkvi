@@ -63,6 +63,15 @@ impl<'a> WithinListDrag<'a> {
     }
 }
 
+/// The dragged row as the cross-pane drag ghost shows it
+/// ([`Nokkvi::drag_preview_row`]).
+pub(crate) struct DragPreviewRow<'a> {
+    pub artwork: Option<&'a iced::widget::image::Handle>,
+    pub title: String,
+    pub subtitle: String,
+    pub meta: String,
+}
+
 impl Nokkvi {
     /// Dispatch `CrossPaneDragMessage` sub-enum variants to their per-variant
     /// handlers. Mirrors the per-handler routing pattern other sub-enums
@@ -287,7 +296,10 @@ impl Nokkvi {
         {
             match panel.active_view {
                 views::BrowsingView::Albums => {
-                    let total = self.library.albums.len();
+                    let total = self
+                        .albums_page
+                        .expansion
+                        .flattened_len(&self.library.albums);
                     self.albums_page
                         .common
                         .slot_list
@@ -301,14 +313,20 @@ impl Nokkvi {
                         .set_selected(center_idx, total);
                 }
                 views::BrowsingView::Artists => {
-                    let total = self.library.artists.len();
+                    let total = self
+                        .artists_page
+                        .expansion
+                        .flattened_len(&self.library.artists);
                     self.artists_page
                         .common
                         .slot_list
                         .set_selected(center_idx, total);
                 }
                 views::BrowsingView::Genres => {
-                    let total = self.library.genres.len();
+                    let total = self
+                        .genres_page
+                        .expansion
+                        .flattened_len(&self.library.genres);
                     self.genres_page
                         .common
                         .slot_list
@@ -386,84 +404,120 @@ impl Nokkvi {
             .boxed()
     }
 
+    /// What the drag ghost shows for the dragged row: its thumbnail and three
+    /// lines of text. `None` when no drag is active or the row is gone.
+    ///
+    /// The dragged index is a FLATTENED slot index: under an expanded parent
+    /// it counts the child rows too, so the expansion views resolve it
+    /// through their `ExpansionState` and never index the parent list with it
+    /// (gotchas/slot-lists.md).
+    pub(crate) fn drag_preview_row(&self) -> Option<DragPreviewRow<'_>> {
+        use crate::views::{artists::discography::DiscographyRow, expansion::SlotListEntry};
+
+        let panel = self.browsing_panel.as_ref()?;
+        let idx = self.cross_pane_drag.active.as_ref()?.center_index?;
+        let mode = self.settings.track_artwork;
+        let minis = &self.artwork.album_art.snapshot;
+
+        let album_row = |a: &'_ nokkvi_data::backend::albums::AlbumUIViewData| DragPreviewRow {
+            artwork: minis.get(&a.id),
+            title: a.name.clone(),
+            subtitle: a.artist.clone(),
+            meta: format!("{} songs", a.song_count),
+        };
+        let song_row = |s: &'_ nokkvi_data::backend::songs::SongUIViewData| DragPreviewRow {
+            artwork: s.cover_key(mode).and_then(|key| minis.get(key)),
+            title: s.title.clone(),
+            subtitle: s.artist.clone(),
+            meta: s.album.clone(),
+        };
+
+        match panel.active_view {
+            views::BrowsingView::Albums => {
+                let albums = &self.library.albums;
+                let entry = self
+                    .albums_page
+                    .expansion
+                    .get_entry_at(idx, albums, |a| &a.id)?;
+                Some(match entry {
+                    SlotListEntry::Parent(album) => album_row(album),
+                    SlotListEntry::Child(song, _) => song_row(song),
+                })
+            }
+            views::BrowsingView::Songs => self.library.songs.get(idx).map(song_row),
+            views::BrowsingView::Artists => {
+                let artists = &self.library.artists;
+                let entry = self
+                    .artists_page
+                    .expansion
+                    .get_entry_at(idx, artists, |a| &a.id)?;
+                Some(match entry {
+                    SlotListEntry::Parent(artist) => DragPreviewRow {
+                        artwork: minis.get(&artist.id),
+                        title: artist.name.clone(),
+                        subtitle: format!("{} albums", artist.album_count),
+                        meta: format!("{} songs", artist.song_count),
+                    },
+                    SlotListEntry::Child(DiscographyRow::Album(album), _) => album_row(album),
+                    // A header stands for its section's albums, as in every
+                    // other batch (`ArtistsPage::batch_targets`).
+                    SlotListEntry::Child(DiscographyRow::Section(header), artist_id) => {
+                        DragPreviewRow {
+                            artwork: minis.get(&artist_id),
+                            title: header.group.label().to_string(),
+                            subtitle: artists
+                                .iter()
+                                .find(|a| a.id == artist_id)
+                                .map(|a| a.name.clone())
+                                .unwrap_or_default(),
+                            meta: format!("{} albums", header.count),
+                        }
+                    }
+                })
+            }
+            views::BrowsingView::Genres => {
+                let genres = &self.library.genres;
+                let entry = self
+                    .genres_page
+                    .expansion
+                    .get_entry_at(idx, genres, |g| &g.id)?;
+                Some(match entry {
+                    SlotListEntry::Parent(genre) => DragPreviewRow {
+                        artwork: self.artwork.genre.mini.snapshot.get(&genre.id),
+                        title: genre.name.clone(),
+                        subtitle: format!("{} albums", genre.album_count),
+                        meta: format!("{} songs", genre.song_count),
+                    },
+                    SlotListEntry::Child(album, _) => album_row(album),
+                })
+            }
+            views::BrowsingView::Similar => self
+                .similar_songs
+                .as_ref()
+                .and_then(|state| state.songs.get(idx))
+                .map(|s| DragPreviewRow {
+                    artwork: s.cover_key(mode).and_then(|key| minis.get(key)),
+                    title: s.title.clone(),
+                    subtitle: s.artist.clone(),
+                    meta: s.album.clone(),
+                }),
+        }
+    }
+
     /// Render a full slot list slot replica for the centered browsing panel item.
     /// Uses the same shared helpers (`slot_list_artwork_column`, `slot_list_text_column`,
     /// `slot_list_metadata_column`) as the actual views for pixel-perfect fidelity.
     pub(crate) fn render_drag_slot(&self) -> iced::Element<'_, Message> {
         use iced::Element;
 
-        let panel = match self.browsing_panel.as_ref() {
-            Some(p) => p,
-            None => {
-                return Self::drag_fallback_label();
-            }
-        };
-
         let Some(drag) = self.cross_pane_drag.active.as_ref() else {
             return Self::drag_fallback_label();
         };
         let selection_count = drag.selection_count;
 
-        let center_idx = match drag.center_index {
-            Some(idx) => idx,
-            None => {
-                return Self::drag_fallback_label();
-            }
-        };
-
-        // Extract (artwork, title, subtitle, meta) per view type
-        let mode = self.settings.track_artwork;
-        let slot_data: Option<(Option<&iced::widget::image::Handle>, String, String, String)> =
-            match panel.active_view {
-                views::BrowsingView::Albums => self.library.albums.get(center_idx).map(|a| {
-                    (
-                        self.artwork.album_art.peek(&a.id),
-                        a.name.clone(),
-                        a.artist.clone(),
-                        format!("{} songs", a.song_count),
-                    )
-                }),
-                views::BrowsingView::Songs => self.library.songs.get(center_idx).map(|s| {
-                    (
-                        s.cover_key(mode)
-                            .and_then(|key| self.artwork.album_art.snapshot.get(key)),
-                        s.title.clone(),
-                        s.artist.clone(),
-                        s.album.clone(),
-                    )
-                }),
-                views::BrowsingView::Artists => self.library.artists.get(center_idx).map(|a| {
-                    (
-                        self.artwork.album_art.peek(&a.id),
-                        a.name.clone(),
-                        format!("{} albums", a.album_count),
-                        format!("{} songs", a.song_count),
-                    )
-                }),
-                views::BrowsingView::Genres => self.library.genres.get(center_idx).map(|g| {
-                    (
-                        self.artwork.genre.mini.snapshot.get(&g.id),
-                        g.name.clone(),
-                        format!("{} albums", g.album_count),
-                        format!("{} songs", g.song_count),
-                    )
-                }),
-                views::BrowsingView::Similar => self.similar_songs.as_ref().and_then(|state| {
-                    state.songs.get(center_idx).map(|s| {
-                        (
-                            s.cover_key(mode)
-                                .and_then(|key| self.artwork.album_art.snapshot.get(key)),
-                            s.title.clone(),
-                            s.artist.clone(),
-                            s.album.clone(),
-                        )
-                    })
-                }),
-            };
-
-        let slot_content: Element<'_, Message> = match slot_data {
-            Some((art, title, subtitle, meta)) => {
-                Self::build_drag_preview_row(art, title, subtitle, meta)
+        let slot_content: Element<'_, Message> = match self.drag_preview_row() {
+            Some(row) => {
+                Self::build_drag_preview_row(row.artwork, row.title, row.subtitle, row.meta)
             }
             None => Self::drag_fallback_label(),
         };
