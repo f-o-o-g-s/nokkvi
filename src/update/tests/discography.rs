@@ -371,6 +371,66 @@ fn shift_enter_on_a_header_folds_and_unfolds_its_section() {
     assert_eq!(centre_index(&app), Some(EPS_HEADER));
 }
 
+/// A jump to an artist (a similar-artist chip, a text link) pins the artist
+/// to the top slot, and the keys then walk the highlight down a row at a
+/// time with the list. Folding a section on the way must keep that walk:
+/// the pin once turned into a click marker, so the next step snapped the
+/// viewport back to the header and the list lurched three rows.
+#[test]
+fn a_fold_under_a_find_and_expand_pin_keeps_the_pinned_walk() {
+    let mut app = app_with_albums(mixed());
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    // The jump: the viewport sits past the artist, which is pinned on top.
+    app.artists_page.common.handle_set_offset(4, total);
+    app.artists_page.common.slot_list.pin_selected(1, total);
+    // One step down walks the pinned highlight onto the Albums header.
+    let _ = page_update(&mut app, slot(SlotListPageMessage::NavigateDown));
+    assert_eq!(centre_index(&app), Some(ALBUMS_HEADER));
+    let viewport = app.artists_page.common.slot_list.viewport_offset;
+    assert_eq!(viewport, 5);
+
+    let _ = page_update(&mut app, ArtistsMessage::ExpandCenter);
+    assert_eq!(shape(&app)[..2], ["#Albums", "#EPs"]);
+    assert_eq!(centre_index(&app), Some(ALBUMS_HEADER));
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, viewport);
+    // The header is the pinned row, not a click's one-row selection.
+    assert!(app.artists_page.common.slot_list.selected_offset_pinned);
+    assert!(
+        app.artists_page
+            .common
+            .slot_list
+            .selected_indices
+            .is_empty()
+    );
+
+    // The next step moves highlight and list one row, as before the fold.
+    let _ = page_update(&mut app, slot(SlotListPageMessage::NavigateDown));
+    assert_eq!(centre_index(&app), Some(ALBUMS_HEADER + 1));
+    assert_eq!(
+        app.artists_page.common.slot_list.viewport_offset,
+        viewport + 1
+    );
+}
+
+/// A chevron click is a click: it ends a pin, like any other click.
+#[test]
+fn a_chevron_click_under_a_pin_ends_the_pin() {
+    let mut app = app_with_albums(mixed());
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    app.artists_page.common.handle_set_offset(4, total);
+    app.artists_page.common.slot_list.pin_selected(1, total);
+
+    let _ = app.handle_artists(ArtistsMessage::ToggleSection(EPS_HEADER));
+    assert_eq!(centre_index(&app), Some(EPS_HEADER));
+    assert!(!app.artists_page.common.slot_list.selected_offset_pinned);
+}
+
 #[test]
 fn shift_enter_on_an_album_under_a_header_still_drills_into_albums() {
     let mut app = app_with_albums(mixed());

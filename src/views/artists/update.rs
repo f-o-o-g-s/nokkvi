@@ -32,6 +32,14 @@ enum BatchTarget<'a> {
     Album(&'a AlbumUIViewData),
 }
 
+/// What folded or unfolded a section: Shift+Enter on the focused header, or
+/// a click on a header's chevron.
+#[derive(Clone, Copy)]
+enum FoldBy {
+    Key,
+    Click,
+}
+
 impl ArtistsPage {
     /// What `rows` stand for in a play / queue / playlist / mix batch, in
     /// display order. A section header stands for the albums of its section
@@ -106,8 +114,15 @@ impl ArtistsPage {
     /// The viewport offset stays put, so the header keeps its place on
     /// screen while the rows under it come or go. Those rows changed
     /// position, so the selection is dropped, and the focus is left on the
-    /// header.
-    fn toggle_section(&mut self, flat_idx: usize, artists: &[ArtistUIViewData]) {
+    /// header: as a click's marker after a chevron click, and still as the
+    /// find-and-expand pin when the key folded a pinned header, so the keys
+    /// go on walking the list a row at a time.
+    fn toggle_section(&mut self, flat_idx: usize, artists: &[ArtistUIViewData], by: FoldBy) {
+        let keep_pin = match by {
+            FoldBy::Key => self.common.slot_list.selected_offset_pinned,
+            // A click ends a pin, as everywhere else.
+            FoldBy::Click => false,
+        };
         let Some(child_idx) = self
             .expansion
             .child_ordinal_at(flat_idx, artists, |a| &a.id)
@@ -126,9 +141,11 @@ impl ArtistsPage {
         }
         let total = self.expansion.flattened_len(artists);
         self.common.settle_after_shrink(total);
-        if self.common.get_center_item_index(total) != Some(flat_idx) {
-            // The header was clicked away from the viewport's centre: mark
-            // it the way a plain click does.
+        if keep_pin {
+            self.common.slot_list.pin_selected(flat_idx, total);
+        } else if self.common.get_center_item_index(total) != Some(flat_idx) {
+            // The header sits away from the viewport's centre: mark it the
+            // way a plain click does.
             self.common
                 .handle_slot_click(flat_idx, total, iced::keyboard::Modifiers::default());
         }
@@ -261,7 +278,7 @@ impl ArtistsPage {
                 // On a section header Shift+Enter folds or unfolds the section.
                 Some(SlotListEntry::Child(DiscographyRow::Section(_), _)) => {
                     if let Some(flat_idx) = center_idx {
-                        self.toggle_section(flat_idx, artists);
+                        self.toggle_section(flat_idx, artists, FoldBy::Key);
                     }
                     return (Task::none(), ArtistsAction::None);
                 }
@@ -399,7 +416,7 @@ impl ArtistsPage {
                     self.context_menu_action(clicked_idx, entry, artists),
                 ),
                 ArtistsMessage::ToggleSection(flat_idx) => {
-                    self.toggle_section(flat_idx, artists);
+                    self.toggle_section(flat_idx, artists, FoldBy::Click);
                     (Task::none(), ArtistsAction::None)
                 }
                 // Routed up to root in `handle_artists` before this match runs.
