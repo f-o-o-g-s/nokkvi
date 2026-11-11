@@ -624,9 +624,8 @@ impl PlaybackController {
     pub async fn seek(&self, position_seconds: f64) -> Result<u64> {
         let position_ms = (position_seconds * 1000.0) as u64;
         let mut engine = self.audio_engine.lock().await;
-        let outcome = engine.seek(position_ms).await;
-        let landed = engine.position();
-        drop(engine);
+        let begun = engine.begin_seek(position_ms).await;
+        let (outcome, landed) = finish_begun_seek(&self.audio_engine, engine, begun).await;
         self.after_seek(outcome).await;
         Ok(landed)
     }
@@ -685,9 +684,8 @@ impl PlaybackController {
             }
             return Ok(target.min(duration));
         }
-        let outcome = engine.seek(target).await;
-        let landed = engine.position();
-        drop(engine);
+        let begun = engine.begin_seek(target).await;
+        let (outcome, landed) = finish_begun_seek(&self.audio_engine, engine, begun).await;
         self.after_seek(outcome).await;
         Ok(landed)
     }
@@ -1735,6 +1733,29 @@ fn relative_seek_target(base_ms: u64, delta_seconds: f64) -> Option<u64> {
 /// `timeOffset` on a transcode.
 pub const TRANSCODE_OFFSET_EXTENSION: &str = "transcodeOffset";
 
+/// Finish a seek begun under `engine` ([`CustomAudioEngine::begin_seek`]):
+/// one that reopens its stream waits for the server with the engine lock
+/// RELEASED, then takes it again to land the answer. Returns the outcome and
+/// where the engine then stands (ms).
+async fn finish_begun_seek(
+    engine_mutex: &Mutex<CustomAudioEngine>,
+    engine: tokio::sync::MutexGuard<'_, CustomAudioEngine>,
+    begun: crate::audio::engine::SeekBegun,
+) -> (crate::audio::engine::SeekOutcome, u64) {
+    use crate::audio::engine::SeekBegun;
+
+    match begun {
+        SeekBegun::Done(outcome) => (outcome, engine.position()),
+        SeekBegun::Reopen(ticket) => {
+            drop(engine);
+            let answer = ticket.open().await;
+            let mut engine = engine_mutex.lock().await;
+            let outcome = engine.finish_seek(answer).await;
+            (outcome, engine.position())
+        }
+    }
+}
+
 /// Wait out a settling relative seek ([`CustomAudioEngine::defer_seek`]),
 /// then run it under the engine lock. A repeat that lands meanwhile moves
 /// the deadline, so the seek goes to the server [`SEEK_SETTLE`] after the
@@ -1743,17 +1764,20 @@ pub const TRANSCODE_OFFSET_EXTENSION: &str = "transcodeOffset";
 ///
 /// [`SEEK_SETTLE`]: crate::audio::engine::SEEK_SETTLE
 async fn run_seek_settle(
-    engine: &Mutex<CustomAudioEngine>,
+    engine_mutex: &Mutex<CustomAudioEngine>,
 ) -> Option<crate::audio::engine::SeekOutcome> {
     use crate::audio::engine::SettleStep;
 
-    let mut due = engine.lock().await.settling_seek_due()?;
+    let mut due = engine_mutex.lock().await.settling_seek_due()?;
     loop {
         tokio::time::sleep_until(due).await;
-        let mut engine = engine.lock().await;
+        let mut engine = engine_mutex.lock().await;
         match engine.take_settled_seek(tokio::time::Instant::now()) {
             SettleStep::Wait(later) => due = later,
-            SettleStep::Fire(target_ms) => return Some(engine.seek(target_ms).await),
+            SettleStep::Fire(target_ms) => {
+                let begun = engine.begin_seek(target_ms).await;
+                return Some(finish_begun_seek(engine_mutex, engine, begun).await.0);
+            }
             SettleStep::Gone => return None,
         }
     }

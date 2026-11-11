@@ -577,17 +577,10 @@ pub struct AudioRenderer {
     /// primary — and cleared by `stop()` so it can never leak past a
     /// teardown into an unrelated later play.
     pending_switch_fade_in: bool,
-    /// Holds an `Armed` crossfade's position trigger while a seek's reopen
-    /// waits for the server ([`Self::hold_crossfade_trigger`]): the old
-    /// stream plays on, and a blend fired then would start, after the seek
-    /// landed, from the seek target. The state stays `Armed`, so the decode
-    /// loop's inline gapless swap keeps standing down. Every arm and disarm
-    /// clears it.
-    crossfade_trigger_held: bool,
     /// How many signals this renderer has dispatched to the engine (each
     /// a task queued on the engine lock: [`Self::on_renderer_finished`] and
-    /// the stall recovery). A seek that held the engine lock while they
-    /// queued compares it to tell whether one is waiting.
+    /// the stall recovery). A seek that reopened its stream compares it to
+    /// tell whether one may still be waiting for the engine lock.
     engine_signals_sent: u64,
     /// Count of REAL transport-fade completions (ramp reached 1.0 and its
     /// end-state action applied — never cancels, never stale discards).
@@ -860,7 +853,6 @@ impl AudioRenderer {
             fade_pause_ms: u64::from(crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT),
             smooth_track_starts: true,
             pending_switch_fade_in: false,
-            crossfade_trigger_held: false,
             engine_signals_sent: 0,
             #[cfg(test)]
             transport_fade_completions: 0,
@@ -1861,7 +1853,6 @@ impl AudioRenderer {
             incoming_format: incoming_format.clone(),
             track_duration_ms,
         };
-        self.crossfade_trigger_held = false;
         // M8: each armed transition's trailing-silence sustain starts fresh.
         self.trailing_silence_ticks = 0;
         debug!(
@@ -1876,23 +1867,9 @@ impl AudioRenderer {
     /// states untouched, matching the previous field-based semantics
     /// where this only zeroed the `crossfade_armed_*` group.
     pub fn disarm_crossfade(&mut self) {
-        self.crossfade_trigger_held = false;
         if matches!(self.crossfade_state, CrossfadeState::Armed { .. }) {
             self.crossfade_state = CrossfadeState::Idle;
         }
-    }
-
-    /// Keep an `Armed` crossfade from firing, its state left `Armed` (see
-    /// the `crossfade_trigger_held` field), until
-    /// [`Self::release_crossfade_trigger`], an arm or a disarm.
-    pub fn hold_crossfade_trigger(&mut self) {
-        self.crossfade_trigger_held = true;
-    }
-
-    /// Let a held crossfade trigger fire again: past its point, on the next
-    /// tick.
-    pub fn release_crossfade_trigger(&mut self) {
-        self.crossfade_trigger_held = false;
     }
 
     /// How many signals this renderer has dispatched to the engine (see the
@@ -3150,13 +3127,11 @@ impl AudioRenderer {
         // Armed variant so the M8 helpers below can borrow `self` mutably;
         // the synchronous `mem::replace` trigger itself is unchanged —
         // invariant 2.)
-        // A held trigger (a seek's reopen is out) does not fire.
         let armed_params = if let CrossfadeState::Armed {
             duration_ms,
             track_duration_ms,
             ..
         } = &self.crossfade_state
-            && !self.crossfade_trigger_held
         {
             Some((*duration_ms, *track_duration_ms))
         } else {

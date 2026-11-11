@@ -223,25 +223,177 @@ enum ReopenCandidate {
     Playing(Arc<tokio::sync::Mutex<AudioDecoder>>),
 }
 
-/// What a seek's reopen came to ([`CustomAudioEngine::reopen_for_seek`]).
-enum ReopenStep {
-    /// The track seeks in ranges (or its decoder turned out not to reopen):
-    /// the seek goes on as a range seek.
-    NotReopening,
-    /// The new stream is open; the seek lands it.
-    Opened {
-        plan: ReopenPlan,
-        opened: ReopenOpened,
-    },
-    /// The render thread finished a blend while the stream opened: the
-    /// engine finalized it, and the seek, aimed at the ended track, is
-    /// dropped.
-    BlendEnded,
-    /// The open failed; the old stream plays on untouched.
-    Failed(SeekFailure),
+/// What [`CustomAudioEngine::begin_seek`] leaves to do.
+pub enum SeekBegun {
+    /// The seek ran to its end under the engine lock (a range seek, a
+    /// refusal, a deferral).
+    Done(SeekOutcome),
+    /// The track seeks by reopening its stream: open it with the engine
+    /// lock RELEASED ([`ReopenTicket::open`]), then hand the answer to
+    /// [`CustomAudioEngine::finish_seek`].
+    Reopen(ReopenTicket),
 }
 
-/// What a seek that reopens the stream opens ([`CustomAudioEngine::plan_for_candidate`]).
+/// A seek's reopen, taken under the engine lock and opened without it: the
+/// server may take seconds to answer, and the engine lock held that long
+/// stalls everything else the engine does (a blend's finalize, the tick,
+/// MPRIS). Meanwhile the old stream plays on and the engine reports the
+/// target as its position.
+pub struct ReopenTicket {
+    /// Which reopen this is; a newer seek's replaces it.
+    serial: u64,
+    /// The seek's target (ms), unclamped.
+    position_ms: u64,
+    candidate: ReopenCandidate,
+    /// How long the whole open may take ([`REOPEN_ANSWER_TIMEOUT`]).
+    timeout: std::time::Duration,
+    /// Whether the server honours `timeOffset`, as the engine knew it.
+    offset_supported: bool,
+    /// The engine's own length for the track, when its decoder has none.
+    engine_duration_ms: u64,
+    /// The render thread's signal count when the ticket was taken.
+    signals_before: u64,
+}
+
+/// What a [`ReopenTicket`] came to, for [`CustomAudioEngine::finish_seek`].
+pub struct ReopenAnswer {
+    serial: u64,
+    position_ms: u64,
+    signals_before: u64,
+    /// `Ok(None)`: the decoder turned out to seek in ranges after all.
+    result: Result<Option<(ReopenPlan, ReopenOpened)>, SeekFailure>,
+}
+
+impl ReopenTicket {
+    /// Open the track again at the seek's target. Holds no engine state:
+    /// call it with the engine lock released. The whole of it is bounded by
+    /// the reopen's time: the wait for the decoder's lock (the decode loop
+    /// may be blocked in a read) and the open itself
+    /// ([`ReopenHints::open_within`]).
+    pub async fn open(self) -> ReopenAnswer {
+        let deadline = tokio::time::Instant::now() + self.timeout;
+        let planned = tokio::time::timeout_at(deadline, self.plan()).await;
+        let result = match planned {
+            Ok(Some(plan)) => open_for_seek(&plan, self.position_ms, deadline)
+                .await
+                .map(|opened| Some((plan, opened))),
+            Ok(None) => Ok(None),
+            Err(_) => {
+                warn!(
+                    "🔍 [SEEK] The track's decoder stayed busy past the reopen's time; the old \
+                     stream plays on"
+                );
+                Err(SeekFailure::NoAnswer)
+            }
+        };
+        ReopenAnswer {
+            serial: self.serial,
+            position_ms: self.position_ms,
+            signals_before: self.signals_before,
+            result,
+        }
+    }
+
+    /// The stream this seek would open again, read off the decoder itself
+    /// (its lock is waited for): its hints and the whole song's length, when
+    /// it seeks by reopening ([`DecoderSeek::Reopen`]).
+    async fn plan(&self) -> Option<ReopenPlan> {
+        match &self.candidate {
+            ReopenCandidate::SkipIncoming(decoder) => {
+                let incoming = decoder.lock().await;
+                self.plan_for(incoming.as_ref()?)
+            }
+            ReopenCandidate::Playing(decoder) => {
+                let decoder = decoder.lock().await;
+                self.plan_for(&decoder)
+            }
+        }
+    }
+
+    fn plan_for(&self, decoder: &AudioDecoder) -> Option<ReopenPlan> {
+        (decoder_seek_kind(self.offset_supported, decoder) == DecoderSeek::Reopen).then(|| {
+            ReopenPlan {
+                hints: decoder.reopen_hints(),
+                // The whole song's length, as the decoder has it (an offset
+                // stream's is the whole song too).
+                whole_ms: if decoder.duration() > 0 {
+                    decoder.duration()
+                } else {
+                    self.engine_duration_ms
+                },
+            }
+        })
+    }
+}
+
+/// A reopen that is out with the server ([`ReopenTicket`]).
+#[derive(Clone, Copy)]
+struct Reopening {
+    serial: u64,
+    /// Where the seek will land (ms): the engine's position meanwhile.
+    target_ms: u64,
+    /// The source generation it was aimed at.
+    generation: u64,
+}
+
+/// Whether a track at `url` can seek by opening it again at an offset
+/// ([`CustomAudioEngine::reopens_by_offset`]).
+fn reopens_by_offset_with(offset_supported: bool, delivery: StreamDelivery, url: &str) -> bool {
+    offset_supported
+        && delivery != StreamDelivery::Live
+        && crate::utils::artwork_url::requests_transcode(url)
+}
+
+/// How `decoder` reaches a seek target ([`CustomAudioEngine::decoder_seek`]).
+fn decoder_seek_kind(offset_supported: bool, decoder: &AudioDecoder) -> DecoderSeek {
+    if decoder.delivery() == StreamDelivery::Sized && decoder.offset_secs() == 0 {
+        DecoderSeek::Range
+    } else if reopens_by_offset_with(offset_supported, decoder.delivery(), decoder.url()) {
+        DecoderSeek::Reopen
+    } else {
+        DecoderSeek::Unavailable
+    }
+}
+
+/// Open the track again at `position_ms` for a seek, with nothing stopped
+/// yet: the track's own URL and params (a setting changed since applies from
+/// the next song) and `timeOffset` at the target's whole second, the
+/// milliseconds past it dropped by the new decoder's preroll so audio
+/// resumes exactly at the target. Gives up at `deadline`
+/// ([`ReopenHints::open_within`]). An answer past the song's end is
+/// [`ReopenOpened::PastEnd`]; any other failure is told as a
+/// [`SeekFailure`].
+async fn open_for_seek(
+    plan: &ReopenPlan,
+    position_ms: u64,
+    deadline: tokio::time::Instant,
+) -> Result<ReopenOpened, SeekFailure> {
+    let pos = position_ms.min(plan.whole_ms);
+    debug!(
+        "🔍 [SEEK] Reopening the stream at {}s for {pos}ms",
+        split_seek_target(pos).0
+    );
+    let time_left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    match plan.hints.open_within(pos, time_left).await {
+        Ok(decoder) => Ok(ReopenOpened::Ready {
+            decoder: Box::new(decoder),
+            pos,
+        }),
+        Err(e) if e.is::<StreamPastEnd>() => {
+            debug!("🔍 [SEEK] {pos}ms is past what the server can send: the track ends");
+            Ok(ReopenOpened::PastEnd)
+        }
+        Err(e) => {
+            warn!(
+                "🔍 [SEEK] Reopening the stream for {pos}ms failed; the old stream plays \
+                 on: {e:#}"
+            );
+            Err(SeekFailure::of(&e))
+        }
+    }
+}
+
+/// What a seek that reopens the stream opens ([`ReopenTicket::plan`]).
 struct ReopenPlan {
     /// The track's URL and what was said of it, read off its decoder.
     hints: ReopenHints,
@@ -1956,6 +2108,13 @@ pub struct CustomAudioEngine {
     /// A relative seek waiting out [`SEEK_SETTLE`] ([`Self::defer_seek`]).
     settling_seek: Option<SettlingSeek>,
 
+    /// A seek's reopen that is out with the server, opened with the engine
+    /// lock released ([`ReopenTicket`]). Cleared wherever a settling seek
+    /// is: by the next seek, a track change, a stop.
+    reopening: Option<Reopening>,
+    /// The last [`ReopenTicket`]'s serial.
+    reopen_serial: u64,
+
     /// Why the last seek that reopened the stream failed (a busy server, the
     /// network), for the UI tick to show once ([`Self::take_seek_failure`]).
     /// The old stream played on.
@@ -2004,6 +2163,8 @@ impl CustomAudioEngine {
             live_icy_metadata,
             track_ended_by_seek: false,
             settling_seek: None,
+            reopening: None,
+            reopen_serial: 0,
             seek_failure: None,
             reopen_answer_timeout: REOPEN_ANSWER_TIMEOUT,
         }
@@ -2069,9 +2230,7 @@ impl CustomAudioEngine {
     /// for, and reopening it would change what plays), on a server that
     /// honours `timeOffset`. Never a station.
     fn reopens_by_offset(&self, delivery: StreamDelivery, url: &str) -> bool {
-        self.transcode_offset_supported()
-            && delivery != StreamDelivery::Live
-            && crate::utils::artwork_url::requests_transcode(url)
+        reopens_by_offset_with(self.transcode_offset_supported(), delivery, url)
     }
 
     /// How the playing decoder itself reaches a seek target. Read from the
@@ -2079,13 +2238,7 @@ impl CustomAudioEngine {
     /// gapless swap whose completion has not run yet, the decoder is already
     /// the next song while the fields still name the outgoing.
     fn decoder_seek(&self, decoder: &AudioDecoder) -> DecoderSeek {
-        if decoder.delivery() == StreamDelivery::Sized && decoder.offset_secs() == 0 {
-            DecoderSeek::Range
-        } else if self.reopens_by_offset(decoder.delivery(), decoder.url()) {
-            DecoderSeek::Reopen
-        } else {
-            DecoderSeek::Unavailable
-        }
+        decoder_seek_kind(self.transcode_offset_supported(), decoder)
     }
 
     /// Hold a relative seek to `target_ms` until [`SEEK_SETTLE`] passes with
@@ -2116,11 +2269,13 @@ impl CustomAudioEngine {
             None => SettleStep::Gone,
             Some(settling) if settling.generation != self.channels.source_generation.current() => {
                 self.settling_seek = None;
+                self.reopening = None;
                 SettleStep::Gone
             }
             Some(settling) if now < settling.due => SettleStep::Wait(settling.due),
             Some(settling) => {
                 self.settling_seek = None;
+                self.reopening = None;
                 SettleStep::Fire(settling.target_ms)
             }
         }
@@ -2161,6 +2316,7 @@ impl CustomAudioEngine {
         // restarts.
         self.pending_start_ms = None;
         self.settling_seek = None;
+        self.reopening = None;
         self.track_ended_by_seek = false;
         if self.source == source {
             trace!(" AudioEngine: source unchanged, returning early");
@@ -2288,6 +2444,12 @@ impl CustomAudioEngine {
         // will land (the old stream still sounds until it does).
         if let Some(target_ms) = self.settling_target() {
             return target_ms;
+        }
+        // A seek whose reopen is out with the server: likewise.
+        if let Some(reopening) = self.reopening
+            && reopening.generation == self.channels.source_generation.current()
+        {
+            return reopening.target_ms;
         }
         if self.skip_fade_window_pending() {
             let plan_generation = self.channels.source_generation.current();
@@ -3176,6 +3338,7 @@ impl CustomAudioEngine {
     /// every manual track switch.
     async fn stop_without_fade(&mut self) {
         self.settling_seek = None;
+        self.reopening = None;
         if !self.playing && !self.paused {
             return;
         }
@@ -3227,11 +3390,31 @@ impl CustomAudioEngine {
     /// stream plays on until the new one is open ([`Self::land_reopen`]).
     /// Neither moves the source generation.
     pub async fn seek(&mut self, position_ms: u64) -> SeekOutcome {
-        use tracing::{debug, trace, warn};
+        match self.begin_seek(position_ms).await {
+            SeekBegun::Done(outcome) => outcome,
+            SeekBegun::Reopen(ticket) => {
+                let answer = ticket.open().await;
+                self.finish_seek(answer).await
+            }
+        }
+    }
+
+    /// The first half of a seek, under the engine lock. A track that seeks
+    /// in ranges (or can't seek, or whose seek is deferred to a skip target)
+    /// is done here. One that seeks by reopening its stream hands back a
+    /// [`ReopenTicket`]: the caller releases the engine lock, opens it
+    /// ([`ReopenTicket::open`]) and lands the answer with
+    /// [`Self::finish_seek`]. The old stream plays on meanwhile and a live
+    /// blend keeps blending, so a slow server costs no silence and a failed
+    /// reopen leaves playback exactly as it was; [`Self::position`] reports
+    /// the target.
+    pub async fn begin_seek(&mut self, position_ms: u64) -> SeekBegun {
+        use tracing::debug;
 
         // This seek replaces a relative seek still settling, and moves a
         // track a seek past its end had ended.
         self.settling_seek = None;
+        self.reopening = None;
         self.track_ended_by_seek = false;
 
         // A planned skip's decoder is still building (the queue already
@@ -3250,7 +3433,7 @@ impl CustomAudioEngine {
                 plan_generation,
                 position_ms,
             });
-            return SeekOutcome::Settled;
+            return SeekBegun::Done(SeekOutcome::Settled);
         }
 
         // A track the server sends without a length (a live transcode) that
@@ -3263,7 +3446,7 @@ impl CustomAudioEngine {
         // here.)
         if !self.seekable() {
             debug!("🔍 [SEEK] Refused - the track the queue names can't seek");
-            return SeekOutcome::Settled;
+            return SeekBegun::Done(SeekOutcome::Settled);
         }
 
         let seek_start = std::time::Instant::now();
@@ -3274,13 +3457,8 @@ impl CustomAudioEngine {
 
         if self.duration == 0 {
             debug!("🔍 [SEEK] Aborting - duration is 0");
-            return SeekOutcome::Settled;
+            return SeekBegun::Done(SeekOutcome::Settled);
         }
-
-        // CRITICAL FIX: Stop the decoding loop FIRST, before trying to acquire decoder lock!
-        // The decoding loop holds the decoder lock while doing HTTP I/O (which can take 20+ seconds).
-        // If we try to acquire the lock before stopping the loop, we'll block for the entire I/O duration.
-        trace!("🔍 [SEEK] Stopping decoding loop FIRST");
 
         // A seek is aimed at the track the UI shows. Inside a SKIP blend that
         // is the incoming (the queue already names it), so promote it and seek
@@ -3292,18 +3470,66 @@ impl CustomAudioEngine {
         // A blend the render thread already finished is the exception
         // (`finish_a_blend_the_renderer_ended`).
         if self.finish_a_blend_the_renderer_ended().await {
-            return SeekOutcome::Settled;
+            return SeekBegun::Done(SeekOutcome::Settled);
         }
 
-        // A seek that reopens the stream opens the new one FIRST, while the
-        // old one plays on and a live blend keeps blending: a slow server
-        // then costs no silence (nothing has stopped the decode loop yet),
-        // and a failed reopen leaves playback exactly as it was.
-        let reopen = match self.reopen_for_seek(position_ms).await {
-            ReopenStep::NotReopening => None,
-            ReopenStep::Opened { plan, opened } => Some((plan, opened)),
-            ReopenStep::BlendEnded => return SeekOutcome::Settled,
-            ReopenStep::Failed(failure) => {
+        let Some(candidate) = self.reopen_candidate().await else {
+            return SeekBegun::Done(self.complete_seek(position_ms, None, seek_start).await);
+        };
+        self.reopen_serial += 1;
+        self.reopening = Some(Reopening {
+            serial: self.reopen_serial,
+            target_ms: position_ms.min(self.duration),
+            generation: self.channels.source_generation.current(),
+        });
+        SeekBegun::Reopen(ReopenTicket {
+            serial: self.reopen_serial,
+            position_ms,
+            candidate,
+            timeout: self.reopen_answer_timeout,
+            offset_supported: self.transcode_offset_supported(),
+            engine_duration_ms: self.duration,
+            signals_before: self.renderer.lock().engine_signals_sent(),
+        })
+    }
+
+    /// The second half of a seek that reopened its stream: land `answer`
+    /// under the engine lock. Dropped when it is no longer the newest seek
+    /// or the track it was aimed at is no longer the one playing (it ended,
+    /// a blend into the next song finished, the user moved on, playback
+    /// stopped). A failed open leaves the old stream playing and is told
+    /// once ([`Self::take_seek_failure`]).
+    ///
+    /// The render thread may have signalled just before this took the lock,
+    /// with its callback still queued behind it: a blend it finished is
+    /// finalized here ([`Self::finish_a_blend_the_renderer_ended`]) and the
+    /// seek dropped; after any other signal the source generation moves, so
+    /// a callback still queued (about the stream the seek replaces) is
+    /// dropped instead of running against the seeked state.
+    pub async fn finish_seek(&mut self, answer: ReopenAnswer) -> SeekOutcome {
+        use tracing::debug;
+
+        // A relative seek settling since (a held key) replaces this one
+        // too: it goes to the server in its own time.
+        let current = self.settling_target().is_none()
+            && self.reopening.is_some_and(|reopening| {
+                reopening.serial == answer.serial
+                    && reopening.generation == self.channels.source_generation.current()
+            });
+        if !current {
+            debug!("🔍 [SEEK] The track or the seek changed while its stream reopened — dropped");
+            if self
+                .reopening
+                .is_some_and(|reopening| reopening.serial == answer.serial)
+            {
+                self.reopening = None;
+            }
+            return SeekOutcome::Settled;
+        }
+        self.reopening = None;
+        let reopen = match answer.result {
+            Ok(reopen) => reopen,
+            Err(failure) => {
                 self.seek_failure = Some(failure);
                 debug!(
                     "🔍 [SEEK] Reopen failed ({failure:?}) — the old stream plays on, untouched"
@@ -3311,6 +3537,34 @@ impl CustomAudioEngine {
                 return SeekOutcome::Settled;
             }
         };
+        let signalled = {
+            let mut renderer = self.renderer.lock();
+            renderer.disarm_crossfade();
+            renderer.engine_signals_sent() != answer.signals_before
+        };
+        if self.finish_a_blend_the_renderer_ended().await {
+            return SeekOutcome::Settled;
+        }
+        if signalled {
+            debug!(
+                "🔍 [SEEK] The render thread signalled while the stream reopened — moving the \
+                 source generation so a signal still queued is dropped"
+            );
+            self.channels.source_generation.bump_for_user_action();
+        }
+        self.complete_seek(answer.position_ms, reopen, std::time::Instant::now())
+            .await
+    }
+
+    /// The rest of a seek once its stream is known: `reopen` is the stream
+    /// a reopening seek opened, `None` for a seek in ranges.
+    async fn complete_seek(
+        &mut self,
+        position_ms: u64,
+        reopen: Option<(ReopenPlan, ReopenOpened)>,
+        seek_start: std::time::Instant,
+    ) -> SeekOutcome {
+        use tracing::{debug, trace, warn};
 
         let outcome = match self.end_crossfade_on_queue_track().await {
             BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
@@ -3512,77 +3766,6 @@ impl CustomAudioEngine {
         renderer_finalized
     }
 
-    /// Open the queue's track again at `position_ms` for [`Self::seek`],
-    /// when it seeks by reopening, with the old stream still playing and
-    /// the engine lock held. The whole of it is bounded by the reopen's time
-    /// ([`REOPEN_ANSWER_TIMEOUT`]): the wait for the decoder's lock (the
-    /// decode loop may be blocked in a read) and the open itself
-    /// ([`ReopenHints::open_within`]).
-    ///
-    /// The renderer's crossfade trigger is held meanwhile: the old stream
-    /// plays on, and a blend it fired would start, once the seek landed,
-    /// from the seek target (its signal queues on the engine lock this seek
-    /// holds). Held rather than disarmed, so the decode loop's inline
-    /// gapless swap keeps standing down for it. A failed open lets it go
-    /// again; one that lands disarms it (the seek re-arms against the new
-    /// position) and then checks what the render thread did while it
-    /// waited: a blend it finished is finalized
-    /// ([`Self::finish_a_blend_the_renderer_ended`]), and any other signal it
-    /// queued (the old stream's end) was about the stream the seek replaces,
-    /// so the source generation moves and the signal is dropped.
-    async fn reopen_for_seek(&mut self, position_ms: u64) -> ReopenStep {
-        let Some(candidate) = self.reopen_candidate().await else {
-            return ReopenStep::NotReopening;
-        };
-        let signals_before = {
-            let mut renderer = self.renderer.lock();
-            renderer.hold_crossfade_trigger();
-            renderer.engine_signals_sent()
-        };
-        let deadline = tokio::time::Instant::now() + self.reopen_answer_timeout;
-        let planned = tokio::time::timeout_at(deadline, self.plan_for_candidate(candidate)).await;
-        let opened = match planned {
-            Ok(Some(plan)) => self
-                .open_for_seek(&plan, position_ms, deadline)
-                .await
-                .map(|opened| Some((plan, opened))),
-            Ok(None) => Ok(None),
-            Err(_) => {
-                warn!(
-                    "🔍 [SEEK] The track's decoder stayed busy past the reopen's time; the old \
-                     stream plays on"
-                );
-                Err(SeekFailure::NoAnswer)
-            }
-        };
-        let opened = match opened {
-            Ok(opened) => opened,
-            Err(failure) => {
-                self.renderer.lock().release_crossfade_trigger();
-                return ReopenStep::Failed(failure);
-            }
-        };
-        let signalled = {
-            let mut renderer = self.renderer.lock();
-            renderer.disarm_crossfade();
-            renderer.engine_signals_sent() != signals_before
-        };
-        if self.finish_a_blend_the_renderer_ended().await {
-            return ReopenStep::BlendEnded;
-        }
-        if signalled {
-            debug!(
-                "🔍 [SEEK] The render thread signalled while the stream reopened — moving the \
-                 source generation so that signal is dropped"
-            );
-            self.channels.source_generation.bump_for_user_action();
-        }
-        match opened {
-            Some((plan, opened)) => ReopenStep::Opened { plan, opened },
-            None => ReopenStep::NotReopening,
-        }
-    }
-
     /// The decoder a seek on the queue's track would open again, judged by
     /// the facts the engine keeps alone (no decoder lock, so a track that
     /// seeks in ranges never waits on one here): a skip blend's incoming,
@@ -3615,78 +3798,9 @@ impl CustomAudioEngine {
             .then(|| ReopenCandidate::Playing(self.decoder.clone()))
     }
 
-    /// The stream a seek on `candidate` would open again, read off the
-    /// decoder itself (its lock is waited for): its hints and the whole
-    /// song's length, when it seeks by reopening ([`DecoderSeek::Reopen`]).
-    async fn plan_for_candidate(&self, candidate: ReopenCandidate) -> Option<ReopenPlan> {
-        match candidate {
-            ReopenCandidate::SkipIncoming(decoder) => {
-                let incoming = decoder.lock().await;
-                self.plan_for(incoming.as_ref()?)
-            }
-            ReopenCandidate::Playing(decoder) => {
-                let decoder = decoder.lock().await;
-                self.plan_for(&decoder)
-            }
-        }
-    }
-
     /// Whether a track of these facts, at `url`, seeks by reopening.
     fn reopens_for(&self, facts: &StreamFacts, url: &str) -> bool {
         !Self::reads_in_ranges(facts) && self.reopens_by_offset(facts.delivery, url)
-    }
-
-    /// The reopen plan for `decoder`, when it seeks by reopening.
-    fn plan_for(&self, decoder: &AudioDecoder) -> Option<ReopenPlan> {
-        (self.decoder_seek(decoder) == DecoderSeek::Reopen).then(|| ReopenPlan {
-            hints: decoder.reopen_hints(),
-            // The whole song's length, as the decoder has it (an offset
-            // stream's is the whole song too).
-            whole_ms: if decoder.duration() > 0 {
-                decoder.duration()
-            } else {
-                self.duration
-            },
-        })
-    }
-
-    /// Open the track again at `position_ms` for a seek ([`Self::seek`]),
-    /// with nothing stopped yet: the track's own URL and params (a setting
-    /// changed since applies from the next song) and `timeOffset` at the
-    /// target's whole second, the milliseconds past it dropped by the new
-    /// decoder's preroll so audio resumes exactly at the target. Gives up at
-    /// `deadline` ([`ReopenHints::open_within`]). An answer past the song's
-    /// end is [`ReopenOpened::PastEnd`]; any other failure is told as a
-    /// [`SeekFailure`].
-    async fn open_for_seek(
-        &self,
-        plan: &ReopenPlan,
-        position_ms: u64,
-        deadline: tokio::time::Instant,
-    ) -> Result<ReopenOpened, SeekFailure> {
-        let pos = position_ms.min(plan.whole_ms);
-        debug!(
-            "🔍 [SEEK] Reopening the stream at {}s for {pos}ms",
-            split_seek_target(pos).0
-        );
-        let time_left = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match plan.hints.open_within(pos, time_left).await {
-            Ok(decoder) => Ok(ReopenOpened::Ready {
-                decoder: Box::new(decoder),
-                pos,
-            }),
-            Err(e) if e.is::<StreamPastEnd>() => {
-                debug!("🔍 [SEEK] {pos}ms is past what the server can send: the track ends");
-                Ok(ReopenOpened::PastEnd)
-            }
-            Err(e) => {
-                warn!(
-                    "🔍 [SEEK] Reopening the stream for {pos}ms failed; the old stream plays \
-                     on: {e:#}"
-                );
-                Err(SeekFailure::of(&e))
-            }
-        }
     }
 
     /// Put a seek's reopened stream in place of the playing one, called
@@ -4168,6 +4282,7 @@ impl CustomAudioEngine {
         stream: StreamFacts,
     ) {
         self.settling_seek = None;
+        self.reopening = None;
         self.track_ended_by_seek = false;
         if self.next_source == source {
             self.next_source.clear();
@@ -12105,13 +12220,15 @@ mod tests {
         }
     }
 
-    /// The renderer's crossfade trigger is held while a seek's reopen waits
-    /// for the server. Left armed, the old stream played on into the trigger
-    /// point during the wait, the trigger fired, and its signal, queued on
-    /// the engine lock, started a blend into the next song right after the
-    /// seek landed. The seek arms it again for the new position.
+    /// A blend the render thread fired while a seek's reopen waited for the
+    /// server, its signal not yet through to the engine when the seek lands
+    /// (here the seek holds the engine lock throughout, the widest that gap
+    /// can be): the seek abandons it, as it does a blend the engine knows,
+    /// and the queued signal is dropped, so no blend into the next song runs
+    /// on from the seek target. The caller re-prepares the next track
+    /// ([`SeekOutcome::AbandonedAutoCrossfade`]).
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_crossfade_trigger_waits_out_a_seeks_reopen() {
+    async fn a_blend_fired_during_a_seeks_reopen_is_abandoned_by_the_seek() {
         let (engine, server, mut mixer) = engine_crossfading_the_clock().await;
         let server = Arc::new(server);
         let renderer = engine.lock().await.renderer.clone();
@@ -12154,10 +12271,159 @@ mod tests {
         drop(e);
         engine.lock().await.stop().await;
 
-        assert!(!blending, "no blend starts after the seek");
-        assert_eq!(outcome, SeekOutcome::Settled, "no blend ran to abandon");
+        assert!(!blending, "no blend runs on after the seek");
+        assert_eq!(outcome, SeekOutcome::AbandonedAutoCrossfade);
         assert!(armed, "the trigger is armed again for the new position");
         assert!(position.abs_diff(2_000) <= 100, "{position}");
+    }
+
+    /// The ticket a reopening seek hands back, or a panic.
+    fn reopen_ticket(begun: SeekBegun) -> ReopenTicket {
+        match begun {
+            SeekBegun::Reopen(ticket) => ticket,
+            SeekBegun::Done(outcome) => panic!("the seek did not reopen: {outcome:?}"),
+        }
+    }
+
+    /// A seek that reopens its stream leaves the engine free while the
+    /// server answers: `begin_seek` returns a ticket with nothing stopped,
+    /// the old stream plays on, the engine reports the target as its
+    /// position, and `finish_seek` lands the answer. Held under the engine
+    /// lock, that wait stalled a blend's finalize, the tick and MPRIS for as
+    /// long as the server took.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reopening_seek_waits_for_the_server_without_the_engine() {
+        let (mut engine, server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        play_out(&mut mixer, 1_000);
+
+        let ticket = reopen_ticket(engine.begin_seek(6_400).await);
+        let shown = engine.position();
+        let still_playing = next_heard_ms(&mut mixer);
+        let asked_yet = server.requests().len();
+        let answer = ticket.open().await;
+        let outcome = engine.finish_seek(answer).await;
+        let landed = engine.position();
+        let heard = next_heard_ms(&mut mixer);
+        let failure = engine.take_seek_failure();
+        engine.stop().await;
+
+        assert_eq!(shown, 6_400, "the clock shows the target meanwhile");
+        assert!(
+            still_playing.abs_diff(1_000) <= 20,
+            "the old stream plays on: {still_playing}"
+        );
+        assert_eq!(asked_yet, 1, "begin_seek sends nothing");
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert_eq!(landed, 6_400);
+        assert!(heard.abs_diff(6_400) <= 20, "{heard}");
+        assert_eq!(failure, None);
+    }
+
+    /// The track changed while a seek's reopen was out (here the source
+    /// generation moves, as every track change moves it): the answer is
+    /// dropped. Landed, it would put the old song's stream under the new
+    /// song.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_track_change_during_a_seeks_reopen_drops_the_seek() {
+        let (mut engine, _server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        play_out(&mut mixer, 1_000);
+
+        let ticket = reopen_ticket(engine.begin_seek(6_400).await);
+        engine.channels.source_generation.bump_for_user_action();
+        let answer = ticket.open().await;
+        let outcome = engine.finish_seek(answer).await;
+        let position = engine.position();
+        let heard = next_heard_ms(&mut mixer);
+        let offset = engine.queue_track_stream().map(|stream| stream.offset_secs);
+        let failure = engine.take_seek_failure();
+        engine.stop().await;
+
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert!(position.abs_diff(1_000) <= 20, "not moved: {position}");
+        assert!(
+            heard.abs_diff(1_000) <= 20,
+            "the stream is untouched: {heard}"
+        );
+        assert_eq!(offset, Some(0));
+        assert_eq!(failure, None, "a dropped seek says nothing");
+    }
+
+    /// A newer seek replaces one whose reopen is still out: only the newer
+    /// answer lands, whichever comes back first.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_newer_seek_replaces_one_whose_reopen_is_out() {
+        for older_lands_first in [true, false] {
+            let (mut engine, _server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+            play_out(&mut mixer, 1_000);
+
+            let older = reopen_ticket(engine.begin_seek(3_000).await);
+            let newer = reopen_ticket(engine.begin_seek(6_400).await);
+            let shown = engine.position();
+            let older = older.open().await;
+            let newer = newer.open().await;
+            if older_lands_first {
+                engine.finish_seek(older).await;
+                engine.finish_seek(newer).await;
+            } else {
+                engine.finish_seek(newer).await;
+                engine.finish_seek(older).await;
+            }
+            let landed = engine.position();
+            let heard = next_heard_ms(&mut mixer);
+            engine.stop().await;
+
+            assert_eq!(shown, 6_400, "the newer target shows");
+            assert_eq!(landed, 6_400, "older first: {older_lands_first}");
+            assert!(heard.abs_diff(6_400) <= 20, "{heard}");
+        }
+    }
+
+    /// A relative seek that starts settling while an earlier seek's reopen
+    /// is out replaces it: the earlier answer is dropped (it would land a
+    /// stream the settling seek is about to replace), and the clock keeps
+    /// showing the settling target.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_settling_seek_replaces_one_whose_reopen_is_out() {
+        let (mut engine, server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        play_out(&mut mixer, 1_000);
+
+        let ticket = reopen_ticket(engine.begin_seek(3_000).await);
+        engine.defer_seek(6_400);
+        let answer = ticket.open().await;
+        engine.finish_seek(answer).await;
+        let shown = engine.position();
+        let offset = engine.queue_track_stream().map(|stream| stream.offset_secs);
+        let heard = next_heard_ms(&mut mixer);
+        engine.stop().await;
+
+        assert_eq!(offsets_after(&server, 1), [Some("3".to_owned())]);
+        assert_eq!(shown, 6_400, "the settling target still shows");
+        assert_eq!(offset, Some(0), "the earlier answer did not land");
+        assert!(
+            heard.abs_diff(1_000) <= 20,
+            "the old stream plays on: {heard}"
+        );
+    }
+
+    /// Stop while a seek's reopen is out: the answer is dropped, and the
+    /// stopped engine neither starts playing nor shows the target.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stop_during_a_seeks_reopen_drops_the_seek() {
+        let (mut engine, _server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        play_out(&mut mixer, 1_000);
+
+        let ticket = reopen_ticket(engine.begin_seek(6_400).await);
+        engine.stop().await;
+        let shown = engine.position();
+        let answer = ticket.open().await;
+        let outcome = engine.finish_seek(answer).await;
+        let position = engine.position();
+        let state = engine.state();
+
+        assert_ne!(shown, 6_400, "a stopped engine shows no pending target");
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert_ne!(position, 6_400);
+        assert_eq!(state, PlaybackState::Stopped);
     }
 
     /// A blend the render thread finished while a seek's reopen waited for
