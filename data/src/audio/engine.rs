@@ -460,6 +460,36 @@ pub enum SkipTransition {
     Cut,
 }
 
+/// What the engine tells the completion callback when a track change
+/// reaches the queue's side. The callback's task runs later, once it has the
+/// engine lock, so each one carries what it takes to tell whether a user
+/// action overtook it meanwhile ([`CustomAudioEngine::completion_stands`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackCompletion {
+    /// The engine is already on the next track (an inline gapless swap, an
+    /// auto crossfade's finalize, a prepared track loaded at the song's
+    /// end): the queue only has to follow. The transport is left as it is,
+    /// so a join that lands while paused stays paused.
+    Advanced {
+        /// The source generation when the engine moved on.
+        generation: u64,
+    },
+    /// The track ended with nothing to move on to and the engine stopped
+    /// itself: the queue picks the next song and it is loaded and played.
+    Ended {
+        /// The engine's source is the one that just played (repeat-one).
+        is_loop: bool,
+        /// The source generation when the track ended.
+        generation: u64,
+        /// [`CustomAudioEngine::stop`] calls so far, the engine's own
+        /// end-of-track stop included.
+        stops: u64,
+    },
+}
+
+/// The engine's completion callback.
+type CompletionCallback = Arc<dyn Fn(TrackCompletion) + Send + Sync>;
+
 /// Outcome of a manual-skip crossfade attempt
 /// ([`CustomAudioEngine::crossfade_to_next`], M7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1678,7 +1708,7 @@ async fn try_gapless_swap(
     gapless: &tokio::sync::Mutex<GaplessSlot>,
     gapless_info: &tokio::sync::Mutex<Option<GaplessTransitionInfo>>,
     source_generation: &SourceGeneration,
-    completion_callback: &Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    completion_callback: &Option<CompletionCallback>,
     current_format: &AudioFormat,
     skip_fade_pending: &Arc<AtomicU64>,
     decode_gen: &DecodeLoopHandle,
@@ -1806,7 +1836,9 @@ async fn try_gapless_swap(
             // Fire completion callback so the UI updates
             // (queue advances, track info refreshes)
             if let Some(cb) = completion_callback {
-                cb(false);
+                cb(TrackCompletion::Advanced {
+                    generation: swap_generation,
+                });
             }
 
             tracing::info!("🎵 [DECODE LOOP] Gapless transition — continuing decode loop");
@@ -2069,10 +2101,9 @@ pub struct CustomAudioEngine {
     // engine async path, and crossfade cancel is enforced structurally.
     gapless: Arc<tokio::sync::Mutex<GaplessSlot>>,
 
-    // Completion callback — called when a track ends.
-    // The bool argument is `true` when the same track is looping (repeat-one),
-    // `false` when advancing to a new track.
-    completion_callback: Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    // Completion callback: called when a track change reaches the queue's
+    // side (see `TrackCompletion`).
+    completion_callback: Option<CompletionCallback>,
 
     // Seeking flag - prevents EOF detection during seek
     seeking: Arc<AtomicBool>,
@@ -2110,6 +2141,14 @@ pub struct CustomAudioEngine {
     /// transition stamped below it describes a decoder that source change
     /// replaced (its info reached the slot after `set_source` retired it).
     source_change_generation: u64,
+    /// The source generation the last user action that re-pointed the queue
+    /// moved to: a new source (`set_source`) or a planned skip fade
+    /// (`plan_skip_fade`). A completion stamped below it was overtaken
+    /// ([`Self::completion_stands`]). A seek's own bumps leave it alone: they
+    /// drop render-thread signals, never a completion.
+    takeover_generation: u64,
+    /// [`Self::stop`] calls so far (see [`TrackCompletion::Ended`]).
+    stops: u64,
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: LiveStringSlot,
@@ -2179,6 +2218,8 @@ impl CustomAudioEngine {
             last_transition_was_crossfade: false,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             source_change_generation: 0,
+            takeover_generation: 0,
+            stops: 0,
             live_icy_metadata,
             track_ended_by_seek: false,
             settling_seek: None,
@@ -2398,6 +2439,7 @@ impl CustomAudioEngine {
 
         self.source = source;
         self.source_change_generation = self.channels.source_generation.bump_for_user_action();
+        self.takeover_generation = self.source_change_generation;
         trace!(" AudioEngine: source set successfully");
     }
 
@@ -3321,6 +3363,9 @@ impl CustomAudioEngine {
     /// Runs the M5 stop out-ramp first (see [`Self::run_stop_fade`]) — the
     /// ramp needs the render thread, which the teardown below joins.
     pub async fn stop(&mut self) {
+        // Counted even when already stopped: a Stop pressed just after the
+        // track ended overtakes that track's completion.
+        self.stops = self.stops.wrapping_add(1);
         if !self.playing && !self.paused {
             return;
         }
@@ -4756,6 +4801,9 @@ impl CustomAudioEngine {
         }
         self.reset_next_track().await;
         let generation = self.channels.source_generation.bump_for_user_action();
+        // The skip moved the queue cursor: a completion fired before this
+        // plan must not move it again.
+        self.takeover_generation = generation;
         self.channels
             .skip_fade_pending
             .store(generation, Ordering::Release);
@@ -5237,7 +5285,7 @@ impl CustomAudioEngine {
             );
         } else if let Some(callback) = &self.completion_callback {
             // Notify completion callback (gapless-style: a new track started)
-            callback(false);
+            callback(self.advanced_now());
         }
     }
 
@@ -5631,15 +5679,52 @@ impl CustomAudioEngine {
         self.state
     }
 
-    /// Set completion callback.
-    ///
-    /// The callback receives `true` when the same track is looping (repeat-one),
-    /// `false` when a different track starts.
+    /// Set completion callback (see [`TrackCompletion`]).
     pub fn set_completion_callback<F>(&mut self, callback: F)
     where
-        F: Fn(bool) + Send + Sync + 'static,
+        F: Fn(TrackCompletion) + Send + Sync + 'static,
     {
         self.completion_callback = Some(Arc::new(callback));
+    }
+
+    /// A completion for a track change the engine has just made itself,
+    /// stamped under the engine lock.
+    fn advanced_now(&self) -> TrackCompletion {
+        TrackCompletion::Advanced {
+            generation: self.channels.source_generation.current(),
+        }
+    }
+
+    /// A completion for a track that ended with the engine stopped, stamped
+    /// under the engine lock after the engine's own stop.
+    pub(crate) fn ended_now(&self, is_loop: bool) -> TrackCompletion {
+        TrackCompletion::Ended {
+            is_loop,
+            generation: self.channels.source_generation.current(),
+            stops: self.stops,
+        }
+    }
+
+    /// Whether `completion` still describes the engine, asked by its task
+    /// under the engine lock. The callback fires when the engine changes
+    /// track and its task then waits for this lock, so a click, a skip or a
+    /// Stop can get in first. One that re-pointed the queue itself (a new
+    /// source, a planned skip fade) overtakes every completion fired before
+    /// it: the queue must not move again. An `Ended` one, whose task would
+    /// load and play the next song, is also overtaken by a Stop and by
+    /// anything that started playback.
+    pub fn completion_stands(&self, completion: &TrackCompletion) -> bool {
+        match *completion {
+            TrackCompletion::Advanced { generation } => generation >= self.takeover_generation,
+            TrackCompletion::Ended {
+                generation, stops, ..
+            } => {
+                generation >= self.takeover_generation
+                    && stops == self.stops
+                    && !self.playing
+                    && !self.paused
+            }
+        }
     }
 
     /// Set visualizer callback
@@ -5981,7 +6066,7 @@ impl CustomAudioEngine {
                 // IMPORTANT: Still call completion callback so playback controller updates queue index!
                 // Gapless always means a new track (we skip same-URL gapless prep), so is_loop=false.
                 if let Some(callback) = &self.completion_callback {
-                    callback(false);
+                    callback(self.advanced_now());
                 }
                 return;
             }
@@ -6002,7 +6087,7 @@ impl CustomAudioEngine {
                 " [DECODER FINISHED] Calling completion callback (is_loop={})",
                 is_loop
             );
-            callback(is_loop);
+            callback(self.ended_now(is_loop));
         }
     }
 
@@ -7633,6 +7718,58 @@ mod tests {
             )
             .await;
         assert_eq!(outcome, SkipFadeOutcome::Blocked, "infinite outgoing");
+    }
+
+    /// A completion's task runs once it has the engine lock, so a user
+    /// action can get in first. One that re-pointed the queue (a new source,
+    /// a planned skip) overtakes every completion fired before it; a Stop, or
+    /// anything that started playback, also overtakes an `Ended` one, whose
+    /// task would load and play the next song. A seek's own generation bump
+    /// (it drops render-thread signals) overtakes neither.
+    #[tokio::test]
+    async fn a_completion_is_overtaken_by_a_new_source_a_skip_plan_or_a_stop() {
+        let mut engine = CustomAudioEngine::new();
+        let (advanced, ended) = (engine.advanced_now(), engine.ended_now(false));
+        assert!(engine.completion_stands(&advanced) && engine.completion_stands(&ended));
+
+        engine.channels.source_generation.bump_for_user_action();
+        assert!(
+            engine.completion_stands(&advanced) && engine.completion_stands(&ended),
+            "a seek's bump drops render-thread signals, never a completion"
+        );
+
+        engine.stop().await;
+        assert!(
+            engine.completion_stands(&advanced),
+            "the queue still follows a join after a Stop"
+        );
+        assert!(
+            !engine.completion_stands(&ended),
+            "a Stop just after the track's end must not start the next song"
+        );
+
+        let (advanced, ended) = (engine.advanced_now(), engine.ended_now(false));
+        engine.plan_skip_fade().await;
+        assert!(
+            !engine.completion_stands(&advanced) && !engine.completion_stands(&ended),
+            "the skip already moved the queue cursor"
+        );
+
+        let (advanced, ended) = (engine.advanced_now(), engine.ended_now(false));
+        engine
+            .load_track_with_rg("http://127.0.0.1:9/rest/stream?id=x", None, None, None)
+            .await;
+        assert!(
+            !engine.completion_stands(&advanced) && !engine.completion_stands(&ended),
+            "the new source is what the queue names"
+        );
+
+        let ended = engine.ended_now(false);
+        engine.force_playing_for_test();
+        assert!(
+            !engine.completion_stands(&ended),
+            "playback started again before the completion ran"
+        );
     }
 
     /// M7 finalize split: a skip fade already advanced the queue at skip
@@ -9376,11 +9513,11 @@ mod tests {
     fn install_callback_counter(engine: &mut CustomAudioEngine) -> Arc<AtomicU32> {
         let counter = Arc::new(AtomicU32::new(0));
         let c = counter.clone();
-        engine.completion_callback = Some(Arc::new(move |is_loop: bool| {
+        engine.completion_callback = Some(Arc::new(move |completion: TrackCompletion| {
             // Gapless always advances to a NEW track — never a loop.
             assert!(
-                !is_loop,
-                "gapless completion callback must fire with is_loop=false"
+                matches!(completion, TrackCompletion::Advanced { .. }),
+                "a gapless completion reports the engine already on the next track"
             );
             c.fetch_add(1, Ordering::SeqCst);
         }));

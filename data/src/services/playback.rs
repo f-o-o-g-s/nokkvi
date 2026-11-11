@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::{
-    audio::engine::{CustomAudioEngine, SkipTransition},
+    audio::engine::{CustomAudioEngine, SkipTransition, TrackCompletion},
     services::queue::{PreviousOutcome, QueueManager, TransitionReason},
     types::{
         NextTrackResetEffect,
@@ -237,10 +237,20 @@ impl PreviousStep {
 /// before any network-bound engine ops run.
 #[derive(Debug, Clone)]
 pub enum TrackTransitionPlan {
+    /// A user action overtook the completion (a click, a skip, a Stop): the
+    /// queue was left alone and the engine needs nothing.
+    Overtaken,
     /// Queue exhausted or no transition available — stop the engine.
     Stop,
-    /// Engine already has the next track ready (gapless or prepared decoder).
-    /// Just ensure playback is running.
+    /// The engine moved to the next track by itself and the queue has
+    /// followed. Nothing to do: the transport stays as it is (a join that
+    /// landed while paused stays paused).
+    Advanced {
+        song: Song,
+        reason: TransitionReason,
+    },
+    /// The ended track's prepared decoder was loaded. Just ensure playback
+    /// is running.
     PlayPrepared {
         song: Song,
         reason: TransitionReason,
@@ -564,7 +574,8 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
         session: &StreamSession,
     ) -> Result<Option<(Song, TransitionReason)>> {
-        let plan = self.decide_transition(engine, session).await;
+        let completion = engine.ended_now(false);
+        let plan = self.decide_transition(engine, session, completion).await;
         Self::execute_transition(plan, engine).await
     }
 
@@ -582,14 +593,30 @@ impl QueueNavigator {
         &self,
         engine: &mut CustomAudioEngine,
         session: &StreamSession,
+        completion: TrackCompletion,
     ) -> TrackTransitionPlan {
         // ── Determine engine state and handle audio layer ──
+        let advanced = matches!(completion, TrackCompletion::Advanced { .. });
+        if !engine.completion_stands(&completion) {
+            // A click, a skip or a Stop got the engine lock between the
+            // track change and this task, and the queue is where that action
+            // put it. Only the engine's own half is left: a swapped-in track
+            // a planned skip left playing is still promoted (a new source
+            // retired it), and the crossfade label must not leak into the
+            // next transition.
+            if advanced {
+                engine.consume_gapless_transition().await;
+                engine.take_last_transition_was_crossfade();
+            }
+            debug!(" [TRACK FINISHED] Overtaken by a user action - the queue stays where it is");
+            return TrackTransitionPlan::Overtaken;
+        }
         let mut was_crossfade = false;
-        let needs_load = if engine.immediate_playing() {
-            // Path 1: Engine already playing (gapless/crossfade completed by engine)
+        let needs_load = if advanced {
+            // Path 1: the engine already moved on (gapless/crossfade completed by engine)
             engine.consume_gapless_transition().await;
             was_crossfade = engine.take_last_transition_was_crossfade();
-            debug!(" [TRACK FINISHED] Engine already playing - gapless transition completed");
+            debug!(" [TRACK FINISHED] Engine already on the next track - the queue follows");
             false
         } else if engine.load_prepared_track().await.is_ok() {
             // Path 2: Prepared track loaded successfully
@@ -642,6 +669,8 @@ impl QueueNavigator {
                         song,
                         reason,
                     }
+                } else if advanced {
+                    TrackTransitionPlan::Advanced { song, reason }
                 } else {
                     TrackTransitionPlan::PlayPrepared { song, reason }
                 };
@@ -737,6 +766,8 @@ impl QueueNavigator {
                 song,
                 reason,
             }
+        } else if advanced {
+            TrackTransitionPlan::Advanced { song, reason }
         } else {
             TrackTransitionPlan::PlayPrepared { song, reason }
         }
@@ -753,10 +784,12 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
     ) -> Result<Option<(Song, TransitionReason)>> {
         match plan {
+            TrackTransitionPlan::Overtaken => Ok(None),
             TrackTransitionPlan::Stop => {
                 engine.stop().await;
                 Ok(None)
             }
+            TrackTransitionPlan::Advanced { song, reason } => Ok(Some((song, reason))),
             TrackTransitionPlan::PlayPrepared { song, reason } => {
                 if !engine.immediate_playing() {
                     engine.play().await?;
@@ -1303,8 +1336,9 @@ mod tests {
         nav.set_current_song_id(Some("only".to_string())).await;
 
         let mut engine = CustomAudioEngine::new();
+        let ended = engine.ended_now(false);
         let plan = nav
-            .decide_transition(&mut engine, &session("http://example"))
+            .decide_transition(&mut engine, &session("http://example"), ended)
             .await;
 
         assert!(
@@ -1324,8 +1358,9 @@ mod tests {
         nav.set_current_song_id(Some("a".to_string())).await;
 
         let mut engine = CustomAudioEngine::new();
+        let ended = engine.ended_now(false);
         let plan = nav
-            .decide_transition(&mut engine, &session("http://server"))
+            .decide_transition(&mut engine, &session("http://server"), ended)
             .await;
 
         match plan {
@@ -1359,8 +1394,9 @@ mod tests {
         nav.set_current_song_id(Some("a".to_string())).await;
 
         let mut engine = CustomAudioEngine::new();
+        let ended = engine.ended_now(false);
         let plan = nav
-            .decide_transition(&mut engine, &session("http://server"))
+            .decide_transition(&mut engine, &session("http://server"), ended)
             .await;
 
         match plan {
@@ -1394,8 +1430,9 @@ mod tests {
         nav.set_current_song_id(Some("a".to_string())).await;
 
         let mut engine = CustomAudioEngine::new();
+        let ended = engine.ended_now(false);
         let plan = nav
-            .decide_transition(&mut engine, &session("http://server"))
+            .decide_transition(&mut engine, &session("http://server"), ended)
             .await;
 
         match plan {
@@ -1426,8 +1463,9 @@ mod tests {
         let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
 
         let mut engine = CustomAudioEngine::new();
+        let ended = engine.ended_now(false);
         let plan = nav
-            .decide_transition(&mut engine, &session("http://server"))
+            .decide_transition(&mut engine, &session("http://server"), ended)
             .await;
 
         assert!(

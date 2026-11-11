@@ -24,6 +24,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - `nokkvi love` and `nokkvi rate` now refuse during radio playback instead of starring or rating the last queue song.
+- With crossfade off, seeking to a song's last second while paused no longer starts the next song playing.
+- Clicking a song just as the playing one changes no longer leaves the queue one song past the click.
+- Stop pressed just as a song changes gaplessly no longer starts the next song.
 
 ### Removed
 

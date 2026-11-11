@@ -13,11 +13,12 @@ use tokio::sync::{
 use tracing::{debug, warn};
 
 use crate::{
-    audio::engine::CustomAudioEngine,
+    audio::engine::{CustomAudioEngine, TrackCompletion},
     backend::{queue::QueueService, settings::SettingsService},
     services::{
         playback::{
             PreviousStep, QueueNavigator, RemovalAftermath, StageStart, StagedSong, StreamSession,
+            TrackTransitionPlan,
         },
         queue::PreviousOutcome,
         task_manager::TaskManager,
@@ -111,7 +112,7 @@ impl PlaybackController {
             let queue_changed_tx_cb = queue_changed_tx;
 
             let mut engine = audio_engine.lock().await;
-            engine.set_completion_callback(move |is_loop| {
+            engine.set_completion_callback(move |completion| {
                 let nav = navigator_arc.clone();
                 let ew = engine_weak.clone();
                 let qvm = queue_vm.clone();
@@ -141,8 +142,19 @@ impl PlaybackController {
                     // behind `engine.play()`'s network probe + prebuffer.
                     let plan = {
                         let nav_guard = nav.lock().await;
-                        nav_guard.decide_transition(&mut engine, &session).await
+                        nav_guard
+                            .decide_transition(&mut engine, &session, completion)
+                            .await
                     };
+                    if matches!(plan, TrackTransitionPlan::Overtaken) {
+                        // The action that overtook this completion owns the
+                        // queue and has refreshed the view itself.
+                        return Ok(());
+                    }
+                    let is_loop = matches!(
+                        completion,
+                        TrackCompletion::Ended { is_loop: true, .. }
+                    );
                     let outcome = QueueNavigator::execute_transition(plan, &mut engine).await;
                     // Every outcome releases the engine before the refresh
                     // await, then tells the UI the queue changed: the
@@ -1046,9 +1058,13 @@ impl PlaybackController {
 
         let play_index = start_index.min(songs.len() - 1);
 
+        // The engine lock is held from before the queue changes until the
+        // load has it (see `load_play_and_set_current`).
+        let engine = self.audio_engine.lock().await;
+
         // 1. Set queue with songs, starting at play_index. The returned
         //    `NextTrackResetEffect` is dispatched against the engine
-        //    further down where the lock is held.
+        //    further down.
         let effect = self
             .queue_service
             .set_queue(songs.clone(), Some(play_index))
@@ -1061,14 +1077,28 @@ impl PlaybackController {
         // 3-4. Load, play (or blend, per "Fade on Skip"), discharge the
         //      set_queue reset, and update the navigator so consume mode
         //      knows what's playing.
-        self.load_play_and_set_current(&stream_url, Some(song.clone()), effect, song.id.clone())
-            .await?;
+        self.load_play_and_set_current(
+            engine,
+            &stream_url,
+            Some(song.clone()),
+            effect,
+            song.id.clone(),
+        )
+        .await?;
 
         Ok(())
     }
 
-    /// Shared engine-load epilogue for the 3 same-shape play primitives:
-    /// acquire the engine lock, route the click through "Fade on Skip"
+    /// Shared engine-load epilogue for the same-shape play primitives. The
+    /// caller hands over the engine lock it took BEFORE it moved the queue
+    /// cursor: a track-change completion waits for that lock, so one that
+    /// ran between the cursor move and this load would advance the queue
+    /// past the clicked song, and the load would then play the click with
+    /// the queue one song on. Held across both, the completion runs before
+    /// the cursor moves or after the load, where the engine tells it it was
+    /// overtaken (`CustomAudioEngine::completion_stands`).
+    ///
+    /// Routes the click through "Fade on Skip"
     /// ([`plan_click_play`], M10), then — on the hard route — hand the load
     /// to [`Self::stage_and_name`] (load, play, discharge the queue
     /// mutation's `NextTrackResetEffect` under the lock, then name the song
@@ -1088,12 +1118,12 @@ impl PlaybackController {
     /// under its own lock.
     async fn load_play_and_set_current(
         &self,
+        mut engine: tokio::sync::MutexGuard<'_, CustomAudioEngine>,
         stream_url: &str,
         song: Option<crate::types::song::Song>,
         effect: crate::types::next_track_reset::NextTrackResetEffect,
         song_id: String,
     ) -> Result<()> {
-        let mut engine = self.audio_engine.lock().await;
         let effect = match plan_click_play(
             &mut engine,
             &self.skip_fade_seq,
@@ -1170,10 +1200,12 @@ impl PlaybackController {
         // order so the chosen track heads a fresh shuffle — otherwise
         // repositioning into a spent order can strand the user at its tail
         // (clicking the last shuffle slot would play once and stop). Scope
-        // lives in `should_reanchor_for_play`. Snapshot on the
-        // engine's own lock, dropped before the queue lock — the engine lock is
-        // never nested under the qm lock.
-        let starting_fresh = Self::should_reanchor_for_play(self.audio_engine.lock().await.state());
+        // lives in `should_reanchor_for_play`. The engine lock is taken here,
+        // before the cursor moves, and held until the load has it (see
+        // `load_play_and_set_current`); the queue lock nests under it, never
+        // the other way round.
+        let engine = self.audio_engine.lock().await;
+        let starting_fresh = Self::should_reanchor_for_play(engine.state());
 
         // 0+1. Record history, resolve entry_id, reposition — all under
         //      one qm lock so the resolution is atomic with the reposition.
@@ -1224,7 +1256,7 @@ impl PlaybackController {
         };
         let stream_url = session.stream_url_for(&song_id, song.as_ref());
 
-        self.load_play_and_set_current(&stream_url, song, reposition_effect, song_id)
+        self.load_play_and_set_current(engine, &stream_url, song, reposition_effect, song_id)
             .await?;
 
         Ok(())
@@ -3333,6 +3365,158 @@ mod tests {
     /// asks for one as soon as its clock reads past 80 %) only races that
     /// load: the completion's stop throws it away, after the server already
     /// started its transcode. So none is started once the track has ended.
+    /// The id of the song the queue names as current.
+    async fn queue_current(fx: &ClickFixture) -> Option<String> {
+        let manager = fx.queue.queue_manager();
+        let manager = manager.lock().await;
+        manager.get_current_song().map(|song| song.id)
+    }
+
+    /// Wait (up to 5 s) for the queue to name `id` as current.
+    async fn wait_for_current(fx: &ClickFixture, id: &str) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if queue_current(fx).await.as_deref() == Some(id) {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    /// `songs` queued on a server that sends each as its own file, the first
+    /// playing with the second prepared for the gapless join.
+    async fn joinable_fixture(
+        server: &ClockServer,
+        songs: &[&str],
+    ) -> Result<(ClickFixture, rodio::mixer::MixerSource)> {
+        let songs = songs.iter().map(|id| flac_song(id)).collect();
+        let (fx, mixer) =
+            playing_clock_fixture_with(server, StreamQuality::default(), songs).await?;
+        assert!(fx.playback.prepare_next_for_gapless().await);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let engine_arc = fx.playback.audio_engine();
+            if engine_arc.lock().await.is_next_track_prepared().await {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the next song is prepared"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok((fx, mixer))
+    }
+
+    /// With the engine lock held, as an action in progress holds it: `action`
+    /// queues for the lock, then the playing song's read-ahead reaches its
+    /// end and joins the next song, whose completion queues behind `action`.
+    /// Returns once both have run.
+    async fn overtake_a_gapless_join<F>(fx: &ClickFixture, action: F) -> Result<()>
+    where
+        F: std::future::Future<Output = Result<()>> + Send + 'static,
+    {
+        let engine_arc = fx.playback.audio_engine();
+        let mut held = engine_arc.lock().await;
+        let action = tokio::spawn(action);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let before = held.source_generation();
+        held.seek(9_500).await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while held.source_generation() == before {
+            assert!(std::time::Instant::now() < deadline, "the join lands");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(held);
+        action.await??;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        Ok(())
+    }
+
+    /// A gapless join that lands while playback is paused (the read-ahead
+    /// reaches the song's end, as after a paused seek to its last second)
+    /// moves the queue on and stays paused. Its completion once found the
+    /// engine not playing, loaded the next song afresh and played it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_gapless_join_while_paused_stays_paused() -> Result<()> {
+        let server = spawn_clock_server(ClockReply::Raw).await;
+        let (fx, _mixer) = joinable_fixture(&server, &["a", "b", "c"]).await?;
+        let opens_of_b = || {
+            server
+                .requests()
+                .iter()
+                .filter(|r| r.param("id").as_deref() == Some("b"))
+                .count()
+        };
+        let prepared = opens_of_b();
+        fx.playback.audio_engine().lock().await.pause();
+
+        fx.playback.seek(9.5).await?;
+        let followed = wait_for_current(&fx, "b").await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let (paused, playing) = {
+            let engine_arc = fx.playback.audio_engine();
+            let engine = engine_arc.lock().await;
+            (engine.immediate_paused(), engine.immediate_playing())
+        };
+        let opened = opens_of_b();
+        fx.playback.audio_engine().lock().await.stop().await;
+
+        assert!(followed, "the queue follows the join to b");
+        assert!(paused && !playing, "the join leaves playback paused");
+        assert_eq!(opened, prepared, "b is not loaded a second time");
+        Ok(())
+    }
+
+    /// A click that gets the engine lock between a gapless join and its
+    /// completion plays the clicked song, and the queue stays on it. The
+    /// completion once moved the queue one song past the click.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_click_that_overtakes_a_gapless_join_keeps_the_queue_on_the_clicked_song()
+    -> Result<()> {
+        let server = spawn_clock_server(ClockReply::Raw).await;
+        let (fx, _mixer) = joinable_fixture(&server, &["a", "b", "c", "d"]).await?;
+
+        let playback = fx.playback.clone();
+        overtake_a_gapless_join(
+            &fx,
+            async move { playback.play_song_from_queue("c", 2).await },
+        )
+        .await?;
+
+        let source = fx.playback.audio_engine().lock().await.source().to_owned();
+        fx.playback.audio_engine().lock().await.stop().await;
+        assert_eq!(queue_current(&fx).await.as_deref(), Some("c"));
+        assert!(
+            source.contains("id=c&"),
+            "the engine plays the click: {source}"
+        );
+        Ok(())
+    }
+
+    /// A Stop that gets the engine lock between a gapless join and its
+    /// completion stays stopped. The completion once found the engine not
+    /// playing, loaded the next song and played it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stop_that_overtakes_a_gapless_join_stays_stopped() -> Result<()> {
+        let server = spawn_clock_server(ClockReply::Raw).await;
+        let (fx, _mixer) = joinable_fixture(&server, &["a", "b", "c"]).await?;
+
+        let playback = fx.playback.clone();
+        overtake_a_gapless_join(&fx, async move { playback.stop().await }).await?;
+
+        let engine_arc = fx.playback.audio_engine();
+        let engine = engine_arc.lock().await;
+        assert!(
+            !engine.playing() && !engine.immediate_paused(),
+            "the engine stays stopped"
+        );
+        Ok(())
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_seek_past_the_end_prepares_no_next_track() -> Result<()> {
         let server = spawn_clock_server(ClockReply::Live).await;
