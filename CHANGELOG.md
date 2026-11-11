@@ -28,7 +28,6 @@ All notable changes to this project will be documented in this file.
 - Clicking a song just as the playing one changes no longer leaves the queue one song past the click.
 - Stop pressed just as a song changes gaplessly no longer starts the next song.
 - Dragging a row to the queue from under an expanded album, artist or genre now shows that row on the drag label.
-- Dropping a row dragged from far down an expanded album, artist or genre now queues that row, not the highlighted one.
 - A slow album or track load no longer re-opens a row you already closed, or replaces the row you opened after it.
 - Switching between Albums and the Queue no longer downloads the same album thumbnails again each time.
 
