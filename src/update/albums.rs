@@ -176,9 +176,7 @@ impl Nokkvi {
                 // (N17). album_art evicts at capacity; `should_refetch` guards the
                 // skew by also checking album_art membership.
                 self.artwork.failed_art.remove(id);
-                self.artwork
-                    .album_art_versions
-                    .insert(id.to_owned(), version.clone());
+                self.record_mini_version(id, version);
                 self.artwork.album_art.put(id.to_owned(), h);
                 true
             }
@@ -190,9 +188,18 @@ impl Nokkvi {
                 // later success, a user Refresh Artwork, or logout all re-enable
                 // it. Logged once (then suppressed).
                 debug!(" Mini artwork not found on server for: {}", id);
-                self.artwork
-                    .failed_art
-                    .insert(id.to_owned(), version.clone());
+                match version {
+                    Some(_) => {
+                        self.artwork
+                            .failed_art
+                            .insert(id.to_owned(), version.clone());
+                    }
+                    // A versionless miss keeps the version an album view's
+                    // miss recorded, as `record_mini_version` does.
+                    None => {
+                        self.artwork.failed_art.entry(id.to_owned()).or_insert(None);
+                    }
+                }
                 false
             }
             MiniArt::Transient => {
@@ -202,6 +209,23 @@ impl Nokkvi {
                 // Silent on purpose: expected under throttle and self-healing;
                 // the retry wrapper already logs a give-up for the retry surfaces.
                 false
+            }
+        }
+    }
+
+    /// Record the version a landed thumbnail was fetched at. A fetch that
+    /// carried none (a passive surface, `passive_artwork_version`) keeps the
+    /// version an album view recorded for the slot: the bytes are at least as
+    /// new, so that view's next pass still matches an unchanged cover and
+    /// still misses a changed one.
+    fn record_mini_version(&mut self, id: &str, version: &Option<String>) {
+        let versions = &mut self.artwork.album_art_versions;
+        match version {
+            Some(_) => {
+                versions.insert(id.to_owned(), version.clone());
+            }
+            None => {
+                versions.entry(id.to_owned()).or_insert(None);
             }
         }
     }

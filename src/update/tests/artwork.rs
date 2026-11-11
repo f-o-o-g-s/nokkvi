@@ -479,3 +479,81 @@ fn now_playing_warm_skipped_while_the_album_is_in_flight() {
 
     assert!(app.now_playing_artwork_to_warm().is_none());
 }
+
+// ============================================================================
+// A surface with no version to offer (the passive `None`) never disagrees
+// ============================================================================
+
+fn warm_app_at(version: Option<&str>) -> crate::Nokkvi {
+    let mut app = test_app();
+    let _ = app.record_mini_art(
+        "al-1",
+        &version.map(str::to_string),
+        MiniArt::Loaded(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4])),
+    );
+    app
+}
+
+fn needs(app: &crate::Nokkvi, version: Option<&str>) -> bool {
+    crate::update::components::ArtworkGate::new(&app.artwork)
+        .needs_fetch(&"al-1".to_string(), &version.map(str::to_string))
+}
+
+/// The Albums view warmed the cover at its image hash; the Queue then asks
+/// with the passive `None`. The two used to disagree forever: each switch
+/// between the views re-downloaded every thumbnail both showed.
+#[test]
+fn a_passive_surface_takes_a_cover_the_albums_view_warmed() {
+    let app = warm_app_at(Some("hash-1"));
+    assert!(
+        !needs(&app, passive_artwork_version(&None).as_deref()),
+        "a surface with no version to compare takes the warm cover",
+    );
+    assert!(!needs(&app, Some("hash-1")));
+    assert!(
+        needs(&app, Some("hash-2")),
+        "a changed cover still re-fetches"
+    );
+}
+
+/// A passive surface re-warms an evicted cover: the version the album views
+/// recorded for it stays, so they do not fetch it once more.
+#[test]
+fn a_passive_rewarm_keeps_the_version_the_albums_view_recorded() {
+    let mut app = warm_app_at(Some("hash-1"));
+    let _ = app.record_mini_art(
+        "al-1",
+        &None,
+        MiniArt::Loaded(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4])),
+    );
+    assert!(!needs(&app, Some("hash-1")));
+}
+
+/// A cover only passive surfaces ever fetched has no version on record; the
+/// Albums view fetches it once at its hash, and both sides agree from then on.
+#[test]
+fn a_cover_warmed_passively_is_fetched_once_at_its_hash() {
+    let mut app = warm_app_at(None);
+    assert!(needs(&app, Some("hash-1")));
+    let _ = app.record_mini_art(
+        "al-1",
+        &Some("hash-1".to_string()),
+        MiniArt::Loaded(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4])),
+    );
+    assert!(!needs(&app, Some("hash-1")));
+    assert!(!needs(&app, None));
+}
+
+/// The same for a cover the server does not have: a failure recorded at a
+/// hash stops a passive surface asking, and the passive failure does not
+/// replace it.
+#[test]
+fn a_passive_surface_does_not_retry_a_cover_that_failed_at_a_hash() {
+    let mut app = test_app();
+    let _ = app.record_mini_art("al-1", &Some("hash-1".to_string()), MiniArt::Missing);
+    assert!(!needs(&app, None));
+
+    let _ = app.record_mini_art("al-1", &None, MiniArt::Missing);
+    assert!(!needs(&app, Some("hash-1")));
+    assert!(needs(&app, Some("hash-2")), "a changed version asks again");
+}

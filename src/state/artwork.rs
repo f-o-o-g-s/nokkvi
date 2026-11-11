@@ -308,7 +308,9 @@ pub struct ArtworkState {
     /// only a per-song `updated_at`, which would oscillate this album_id-keyed
     /// map, so they feed a constant `None` (id-only dedup,
     /// `update::components::passive_artwork_version`) and re-warm the current
-    /// cover on the next cold load.
+    /// cover on the next cold load. That `None` offers no version: it
+    /// never counts as a mismatch and never replaces a recorded one
+    /// (`should_refetch`, `record_mini_art`).
     ///
     /// Reset to empty by `Default`, so logout (`ArtworkState::default()`) drops
     /// it for free. `album_art` evicts silently at capacity, so a version entry

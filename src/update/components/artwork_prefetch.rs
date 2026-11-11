@@ -90,16 +90,25 @@ pub(crate) fn should_refetch(
     id: &String,
     updated_at: &Option<String>,
 ) -> bool {
+    // A caller with no version to offer (the passive surfaces' constant `None`,
+    // [`passive_artwork_version`]) cannot say the cover changed, so whatever is
+    // on record stands: a warm slot stays warm and a recorded failure stays
+    // failed. Comparing its `None` against the hash an album view recorded
+    // made the two disagree on every pass, and each switch between Albums and
+    // the Queue fetched every shared thumbnail again.
+    let Some(version) = updated_at else {
+        return !cached_ids.contains(id) && !failed.contains_key(id);
+    };
     if cached_ids.contains(id) {
         // Warmed: refetch only when the recorded version no longer matches.
-        return versions.get(id) != Some(updated_at);
+        return versions.get(id).and_then(Option::as_ref) != Some(version);
     }
     // Handle absent (never warmed, or evicted). Re-fetch UNLESS this id already
     // failed at THIS exact version — a known-dead cover must not be re-queued on
     // every scroll/resize. A changed updated_at (server cover added) bypasses the
     // negative entry, mirroring the version branch; logout and a user "Refresh
     // Artwork" also drop the entry.
-    failed.get(id) != Some(updated_at)
+    failed.get(id).and_then(Option::as_ref) != Some(version)
 }
 
 /// The album-coherent version that the PASSIVE 80px-thumbnail surfaces (queue,
