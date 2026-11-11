@@ -60,16 +60,29 @@ fn every_albums_row_menu_entry_has_an_action() {
 
 #[test]
 fn every_artists_row_menu_entry_has_an_action() {
+    use nokkvi_data::types::discography::ReleaseType;
+
     let artists = vec![make_artist("ar1", "Band")];
+    // An EP puts a release-type section header between the artist and the
+    // album: flattened [ar1, #EPs, a1].
+    const SECTION_ROW: usize = 1;
+    const ALBUM_ROW: usize = 2;
     let rows = [
         (PARENT_ROW, ArtistsPage::parent_menu()),
-        (CHILD_ROW, ArtistsPage::child_menu()),
+        (SECTION_ROW, ArtistsPage::section_menu()),
+        (ALBUM_ROW, ArtistsPage::child_menu()),
     ];
     for (row, offered) in rows {
         for entry in clickable(offered) {
             let mut page = ArtistsPage::new();
-            page.expansion.expanded_id = Some("ar1".into());
-            page.expansion.children = vec![make_album("a1", "Record", "Band").into()];
+            let mut ep = make_album("a1", "Record", "Band");
+            ep.release_types = vec![ReleaseType::Ep];
+            let _ = page.update(
+                ArtistsMessage::AlbumsLoaded("ar1".into(), vec![ep]),
+                artists.len(),
+                &artists,
+            );
+            assert_eq!(page.expansion.children.len(), 2, "a header and the EP");
 
             let (_, action) = page.update(
                 ArtistsMessage::ContextMenuAction(row, entry),

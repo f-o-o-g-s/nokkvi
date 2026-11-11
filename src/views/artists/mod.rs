@@ -130,6 +130,9 @@ pub enum ArtistsMessage {
     ExpandCenter,
     FocusAndExpand(usize), // Clicked 'X albums' — focus that row and expand it
     CollapseExpansion,
+    /// Click on a release-type section header's chevron (the header's
+    /// flattened row index): fold or unfold that section.
+    ToggleSection(usize),
     /// Albums loaded for expanded artist (artist_id, albums)
     AlbumsLoaded(String, Vec<AlbumUIViewData>),
 

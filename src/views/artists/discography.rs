@@ -58,6 +58,16 @@ pub enum DiscographyRow {
     Album(AlbumUIViewData),
 }
 
+impl DiscographyRow {
+    /// The album this row shows; `None` for a section header.
+    pub(crate) fn album(&self) -> Option<&AlbumUIViewData> {
+        match self {
+            Self::Album(album) => Some(album),
+            Self::Section(_) => None,
+        }
+    }
+}
+
 impl From<AlbumUIViewData> for DiscographyRow {
     fn from(album: AlbumUIViewData) -> Self {
         Self::Album(album)
@@ -129,12 +139,81 @@ pub(crate) fn albums_mut(
     })
 }
 
+/// The albums of the section whose header sits at `header_idx` in `rows`, in
+/// display order: the header's own while collapsed, else the album rows up
+/// to the next header. Empty when `header_idx` is not a header.
+pub(crate) fn section_albums(
+    rows: &[DiscographyRow],
+    header_idx: usize,
+) -> impl Iterator<Item = &AlbumUIViewData> {
+    let (hidden, open): (&[AlbumUIViewData], &[DiscographyRow]) = match rows.get(header_idx) {
+        Some(DiscographyRow::Section(header)) if header.is_collapsed() => (&header.hidden, &[]),
+        Some(DiscographyRow::Section(_)) => (&[], &rows[header_idx + 1..]),
+        Some(DiscographyRow::Album(_)) | None => (&[], &[]),
+    };
+    hidden
+        .iter()
+        .chain(open.iter().map_while(DiscographyRow::album))
+}
+
+/// The albums of section `group`, wherever its header sits; empty when the
+/// rows have no such section.
+pub(crate) fn albums_of_group(
+    rows: &[DiscographyRow],
+    group: DiscographyGroup,
+) -> impl Iterator<Item = &AlbumUIViewData> {
+    let header_idx = rows
+        .iter()
+        .position(|row| matches!(row, DiscographyRow::Section(header) if header.group == group));
+    // `usize::MAX` is past every row, which `section_albums` reads as "none".
+    section_albums(rows, header_idx.unwrap_or(usize::MAX))
+}
+
 /// The 1-based place of the album at `idx` among all of the artist's albums
 /// (headers take no number; a collapsed section's albums keep theirs, so a
 /// row's number never changes when a section above it folds).
 pub(crate) fn album_ordinal(rows: &[DiscographyRow], idx: usize) -> usize {
     let before = rows.get(..idx).unwrap_or(rows);
     albums(before).count() + 1
+}
+
+/// Fold or unfold the section whose header sits at `header_idx`. Returns the
+/// section and whether it is now collapsed; `None` (and no change) when the
+/// row is not a header.
+pub(crate) fn toggle_section(
+    rows: &mut Vec<DiscographyRow>,
+    header_idx: usize,
+) -> Option<(DiscographyGroup, bool)> {
+    let Some(DiscographyRow::Section(header)) = rows.get(header_idx) else {
+        return None;
+    };
+    let group = header.group;
+    if header.is_collapsed() {
+        let Some(DiscographyRow::Section(header)) = rows.get_mut(header_idx) else {
+            return None;
+        };
+        let members = std::mem::take(&mut header.hidden);
+        let at = header_idx + 1;
+        rows.splice(at..at, members.into_iter().map(DiscographyRow::Album));
+        Some((group, false))
+    } else {
+        let start = header_idx + 1;
+        let len = rows[start..]
+            .iter()
+            .take_while(|row| row.album().is_some())
+            .count();
+        let members: Vec<AlbumUIViewData> = rows
+            .drain(start..start + len)
+            .filter_map(|row| match row {
+                DiscographyRow::Album(album) => Some(album),
+                DiscographyRow::Section(_) => None,
+            })
+            .collect();
+        if let Some(DiscographyRow::Section(header)) = rows.get_mut(header_idx) {
+            header.hidden = members;
+        }
+        Some((group, true))
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +328,60 @@ mod tests {
         assert_eq!(
             ids(albums(&rows)),
             ["lp-new", "lp-old", "ep-new", "ep-old", "single"]
+        );
+    }
+
+    #[test]
+    fn toggling_a_section_folds_and_unfolds_it_in_place() {
+        let mut rows = build_rows(mixed(), ARTIST, true, &HashSet::new());
+        let open = shape(&rows);
+
+        assert_eq!(
+            toggle_section(&mut rows, 3),
+            Some((DiscographyGroup::Eps, true))
+        );
+        assert_eq!(
+            shape(&rows),
+            ["#Albums", "lp-new", "lp-old", "#EPs", "#Singles", "single"]
+        );
+        let DiscographyRow::Section(eps) = &rows[3] else {
+            panic!("row 3 is the EPs header");
+        };
+        assert!(eps.is_collapsed());
+        assert_eq!(eps.count, 2);
+
+        assert_eq!(
+            toggle_section(&mut rows, 3),
+            Some((DiscographyGroup::Eps, false))
+        );
+        assert_eq!(shape(&rows), open);
+
+        // The last section folds up to the end of the list.
+        assert_eq!(
+            toggle_section(&mut rows, 6),
+            Some((DiscographyGroup::Singles, true))
+        );
+        assert_eq!(rows.len(), 7);
+        // An album row is not a header.
+        assert_eq!(toggle_section(&mut rows, 1), None);
+        assert_eq!(toggle_section(&mut rows, 99), None);
+    }
+
+    #[test]
+    fn section_albums_stop_at_the_next_header() {
+        let rows = build_rows(mixed(), ARTIST, true, &HashSet::new());
+        assert_eq!(ids(section_albums(&rows, 0)), ["lp-new", "lp-old"]);
+        assert_eq!(ids(section_albums(&rows, 6)), ["single"]);
+        assert!(section_albums(&rows, 1).next().is_none());
+        assert!(section_albums(&rows, 99).next().is_none());
+        assert_eq!(
+            ids(albums_of_group(&rows, DiscographyGroup::Eps)),
+            ["ep-new", "ep-old"]
+        );
+        assert!(
+            albums_of_group(&rows, DiscographyGroup::Live)
+                .next()
+                .is_none()
         );
     }
 

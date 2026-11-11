@@ -262,6 +262,48 @@ fn multi_select_enter_adds_from_the_split_view_library_pane() {
     }
 }
 
+/// Expand an artist with a mixed discography in `app` and centre its first
+/// section header; returns Enter on it.
+fn enter_on_a_section_header(app: &mut crate::Nokkvi) -> crate::app_message::Message {
+    use crate::{views::ArtistsMessage, widgets::SlotListPageMessage};
+
+    seed_artists(app, vec![make_artist("ar1", "One")]);
+    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(
+        "ar1".to_string(),
+        super::discography::mixed(),
+    ));
+    // Flattened: ar1, #Albums, …
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    app.artists_page.common.handle_set_offset(1, total);
+    crate::app_message::Message::Artists(ArtistsMessage::SlotList(
+        SlotListPageMessage::ActivateCenter(false),
+    ))
+}
+
+#[test]
+fn enter_on_a_section_header_plays_from_the_artists_view() {
+    let mut app = radio_app_with_stale_context();
+    app.current_view = View::Artists;
+    let enter = enter_on_a_section_header(&mut app);
+
+    let _ = app.update(enter);
+
+    assert_batch_play_entered_new_context(&app, "Enter on a section header");
+}
+
+#[test]
+fn enter_on_a_section_header_adds_from_the_split_view_library_pane() {
+    let mut app = radio_app_with_browsing_panel();
+    let enter = enter_on_a_section_header(&mut app);
+
+    let _ = app.update(enter);
+
+    assert_add_left_playback_alone(&app, "Enter on a section header");
+}
+
 #[test]
 fn albums_shuffle_play_batch_leaves_radio() {
     use crate::{views::AlbumsMessage, widgets::context_menu::LibraryContextEntry};

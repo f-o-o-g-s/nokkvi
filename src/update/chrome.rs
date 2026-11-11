@@ -92,7 +92,8 @@ pub(crate) fn dispatch_view_chrome<M: HasViewChrome>(
 ///   enums without the variant (Similar — results are ephemeral, no roulette
 ///   over the result list).
 /// - `expand`: `yes` ⇒ `Self::CollapseExpansion | Self::ExpandCenter` trigger
-///   the expand SFX (the four expansion views); `no` for the rest.
+///   the expand SFX (the expansion views); `sections` adds Artists'
+///   `ToggleSection`, `harbour` is Harbour's own pair; `no` for the rest.
 /// - `drag`: `yes` ⇒ extract `Self::ArtworkColumnDrag` /
 ///   `Self::ArtworkColumnVerticalDrag`; `no` for views without an artwork
 ///   pane (Radios). The trait methods still exist on those views so
@@ -114,6 +115,14 @@ macro_rules! impl_view_chrome {
     // header) and `ExpandCenter` (Shift+Enter), not the shared `CollapseExpansion`.
     (@expand harbour, $self:ident) => {
         matches!($self, Self::ToggleSection(_) | Self::ExpandCenter)
+    };
+    // Artists also folds a release-type section of the expanded artist with
+    // `ToggleSection` (a click on the header's chevron).
+    (@expand sections, $self:ident) => {
+        matches!(
+            $self,
+            Self::CollapseExpansion | Self::ExpandCenter | Self::ToggleSection(_)
+        )
     };
     (@expand no, $self:ident) => {
         false
@@ -170,7 +179,7 @@ impl_view_chrome!(AlbumsMessage {
 });
 impl_view_chrome!(ArtistsMessage {
     roulette: yes,
-    expand: yes,
+    expand: sections,
     drag: yes
 });
 impl_view_chrome!(SongsMessage {
@@ -433,6 +442,8 @@ mod tests {
         assert!(AlbumsMessage::CollapseExpansion.is_expand_action());
         assert!(AlbumsMessage::ExpandCenter.is_expand_action());
         assert!(ArtistsMessage::CollapseExpansion.is_expand_action());
+        assert!(ArtistsMessage::ExpandCenter.is_expand_action());
+        assert!(ArtistsMessage::ToggleSection(3).is_expand_action());
         assert!(GenresMessage::ExpandCenter.is_expand_action());
         assert!(PlaylistsMessage::CollapseExpansion.is_expand_action());
         // Harbour toggles sections via ToggleSection (click) + ExpandCenter

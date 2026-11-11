@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 - An expanded artist's albums are grouped under release-type headers: Albums, EPs, Singles, Live, Compilations and more, with Appears On last.
 - An artist with only plain albums keeps the flat album list.
+- Enter on a release-type header plays that whole section in list order, or adds it from the split view's library pane.
+- Shift+Enter on a release-type header, or a click on its chevron, folds or unfolds the section.
+- Folded sections stay folded for every artist until nokkvi quits.
+- A release-type header's right-click menu shuffles its section, or adds it to the queue, a playlist or a mix.
+- A selected release-type header stands for all of its albums in batch actions.
 - Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
 
 ### Changed

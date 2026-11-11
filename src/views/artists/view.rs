@@ -37,6 +37,17 @@ impl ArtistsPage {
         crate::widgets::context_menu::library_entries_with_folder()
     }
 
+    /// Right-click entries for a release-type section header: the batch
+    /// actions, which take the section's albums (see [`Self::parent_menu`]).
+    pub(crate) fn section_menu() -> Vec<LibraryContextEntry> {
+        vec![
+            LibraryContextEntry::ShufflePlay,
+            LibraryContextEntry::AddToQueue,
+            LibraryContextEntry::AddToPlaylist,
+            LibraryContextEntry::AddToMix,
+        ]
+    }
+
     /// Build the view
     pub fn view<'a>(&'a self, data: ArtistsViewData<'a>) -> Element<'a, ArtistsMessage> {
         // Build the columns-visibility dropdown for the artists view header.
@@ -201,7 +212,12 @@ impl ArtistsPage {
                     )
                 }
                 SlotListEntry::Child(DiscographyRow::Section(header), _parent_artist_id) => {
-                    let row = Self::render_section_header_row(header, &ctx, data.stable_viewport);
+                    let row = Self::render_section_header_row(
+                        header,
+                        &ctx,
+                        data.stable_viewport,
+                        open_menu_for_rows,
+                    );
                     crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
                         &ctx,
@@ -661,6 +677,10 @@ impl ArtistsPage {
     /// chassis (same depth fill, focus ring, hover and opacity fall-off), so
     /// it navigates and highlights like any other row.
     ///
+    /// Enter or a click on the highlighted header plays the section; the
+    /// chevron (or Shift+Enter) folds it; the right-click menu holds the
+    /// batch actions.
+    ///
     /// Layout: `[indent] [chevron, in the sub-index column] [SECTION NAME]
     /// [hairline rule ⋯] [count] [years]`. The name starts on the album rows'
     /// thumbnail rail (or their title rail with the thumbnail column off).
@@ -668,8 +688,9 @@ impl ArtistsPage {
         header: &SectionHeader,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
-        use iced::widget::{Space, text};
+        use iced::widget::{Space, mouse_area, text};
 
         use crate::{
             theme,
@@ -709,6 +730,11 @@ impl ArtistsPage {
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center);
+        // The whole sub-index column is the fold target, full row height, so
+        // the click needs no aim; the rest of the row is the row's own click.
+        let chevron = mouse_area(chevron)
+            .on_press(ArtistsMessage::ToggleSection(ctx.item_index))
+            .interaction(iced::mouse::Interaction::Pointer);
 
         // The name in tracked capitals. iced has no letter-spacing, so each
         // letter is its own text and the row's spacing is the tracking.
@@ -778,12 +804,22 @@ impl ArtistsPage {
             .align_y(Alignment::Center)
             .height(Length::Fill);
 
-        child_slot_button(
+        let header_el = child_slot_button(
             content,
             ctx,
             style,
             stable_viewport,
             ArtistsMessage::SlotList,
+        );
+
+        crate::widgets::context_menu::wrap_library_row(
+            crate::View::Artists,
+            ctx.item_index,
+            header_el,
+            Self::section_menu(),
+            open_menu,
+            ArtistsMessage::ContextMenuAction,
+            ArtistsMessage::SetOpenMenu,
         )
     }
 
