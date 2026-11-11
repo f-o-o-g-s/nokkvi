@@ -1212,9 +1212,7 @@ fn logout_clears_the_cover() {
         source: id,
         result: Some(std::sync::Arc::new(cover)),
     }));
-    let _lock = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = super::sse_slot_guard();
     let _ = app.reset_session_state();
     assert!(app.milkdrop.shared.cover.lock().is_none());
     assert_eq!(app.milkdrop.cover_sent, None);

@@ -6,17 +6,11 @@
 //! drifted (e.g. `general.rs` covers server version, light mode, task manager,
 //! radios, and auth).
 
-/// Serializes every test that touches the process-global `SSE_CONNECTION_INFO`
-/// slot — whether directly via `navidrome_sse::{register,clear}` or indirectly
-/// via `reset_session_state()` (which calls `navidrome_sse::clear()`). All such
-/// tests flip the same shared static, so under parallel execution they race: a
-/// concurrent `clear()` empties the slot between another test's `register()` and
-/// its `slot_is_set()` assertion. Holding this lock for the full duration of
-/// each such test forces them to run one at a time. `unwrap_or_else(|e|
-/// e.into_inner())` recovers a poisoned lock so a panic in one test does not
-/// cascade into the others. Tests that flip the process-global THEME atomics
-/// use the crate-wide `crate::theme::THEME_MODE_LOCK` for the same reason.
-pub(super) static SSE_SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Take the process-global SSE connection slot for a test that reads it back
+/// or needs it steady ([`crate::services::navidrome_sse::own_slot_for_test`]).
+pub(super) fn sse_slot_guard() -> crate::services::navidrome_sse::SlotTestGuard {
+    crate::services::navidrome_sse::own_slot_for_test()
+}
 
 mod artist_info;
 mod artist_recs;

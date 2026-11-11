@@ -332,9 +332,7 @@ fn list_timers_reach_the_view_under_a_modal() {
 
 #[test]
 fn logout_closes_every_modal() {
-    let _sse = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _sse = super::sse_slot_guard();
     let mut app = app_with_every_modal_open();
 
     let _ = app.reset_session_state();

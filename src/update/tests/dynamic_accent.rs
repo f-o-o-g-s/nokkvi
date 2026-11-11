@@ -8,7 +8,7 @@
 
 use iced::widget::image::Handle;
 
-use super::SSE_SLOT_TEST_LOCK;
+use super::sse_slot_guard;
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, Message, PlaybackMessage},
@@ -328,7 +328,7 @@ fn a_late_result_for_another_track_is_not_shown() {
 
 #[test]
 fn logout_clears_the_accent_and_its_cache() {
-    let _sse = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _sse = sse_slot_guard();
     let _guard = THEME_MODE_LOCK.lock();
     let (mut app, _id) = shown_app();
     let _ = app.reset_session_state();

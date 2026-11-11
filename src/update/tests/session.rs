@@ -12,7 +12,7 @@
 //!   kept retrying with stale credentials and got 401 forever until the
 //!   new login overwrote the slot.
 
-use super::SSE_SLOT_TEST_LOCK;
+use super::sse_slot_guard;
 use crate::test_helpers::*;
 
 #[test]
@@ -20,7 +20,7 @@ fn reset_session_state_clears_stranded_within_list_drag() {
     // A logout (hotkey/IPC) mid-drag must not leave the queue's drag state set,
     // or the floating ghost + edge auto-scroll would resume on the next session.
     use crate::widgets::drag_column::EdgeZone;
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     let mut app = test_app();
 
     app.queue_page.drag_source = Some(vec![42]);
@@ -38,7 +38,7 @@ fn reset_session_state_clears_stranded_within_list_drag() {
 fn reset_session_state_clears_artwork_cache() {
     // `reset_session_state()` calls `navidrome_sse::clear()`; serialize against
     // the other SSE-slot tests so the shared static cannot race.
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     let mut app = test_app();
 
     // Seed a sentinel into ArtworkState. `loading_large_artwork` is the
@@ -71,7 +71,7 @@ fn reset_session_state_clears_artwork_cache() {
 
 #[test]
 fn navidrome_sse_clear_is_idempotent() {
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     // `clear()` must be safe to call without a prior `register()`, and
     // safe to call repeatedly. The reset path runs unconditionally on
     // logout / session-expired; if `clear()` panicked on an empty slot
@@ -94,7 +94,7 @@ fn test_sse_info() -> crate::services::navidrome_sse::SseConnectionInfo {
 fn navidrome_sse_clear_actually_empties_slot() {
     use crate::services::navidrome_sse;
 
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
 
     // `SSE_CONNECTION_INFO` is a process-global static; isolate this test by
     // registering then clearing within the same body so cross-test order
@@ -113,18 +113,46 @@ fn navidrome_sse_clear_actually_empties_slot() {
     );
 }
 
+/// Tests run as parallel threads of one process and the SSE connection slot
+/// is a process global: a test whose handler logs out, expires the session
+/// or logs in must not reach into the slot a slot test is reading back.
+/// Only the test that owns the slot moves it.
+#[test]
+fn another_tests_logout_or_login_leaves_an_owned_sse_slot_alone() {
+    use crate::services::navidrome_sse;
+
+    let _guard = sse_slot_guard();
+    navidrome_sse::register(test_sse_info());
+
+    // What another test's `reset_session_state` does, on its own thread.
+    std::thread::spawn(navidrome_sse::clear)
+        .join()
+        .expect("the other test's thread");
+    let after_their_logout = navidrome_sse::slot_is_set();
+
+    navidrome_sse::clear();
+    // What another test's `handle_login_result` does.
+    std::thread::spawn(|| navidrome_sse::register(test_sse_info()))
+        .join()
+        .expect("the other test's thread");
+    let after_their_login = navidrome_sse::slot_is_set();
+    navidrome_sse::clear();
+
+    assert!(after_their_logout, "their logout emptied our slot");
+    assert!(!after_their_login, "their login filled our slot");
+}
+
 #[test]
 fn navidrome_sse_register_never_silently_drops_under_contention() {
     use std::{thread, time::Duration};
 
     use crate::services::navidrome_sse;
 
-    // Serialize against the other `SSE_CONNECTION_INFO` tests so a concurrent
-    // `clear()` cannot empty the slot between this test's `register()` and its
-    // `slot_is_set()` assertion. Plain `std::thread` (not tokio) keeps this a
-    // synchronous test: the test-serialization guard never crosses an `.await`,
-    // so it shares one lock with the sibling sync tests cleanly.
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Own the slot, so no other test's logout can empty it between this
+    // test's `register()` and its `slot_is_set()` assertion. Plain
+    // `std::thread` (not tokio) keeps this a synchronous test: the register
+    // runs on this thread, which owns the slot.
+    let _guard = sse_slot_guard();
 
     // Start from a known-empty slot.
     navidrome_sse::clear();
@@ -162,7 +190,7 @@ fn navidrome_sse_register_never_silently_drops_under_contention() {
 fn reset_session_state_releases_the_scrobble_latches() {
     use crate::state::RadioScrobbleAction;
 
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     let mut app = test_app();
     app.scrobble.current_song_id = Some("s1".into());
     app.scrobble.submission_in_flight = true;

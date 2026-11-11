@@ -1,6 +1,6 @@
 //! Tests for general handlers (server version, light mode, task manager, radios, auth) update handlers.
 
-use super::SSE_SLOT_TEST_LOCK;
+use super::sse_slot_guard;
 use crate::{View, test_helpers::*};
 
 // Server Version (mod.rs)
@@ -899,7 +899,7 @@ fn reset_session_state_clears_all_session_bound_fields() {
     // `reset_session_state()` calls `navidrome_sse::clear()` on the global SSE
     // slot; serialize against the other SSE-slot tests so the shared static
     // cannot race under parallel execution.
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     let mut app = test_app();
     seed_session_bound_state(&mut app);
 
@@ -1047,7 +1047,7 @@ fn reset_session_state_preserves_non_session_fields() {
     // `reset_session_state()` calls `navidrome_sse::clear()` on the global SSE
     // slot; serialize against the other SSE-slot tests so the shared static
     // cannot race under parallel execution.
-    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = sse_slot_guard();
     let mut app = test_app();
 
     // Mutate retained fields to non-default values.

@@ -849,9 +849,7 @@ mod r1 {
 
     #[test]
     fn session_reset_leaves_theater() {
-        let _guard = super::super::SSE_SLOT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = super::super::sse_slot_guard();
         let mut app = home_app();
         let _ = app.enter_theater();
         let _ = app.reset_session_state();

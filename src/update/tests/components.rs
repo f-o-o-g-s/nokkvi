@@ -517,9 +517,7 @@ fn entity_play_on_a_missing_row_keeps_radio() {
 fn logout_forgets_the_station_left_for_play() {
     // A pre-logout play that fails afterwards must not bring back a station
     // from the previous session.
-    let _sse = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _sse = super::sse_slot_guard();
     let mut app = test_app();
     seed_radio_playback(&mut app);
     let _ = app.play_batch_task(nokkvi_data::types::batch::BatchPayload::new(), false);
@@ -823,9 +821,7 @@ fn stale_chain_done_leaves_the_newer_loads_count() {
 fn logout_stops_a_running_songs_load() {
     // The chain's in-flight task holds a clone of the counter; a fresh
     // counter would leave that clone current and let the page append.
-    let _sse = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _sse = super::sse_slot_guard();
     let (mut app, chain) = app_with_running_songs_load();
     let task_copy = app.library.progressive_queue_generation.clone();
 

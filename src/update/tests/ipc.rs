@@ -477,9 +477,7 @@ fn status_returns_a_full_state_snapshot() {
 #[test]
 fn status_reports_stopped_after_a_forced_logout() {
     // `reset_session_state` clears the static SSE slot.
-    let _sse = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _sse = super::sse_slot_guard();
     let mut app = test_app();
     app.playback.playing = true;
     app.playback.paused = false;

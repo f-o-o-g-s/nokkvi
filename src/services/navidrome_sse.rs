@@ -36,6 +36,10 @@ static SEEN_UNKNOWN_SSE_EVENTS: OnceLock<ParkingMutex<HashSet<String>>> = OnceLo
 
 /// Register connection details. Called once from handle_login_result.
 pub(crate) fn register(info: SseConnectionInfo) {
+    #[cfg(test)]
+    if !TEST_OWNS_SLOT.get() {
+        return;
+    }
     *SSE_CONNECTION_INFO.lock() = Some(info);
     debug!(" [SSE] Connection info registered");
 }
@@ -47,8 +51,51 @@ pub(crate) fn register(info: SseConnectionInfo) {
 /// an unreachable one) until the next successful `register()` overwrites
 /// the slot.
 pub(crate) fn clear() {
+    #[cfg(test)]
+    if !TEST_OWNS_SLOT.get() {
+        return;
+    }
     *SSE_CONNECTION_INFO.lock() = None;
     debug!(" [SSE] Connection info cleared");
+}
+
+#[cfg(test)]
+static SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+thread_local! {
+    /// Whether this thread's test owns the connection slot ([`own_slot_for_test`]).
+    static TEST_OWNS_SLOT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A test's hold on the process-global connection slot ([`own_slot_for_test`]).
+#[cfg(test)]
+pub(crate) struct SlotTestGuard {
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for SlotTestGuard {
+    fn drop(&mut self) {
+        TEST_OWNS_SLOT.set(false);
+    }
+}
+
+/// Test-only: take the connection slot for the calling test. Tests run in
+/// parallel threads of one process and the slot is a process global, so a
+/// test that reads it back (`slot_is_set`) owns it for as long as the guard
+/// lives: owners run one at a time, and in a test build `register` and
+/// `clear` touch the slot only on the owning test's thread. Every other
+/// test's logout, session expiry or login leaves it alone, so no test has to
+/// remember a lock just because its handler happens to reset the session
+/// (forgetting one made `navidrome_sse_register_never_silently_drops_under_contention`
+/// fail about one run in three). A poisoned lock is recovered, so one
+/// failing test doesn't take the others with it.
+#[cfg(test)]
+pub(crate) fn own_slot_for_test() -> SlotTestGuard {
+    let serial = SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    TEST_OWNS_SLOT.set(true);
+    SlotTestGuard { _serial: serial }
 }
 
 /// Test-only helper: reports whether the SSE connection slot currently holds

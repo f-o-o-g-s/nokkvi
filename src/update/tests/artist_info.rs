@@ -171,9 +171,7 @@ fn a_result_for_an_artist_no_longer_centred_stays_with_its_own_artist() {
 
 #[test]
 fn a_result_from_before_logout_is_dropped() {
-    let _lock = super::SSE_SLOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = super::sse_slot_guard();
     let mut app = app_with_artists(20);
     let before = app.artist_info.session_generation();
     let first = navigate(&mut app, SlotListPageMessage::NavigateDown);
