@@ -5140,10 +5140,15 @@ impl CustomAudioEngine {
                     break;
                 }
 
-                // Backpressure check — time-based watermarks (same as primary loop)
+                // Backpressure check — time-based watermarks (same as primary
+                // loop), on the stream the incoming plays in: its own while
+                // the blend runs, the primary once the render thread
+                // promoted it, until the engine's finalize takes this
+                // decoder over. Read as empty there, the loop read the whole
+                // stream into nothing while the engine lock was held.
                 let buffer_count = {
                     let renderer_guard = renderer.lock();
-                    renderer_guard.crossfade_buffer_count() // interleaved samples
+                    renderer_guard.incoming_buffer_count() // interleaved samples
                 };
 
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
@@ -5185,13 +5190,15 @@ impl CustomAudioEngine {
                 liveness.mark_read_start();
                 let chunk = tokio::task::block_in_place(|| decode_one_chunk(dec));
                 liveness.mark_read_end();
+                // Written before the decoder is let go: the engine's finalize
+                // takes it under this lock, so every chunk decoded here is in
+                // the stream before the primary loop's first one.
+                if let Some(samples) = &chunk {
+                    renderer.lock().write_crossfade_samples(samples);
+                }
                 drop(decoder_guard);
 
-                if let Some(samples) = chunk {
-                    let mut renderer_guard = renderer.lock();
-                    renderer_guard.write_crossfade_samples(&samples);
-                    drop(renderer_guard);
-                } else {
+                if chunk.is_none() {
                     // No data, wait a bit
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 }
@@ -12034,10 +12041,10 @@ mod tests {
 
     /// An engine playing the clock song as a requested transcode with a 2 s
     /// crossfade on and the next song prepared, so the renderer's trigger is
-    /// armed for 8 s. Its streams are not bit-perfect (a blend never is), so
-    /// what the output plays is not the clock's samples. Wired to itself as
-    /// the app's engine is, so the render thread's signals reach it. Keep the
-    /// mixer source alive.
+    /// armed for 8 s. Its streams build bit-perfect under Relaxed, which
+    /// blends same-format songs: outside a blend the output plays the clock's
+    /// samples untouched. Wired to itself as the app's engine is, so the
+    /// render thread's signals reach it. Keep the mixer source alive.
     async fn engine_crossfading_the_clock() -> (
         Arc<tokio::sync::Mutex<CustomAudioEngine>>,
         ClockServer,
@@ -12048,6 +12055,9 @@ mod tests {
         let mixer = {
             let mut e = engine.lock().await;
             let mixer = e.renderer.lock().install_detached_output_for_test();
+            e.renderer.lock().force_pw_volume_active_for_test();
+            e.set_bit_perfect(crate::types::player_settings::BitPerfectMode::Relaxed)
+                .await;
             e.set_engine_reference(Arc::downgrade(&engine));
             e.set_transcode_offset_supported(true);
             e.set_crossfade_enabled(true).await;
@@ -12210,6 +12220,157 @@ mod tests {
         assert_ne!(
             generation, signalled_generation,
             "the queued signal fails the staleness gate"
+        );
+    }
+
+    /// A real blend the render thread finishes while a seek's reopen waits
+    /// for a slow server (the engine lock held all that time, so the engine
+    /// can't take its half over): the incoming song plays on from where the
+    /// blend left it. Its decode loop lost its ring at the renderer's
+    /// finalize, read the whole stream at once into nothing, and the song,
+    /// promoted at its end, stopped as soon as the blend's audio ran out
+    /// (live: cut off 4 s in, then the song after it).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_blend_that_ends_during_a_slow_reopen_keeps_the_incoming_playing() {
+        let (engine, server, mut mixer) = engine_crossfading_the_clock().await;
+        let completions = Arc::new(AtomicU32::new(0));
+        let counter = completions.clone();
+        engine.lock().await.set_completion_callback(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let renderer = engine.lock().await.renderer.clone();
+        // Into the blend: the trigger at 8 s, then the engine's half.
+        pull_until(&mut mixer, &renderer, 8_000);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while engine.lock().await.crossfade.phase.is_idle() {
+            assert!(std::time::Instant::now() < deadline, "the blend started");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        // The answer comes after the 2 s blend has ended on the render
+        // thread, and playback goes on in real time meanwhile.
+        server.set_answer_delay(std::time::Duration::from_secs(3));
+        let playing = Arc::new(AtomicBool::new(true));
+        let player = {
+            let playing = playing.clone();
+            std::thread::spawn(move || {
+                let started = std::time::Instant::now();
+                let mut played_ms = 0;
+                while playing.load(Ordering::Acquire) {
+                    let due = u64::try_from(started.elapsed().as_millis()).unwrap();
+                    play_out(&mut mixer, due.saturating_sub(played_ms));
+                    played_ms = due;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                mixer
+            })
+        };
+
+        let outcome = engine.lock().await.seek(2_000).await;
+        playing.store(false, Ordering::Release);
+        let mut mixer = player.join().expect("the player");
+        let (source, at_its_end, decoded_ms, position) = {
+            let e = engine.lock().await;
+            let decoder = e.decoder.lock().await;
+            (
+                e.source().to_owned(),
+                decoder.is_eof(),
+                decoder.decoded_ms(),
+                e.position(),
+            )
+        };
+        let heard = next_heard_ms(&mut mixer);
+
+        assert_eq!(source, server.song_url("next"), "the blend's song plays");
+        assert_eq!(outcome, SeekOutcome::Settled);
+        assert!(
+            !at_its_end && decoded_ms < 7_000,
+            "the incoming was read only as far as it played (decoded {decoded_ms} ms, at \
+             its end: {at_its_end})"
+        );
+        assert!(
+            heard > 2_500 && heard.abs_diff(position) <= 300,
+            "the song plays on from where the blend left it, under its own clock: heard \
+             {heard} ms, clock {position} ms"
+        );
+        // And on: two more seconds of it, and nothing ends it.
+        pull_until(&mut mixer, &renderer, position + 2_000);
+        let ended = completions.load(Ordering::SeqCst);
+        engine.lock().await.stop().await;
+        assert_eq!(ended, 1, "the blend moved the song on once");
+    }
+
+    /// The same wait in the gapless window: the old song reaches its end
+    /// while the server holds the reopen's answer, and the decode loop swaps
+    /// the next song in. The seek, aimed at the old song, is dropped, and the
+    /// next song plays on from its start, fed all the while.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_gapless_swap_during_a_slow_reopen_keeps_the_next_song_playing() {
+        let (mut engine, server, mut mixer) = engine_playing_the_clock(ClockReply::Live).await;
+        let next_url = server.song_url("next");
+        let mut next = AudioDecoder::default();
+        next.set_expected_duration_ms(Some(CLOCK_MS));
+        next.init(&next_url).await.expect("the next song opens");
+        engine
+            .store_prepared_decoder(
+                next,
+                next_url.clone(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+        let renderer = engine.renderer.clone();
+        pull_until(&mut mixer, &renderer, 8_000);
+        let server = Arc::new(server);
+        server.set_answer_delay(std::time::Duration::from_secs(2));
+        let opened = server.requests().len();
+        // While the server holds its answer, play on until the decoder (a
+        // cushion ahead) has reached the old song's end and the loop swapped
+        // the next one in: the swap starts the clock over for the join.
+        let player = {
+            let server = server.clone();
+            let renderer = renderer.clone();
+            std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while server.requests().len() == opened && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                while renderer.lock().position() >= 7_000 && std::time::Instant::now() < deadline {
+                    play_out(&mut mixer, 10);
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                mixer
+            })
+        };
+
+        engine.seek(3_000).await;
+        let mut mixer = player.join().expect("the player");
+        let swapped_in = engine.decoder.lock().await.url() == next_url;
+        let completion_pending = engine.gapless_transition_info.lock().await.is_some();
+        engine.consume_gapless_transition().await;
+        // Past the join: the next song is heard from its start.
+        let heard: Vec<u64> = (0..2_000)
+            .map(|_| {
+                play_out(&mut mixer, 1);
+                next_heard_ms(&mut mixer)
+            })
+            .collect();
+        let (source, at_its_end) = (
+            engine.source().to_owned(),
+            engine.decoder.lock().await.is_eof(),
+        );
+        engine.stop().await;
+
+        assert!(swapped_in, "the swap happened while the reopen waited");
+        assert!(
+            completion_pending,
+            "its completion was waiting on the engine"
+        );
+        assert_eq!(source, next_url);
+        assert!(!at_its_end, "the next song reads on");
+        assert!(
+            heard.iter().any(|&ms| (1..3_000).contains(&ms)),
+            "the next song is heard from its start: {:?}",
+            &heard[heard.len() - 5..]
         );
     }
 
