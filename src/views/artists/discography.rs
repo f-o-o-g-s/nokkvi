@@ -169,6 +169,15 @@ pub(crate) fn albums_of_group(
     section_albums(rows, header_idx.unwrap_or(usize::MAX))
 }
 
+/// The section the row at `idx` belongs to: the nearest header at or above
+/// it. `None` in a flat list, which has no headers.
+pub(crate) fn section_of(rows: &[DiscographyRow], idx: usize) -> Option<DiscographyGroup> {
+    rows.get(..=idx)?.iter().rev().find_map(|row| match row {
+        DiscographyRow::Section(header) => Some(header.group),
+        DiscographyRow::Album(_) => None,
+    })
+}
+
 /// The 1-based place of the album at `idx` among all of the artist's albums
 /// (headers take no number; a collapsed section's albums keep theirs, so a
 /// row's number never changes when a section above it folds).
@@ -383,6 +392,18 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_row_belongs_to_the_nearest_header_above_it() {
+        let rows = build_rows(mixed(), ARTIST, true, &HashSet::new());
+        assert_eq!(section_of(&rows, 0), Some(DiscographyGroup::Albums));
+        assert_eq!(section_of(&rows, 2), Some(DiscographyGroup::Albums));
+        assert_eq!(section_of(&rows, 4), Some(DiscographyGroup::Eps));
+        assert_eq!(section_of(&rows, 7), Some(DiscographyGroup::Singles));
+        assert_eq!(section_of(&rows, 99), None);
+        let flat = build_rows(mixed(), ARTIST, false, &HashSet::new());
+        assert_eq!(section_of(&flat, 3), None);
     }
 
     #[test]

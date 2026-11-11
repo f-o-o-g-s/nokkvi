@@ -11,7 +11,10 @@ use iced::{
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
-    types::artist_recs::ArtistRec,
+    types::{
+        artist_recs::ArtistRec,
+        discography::{DiscographyGroup, RowTagKind, row_tags},
+    },
 };
 
 use super::{
@@ -226,11 +229,10 @@ impl ArtistsPage {
                     )
                 }
                 SlotListEntry::Child(DiscographyRow::Album(album), _parent_artist_id) => {
-                    let sub_index_label = self.album_sub_index_label(ctx.item_index, artists);
                     let row = self.render_album_child_row(
                         album,
+                        artists,
                         &ctx,
-                        &sub_index_label,
                         crate::views::RowCovers {
                             minis: data.album_art,
                             placeholders,
@@ -673,6 +675,19 @@ impl ArtistsPage {
         format!("{artist_number}.{album_number}")
     }
 
+    /// The release-type section the album row at flattened `flat_index`
+    /// sits in; `None` in a flat list (no headers).
+    pub(crate) fn album_section(
+        &self,
+        flat_index: usize,
+        artists: &[ArtistUIViewData],
+    ) -> Option<DiscographyGroup> {
+        let child_idx = self
+            .expansion
+            .child_ordinal_at(flat_index, artists, |a| &a.id)?;
+        discography::section_of(&self.expansion.children, child_idx)
+    }
+
     /// Render a release-type section header: a full slot on the album rows'
     /// chassis (same depth fill, focus ring, hover and opacity fall-off), so
     /// it navigates and highlights like any other row.
@@ -827,28 +842,52 @@ impl ArtistsPage {
     fn render_album_child_row<'a>(
         &self,
         album: &AlbumUIViewData,
+        artists: &[ArtistUIViewData],
         ctx: &crate::widgets::slot_list::SlotListRowContext,
-        sub_index_label: &str,
         covers: crate::views::RowCovers<'a>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
+        let sub_index_label = self.album_sub_index_label(ctx.item_index, artists);
+        let section = self.album_section(ctx.item_index, artists);
         let navigate_msg = ArtistsMessage::NavigateAndExpandAlbum(album.id.clone());
+        // Under a section header a row says what the header doesn't: the
+        // types it leaves out, the version, the explicit mark. A flat list
+        // (grouping off, or only plain albums) keeps its rows bare.
+        let title_tags = section
+            .map(|group| {
+                row_tags(album, group)
+                    .into_iter()
+                    .map(|tag| crate::widgets::slot_list::TitleTag {
+                        accent: match tag.kind {
+                            RowTagKind::Type => true,
+                            RowTagKind::Version | RowTagKind::Explicit => false,
+                        },
+                        text: tag.text,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Appears On lists other artists' albums, so each row names its own.
+        let guest_album = section == Some(DiscographyGroup::AppearsOn);
         let album_el = super::super::expansion::render_child_album_row(
             album,
             ctx,
-            sub_index_label,
+            &sub_index_label,
             covers.get(&album.id),
             ArtistsMessage::SlotList,
             super::super::expansion::ChildAlbumRowOptions {
                 show_artwork: self.column_visibility.thumbnail,
-                show_artist: false, // artist is already the parent row
+                // Elsewhere the parent row already names the artist.
+                show_artist: guest_album,
                 stable_viewport,
                 depth: 1, // child albums under artist
                 on_star_click: Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
                 on_song_count_click: Some(navigate_msg.clone()),
                 on_album_click: Some(navigate_msg),
-                on_artist_click: None,
+                on_artist_click: guest_album
+                    .then(|| ArtistsMessage::NavigateAndExpandArtist(album.artist_id.clone())),
+                title_tags,
             },
         );
 

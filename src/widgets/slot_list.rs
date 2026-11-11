@@ -1729,6 +1729,73 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
     style: SlotListSlotStyle,
     portion: u16,
 ) -> Element<'a, Message> {
+    slot_list_text_column_tagged(text, Vec::new(), style, portion)
+}
+
+/// A small tag set after a row's title: a release type the section header
+/// doesn't say, an album version, the explicit marker.
+pub(crate) struct TitleTag {
+    pub(crate) text: String,
+    /// Tint the tag with the accent (a release type, echoing the section
+    /// headers) instead of the row's dim ink (a version, the explicit mark).
+    pub(crate) accent: bool,
+}
+
+/// How strongly a title tag's outline shows next to its ink.
+const TITLE_TAG_EDGE_ALPHA: f32 = 0.55;
+
+/// One [`TitleTag`] as a small outlined chip.
+fn title_tag_chip<'a, Message: 'a>(
+    tag: TitleTag,
+    size: f32,
+    style: SlotListSlotStyle,
+    opacity: f32,
+) -> Element<'a, Message> {
+    let fallback = if tag.accent {
+        theme::accent_bright()
+    } else {
+        theme::fg3()
+    };
+    // On a loud-fill row the tag takes the row's own ink, like every other
+    // tinted glyph there.
+    let ink = slot_list_static_icon_color(style, fallback, opacity);
+    let edge = Color {
+        a: ink.a * TITLE_TAG_EDGE_ALPHA,
+        ..ink
+    };
+    container(
+        iced::widget::text(tag.text)
+            .size(size)
+            .font(theme::ui_font())
+            .color(ink)
+            .wrapping(iced::widget::text::Wrapping::None),
+    )
+    .padding(iced::Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: (size * 0.45).round(),
+        right: (size * 0.45).round(),
+    })
+    .style(move |_| container::Style {
+        border: iced::Border {
+            color: edge,
+            width: 1.0,
+            radius: theme::ui_radius_xs(),
+        },
+        ..Default::default()
+    })
+    .boxed()
+}
+
+/// [`slot_list_text_column`] with small tags after the title, on its line.
+/// The title always shows in full (up to its own ellipsis); a tag shows only
+/// while it fits whole beside it, so a narrow pane drops tags, never title.
+pub(crate) fn slot_list_text_column_tagged<'a, Message: Clone + 'a + 'static>(
+    text: SlotTextColumn<Message>,
+    tags: Vec<TitleTag>,
+    style: SlotListSlotStyle,
+    portion: u16,
+) -> Element<'a, Message> {
     let SlotTextColumn {
         title,
         title_on_press,
@@ -1772,6 +1839,20 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .font(title_font)
             .wrapping(Wrapping::None)
             .ellipsis(Ellipsis::End)
+            .boxed()
+    };
+
+    let title_widget: Element<'a, Message> = if tags.is_empty() {
+        title_widget
+    } else {
+        // A step under the title, so a tag reads as a note on it.
+        let tag_size = (title_size * 0.72).round();
+        tags.into_iter()
+            .fold(
+                crate::widgets::fit_row::FitRow::new(title_widget),
+                |row, tag| row.push(title_tag_chip(tag, tag_size, style, style.text_color.a)),
+            )
+            .spacing((title_size * 0.5).round())
             .boxed()
     };
 

@@ -399,6 +399,10 @@ crate::player_settings_schema! {
     /// api.deezer.com; off, nothing is sent there.
     #[serde(default = "default_true")]
     same similar_artists_deezer: bool = default_true(),
+    /// Whether an expanded artist's albums are sorted under release-type
+    /// section headers (default: on). Off, they are one list, newest first.
+    #[serde(default = "default_true")]
+    same group_artist_albums: bool = default_true(),
     /// Whether to suppress the toast notification shown when Navidrome
     /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]

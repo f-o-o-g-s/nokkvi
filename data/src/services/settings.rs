@@ -492,6 +492,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_group_artist_albums(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.group_artist_albums = enabled;
+        self.save()
+    }
+
     pub fn set_lyrics_fetch_online(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.lyrics_fetch_online = enabled;
         self.save()
@@ -1575,6 +1580,7 @@ mod sentinel_roundtrip_tests {
             harbour_expandable_shelves: true, // default false
             similar_artists_online: false,    // default true
             similar_artists_deezer: false,    // default true
+            group_artist_albums: false,       // default true
             local_music_path: "/tmp/sentinel/music".to_string(),
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top

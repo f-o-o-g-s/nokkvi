@@ -670,6 +670,9 @@ pub(crate) struct ChildAlbumRowOptions<M> {
     pub(crate) on_album_click: Option<M>,
     /// Only used when `show_artist` is set.
     pub(crate) on_artist_click: Option<M>,
+    /// Small tags after the album name (Artists: what the section header
+    /// doesn't say). Empty for a plain row.
+    pub(crate) title_tags: Vec<crate::widgets::slot_list::TitleTag>,
 }
 
 /// Render a child **album** row (used by Artists → Albums and Genres → Albums).
@@ -701,6 +704,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         on_song_count_click,
         on_album_click,
         on_artist_click,
+        title_tags,
     } = opts;
     let style = ctx.slot_style(false, false, depth);
 
@@ -748,7 +752,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     }
 
     content = content.push(
-        container(crate::widgets::slot_list::slot_list_text_column(
+        container(crate::widgets::slot_list::slot_list_text_column_tagged(
             crate::widgets::slot_list::SlotTextColumn {
                 title: album.name.clone(),
                 title_on_press: on_album_click,
@@ -764,6 +768,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
                 subtitle_size: ctx.metrics.subtitle_size,
                 is_bold: true,
             },
+            title_tags,
             style,
             name_portion + if show_artist { 20 } else { 0 },
         ))

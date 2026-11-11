@@ -2641,6 +2641,8 @@ impl Nokkvi {
         let previous_rec_sources = self.rec_sources();
         self.settings = settings.clone();
         let rec_sources_task = self.rec_sources_changed(previous_rec_sources);
+        self.artists_page
+            .set_grouping(self.settings.group_artist_albums, &self.library.artists);
         let shelf_task = if previous_shelf_style == self.harbour_shelf_style() {
             Task::none()
         } else {

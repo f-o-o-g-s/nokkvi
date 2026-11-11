@@ -11,6 +11,7 @@ pub(crate) mod base_slot_list_layout;
 pub(crate) mod boat;
 pub(crate) mod drag_column;
 pub(crate) mod eq_slider;
+pub(crate) mod fit_row;
 pub(crate) mod format_info;
 pub(crate) mod harbour_light;
 pub(crate) mod harbour_runes;

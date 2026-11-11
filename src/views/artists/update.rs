@@ -274,12 +274,7 @@ impl ArtistsPage {
             id_fn: |a| &a.id,
             expand_center: ArtistsMessage::ExpandCenter => ArtistsAction::ExpandArtist,
             collapse: ArtistsMessage::CollapseExpansion,
-            children_loaded: ArtistsMessage::AlbumsLoaded => |id, albums| discography::build_rows(
-                albums,
-                &id,
-                self.group_by_release_type,
-                &self.collapsed_sections,
-            ),
+            children_loaded: ArtistsMessage::AlbumsLoaded => |id, albums| self.rows_for_loaded(&id, albums),
             sort_selected: ArtistsMessage::SortModeSelected => ArtistsAction::SortModeChanged,
             toggle_sort: ArtistsMessage::ToggleSortOrder => ArtistsAction::SortOrderChanged,
             search_changed: ArtistsMessage::SearchQueryChanged => ArtistsAction::SearchChanged,

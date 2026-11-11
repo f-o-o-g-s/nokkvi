@@ -311,6 +311,10 @@ fn live_controls_start_at_their_persisted_defaults() {
         app.settings.similar_artists_deezer,
         persisted.similar_artists_deezer
     );
+    assert_eq!(
+        app.settings.group_artist_albums,
+        persisted.group_artist_albums
+    );
     // The Streaming Quality rows read Original / 128 kbps until the load,
     // like a fresh install.
     assert_eq!(app.settings.stream_format, persisted.stream_format);

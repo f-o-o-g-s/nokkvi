@@ -2,7 +2,8 @@
 //!
 //! Section layout (top-to-bottom):
 //!   1. Library  — library_page_size, artwork_resolution, track_artwork,
-//!      show_album_artists_only, similar_artists_online, similar_artists_deezer
+//!      show_album_artists_only, similar_artists_online, similar_artists_deezer,
+//!      group_artist_albums
 //!   2. Display  — start_view, suppress_library_refresh_toasts
 //!   3. Behavior — enter_behavior, enter_shuffle, harbour_expandable_shelves,
 //!      stable_viewport, auto_follow_playing, seek_step
@@ -56,6 +57,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         macro_rows.take("general.show_album_artists_only"),
         macro_rows.take("general.similar_artists_online"),
         macro_rows.take("general.similar_artists_deezer"),
+        macro_rows.take("general.group_artist_albums"),
         // --- Display ---
         SettingsEntry::Header {
             label: "Display",

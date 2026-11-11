@@ -587,3 +587,101 @@ fn star_and_rating_clicks_on_a_header_do_nothing() {
         assert!(matches!(action, ArtistsAction::None), "{action:?}");
     }
 }
+
+// ── The setting ─────────────────────────────────────────────────────────────
+
+/// Deliver the settings with Group Artist Albums by Release Type set.
+fn load_grouping_setting(app: &mut Nokkvi, grouped: bool) {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut settings = app.settings.clone();
+    settings.group_artist_albums = grouped;
+    let _ = app.handle_player_settings_loaded(settings);
+}
+
+#[test]
+fn the_setting_off_flattens_an_open_expansion_in_the_servers_order() {
+    let mut app = app_with_albums(mixed());
+    // A fold and a selection, both positions in the grouped list.
+    let _ = app.handle_artists(ArtistsMessage::ToggleSection(EPS_HEADER));
+    let _ = page_update(&mut app, slot(SlotListPageMessage::SelectionToggle(LP_NEW)));
+    centre(&mut app, 8);
+
+    load_grouping_setting(&mut app, false);
+
+    assert_eq!(
+        shape(&app),
+        ["ep-new", "lp-new", "single", "ep-old", "lp-old"]
+    );
+    assert!(app.artists_page.common.activation_batch().is_none());
+    let total = app
+        .artists_page
+        .expansion
+        .flattened_len(&app.library.artists);
+    assert_eq!(total, 8);
+    assert!(app.artists_page.common.slot_list.viewport_offset < total);
+
+    // The next expansion is flat too...
+    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), mixed()));
+    assert_eq!(shape(&app).len(), 5);
+
+    // ...and turning it back on regroups what is open, folds remembered.
+    load_grouping_setting(&mut app, true);
+    assert_eq!(
+        shape(&app),
+        ["#Albums", "lp-new", "lp-old", "#EPs", "#Singles", "single"]
+    );
+}
+
+#[test]
+fn redelivering_the_same_setting_leaves_the_expansion_alone() {
+    let mut app = app_with_albums(mixed());
+    load_grouping_setting(&mut app, true);
+    centre(&mut app, EP_NEW);
+    let _ = page_update(&mut app, slot(SlotListPageMessage::SelectionToggle(LP_NEW)));
+
+    load_grouping_setting(&mut app, true);
+
+    assert_eq!(shape(&app).len(), 8);
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, EP_NEW);
+    assert!(app.artists_page.common.activation_batch().is_some());
+}
+
+#[test]
+fn the_setting_changes_nothing_while_no_artist_is_expanded() {
+    let mut app = test_app();
+    seed_artists(&mut app, vec![make_artist(ARTIST, "One")]);
+    load_grouping_setting(&mut app, false);
+    assert!(!app.artists_page.group_by_release_type);
+    assert!(!app.artists_page.expansion.is_expanded());
+    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), mixed()));
+    assert_eq!(shape(&app).len(), 5);
+}
+
+// ── Row tags and Appears On ─────────────────────────────────────────────────
+
+#[test]
+fn an_album_row_knows_its_section_and_a_flat_row_has_none() {
+    let mut guest = typed("guest", &[ReleaseType::Ep], 2001);
+    guest.album_artist_ids = vec!["someone-else".to_string()];
+    let mut albums = mixed();
+    albums.push(guest);
+    let app = app_with_albums(albums);
+    let artists = &app.library.artists;
+    let section = |row: usize| app.artists_page.album_section(row, artists);
+
+    assert_eq!(section(LP_NEW), Some(DiscographyGroup::Albums));
+    assert_eq!(section(EP_NEW), Some(DiscographyGroup::Eps));
+    assert_eq!(section(SINGLE), Some(DiscographyGroup::Singles));
+    // The guest EP is the last child, under Appears On, not under EPs.
+    assert_eq!(shape(&app)[8..], ["#Appears On", "guest"]);
+    assert_eq!(section(11), Some(DiscographyGroup::AppearsOn));
+    // Artist rows are in no section.
+    assert_eq!(section(0), None);
+    assert_eq!(section(12), None);
+
+    let plain = app_with_albums(vec![typed("a", &[ReleaseType::Album], 2005)]);
+    assert_eq!(
+        plain.artists_page.album_section(2, &plain.library.artists),
+        None
+    );
+}

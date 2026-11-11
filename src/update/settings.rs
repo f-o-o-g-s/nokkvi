@@ -55,6 +55,7 @@ impl Nokkvi {
             show_album_artists_only: self.settings.show_album_artists_only,
             similar_artists_online: self.settings.similar_artists_online,
             similar_artists_deezer: self.settings.similar_artists_deezer,
+            group_artist_albums: self.settings.group_artist_albums,
             suppress_library_refresh_toasts: self.settings.suppress_library_refresh_toasts,
             show_tray_icon: self.settings.show_tray_icon,
             close_to_tray: self.settings.close_to_tray,

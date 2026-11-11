@@ -110,6 +110,7 @@
   "show_album_artists_only": true,
   "similar_artists_online": true,
   "similar_artists_deezer": true,
+  "group_artist_albums": true,
   "suppress_library_refresh_toasts": true,
   "queue_show_stars": true,
   "queue_show_album": true,

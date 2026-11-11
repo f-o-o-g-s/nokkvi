@@ -50,6 +50,8 @@ pub struct TomlSettings {
     pub similar_artists_online: bool,
     /// Similar artists from Deezer too, blended with ListenBrainz's.
     pub similar_artists_deezer: bool,
+    /// Sort an expanded artist's albums under release-type section headers.
+    pub group_artist_albums: bool,
     pub suppress_library_refresh_toasts: bool,
     /// Per-view column-visibility toggles — flattened so every
     /// `<view>_show_<col>` key stays a TOP-LEVEL `[settings]` key (pinned by
@@ -361,6 +363,7 @@ impl Default for TomlSettings {
             show_album_artists_only: true,
             similar_artists_online: true,
             similar_artists_deezer: true,
+            group_artist_albums: true,
             suppress_library_refresh_toasts: true,
             view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,

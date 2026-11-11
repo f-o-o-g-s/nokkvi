@@ -316,6 +316,16 @@ keyword_table! {
             "internet",
             "musicbrainz",
         ],
+        "general.group_artist_albums" => &[
+            "discography",
+            "sections",
+            "ep",
+            "singles",
+            "live",
+            "compilations",
+            "appears on",
+            "flat list",
+        ],
         "general.similar_artists_deezer" => &[
             "deezer",
             "recommendations",

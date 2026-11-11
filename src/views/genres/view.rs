@@ -433,6 +433,7 @@ impl GenresPage {
                 on_artist_click: Some(GenresMessage::NavigateAndExpandArtist(
                     album.artist_id.clone(),
                 )),
+                title_tags: Vec::new(),
             },
         );
 

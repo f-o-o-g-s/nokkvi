@@ -50,6 +50,9 @@ pub struct ArtistsPage {
     /// The sections the user folded this session, by kind: the next artist's
     /// albums (and a reload of this one's) arrive with those sections folded.
     pub collapsed_sections: HashSet<DiscographyGroup>,
+    /// The expanded artist's album ids in the order the server sent them
+    /// (newest first), so a grouping change can rebuild the flat list.
+    server_order: Vec<String>,
 }
 
 // Toggleable artists columns. The artist name is always shown; everything
@@ -248,6 +251,7 @@ impl Default for ArtistsPage {
             column_visibility: ArtistsColumnVisibility::default(),
             group_by_release_type: true,
             collapsed_sections: HashSet::new(),
+            server_order: Vec::new(),
         }
     }
 }
@@ -266,6 +270,58 @@ impl ArtistsPage {
     /// [`Self::expanded_albums`], mutably, for star / rating / play-count sync.
     pub fn expanded_albums_mut(&mut self) -> impl Iterator<Item = &mut AlbumUIViewData> {
         discography::albums_mut(&mut self.expansion.children)
+    }
+
+    /// The rows to store for `artist_id`'s freshly loaded `albums` (the
+    /// server's order, newest first): grouped by release type when the
+    /// setting says so, with the sections the user folded this session
+    /// folded again.
+    pub(crate) fn rows_for_loaded(
+        &mut self,
+        artist_id: &str,
+        albums: Vec<AlbumUIViewData>,
+    ) -> Vec<DiscographyRow> {
+        self.server_order = albums.iter().map(|album| album.id.clone()).collect();
+        discography::build_rows(
+            albums,
+            artist_id,
+            self.group_by_release_type,
+            &self.collapsed_sections,
+        )
+    }
+
+    /// Turn release-type grouping on or off (the root hands the setting in
+    /// on every settings load). A change rebuilds the rows of the artist
+    /// that is expanded right now, from the albums already held, put back in
+    /// the server's order first; the same value again does nothing.
+    pub fn set_grouping(&mut self, grouped: bool, artists: &[ArtistUIViewData]) {
+        if self.group_by_release_type == grouped {
+            return;
+        }
+        self.group_by_release_type = grouped;
+        let Some(artist_id) = self.expansion.expanded_id.clone() else {
+            return;
+        };
+        let mut albums: Vec<AlbumUIViewData> = std::mem::take(&mut self.expansion.children)
+            .into_iter()
+            .flat_map(|row| match row {
+                DiscographyRow::Album(album) => vec![album],
+                DiscographyRow::Section(header) => header.hidden,
+            })
+            .collect();
+        let place = |album: &AlbumUIViewData| {
+            self.server_order
+                .iter()
+                .position(|id| *id == album.id)
+                .unwrap_or(usize::MAX)
+        };
+        albums.sort_by_key(place);
+        self.expansion.children =
+            discography::build_rows(albums, &artist_id, grouped, &self.collapsed_sections);
+        // Every child row moved: positions held by the selection, the focus
+        // marker and (past the new end) the viewport no longer name them.
+        self.common
+            .settle_after_shrink(self.expansion.flattened_len(artists));
     }
 
     /// Convert sort mode to API string for server requests.

@@ -315,6 +315,88 @@ pub fn classify(album: &AlbumUIViewData, artist_id: &str) -> DiscographyGroup {
     }
 }
 
+/// What a small tag after an album's title says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowTagKind {
+    /// A release type the section header doesn't already say ("Live" on an
+    /// EP, "Compilation" on an album the artist appears on).
+    Type,
+    /// The album version ("Deluxe Edition").
+    Version,
+    /// The explicit marker, "E".
+    Explicit,
+}
+
+/// One small tag after an album's title in a grouped discography.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowTag {
+    pub kind: RowTagKind,
+    pub text: String,
+}
+
+impl DiscographyGroup {
+    /// The release type the section's name already tells of every album in
+    /// it. Other and Appears On hold albums of any type, so they tell none.
+    fn implied_type(self) -> Option<ReleaseType> {
+        match self {
+            Self::Albums => Some(ReleaseType::Album),
+            Self::Eps => Some(ReleaseType::Ep),
+            Self::Singles => Some(ReleaseType::Single),
+            Self::Live => Some(ReleaseType::Live),
+            Self::Compilations => Some(ReleaseType::Compilation),
+            Self::Soundtracks => Some(ReleaseType::Soundtrack),
+            Self::Remixes => Some(ReleaseType::Remix),
+            Self::DjMixes => Some(ReleaseType::DjMix),
+            Self::Mixtapes => Some(ReleaseType::Mixtape),
+            Self::Demos => Some(ReleaseType::Demo),
+            Self::Other | Self::AppearsOn => None,
+        }
+    }
+}
+
+/// The tags after `album`'s title when it sits in section `group`: its
+/// release types the section doesn't already say, then its version, then
+/// the explicit marker.
+///
+/// A plain `Album` type is never a tag (it is what a row is by default), so
+/// an album in Albums has no type tag, a live EP in EPs says "Live", and in
+/// Appears On an EP says "EP". An untyped album the server flags as a
+/// compilation says "Compilation" outside the Compilations section.
+pub fn row_tags(album: &AlbumUIViewData, group: DiscographyGroup) -> Vec<RowTag> {
+    let implied = group.implied_type();
+    let mut tags: Vec<RowTag> = album
+        .release_types
+        .iter()
+        .filter(|kind| **kind != ReleaseType::Album && Some(**kind) != implied)
+        .map(|kind| RowTag {
+            kind: RowTagKind::Type,
+            text: kind.label().to_string(),
+        })
+        .collect();
+    if album.release_types.is_empty()
+        && album.compilation == Some(true)
+        && implied != Some(ReleaseType::Compilation)
+    {
+        tags.push(RowTag {
+            kind: RowTagKind::Type,
+            text: ReleaseType::Compilation.label().to_string(),
+        });
+    }
+    if let Some(version) = &album.version {
+        tags.push(RowTag {
+            kind: RowTagKind::Version,
+            text: version.clone(),
+        });
+    }
+    if album.explicit {
+        tags.push(RowTag {
+            kind: RowTagKind::Explicit,
+            text: "E".to_string(),
+        });
+    }
+    tags
+}
+
 /// Sort an artist's albums into sections, in display order. A section with
 /// no album is left out, and inside a section the albums keep the order they
 /// came in (the server's, newest first).
@@ -695,5 +777,107 @@ mod tests {
         assert_eq!(clean.record_label, None);
         assert!(album("al", json!({ "tags": { "explicitstatus": ["Explicit"] } })).explicit);
         assert!(!album("al", json!({})).explicit);
+    }
+
+    fn tag_texts(album: &AlbumUIViewData, group: DiscographyGroup) -> Vec<String> {
+        row_tags(album, group)
+            .into_iter()
+            .map(|tag| tag.text)
+            .collect()
+    }
+
+    #[test]
+    fn a_plain_album_in_albums_has_no_tags() {
+        assert!(row_tags(&typed("al", &["album"]), DiscographyGroup::Albums).is_empty());
+        assert!(row_tags(&album("al", json!({})), DiscographyGroup::Albums).is_empty());
+    }
+
+    #[test]
+    fn type_tags_say_what_the_section_does_not() {
+        use DiscographyGroup as G;
+        // Secondary types on an EP or Single.
+        assert_eq!(tag_texts(&typed("al", &["ep", "live"]), G::Eps), ["Live"]);
+        assert_eq!(
+            tag_texts(&typed("al", &["single", "remix"]), G::Singles),
+            ["Remix"]
+        );
+        // The section's own type is not repeated; the rest are.
+        assert_eq!(
+            tag_texts(&typed("al", &["album", "compilation", "live"]), G::Live),
+            ["Compilation"]
+        );
+        assert_eq!(
+            tag_texts(
+                &typed("al", &["album", "compilation", "dj-mix"]),
+                G::Compilations
+            ),
+            ["DJ Mix"]
+        );
+        // Other holds any type, so each is named.
+        assert_eq!(
+            tag_texts(&typed("al", &["album", "spokenword"]), G::Other),
+            ["Spoken Word"]
+        );
+        assert_eq!(
+            tag_texts(&typed("al", &["broadcast"]), G::Other),
+            ["Broadcast"]
+        );
+    }
+
+    #[test]
+    fn appears_on_names_the_type_unless_it_is_a_plain_album() {
+        use DiscographyGroup as G;
+        assert!(row_tags(&typed("al", &["album"]), G::AppearsOn).is_empty());
+        assert_eq!(tag_texts(&typed("al", &["ep"]), G::AppearsOn), ["EP"]);
+        assert_eq!(
+            tag_texts(&typed("al", &["album", "compilation"]), G::AppearsOn),
+            ["Compilation"]
+        );
+        assert_eq!(
+            tag_texts(&typed("al", &["single", "remix"]), G::AppearsOn),
+            ["Single", "Remix"]
+        );
+        // The server's compilation flag stands in for a missing type...
+        let flagged = album("al", json!({ "compilation": true }));
+        assert_eq!(tag_texts(&flagged, G::AppearsOn), ["Compilation"]);
+        // ...except where the section already says so, or a type is known.
+        assert!(row_tags(&flagged, G::Compilations).is_empty());
+        let typed_flagged = album(
+            "al",
+            json!({ "compilation": true, "tags": { "releasetype": ["ep"] } }),
+        );
+        assert_eq!(tag_texts(&typed_flagged, G::Eps), Vec::<String>::new());
+    }
+
+    #[test]
+    fn version_and_explicit_follow_the_type_tags() {
+        let loaded = album(
+            "al",
+            json!({ "tags": {
+                "releasetype": ["ep", "live"],
+                "albumversion": ["Deluxe Edition"],
+                "explicitstatus": ["e"],
+            } }),
+        );
+        assert_eq!(
+            row_tags(&loaded, DiscographyGroup::Eps),
+            vec![
+                RowTag {
+                    kind: RowTagKind::Type,
+                    text: "Live".to_string()
+                },
+                RowTag {
+                    kind: RowTagKind::Version,
+                    text: "Deluxe Edition".to_string()
+                },
+                RowTag {
+                    kind: RowTagKind::Explicit,
+                    text: "E".to_string()
+                },
+            ]
+        );
+        // They show in Albums too, where there is no type tag.
+        let deluxe = album("al", json!({ "tags": { "albumversion": ["Remastered"] } }));
+        assert_eq!(tag_texts(&deluxe, DiscographyGroup::Albums), ["Remastered"]);
     }
 }

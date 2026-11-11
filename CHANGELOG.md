@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 - Folded sections stay folded for every artist until nokkvi quits.
 - A release-type header's right-click menu shuffles its section, or adds it to the queue, a playlist or a mix.
 - A selected release-type header stands for all of its albums in batch actions.
+- Album rows under a release-type header carry small tags for what the header leaves out, like Live on an EP.
+- Album rows under a release-type header also tag the album version, like Deluxe Edition, and mark explicit albums with an E.
+- Albums under Appears On name their own artist.
+- Settings → General has Group Artist Albums by Release Type, on by default; off shows an expanded artist's albums as one list, newest first.
 - Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
 
 ### Changed
