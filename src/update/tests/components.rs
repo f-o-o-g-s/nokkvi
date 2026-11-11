@@ -268,10 +268,7 @@ fn enter_on_a_section_header(app: &mut crate::Nokkvi) -> crate::app_message::Mes
     use crate::{views::ArtistsMessage, widgets::SlotListPageMessage};
 
     seed_artists(app, vec![make_artist("ar1", "One")]);
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(
-        "ar1".to_string(),
-        super::discography::mixed(),
-    ));
+    super::discography::albums_land(app, "ar1", super::discography::mixed());
     // Flattened: ar1, #Albums, …
     let total = app
         .artists_page

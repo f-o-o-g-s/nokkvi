@@ -691,8 +691,12 @@ impl Nokkvi {
         }
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
+        // A late load (`ExpansionState::takes_children`) stores no rows, so it
+        // warms none either.
         let expansion_album_ids = match &msg {
-            ArtistsMessage::AlbumsLoaded(_, albums) => {
+            ArtistsMessage::AlbumsLoaded(id, albums)
+                if self.artists_page.expansion.takes_children(id) =>
+            {
                 super::components::expansion_child_album_ids(albums)
             }
             _ => Vec::new(),

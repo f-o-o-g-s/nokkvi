@@ -77,6 +77,7 @@ fn every_artists_row_menu_entry_has_an_action() {
             let mut page = ArtistsPage::new();
             let mut ep = make_album("a1", "Record", "Band");
             ep.release_types = vec![ReleaseType::Ep];
+            page.expansion.await_children("ar1");
             let _ = page.update(
                 ArtistsMessage::AlbumsLoaded("ar1".into(), vec![ep]),
                 artists.len(),

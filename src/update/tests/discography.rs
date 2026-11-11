@@ -63,8 +63,15 @@ pub(super) fn app_with_albums(albums: Vec<AlbumUIViewData>) -> Nokkvi {
             make_artist("ar2", "Two"),
         ],
     );
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), albums));
+    albums_land(&mut app, ARTIST, albums);
     app
+}
+
+/// An expand asks for `artist_id`'s albums and they land: the page takes a
+/// children load only for the artist an expand named (or the open one).
+pub(super) fn albums_land(app: &mut Nokkvi, artist_id: &str, albums: Vec<AlbumUIViewData>) {
+    app.artists_page.expansion.await_children(artist_id);
+    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(artist_id.to_string(), albums));
 }
 
 /// The expanded artist's rows as short strings: `#EPs` for a header, the id
@@ -128,6 +135,7 @@ fn grouping_off_loads_the_servers_flat_list() {
     let mut app = app_with_albums(Vec::new());
     app.artists_page.group_by_release_type = false;
     let artists = app.library.artists.to_vec();
+    app.artists_page.expansion.await_children(ARTIST);
     let _ = app.artists_page.update(
         ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), mixed()),
         artists.len(),
@@ -255,7 +263,7 @@ fn star_and_rating_sync_reach_an_album_in_a_folded_section() {
         .collapsed_sections
         .insert(DiscographyGroup::Eps);
     seed_artists(&mut app, vec![make_artist(ARTIST, "One")]);
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), mixed()));
+    albums_land(&mut app, ARTIST, mixed());
     assert_eq!(
         shape(&app),
         ["#Albums", "lp-new", "lp-old", "#EPs", "#Singles", "single"]
@@ -514,10 +522,7 @@ fn a_fold_is_remembered_for_the_next_artist_and_a_reload() {
             .collect()
     };
     let _ = app.handle_artists(ArtistsMessage::CollapseExpansion);
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(
-        "ar2".to_string(),
-        next_artists(),
-    ));
+    albums_land(&mut app, "ar2", next_artists());
     assert_eq!(
         shape(&app),
         ["#Albums", "lp-new", "lp-old", "#EPs", "#Singles", "single"]
@@ -526,10 +531,7 @@ fn a_fold_is_remembered_for_the_next_artist_and_a_reload() {
     // Unfolding forgets it. Flattened: ar0, ar1, ar2, #Albums, 2 albums, #EPs.
     let _ = app.handle_artists(ArtistsMessage::ToggleSection(6));
     assert!(app.artists_page.collapsed_sections.is_empty());
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(
-        "ar2".to_string(),
-        next_artists(),
-    ));
+    albums_land(&mut app, "ar2", next_artists());
     assert_eq!(shape(&app).len(), 8);
 }
 
@@ -713,7 +715,7 @@ fn the_setting_changes_nothing_while_no_artist_is_expanded() {
     load_grouping_setting(&mut app, false);
     assert!(!app.artists_page.group_by_release_type);
     assert!(!app.artists_page.expansion.is_expanded());
-    let _ = app.handle_artists(ArtistsMessage::AlbumsLoaded(ARTIST.to_string(), mixed()));
+    albums_land(&mut app, ARTIST, mixed());
     assert_eq!(shape(&app).len(), 5);
 }
 

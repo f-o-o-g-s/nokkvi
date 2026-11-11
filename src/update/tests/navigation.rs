@@ -1996,3 +1996,108 @@ fn a_login_attempt_keeps_the_cached_storage() {
     drop(app);
     let _ = std::fs::remove_file(&db_path);
 }
+
+// ============================================================================
+// A children load that lands late finds no row to open
+// ============================================================================
+
+/// Centre artist row `idx` and press Shift+Enter on it, as the user does;
+/// returns the artist the page asked the root to load.
+fn expand_artist_row(app: &mut crate::Nokkvi, idx: usize) -> Option<String> {
+    use crate::views::{ArtistsAction, ArtistsMessage};
+    let artists = app.library.artists.to_vec();
+    let total = app.artists_page.expansion.flattened_len(&artists);
+    app.artists_page.common.handle_set_offset(idx, total);
+    let (_, action) =
+        app.artists_page
+            .update(ArtistsMessage::ExpandCenter, artists.len(), &artists);
+    match action {
+        ArtistsAction::ExpandArtist(id) => Some(id),
+        _ => None,
+    }
+}
+
+fn artist_albums_loaded(app: &mut crate::Nokkvi, artist_id: &str) {
+    let _ = app.handle_artists(crate::views::ArtistsMessage::AlbumsLoaded(
+        artist_id.to_string(),
+        vec![make_album(&format!("{artist_id}-lp"), "LP", "Artist")],
+    ));
+}
+
+/// The first artist's albums are slow; the user opens a second artist, whose
+/// albums land first. The slow answer used to take the expansion back.
+#[test]
+fn a_late_children_load_does_not_reopen_the_artist_the_user_left() {
+    let mut app = test_app();
+    seed_artists(&mut app, artists_indexed(3));
+
+    assert_eq!(expand_artist_row(&mut app, 0).as_deref(), Some("ar0"));
+    assert_eq!(expand_artist_row(&mut app, 1).as_deref(), Some("ar1"));
+    artist_albums_loaded(&mut app, "ar1");
+    artist_albums_loaded(&mut app, "ar0");
+
+    assert_eq!(
+        app.artists_page.expansion.expanded_id.as_deref(),
+        Some("ar1"),
+        "the artist opened last stays open",
+    );
+}
+
+/// The user opens an artist, then closes it again before an older load
+/// lands: nothing is open, and the late answer opens nothing.
+#[test]
+fn a_late_children_load_does_not_reopen_a_collapsed_artist() {
+    let mut app = test_app();
+    seed_artists(&mut app, artists_indexed(3));
+
+    assert_eq!(expand_artist_row(&mut app, 0).as_deref(), Some("ar0"));
+    artist_albums_loaded(&mut app, "ar0");
+    assert!(app.artists_page.expansion.is_expanded());
+
+    // Shift+Enter on the open artist closes it; a refetch of its rows that
+    // was still out lands afterwards.
+    assert_eq!(expand_artist_row(&mut app, 0), None);
+    artist_albums_loaded(&mut app, "ar0");
+
+    assert!(
+        !app.artists_page.expansion.is_expanded(),
+        "a closed artist stays closed",
+    );
+}
+
+/// A sort change reloads the list and drops the expansion; the albums asked
+/// for before it land in a list that no longer holds that request.
+#[test]
+fn a_children_load_from_before_a_sort_change_opens_nothing() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+    seed_artists(&mut app, artists_indexed(3));
+
+    assert_eq!(expand_artist_row(&mut app, 0).as_deref(), Some("ar0"));
+    let _ = app.handle_artists(crate::views::ArtistsMessage::SortModeSelected(
+        SortMode::Random,
+    ));
+    artist_albums_loaded(&mut app, "ar0");
+
+    assert!(!app.artists_page.expansion.is_expanded());
+}
+
+/// The open parent's rows can be fetched again (the playlist view does after
+/// a track removal): that answer still lands.
+#[test]
+fn a_refetch_for_the_open_artist_replaces_its_rows() {
+    let mut app = test_app();
+    seed_artists(&mut app, artists_indexed(3));
+    assert_eq!(expand_artist_row(&mut app, 0).as_deref(), Some("ar0"));
+    artist_albums_loaded(&mut app, "ar0");
+
+    let _ = app.handle_artists(crate::views::ArtistsMessage::AlbumsLoaded(
+        "ar0".to_string(),
+        vec![
+            make_album("n1", "New One", "Artist"),
+            make_album("n2", "New Two", "Artist"),
+        ],
+    ));
+
+    assert_eq!(app.artists_page.expansion.children.len(), 2);
+}

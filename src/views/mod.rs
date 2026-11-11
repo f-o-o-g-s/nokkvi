@@ -336,6 +336,11 @@ macro_rules! impl_expansion_update {
                 $self.expansion.collapse($items, $id_fn, &mut $self.common);
                 Ok((Task::none(), $action_none))
             }
+            // A load nothing waits for is late: the user closed that row,
+            // opened another or re-sorted the list while it was out.
+            $children_msg($loaded_id, _) if !$self.expansion.takes_children(&$loaded_id) => {
+                Ok((Task::none(), $action_none))
+            }
             $children_msg($loaded_id, $loaded) => {
                 let children = $children;
                 $self.expansion.set_children($loaded_id, children, $items, &mut $self.common);
