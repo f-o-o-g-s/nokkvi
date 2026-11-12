@@ -55,6 +55,7 @@ pub struct AlbumUIViewData {
     pub artist_id: String,
     pub song_count: u32,
     pub artwork_url: String,
+    /// This release's year. `None` for an undated album: the server sends 0.
     pub year: Option<u32>,
     pub genre: Option<String>,
     pub genres: Option<String>,
@@ -96,7 +97,8 @@ pub struct AlbumUIViewData {
     pub release_date: Option<String>,
     /// Raw original date string (e.g. "1973-03-24" for a remaster's original release)
     pub original_date: Option<String>,
-    /// Original release year (Feishin uses max_original_year)
+    /// Original release year (Feishin uses max_original_year). `None` when
+    /// the tags carry no original date: the server sends 0 then.
     pub original_year: Option<u32>,
     /// Navidrome 0.64 image info (default on older servers).
     pub image: crate::types::image_info::ImageInfo,
@@ -174,7 +176,7 @@ impl AlbumUIViewData {
                 .unwrap_or_default(),
             artwork_url,
             song_count: album.song_count.unwrap_or(0),
-            year: album.year.or(album.max_year),
+            year: known_year([album.year, album.max_year]),
             genre: album.genre.clone(),
             genres,
             duration: album.duration,
@@ -203,9 +205,43 @@ impl AlbumUIViewData {
             explicit,
             release_date: album.release_date.clone(),
             original_date: album.original_date.clone(),
-            original_year: album.max_original_year,
+            original_year: known_year([album.max_original_year]),
             image: album.image.clone(),
             searchable_lower,
+        }
+    }
+
+    /// The album's date as the artwork panel shows it: the original release
+    /// date when the tags carry one, else this release's date, else the
+    /// year. An original date from another year than this release gets the
+    /// release year in brackets ("Jun 29, 1994 (2024)" for a reissue). The
+    /// bracket is judged by the date shown, so a release date never has its
+    /// own year repeated. `None` for an undated album.
+    pub fn date_line(&self) -> Option<String> {
+        use crate::utils::formatters::format_release_date;
+
+        fn present(date: Option<&String>) -> Option<&str> {
+            date.map(|date| date.trim()).filter(|date| !date.is_empty())
+        }
+        let beside_release_year =
+            |shown: String, original_year: Option<u32>| match (original_year, self.year) {
+                (Some(original), Some(release)) if original != release => {
+                    format!("{shown} ({release})")
+                }
+                _ => shown,
+            };
+
+        if let Some(original) = present(self.original_date.as_ref()) {
+            // The date's own year; the tracks' latest original year only
+            // when the date does not start with one.
+            let year = leading_year(original).or(self.original_year);
+            Some(beside_release_year(format_release_date(original), year))
+        } else if let Some(release) = present(self.release_date.as_ref()) {
+            Some(format_release_date(release))
+        } else if let Some(original) = self.original_year {
+            Some(beside_release_year(original.to_string(), Some(original)))
+        } else {
+            self.year.map(|year| year.to_string())
         }
     }
 
@@ -313,6 +349,18 @@ impl AlbumUIViewData {
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         pairs
     }
+}
+
+/// The first of `years` the server knows. Navidrome sends 0 for a year it
+/// has no tag for (an album with no original date has `maxOriginalYear: 0`):
+/// that is no year, never the year 0.
+fn known_year<const N: usize>(years: [Option<u32>; N]) -> Option<u32> {
+    years.into_iter().flatten().find(|year| *year > 0)
+}
+
+/// The year a date string starts with ("1994-06-29", "1996").
+fn leading_year(date: &str) -> Option<u32> {
+    known_year([date.get(..4).and_then(|year| year.parse().ok())])
 }
 
 impl crate::backend::Starable for AlbumUIViewData {
@@ -1041,6 +1089,108 @@ mod tests {
             row.notes_and_link(Some(&fetched)),
             (Some("row notes"), Some("https://www.last.fm/music/A/A"))
         );
+    }
+
+    // The date fields below are the shapes Navidrome 0.64.2 sent for real
+    // albums: it writes 0 for a year it does not know.
+
+    /// An album with no original-date tag: Navidrome sends `maxOriginalYear:
+    /// 0`. That is no year, so the release date stands alone; it once read
+    /// "2003 (2003)" (Hail To The Thief).
+    #[test]
+    fn a_release_date_without_an_original_date_shows_once() {
+        let album = view_from_json(serde_json::json!({
+            "id": "al1", "name": "Hail To The Thief",
+            "date": "2003", "releaseDate": "2003",
+            "minYear": 2003, "maxYear": 2003,
+            "minOriginalYear": 0, "maxOriginalYear": 0,
+        }));
+        assert_eq!(album.date_line().as_deref(), Some("2003"));
+        assert_eq!(album.original_year, None, "0 is no year");
+
+        let full = view_from_json(serde_json::json!({
+            "id": "al2", "name": "A Full Release Date",
+            "releaseDate": "2025-06-20", "maxYear": 2025, "maxOriginalYear": 0,
+        }));
+        assert_eq!(full.date_line().as_deref(), Some("Jun 20, 2025"));
+    }
+
+    /// With neither date tag the year stands in; the unknown original year
+    /// once came first and read "0 (2021)" (Cosmic Vibes).
+    #[test]
+    fn an_album_with_only_a_year_shows_that_year() {
+        let album = view_from_json(serde_json::json!({
+            "id": "al1", "name": "Cosmic Vibes", "date": "2021",
+            "minYear": 2021, "maxYear": 2021,
+            "minOriginalYear": 0, "maxOriginalYear": 0,
+        }));
+        assert_eq!(album.date_line().as_deref(), Some("2021"));
+    }
+
+    /// An undated album has no date line, and no year 0 for the rows and Get
+    /// Info to print.
+    #[test]
+    fn an_undated_album_has_no_date_and_no_year() {
+        let album = view_from_json(serde_json::json!({
+            "id": "al1", "name": "Untagged",
+            "minYear": 0, "maxYear": 0, "minOriginalYear": 0, "maxOriginalYear": 0,
+        }));
+        assert_eq!(album.date_line(), None);
+        assert_eq!((album.year, album.original_year), (None, None));
+        let bare = view_from_json(serde_json::json!({ "id": "al2", "name": "Bare" }));
+        assert_eq!(bare.date_line(), None);
+    }
+
+    /// A reissue shows when the music first came out, then this release's
+    /// year in brackets; an album released once shows its date alone.
+    #[test]
+    fn an_original_date_from_another_year_names_the_release_year() {
+        let reissue = view_from_json(serde_json::json!({
+            "id": "al1", "name": "Acid Mt. Fuji",
+            "date": "2024-09-06", "originalDate": "1994-06-29", "releaseDate": "2024",
+            "minYear": 2024, "maxYear": 2024,
+            "minOriginalYear": 1994, "maxOriginalYear": 1994,
+        }));
+        assert_eq!(reissue.date_line().as_deref(), Some("Jun 29, 1994 (2024)"));
+
+        let year_only = view_from_json(serde_json::json!({
+            "id": "al2", "name": "Adventures in Foam",
+            "originalDate": "1996", "releaseDate": "2025",
+            "maxYear": 2025, "maxOriginalYear": 1996,
+        }));
+        assert_eq!(year_only.date_line().as_deref(), Some("1996 (2025)"));
+
+        let once = view_from_json(serde_json::json!({
+            "id": "al3", "name": "Born Like This",
+            "date": "2009-03-24", "originalDate": "2009-03-23", "releaseDate": "2009",
+            "maxYear": 2009, "maxOriginalYear": 2009,
+        }));
+        assert_eq!(once.date_line().as_deref(), Some("Mar 23, 2009"));
+    }
+
+    /// The bracket is this release's year beside an ORIGINAL date. It is
+    /// judged by the date shown, so a release date never gets its own year
+    /// repeated, whatever original year the tracks carry.
+    #[test]
+    fn the_release_year_is_judged_against_the_date_shown() {
+        let release_only = view_from_json(serde_json::json!({
+            "id": "al1", "name": "A",
+            "releaseDate": "2025-05-01", "maxYear": 2025, "maxOriginalYear": 2023,
+        }));
+        assert_eq!(release_only.date_line().as_deref(), Some("May 1, 2025"));
+
+        // The original date's own year decides, not the tracks' latest one.
+        let mixed = view_from_json(serde_json::json!({
+            "id": "al2", "name": "B",
+            "originalDate": "2020-01-10", "maxYear": 2020, "maxOriginalYear": 2024,
+        }));
+        assert_eq!(mixed.date_line().as_deref(), Some("Jan 10, 2020"));
+
+        // No date tags at all: the original year, then the release year.
+        let years = view_from_json(serde_json::json!({
+            "id": "al3", "name": "C", "maxYear": 1997, "maxOriginalYear": 1992,
+        }));
+        assert_eq!(years.date_line().as_deref(), Some("1992 (1997)"));
     }
 
     /// The link is handed to `xdg-open`, so only a web link is offered: a

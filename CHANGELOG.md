@@ -39,6 +39,8 @@ All notable changes to this project will be documented in this file.
 - A slow album or track load no longer re-opens a row you already closed, or replaces the row you opened after it.
 - Switching between Albums and the Queue no longer downloads the same album thumbnails again each time.
 - The Playlists list no longer jumps back to the top when a playlist changes on the server.
+- The Albums artwork panel no longer repeats the year, like "2003 (2003)", for an album with no original date.
+- The Albums artwork panel no longer reads "0 (2021)" for an album tagged with only a year.
 
 ### Removed
 

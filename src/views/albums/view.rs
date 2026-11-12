@@ -285,27 +285,9 @@ impl AlbumsPage {
                 .spacing(4)
                 .align_x(iced::Alignment::Center);
 
-                // Date Resolution (Feishin logic cascade)
-                let date_text = if let Some(orig_date) = &album.original_date {
-                    nokkvi_data::utils::formatters::format_release_date(orig_date)
-                } else if let Some(rel_date) = &album.release_date {
-                    nokkvi_data::utils::formatters::format_release_date(rel_date)
-                } else if let Some(year) = album.original_year.or(album.year) {
-                    year.to_string()
-                } else {
-                    String::new()
-                };
-
-                let mut info_stats = Vec::new();
-                if !date_text.is_empty() {
-                    let mut full_date = date_text;
-                    if let (Some(orig_yr), Some(yr)) = (album.original_year, album.year)
-                        && orig_yr != yr
-                    {
-                        full_date = format!("{full_date} ({yr})");
-                    }
-                    info_stats.push(full_date);
-                }
+                // Original date, else release date, else year (the Feishin
+                // cascade), with a reissue's own year in brackets.
+                let mut info_stats: Vec<String> = album.date_line().into_iter().collect();
 
                 let count = album.song_count;
                 if count > 0 {
