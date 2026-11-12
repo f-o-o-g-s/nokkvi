@@ -2851,7 +2851,7 @@ pub(crate) mod tests {
         }
         for _ in 0..cap {
             match qm.get_next_song() {
-                Some(next) => seq.push(next.song.id.clone()),
+                Some(next) => seq.push(next.song.id),
                 None => break,
             }
         }

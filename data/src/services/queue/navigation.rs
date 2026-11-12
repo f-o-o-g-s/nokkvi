@@ -1331,7 +1331,7 @@ mod tests {
         for _ in 0..9 {
             let next = qm.get_next_song();
             assert!(next.is_some());
-            visited.insert(next.unwrap().song.id.clone());
+            visited.insert(next.unwrap().song.id);
             assert_navigation_invariants(&qm, "shuf/nc/nr");
         }
         // Should visit all 9 remaining songs (started at 0, advanced 9 times)
@@ -1692,7 +1692,7 @@ mod proptest_navigation {
             visited.insert("0".to_string()); // starting song
             let mut count = 0;
             while let Some(next) = qm.get_next_song() {
-                visited.insert(next.song.id.clone());
+                visited.insert(next.song.id);
                 count += 1;
                 if count > n + 5 {
                     prop_assert!(false, "shuffle did not terminate: n={}", n);
@@ -1770,7 +1770,7 @@ mod proptest_navigation {
             let cap = n + 5;
             let mut count = 0;
             while let Some(next) = qm.get_next_song() {
-                seq.push(next.song.id.clone());
+                seq.push(next.song.id);
                 count += 1;
                 prop_assert!(count <= cap, "drain did not terminate (n={}, co={})", n, co);
             }

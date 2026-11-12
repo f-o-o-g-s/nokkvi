@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.30.0 — 2026-11-12
+
+### Added
+
 - An expanded artist's albums are grouped under release-type headers: Albums, EPs, Singles, Live, Compilations and more, with Appears On last.
 - An artist with only plain albums keeps the flat album list.
 - Enter on a release-type header plays that whole section in list order, or adds it from the split view's library pane.
@@ -16,7 +26,8 @@ All notable changes to this project will be documented in this file.
 - Album rows under a release-type header carry small tags for what the header leaves out, like Live on an EP.
 - Album rows under a release-type header also tag the album version, like Deluxe Edition, and mark explicit albums with an E.
 - Albums under Appears On name their own artist.
-- Settings → General has Group Artist Albums by Release Type, on by default; off shows an expanded artist's albums as one list, newest first.
+- Settings → General has Group Artist Albums by Release Type, on by default.
+- With Group Artist Albums by Release Type off, an expanded artist's albums show as one list, newest first.
 - Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
 - Playlist rows have a clickable heart and star rating on Navidrome 0.64 or newer, like album rows.
 - The star and rating keys work on a focused playlist row.
@@ -26,8 +37,6 @@ All notable changes to this project will be documented in this file.
 - The Albums artwork panel shows the centred album's notes under its stats when Navidrome has any.
 - A Read more link under an album's notes opens the album's page, usually on Last.fm.
 - Get Info on an album lists its notes and external link when Navidrome has them.
-
-### Changed
 
 ### Fixed
 
@@ -47,43 +56,9 @@ All notable changes to this project will be documented in this file.
 - Scrolling to the end of the loaded rows no longer blanks the list while the next page loads.
 - The big cover no longer goes blank for an instant between the thumbnail and the full-size picture when you land on an album or artist.
 
-### Removed
-
-## v0.29.0 — 2026-11-10
-
-### Added
-
-- Settings → Playback has a new Streaming Quality section with Stream Format (Original, Opus or MP3) and Max Bitrate (64 to 320 kbps).
-- With Stream Format set to Opus or MP3, lossless songs above Max Bitrate now stream from your server as a smaller copy.
-- MP3s and other compressed songs more than a quarter above Max Bitrate also stream as a smaller copy.
-- With Opus or MP3 chosen, songs in formats nokkvi can't decode, like APE, WavPack or DSD, now play as a smaller copy.
-- With Opus or MP3 chosen, songs with more than two channels always stream as a stereo MP3 copy.
-- A Streaming Quality change applies from the next song, leaving the song playing as it is.
-- The Waveform seek bar shows the Line style for songs streamed as a smaller copy, unless their waveform was saved earlier.
-- Seeking works in a smaller copy on Navidrome 0.51 or newer.
-- A seek in a smaller copy that fails leaves the song playing where it was.
-- A failed seek in a smaller copy says so, and says when the server is busy or not answering.
-- When the connection drops partway through a smaller copy, nokkvi picks the song up where it stopped, on Navidrome 0.51 or newer.
-- If picking a dropped smaller copy up again keeps failing, nokkvi says the server stopped sending the song.
-- Streaming Quality shows when your server's player settings force a format or a bitrate limit for nokkvi.
-- `nokkvi status` now reports the playing stream's codec, bitrate, sample rate and delivery, whether it is the original file, and how it seeks.
-
-### Changed
-
-- A seek refused in a song your server transcodes on its own now says the server is choosing its format.
-
-### Fixed
-
-- After a descending queue sort, songs that share a rating or other sorted value no longer flip order when the track changes.
-- After a descending queue sort with shuffle off, Next now plays the song shown below the current one.
-- A transcode served from Navidrome's cache is now labelled with the codec actually playing, instead of the file's own format.
-- BIT-PERFECT now shows only when the stream is the song's original file.
-- During a skip crossfade into a transcoded song, the format label now shows its codec instead of the outgoing song's.
-- When the next song fails to load, Next now says why instead of "No next track".
-- When the previous song fails to load, Previous now says why instead of failing silently.
-
 ## Older releases
 
+- **v0.29.x** (2026-11-10, v0.29.0): [CHANGELOG-0.29.md](./changelog-archive/CHANGELOG-0.29.md)
 - **v0.28.x** (2026-10-22 → 2026-11-03, v0.28.0–v0.28.2): [CHANGELOG-0.28.md](./changelog-archive/CHANGELOG-0.28.md)
 - **v0.27.x** (2026-10-17 → 2026-10-20, v0.27.0–v0.27.2): [CHANGELOG-0.27.md](./changelog-archive/CHANGELOG-0.27.md)
 - **v0.26.x** (2026-10-14 → 2026-10-15, v0.26.0–v0.26.1): [CHANGELOG-0.26.md](./changelog-archive/CHANGELOG-0.26.md)

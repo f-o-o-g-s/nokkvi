@@ -257,8 +257,8 @@ impl EqProcessor {
 
         // Cascade through all 10 bands
         let mut s = sample;
-        for band in 0..EQ_BAND_COUNT {
-            s = self.filters[band][ch].run(s);
+        for band_filters in &mut self.filters {
+            s = band_filters[ch].run(s);
         }
 
         // Apply headroom if any band is boosting
@@ -284,8 +284,8 @@ impl EqProcessor {
                     freq.hz(),
                     EQ_Q,
                 ) {
-                    for ch in 0..2 {
-                        self.filters[band][ch].update_coefficients(coeffs);
+                    for filter in &mut self.filters[band] {
+                        filter.update_coefficients(coeffs);
                     }
                 }
             }
