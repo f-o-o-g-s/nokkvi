@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
 - The Playlists view sorts by Favorited and by Rating.
 - The Playlists columns menu has Stars and Love toggles; Stars is off by default and shows under a Rating sort.
 - The playlist artwork panel shows Favorited and the rating.
+- The Albums artwork panel shows the centred album's notes under its stats when Navidrome has any.
+- A Read more link under an album's notes opens the album's page, usually on Last.fm.
+- Get Info on an album lists its notes and external link when Navidrome has them.
 
 ### Changed
 

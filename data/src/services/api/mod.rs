@@ -3,6 +3,7 @@
 //! Per-entity modules (albums, artists, songs, genres, playlists) plus shared
 //! star/rating functionality and Subsonic URL helpers.
 
+pub mod album_info;
 pub mod albums;
 pub mod artist_info;
 pub mod artists;

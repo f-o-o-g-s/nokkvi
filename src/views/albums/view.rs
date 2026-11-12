@@ -344,6 +344,17 @@ impl AlbumsPage {
                     col = col.push(row);
                 }
 
+                // Album notes (albums-specific): the native row's, else the
+                // getAlbumInfo2 answer fetched this session.
+                let (notes, link) = album.notes_and_link(data.album_info.get(&album.id));
+                if let Some(notes) = notes {
+                    col = col.push(crate::widgets::metadata_pill::agent_text_block(
+                        notes,
+                        link,
+                        AlbumsMessage::OpenExternalUrl,
+                    ));
+                }
+
                 col.boxed()
             });
 

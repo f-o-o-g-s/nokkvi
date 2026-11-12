@@ -12,6 +12,7 @@ pub(super) fn sse_slot_guard() -> crate::services::navidrome_sse::SlotTestGuard 
     crate::services::navidrome_sse::own_slot_for_test()
 }
 
+mod album_info;
 mod artist_info;
 mod artist_recs;
 mod artwork;

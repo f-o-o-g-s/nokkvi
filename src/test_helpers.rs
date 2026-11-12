@@ -187,6 +187,8 @@ pub(crate) fn make_album(id: &str, name: &str, artist: &str) -> AlbumUIViewData 
         mbz_album_id: None,
         release_type: None,
         comment: None,
+        notes: None,
+        external_url: None,
         tags: Vec::new(),
         participants: Vec::new(),
         album_artist_ids: Vec::new(),

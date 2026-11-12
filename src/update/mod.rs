@@ -125,11 +125,20 @@ impl Nokkvi {
         // layout would show (the view, the split view, the editor) leaves
         // theater, so no mouse or async route changes the view invisibly.
         let theater_route = self.theater.active.then(|| self.theater_route_snapshot());
+        let album_notes_wanted = self.album_notes_wanted();
         let mut task = self.dispatch_message(message);
         if self.theater.active
             && theater_route.is_some_and(|before| before != self.theater_route_snapshot())
         {
             task = Task::batch([task, self.exit_theater()]);
+        }
+        // The Albums panel's notes are asked for only while someone can read
+        // them. Whatever made them readable again (a view or tab switch, the
+        // split view opening, Theater Mode ending, a spin or a find chain
+        // finishing, the text overlay switched on) is caught here, once, so
+        // no route has to remember to centre the album again.
+        if !album_notes_wanted && self.album_notes_wanted() {
+            task = Task::batch([task, self.album_notes_now_wanted_task()]);
         }
         // The drag mappers, the scrollbar thumb, the centered-row reads, and
         // find-and-expand read the stored slot_count between renders, so it

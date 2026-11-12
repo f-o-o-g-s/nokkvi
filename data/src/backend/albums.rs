@@ -14,7 +14,11 @@ use tracing::trace;
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::albums::AlbumsApiService,
-    types::{album::Album, library_query::LibraryQuery, reactive::ReactiveInt},
+    types::{
+        album::{Album, AlbumInfo},
+        library_query::LibraryQuery,
+        reactive::ReactiveInt,
+    },
     utils::url_redaction::redact_subsonic_url,
 };
 
@@ -66,6 +70,13 @@ pub struct AlbumUIViewData {
     pub mbz_album_id: Option<String>,
     pub release_type: Option<String>,
     pub comment: Option<String>,
+    /// The notes Navidrome's agents fetched for the album, as plain text
+    /// (the native row's `description`). `None` until some client has asked
+    /// the server about the album: see [`AlbumInfo`].
+    pub notes: Option<String>,
+    /// The agents' page for the album (the native row's `externalUrl`),
+    /// filled together with the notes.
+    pub external_url: Option<String>,
     pub tags: Vec<(String, String)>,
     pub participants: Vec<(String, String)>,
     /// Ids of the album's album artists (the `albumartist` participants, else
@@ -178,6 +189,11 @@ impl AlbumUIViewData {
             mbz_album_id: album.mbz_album_id.clone(),
             release_type: album.mbz_album_type.clone(),
             comment: album.comment.clone(),
+            notes: crate::types::album::plain_notes(album.description.as_deref()),
+            external_url: album
+                .external_url
+                .clone()
+                .filter(|url| !url.trim().is_empty()),
             tags,
             participants,
             album_artist_ids,
@@ -191,6 +207,32 @@ impl AlbumUIViewData {
             image: album.image.clone(),
             searchable_lower,
         }
+    }
+
+    /// The notes and the page to show for this album, each from the row when
+    /// it has one, else from the `getAlbumInfo2` answer fetched this session.
+    /// The row is empty until some client has asked. Once it is filled it
+    /// wins: the fetch returns what the row's columns held, and a refresh the
+    /// fetch queued reaches the row through the reload the server's
+    /// broadcast triggers.
+    ///
+    /// The page is for opening (`xdg-open`), so only an http(s) link is
+    /// offered, from the row and from the fetched answer alike.
+    pub fn notes_and_link<'a>(
+        &'a self,
+        fetched: Option<&'a AlbumInfo>,
+    ) -> (Option<&'a str>, Option<&'a str>) {
+        let web = |url: Option<&'a String>| {
+            url.map(String::as_str)
+                .filter(|url| crate::utils::server_url::has_http_scheme(url))
+        };
+        let notes = self
+            .notes
+            .as_deref()
+            .or_else(|| fetched.and_then(|info| info.notes.as_deref()));
+        let link = web(self.external_url.as_ref())
+            .or_else(|| web(fetched.and_then(|info| info.external_url.as_ref())));
+        (notes, link)
     }
 
     /// The ids of the album's album artists: its `albumartist` participants,
@@ -933,6 +975,96 @@ mod tests {
 
     fn album_from_json(value: serde_json::Value) -> Album {
         serde_json::from_value(value).expect("valid album json")
+    }
+
+    fn view_from_json(value: serde_json::Value) -> AlbumUIViewData {
+        AlbumUIViewData::from_album(&album_from_json(value), "http://srv", "u=x")
+    }
+
+    /// Navidrome fills `description` / `externalUrl` on the native row once a
+    /// client has asked `getAlbumInfo2`; the row then carries the notes on
+    /// every later load, as plain text.
+    #[test]
+    fn the_native_rows_notes_and_page_reach_the_view_data() {
+        let filled = view_from_json(serde_json::json!({
+            "id": "al1",
+            "name": "Born Like This",
+            "description": "The sixth album. <a href=\"https://example.org/a\">More</a>",
+            "externalUrl": "https://www.last.fm/music/MF+DOOM/Born+Like+This",
+        }));
+        assert_eq!(
+            filled.notes.as_deref(),
+            Some("The sixth album. More (https://example.org/a)")
+        );
+        assert_eq!(
+            filled.external_url.as_deref(),
+            Some("https://www.last.fm/music/MF+DOOM/Born+Like+This")
+        );
+
+        let unasked = view_from_json(serde_json::json!({ "id": "al2", "name": "Unasked" }));
+        assert_eq!((unasked.notes, unasked.external_url), (None, None));
+
+        let blank = view_from_json(serde_json::json!({
+            "id": "al3", "name": "Blank", "description": "  ", "externalUrl": "",
+        }));
+        assert_eq!((blank.notes, blank.external_url), (None, None));
+    }
+
+    /// The case album notes exist for: a native row Navidrome had not filled
+    /// yet shows the answer fetched this session.
+    #[test]
+    fn the_fetched_answer_fills_an_unfilled_row() {
+        let row = view_from_json(serde_json::json!({ "id": "al1", "name": "A" }));
+        let fetched = AlbumInfo {
+            notes: Some("fetched notes".to_string()),
+            external_url: Some("https://www.last.fm/music/A/A".to_string()),
+        };
+        assert_eq!(
+            row.notes_and_link(Some(&fetched)),
+            (Some("fetched notes"), Some("https://www.last.fm/music/A/A"))
+        );
+        assert_eq!(row.notes_and_link(None), (None, None));
+    }
+
+    /// A filled row is never older than the fetched answer, so it wins field
+    /// by field; the fetched answer still fills the field the row lacks.
+    #[test]
+    fn a_filled_row_wins_field_by_field() {
+        let row = view_from_json(serde_json::json!({
+            "id": "al1", "name": "A", "description": "row notes",
+        }));
+        let fetched = AlbumInfo {
+            notes: Some("fetched notes".to_string()),
+            external_url: Some("https://www.last.fm/music/A/A".to_string()),
+        };
+        assert_eq!(
+            row.notes_and_link(Some(&fetched)),
+            (Some("row notes"), Some("https://www.last.fm/music/A/A"))
+        );
+    }
+
+    /// The link is handed to `xdg-open`, so only a web link is offered: a
+    /// row's link that is not one falls through to the fetched answer's.
+    #[test]
+    fn only_a_web_link_is_offered() {
+        let row = view_from_json(serde_json::json!({
+            "id": "al1", "name": "A", "description": "notes",
+            "externalUrl": "file:///etc/passwd",
+        }));
+        assert_eq!(row.notes_and_link(None), (Some("notes"), None));
+        let scripted = AlbumInfo {
+            notes: None,
+            external_url: Some("javascript:alert(1)".to_string()),
+        };
+        assert_eq!(row.notes_and_link(Some(&scripted)), (Some("notes"), None));
+        let web = AlbumInfo {
+            notes: None,
+            external_url: Some("HTTPS://example.org/a".to_string()),
+        };
+        assert_eq!(
+            row.notes_and_link(Some(&web)),
+            (Some("notes"), Some("HTTPS://example.org/a"))
+        );
     }
 
     #[test]

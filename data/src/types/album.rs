@@ -76,6 +76,14 @@ pub struct Album {
     pub compilation: Option<bool>,
     #[serde(rename = "comment")]
     pub comment: Option<String>,
+    /// The notes Navidrome's agents fetched for the album (Last.fm's wiki
+    /// summary, or another agent's). Empty until some client has asked
+    /// `getAlbumInfo2` about the album: see [`AlbumInfo`].
+    #[serde(rename = "description")]
+    pub description: Option<String>,
+    /// The agents' page for the album, filled together with `description`.
+    #[serde(rename = "externalUrl")]
+    pub external_url: Option<String>,
     #[serde(rename = "starred", default)]
     #[serde(deserialize_with = "crate::types::deserialize_starred_opt")]
     pub starred: Option<bool>,
@@ -134,6 +142,34 @@ impl Album {
     pub fn is_starred(&self) -> bool {
         self.starred.unwrap_or(false)
     }
+}
+
+/// What Subsonic `getAlbumInfo2` reports about one album: the notes and the
+/// page Navidrome's agents fetched (Last.fm, or another configured agent).
+///
+/// Navidrome fills this lazily, only when a client asks: the native
+/// `/api/album` row carries the same `description` / `externalUrl` columns,
+/// but they stay empty for an album no client has asked about. Each field is
+/// `None` when the server sent it empty or not at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumInfo {
+    /// The agent's notes as plain text ([`plain_notes`]). Last.fm's are the
+    /// opening of the album's wiki, a few hundred characters that can stop
+    /// mid-sentence.
+    pub notes: Option<String>,
+    /// The agent's page for the album. Subsonic names the key `lastFmUrl`,
+    /// but Navidrome fills it from whichever agent answered, so it is not
+    /// always a Last.fm link. Most albums have a page; far fewer have notes.
+    pub external_url: Option<String>,
+}
+
+/// An album's notes as the views show them, from either wire (`notes` on
+/// `getAlbumInfo2`, `description` on the native row): tags stripped, since an
+/// agent's text can carry an `<a>` link, and `None` when nothing is left.
+pub fn plain_notes(raw: Option<&str>) -> Option<String> {
+    let text = crate::utils::html::strip_html_tags(raw?);
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 impl std::fmt::Display for Album {

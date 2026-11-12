@@ -290,6 +290,7 @@ impl AlbumsPage {
                 AlbumsMessage::ArtworkLoaded(_, _)
                 | AlbumsMessage::LargeArtworkLoaded(_, _)
                 // Routed up to root in `handle_albums` before this match runs.
+                | AlbumsMessage::OpenExternalUrl(_)
                 | AlbumsMessage::SetOpenMenu(_)
                 | AlbumsMessage::Roulette
                 | AlbumsMessage::ArtworkColumnDrag(_)

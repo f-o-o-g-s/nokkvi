@@ -70,6 +70,9 @@ pub struct AlbumsViewData<'a> {
     /// Blurred stand-ins for covers on their way (`ArtworkState::placeholders`).
     pub placeholders: &'a HashMap<String, crate::state::Placeholder>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
+    /// `getAlbumInfo2` answers by album id; the pill's notes and link fall
+    /// back to them where the native row has none.
+    pub album_info: &'a HashMap<String, nokkvi_data::types::album::AlbumInfo>,
     pub window_width: f32,
     pub window_height: f32,
     /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
@@ -138,6 +141,9 @@ pub enum AlbumsMessage {
     NavigateAndExpandArtist(String),
     /// Navigate to Genres and auto-expand the genre with this id (no filter set).
     NavigateAndExpandGenre(String),
+    /// The pill's "Read more" link under the album notes: open the agent's
+    /// page for the album. Intercepted in `handle_albums`.
+    OpenExternalUrl(String),
     ToggleColumnVisible(AlbumsColumn),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_albums` before the

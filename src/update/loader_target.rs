@@ -420,9 +420,12 @@ impl LoaderTarget for AlbumsTarget {
 
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
         let album_id = app.centred_album_id()?;
-        Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-            album_id,
-        ))))
+        // The panel's notes follow the album the load centred.
+        let info = app.album_info_settle_task(album_id.clone());
+        Some(Task::batch([
+            Task::done(Message::Artwork(ArtworkMessage::LoadLarge(album_id))),
+            info,
+        ]))
     }
 
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {

@@ -1805,6 +1805,8 @@ impl Nokkvi {
             artist_info: _,
             // Cache, in-flight set and the id wait; generation carried.
             artist_recs: _,
+            // Cache and in-flight set; session generation carried.
+            album_info: _,
             // Shelves + search; both generations carried.
             harbour: _,
             // Crate + modal; search generation carried.
@@ -2010,6 +2012,7 @@ impl Nokkvi {
         self.session_generation = self.session_generation.carried_forward();
         self.artist_info.reset_for_session();
         self.artist_recs.reset_for_session();
+        self.album_info.reset_for_session();
         self.harbour.reset_for_session();
         self.trawl.reset_for_session();
         self.drop_active_playlist_context();

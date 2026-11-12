@@ -8,9 +8,9 @@ paths:
   - "src/update/components/**"
   - "src/update/hotkeys/navigation.rs"
   - "src/update/tests/{navigation,navigation_macros,components,row_menus,slot_list,autohide_toolbar,harbour,playlists}.rs"
-  - "src/update/tests/{split_view,cross_pane_drag,roulette,page_loader,library,library_refresh,background_reload,focused_row,menus}.rs"
+  - "src/update/tests/{split_view,cross_pane_drag,roulette,page_loader,library,library_refresh,background_reload,focused_row,menus,album_info}.rs"
   - "src/widgets/slot_list_page.rs"
-  - "src/state/{roulette,pending,panes}.rs"
+  - "src/state/{roulette,pending,panes,album_info}.rs"
   - "src/app_message.rs"
   - "data/src/types/view_columns.rs"
 ---
@@ -75,6 +75,16 @@ Bare Left/Right are Seek Backward / Seek Forward; Shift+Left/Right cycle the sor
 Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. Center-entry resolution is centralized in `views/expansion.rs`. A child need not be an entity: Artists' child type is `DiscographyRow` (an album or a release-type section header that is a real slot, ui-artists.md), so a reader of an expansion's children matches on what the row is. (gotchas: see gotchas/slot-lists.md "Expansion sort state".)
 
 **Find-and-expand** (clicking an inline album/artist/genre link or Shift+C from Songs): the chain runs through the `Nokkvi.pending_expand: state::PendingExpandState` cluster — `target: Option<PendingExpand>` (variants `Album { album_id, for_browsing_pane }`, `Artist { ... }`, `Genre { ... }`, `Song { song_id, for_browsing_pane }`) plus the `center_only` flag and the post-load `top_pin`. The `Song` variant exists only for the CenterOnPlaying fallback in the Songs view — clear search, paginate until the playing track appears, center on it without dispatching `FocusAndExpand`. Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`. The carrier messages are `NavigationMessage::Expand(PendingExpand)` (kick-off) and `NavigationMessage::ExpandTimeout(PendingExpand)` (2s "Finding {entity}…" toast) — both namespaced under `Message::Navigation` and dispatched via `update/navigation.rs`.
+
+## Album Notes (Albums)
+
+Navidrome fetches an album's notes and page from its agents only when a client calls `getAlbumInfo2` (backend-services.md "Album info"), so the Albums view asks about the centred album the way Artists asks about the centred artist (ui-artists.md "Artist Biography (Artists)"). The centred album is `Nokkvi::centred_album_id()`, the pill's row: a track row of an expanded album resolves to that album. Every centring path (the `LoadLargeArtwork` arm, `ExpandAlbum`, the post-load centre in `AlbumsTarget`, `center_large_artwork_load_task`) calls `Nokkvi::album_info_settle_task` beside its large-art load, and the timer's `InfoSettled` asks only if no other album was centred since. Answers live on `Nokkvi.album_info` (`AlbumInfoState = CentredFetch<AlbumInfo>`): one ask per id while it is cached, an answer with nothing in it cached too (most albums have a page and no notes), a failure logged, never toasted, and asked again at the next centring, a pre-logout answer dropped by generation.
+
+- **One gate, `Nokkvi::album_notes_wanted()`**, read by the settle task and the settle handler: the Albums panel shows text (Text Overlay On Artwork), the list is on screen (the current view or the split view's active tab, and not behind Theater Mode; it also loads at login behind the start view and reloads in the background under any view), no roulette spin is sweeping it and no find-and-expand chain is paging through it. Both centre albums in passing, and the reload an answer's broadcast triggers (below) would feed a spin its next album or throw away the pages a chain has loaded. A new reason to hold the ask back goes into that predicate.
+- **The root `update` watches the gate turn true** and centres the album then (`album_notes_now_wanted_task`), so a view or tab switch, the split view opening, Theater Mode ending, a spin or chain finishing and the overlay switched on all ask without a hook of their own.
+- **The pill** takes the native row's `notes` / `external_url` field by field and falls back to the fetched answer (`AlbumUIViewData::notes_and_link`, http(s) links only: the link goes to `xdg-open`), and draws them through `metadata_pill::agent_text_block`: the text cut at `PILL_TEXT_PREVIEW_CHARS`, then a host-named link. A page without notes draws nothing.
+- **Get Info** lists an album's `External URL` and `Notes` from the row; `with_fetched_album_info` fills them from the session's answer at `Open`, and `refresh_open_album_info` when the answer lands under a modal opened first. It reopens the modal only when `InfoModalItem::fill_album_info` filled a field: the rows' text is no measure, since the relative dates in it change with the clock.
+- **The cost of a first ask**: Navidrome broadcasts an album `refreshResource` for the fill and again for the refresh it queues behind it (about 5 s later, one album at a time), and once more for an ask past the 7-day time-to-live. Each reaches every client and reloads the Albums list in the background like any album event (`handle_library_changed`). An album asked about inside its time-to-live broadcasts nothing.
 
 ## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
 

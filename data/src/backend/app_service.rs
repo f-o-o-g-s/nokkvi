@@ -1237,6 +1237,10 @@ impl AppService {
 
     subsonic_api_factory!(
         (
+            album_info_api,
+            crate::services::api::album_info::AlbumInfoApiService
+        ),
+        (
             artist_info_api,
             crate::services::api::artist_info::ArtistInfoApiService
         ),

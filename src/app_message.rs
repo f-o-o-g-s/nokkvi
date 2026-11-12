@@ -1310,6 +1310,18 @@ pub enum AlbumsLoaderMessage {
         result: Result<Vec<nokkvi_data::backend::albums::AlbumUIViewData>, String>,
         total_count: usize,
     },
+    /// A `getAlbumInfo2` answer for `album_id`, fetched when the album was
+    /// centred. `generation` is the session counter it was dispatched under
+    /// (see `AlbumInfoState`). A rejected session never arrives here: it is
+    /// routed to `Message::SessionExpired`.
+    InfoLoaded {
+        generation: u64,
+        album_id: String,
+        result: Result<nokkvi_data::types::album::AlbumInfo, String>,
+    },
+    /// An album's settle timer fired; its info is asked for only if it is
+    /// still the album centred last.
+    InfoSettled(String),
 }
 
 // --- Artists Loader --------------------------------------------------------

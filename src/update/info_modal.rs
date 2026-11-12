@@ -1,15 +1,55 @@
 //! Info modal handler — open/close, copy, URL/folder open, row interaction.
 
 use iced::Task;
+use nokkvi_data::types::info_modal::InfoModalItem;
 
 use crate::{Nokkvi, app_message::Message, widgets::info_modal::InfoModalMessage};
 
 impl Nokkvi {
+    /// `item` with what this session fetched about it filled in: an album's
+    /// notes and page, where the album row it was built from had none.
+    /// Navidrome fills the row only once a client has asked `getAlbumInfo2`,
+    /// and the row on screen only at its next reload.
+    fn with_fetched_album_info(&self, mut item: InfoModalItem) -> InfoModalItem {
+        let fetched = match &item {
+            InfoModalItem::Album { id, .. } => self.album_info.cache.peek(id),
+            InfoModalItem::Song { .. }
+            | InfoModalItem::Artist { .. }
+            | InfoModalItem::Playlist { .. } => None,
+        };
+        if let Some(fetched) = fetched {
+            item.fill_album_info(fetched);
+        }
+        item
+    }
+
+    /// The info for `album_id` just landed: Get Info opened on that album
+    /// before the answer was back gains its notes and page. An answer that
+    /// fills nothing leaves the modal, and the rows the user expanded,
+    /// alone. That is judged by the fill, never by comparing the rows' text:
+    /// "Last Played: 5 minutes ago" reads differently a minute later.
+    pub(crate) fn refresh_open_album_info(&mut self, album_id: &str) {
+        let Some(item) = &self.info_modal.item else {
+            return;
+        };
+        if !matches!(item, InfoModalItem::Album { id, .. } if id == album_id) {
+            return;
+        }
+        let Some(fetched) = self.album_info.cache.peek(&album_id.to_string()) else {
+            return;
+        };
+        let mut filled = item.clone();
+        if filled.fill_album_info(fetched) {
+            self.info_modal.open(filled);
+        }
+    }
+
     /// Handle info modal messages (open, close, copy, URL/folder launch, editor actions).
     pub(crate) fn handle_info_modal(&mut self, msg: InfoModalMessage) -> Task<Message> {
         match msg {
             InfoModalMessage::Open(item) => {
-                self.info_modal.open(*item);
+                let item = self.with_fetched_album_info(*item);
+                self.info_modal.open(item);
             }
             InfoModalMessage::Close => {
                 self.info_modal.close();

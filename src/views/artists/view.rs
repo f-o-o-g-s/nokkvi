@@ -279,7 +279,7 @@ impl ArtistsPage {
         let pill_content = centered_artist
             .filter(|_| crate::theme::artists_artwork_overlay())
             .map(|artist| {
-                use iced::widget::{button, column, text};
+                use iced::widget::{column, text};
 
                 use crate::theme;
 
@@ -332,59 +332,11 @@ impl ArtistsPage {
                 // getArtistInfo2 answer first, the native row otherwise.
                 let (bio, link) = pill_bio_and_link(artist, data.artist_info.get(&artist.id));
                 if let Some(bio) = bio {
-                    let bio_preview: String = bio.chars().take(350).collect();
-                    let bio_preview = if bio.chars().count() > 350 {
-                        format!("{}...", bio_preview.trim_end())
-                    } else {
-                        bio_preview
-                    };
-
-                    let mut bio_col = column![
-                        text(bio_preview)
-                            .size(13)
-                            .color(theme::fg1())
-                            .font(theme::ui_font())
-                            .center()
-                    ]
-                    .spacing(4)
-                    .align_x(iced::Alignment::Center);
-
-                    if let Some(url) = link {
-                        let read_more_btn = button(
-                            text(bio_link_label(url))
-                                .size(11)
-                                .color(theme::accent_bright())
-                                .font(theme::weighted_ui_font(iced::font::Weight::Bold)),
-                        )
-                        .on_press(ArtistsMessage::OpenExternalUrl(url.to_string()))
-                        .padding(iced::Padding {
-                            top: 2.0,
-                            bottom: 2.0,
-                            left: 6.0,
-                            right: 6.0,
-                        })
-                        .style(|_theme, status| {
-                            let opacity = match status {
-                                iced::widget::button::Status::Hovered
-                                | iced::widget::button::Status::Pressed => 0.75,
-                                _ => 1.0,
-                            };
-                            let mut color = theme::accent_bright();
-                            color.a = opacity;
-                            iced::widget::button::Style {
-                                background: None,
-                                border: iced::Border {
-                                    width: 0.0,
-                                    ..Default::default()
-                                },
-                                text_color: color,
-                                ..Default::default()
-                            }
-                        });
-                        bio_col = bio_col.push(read_more_btn.boxed());
-                    }
-
-                    col = col.push(bio_col.boxed());
+                    col = col.push(crate::widgets::metadata_pill::agent_text_block(
+                        bio,
+                        link,
+                        ArtistsMessage::OpenExternalUrl,
+                    ));
                 }
 
                 // Similar artists (ListenBrainz, Deezer) under the biography, once
@@ -917,28 +869,12 @@ pub(crate) fn pill_bio_and_link<'a>(
     fn text(field: Option<&String>) -> Option<&str> {
         field.map(String::as_str).filter(|s| !s.trim().is_empty())
     }
-    let web = |field: Option<&'a String>| {
-        text(field).filter(|url| nokkvi_data::utils::server_url::has_http_scheme(url))
-    };
+    let web = |field: Option<&'a String>| crate::widgets::metadata_pill::web_link(text(field));
     let bio =
         text(artist.biography.as_ref()).or_else(|| text(info.and_then(|i| i.biography.as_ref())));
     let link = web(artist.external_url.as_ref())
         .or_else(|| web(info.and_then(|i| i.external_url.as_ref())));
     (bio, link)
-}
-
-/// The bio link's label: it names where the link goes ("Read more on
-/// last.fm"), since Navidrome fills the link from whichever agent answered
-/// and it is not always Last.fm. "Read more" when the link has no host.
-pub(crate) fn bio_link_label(url: &str) -> String {
-    reqwest::Url::parse(url)
-        .ok()
-        .and_then(|parsed| {
-            let host = parsed.host_str()?;
-            let host = host.strip_prefix("www.").unwrap_or(host);
-            (!host.is_empty()).then(|| format!("Read more on {host}"))
-        })
-        .unwrap_or_else(|| "Read more".to_string())
 }
 
 /// The section header's hairline rule: the accent at the strength of the
@@ -1179,19 +1115,6 @@ mod tests {
             pill_bio_and_link(&artist, Some(&blank)),
             (Some("native bio"), None)
         );
-    }
-
-    #[test]
-    fn the_link_label_names_the_site_it_opens() {
-        assert_eq!(
-            bio_link_label("https://www.last.fm/music/Sia"),
-            "Read more on last.fm"
-        );
-        assert_eq!(
-            bio_link_label("https://isissemajhall.com/"),
-            "Read more on isissemajhall.com"
-        );
-        assert_eq!(bio_link_label("not a url"), "Read more");
     }
 }
 

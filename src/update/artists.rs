@@ -14,14 +14,11 @@ use tracing::debug;
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
+    state::CENTRE_SETTLE,
     update::{ArtistsTarget, PagedLoad, Reload},
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
 };
-
-/// How long an artist must stay centred before the Artists view asks the
-/// server for its info (`getArtistInfo2`).
-const ARTIST_INFO_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Nokkvi {
     /// Sort UI artists in-place by rating (Some > None, then desc by value).
@@ -305,7 +302,7 @@ impl Nokkvi {
     /// centred. Every centring path goes through this, so the biography
     /// follows the same trigger as the artwork panel it sits on. The info is
     /// asked for only once the artist has stayed centred for
-    /// [`ARTIST_INFO_SETTLE`]: a first ask makes the server run its agents
+    /// [`CENTRE_SETTLE`]: a first ask makes the server run its agents
     /// and broadcast a library refresh, too much to do for every row a held
     /// arrow key scrolls past.
     pub(crate) fn artist_center_tasks(&mut self, artist_id: String) -> Task<Message> {
@@ -331,7 +328,7 @@ impl Nokkvi {
         let info_wanted = self.artist_info.centre(&artist_id);
         let recs_wanted = self.rec_sources().any() && self.artist_recs.centre(&artist_id);
         if (info_wanted || recs_wanted) && self.app_service.is_some() {
-            Task::perform(tokio::time::sleep(ARTIST_INFO_SETTLE), move |()| {
+            Task::perform(tokio::time::sleep(CENTRE_SETTLE), move |()| {
                 Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::InfoSettled(
                     artist_id,
                 ))
@@ -684,9 +681,7 @@ impl Nokkvi {
             return task;
         }
         if let ArtistsMessage::OpenExternalUrl(url) = msg {
-            if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                tracing::warn!("Failed to open URL '{}': {}", url, e);
-            }
+            super::components::open_external_url(&url);
             return Task::none();
         }
         // Capture child album ids before consuming `msg` so we can fan out

@@ -3,13 +3,14 @@
 use iced::{Task, widget::image};
 use nokkvi_data::{
     backend::albums::AlbumUIViewData,
-    types::{ItemKind, paged_buffer::PageSlot},
+    types::{ItemKind, album::AlbumInfo, paged_buffer::PageSlot},
 };
 use tracing::debug;
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, MiniArt, NavigationMessage},
+    state::CENTRE_SETTLE,
     update::{AlbumsTarget, PagedLoad, Reload},
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
@@ -29,6 +30,151 @@ impl Nokkvi {
             views::expansion::SlotListEntry::Parent(album) => Some(album.id.clone()),
             views::expansion::SlotListEntry::Child(_, parent_id) => Some(parent_id),
         }
+    }
+
+    /// Fetch the centred album's info (`getAlbumInfo2`) unless it is cached
+    /// or already in flight. Navidrome asks its agents for an album's notes
+    /// only on this call, so without it the notes stay blank on a server no
+    /// other client browses.
+    ///
+    /// The in-flight mark is set before the `app_service` check, like the
+    /// artist info's: it is the observable side effect tests use. In the app
+    /// it is never left behind without a request: `InfoSettled` only comes
+    /// from a timer `album_info_settle_task` starts with a service, and
+    /// logout (which drops the service) clears the marks.
+    pub(crate) fn album_info_task(&mut self, album_id: String) -> Task<Message> {
+        let Some(generation) = self.album_info.begin(&album_id) else {
+            return Task::none();
+        };
+        let id = album_id.clone();
+        self.shell_task(
+            move |shell| async move { shell.album_info_api().await?.get_album_info(&id).await },
+            move |result| Self::album_info_result_message(generation, album_id, result),
+        )
+    }
+
+    /// Whether the centred album's notes are wanted now, the one gate on
+    /// asking the server about it. An ask makes the server run its agents
+    /// and tell every client, which reloads their Albums lists, so it is
+    /// made only for an album whose panel text someone can read:
+    ///
+    /// - the Albums panel shows text (Text Overlay On Artwork);
+    /// - the list is on screen: the current view, or the split view's active
+    ///   tab, and not behind Theater Mode. It also loads at login behind the
+    ///   start view and reloads in the background under any view;
+    /// - no roulette spin is sweeping it, and no find-and-expand chain is
+    ///   paging through it: either centres albums in passing, and the reload
+    ///   an answer's broadcast triggers would feed a spin its next album or
+    ///   throw away the pages a chain has loaded.
+    ///
+    /// The root `update` watches this for the moment it turns true
+    /// ([`Self::album_notes_now_wanted_task`]).
+    pub(crate) fn album_notes_wanted(&self) -> bool {
+        self.settings.albums_artwork_overlay
+            && !self.theater.active
+            && self.panel_art_steered(Some(View::Albums))
+            && self.roulette.is_none()
+            && self.pending_expand.target.is_none()
+    }
+
+    /// The centred album's notes just became wanted (the view or the
+    /// browsing tab switched to Albums, the split view opened on it, Theater
+    /// Mode ended, a spin or a find chain finished): it was not asked about
+    /// while they were not, and nothing else centres it again.
+    pub(crate) fn album_notes_now_wanted_task(&mut self) -> Task<Message> {
+        match self.centred_album_id() {
+            Some(album_id) => self.album_info_settle_task(album_id),
+            None => Task::none(),
+        }
+    }
+
+    /// Start the settle timer for the album the Albums view just centred,
+    /// when its notes are wanted ([`Self::album_notes_wanted`]) and still to
+    /// be asked for. Every centring path calls this beside its large-artwork
+    /// load, so the notes follow the same trigger as the artwork panel they
+    /// sit on. The info is asked for only once the album has stayed centred
+    /// for [`CENTRE_SETTLE`]: a first ask makes the server run its agents
+    /// and broadcast a library refresh, too much to do for every row a held
+    /// arrow key scrolls past.
+    pub(crate) fn album_info_settle_task(&mut self, album_id: String) -> Task<Message> {
+        if !self.album_notes_wanted() {
+            return Task::none();
+        }
+        if self.album_info.centre(&album_id) && self.app_service.is_some() {
+            Task::perform(
+                // The timer is made when the task first runs, inside the
+                // runtime, not here.
+                async { tokio::time::sleep(CENTRE_SETTLE).await },
+                move |()| {
+                    Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::InfoSettled(
+                        album_id,
+                    ))
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    /// An album's settle timer fired: ask for its info if it is still the
+    /// album centred last and its notes are still wanted (when they are
+    /// wanted again, the root `update` centres it again).
+    pub(crate) fn handle_album_info_settled(&mut self, album_id: String) -> Task<Message> {
+        if self.album_info.settled(&album_id) && self.album_notes_wanted() {
+            self.album_info_task(album_id)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// The message a finished `getAlbumInfo2` fetch sends: a rejected
+    /// session goes to the login screen, anything else lands in
+    /// [`Self::handle_album_info_loaded`].
+    pub(crate) fn album_info_result_message(
+        generation: u64,
+        album_id: String,
+        result: anyhow::Result<AlbumInfo>,
+    ) -> Message {
+        if let Err(e) = &result
+            && let Some(msg) = super::components::session_expired_message(e)
+        {
+            return msg;
+        }
+        Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::InfoLoaded {
+            generation,
+            album_id,
+            result: result.map_err(|e| format!("{e:#}")),
+        })
+    }
+
+    /// Land a `getAlbumInfo2` answer: cache it, or on failure release the
+    /// album so the next centring asks again. An answer with nothing in it
+    /// is cached too: most albums have no notes, and that is worth
+    /// remembering.
+    ///
+    /// A failure is logged and not toasted: the notes are a garnish, and a
+    /// toast per centred album would bury the view while the server is
+    /// unreachable. The native row's notes still show.
+    pub(crate) fn handle_album_info_loaded(
+        &mut self,
+        generation: u64,
+        album_id: &str,
+        result: Result<AlbumInfo, String>,
+    ) -> Task<Message> {
+        let info = match result {
+            Ok(info) => Some(info),
+            Err(e) => {
+                debug!("getAlbumInfo2 for {album_id} failed (asked again on next centring): {e}");
+                None
+            }
+        };
+        if !self.album_info.finish(generation, album_id, info) {
+            debug!("getAlbumInfo2 for {album_id} landed after logout; dropped");
+            return Task::none();
+        }
+        // Get Info opened on this album before the answer was back.
+        self.refresh_open_album_info(album_id);
+        Task::none()
     }
 
     /// Per-entity fetch closure for `Nokkvi::load_paged::<AlbumsTarget>`.
@@ -690,6 +836,10 @@ impl Nokkvi {
         if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Albums) {
             return task;
         }
+        if let AlbumsMessage::OpenExternalUrl(url) = msg {
+            super::components::open_external_url(&url);
+            return Task::none();
+        }
         // The page's `update` calls `set_children` for `TracksLoaded`, which
         // wipes `selected_offset` to clamp the viewport into the post-
         // expansion flat list. For find-chain navigations we want the
@@ -848,8 +998,10 @@ impl Nokkvi {
                     if let Some(album_id) = resolved_album_id {
                         tasks.push(self.panel_art_step(
                             Some(View::Albums),
-                            crate::state::PanelArt::Album(album_id),
+                            crate::state::PanelArt::Album(album_id.clone()),
                         ));
+                        // The panel's notes follow the same centring.
+                        tasks.push(self.album_info_settle_task(album_id));
                     }
 
                     // Prefetch viewport mini artwork + chain a page-load if
@@ -873,6 +1025,9 @@ impl Nokkvi {
                 // CRITICAL FIX: Ensure large artwork is fetched when expanding an album via mouse click.
                 // Standard navigation triggers this automatically, but FocusAndExpand skips standard focus.
                 let artwork_task = self.handle_load_large_artwork(id.clone());
+                // Same for the panel's notes: a "N songs" click or a link's
+                // find-and-expand centres the album without a scroll step.
+                let info_task = self.album_info_settle_task(id.clone());
 
                 let tracks_task = self.expand_load_children_task(
                     move |shell| async move {
@@ -887,7 +1042,7 @@ impl Nokkvi {
                     "load album tracks",
                 );
 
-                return Task::batch([artwork_task, tracks_task]);
+                return Task::batch([artwork_task, info_task, tracks_task]);
             }
             AlbumsAction::PlayAlbumFromTrack(album_id, track_idx, force) => {
                 // Browsing panel: redirect play → add song to queue, before
@@ -1028,6 +1183,12 @@ impl Nokkvi {
                 result,
                 total_count,
             } => self.handle_albums_page_loaded(slot, result, total_count),
+            AlbumsLoaderMessage::InfoLoaded {
+                generation,
+                album_id,
+                result,
+            } => self.handle_album_info_loaded(generation, &album_id, result),
+            AlbumsLoaderMessage::InfoSettled(album_id) => self.handle_album_info_settled(album_id),
         }
     }
 }

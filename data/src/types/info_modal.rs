@@ -4,8 +4,11 @@
 //! each item type and provides a uniform `properties()` method that returns
 //! label/value pairs for the two-column table.
 
-use crate::utils::formatters::{
-    bool_icon, format_duration_hms, format_file_size, format_rating, format_relative_time,
+use crate::utils::{
+    formatters::{
+        bool_icon, format_duration_hms, format_file_size, format_rating, format_relative_time,
+    },
+    html::strip_html_tags,
 };
 
 /// Items that can be shown in the info modal.
@@ -68,6 +71,12 @@ pub enum InfoModalItem {
         updated_at: Option<String>,
         created_at: Option<String>,
         mbz_album_id: Option<String>,
+        /// The agents' notes for the album, as plain text: the album row's,
+        /// else the `getAlbumInfo2` answer fetched this session
+        /// ([`InfoModalItem::fill_album_info`]).
+        notes: Option<String>,
+        /// The agents' page for the album.
+        external_url: Option<String>,
         comment: Option<String>,
         id: String,
         tags: Vec<(String, String)>,
@@ -277,6 +286,8 @@ impl InfoModalItem {
                 updated_at,
                 created_at,
                 mbz_album_id,
+                notes,
+                external_url,
                 comment,
                 id,
                 tags,
@@ -335,6 +346,8 @@ impl InfoModalItem {
                         .filter(|s| !s.is_empty())
                         .map(|id| format!("https://musicbrainz.org/release/{id}")),
                 );
+                push_opt_str(&mut rows, "External URL", external_url);
+                push_opt_str(&mut rows, "Notes", notes);
                 push_opt_str(&mut rows, "Comment", comment);
                 push_str(&mut rows, "ID", id);
 
@@ -467,99 +480,6 @@ fn push_opt(rows: &mut Vec<(String, String)>, label: &str, value: Option<String>
     }
 }
 
-/// Strip HTML tags from text, converting `<a href="URL">text</a>` to `text (URL)`.
-/// Handles the common Last.fm biography format.
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut chars = html.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            // Collect the tag content
-            let mut tag = String::new();
-            for tc in chars.by_ref() {
-                if tc == '>' {
-                    break;
-                }
-                tag.push(tc);
-            }
-
-            let tag_lower = tag.to_lowercase();
-
-            if tag_lower.starts_with("a ") || tag_lower.starts_with("a\t") {
-                // Extract href from <a ...href="URL"...>
-                let href = extract_href(&tag);
-
-                // Collect link text until </a>
-                let mut link_text = String::new();
-                while let Some(&nc) = chars.peek() {
-                    if nc == '<' {
-                        // Check for </a>
-                        chars.next();
-                        let mut end_tag = String::new();
-                        for tc in chars.by_ref() {
-                            if tc == '>' {
-                                break;
-                            }
-                            end_tag.push(tc);
-                        }
-                        if end_tag.trim().eq_ignore_ascii_case("/a") {
-                            break;
-                        }
-                        // Not </a>, keep the content
-                        link_text.push('<');
-                        link_text.push_str(&end_tag);
-                        link_text.push('>');
-                    } else {
-                        link_text.push(nc);
-                        chars.next();
-                    }
-                }
-
-                let text = link_text.trim();
-                if let Some(url) = href {
-                    if text.is_empty() || text == url.as_str() {
-                        result.push_str(&url);
-                    } else {
-                        result.push_str(text);
-                        result.push_str(" (");
-                        result.push_str(&url);
-                        result.push(')');
-                    }
-                } else if !text.is_empty() {
-                    result.push_str(text);
-                }
-            }
-            // else: skip the tag entirely (strip it)
-        } else {
-            result.push(ch);
-        }
-    }
-
-    result
-}
-
-/// Extract the href value from an anchor tag's attributes string.
-fn extract_href(tag_attrs: &str) -> Option<String> {
-    let lower = tag_attrs.to_lowercase();
-    let href_pos = lower.find("href=")?;
-    let after_href = &tag_attrs[href_pos + 5..];
-    let trimmed = after_href.trim_start();
-
-    if let Some(content) = trimmed.strip_prefix('"') {
-        let end = content.find('"')?;
-        Some(content[..end].to_string())
-    } else if let Some(content) = trimmed.strip_prefix('\'') {
-        let end = content.find('\'')?;
-        Some(content[..end].to_string())
-    } else {
-        let end = trimmed
-            .find(|c: char| c.is_whitespace() || c == '>')
-            .unwrap_or(trimmed.len());
-        Some(trimmed[..end].to_string())
-    }
-}
-
 impl InfoModalItem {
     /// Construct a `Song` info modal item from a raw `Song` struct.
     /// DRY helper used by all view files and the queue handler.
@@ -670,12 +590,40 @@ impl InfoModalItem {
             updated_at: album.updated_at.clone(),
             created_at: album.created_at.clone(),
             mbz_album_id: album.mbz_album_id.clone(),
+            notes: album.notes.clone(),
+            external_url: album.external_url.clone(),
             comment: album.comment.clone(),
             id: album.id.clone(),
             tags: album.tags.clone(),
             participants: album.participants.clone(),
             representative_path,
         }
+    }
+
+    /// Fill an album item's notes and page from the `getAlbumInfo2` answer
+    /// fetched this session, where the album row had none. The row wins
+    /// field by field, as in `AlbumUIViewData::notes_and_link`. Any other
+    /// item is left as it is. Returns whether a field was filled.
+    pub fn fill_album_info(&mut self, fetched: &crate::types::album::AlbumInfo) -> bool {
+        let Self::Album {
+            notes,
+            external_url,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        let mut filled = false;
+        for (field, answer) in [
+            (notes, &fetched.notes),
+            (external_url, &fetched.external_url),
+        ] {
+            if field.is_none() && answer.is_some() {
+                field.clone_from(answer);
+                filled = true;
+            }
+        }
+        filled
     }
 
     /// Construct an `Artist` info modal item from an `ArtistUIViewData`.
@@ -865,6 +813,8 @@ mod tests {
             mbz_album_id: Some("mbz-7".to_string()),
             release_type: Some("EP".to_string()),
             comment: Some("a comment".to_string()),
+            notes: Some("the notes".to_string()),
+            external_url: Some("https://www.last.fm/music/x/y".to_string()),
             tags: vec![("Media".to_string(), "CD".to_string())],
             participants: vec![("Producer".to_string(), "Someone".to_string())],
             album_artist_ids: vec!["ar-7".to_string()],
@@ -900,6 +850,8 @@ mod tests {
             updated_at,
             created_at,
             mbz_album_id,
+            notes,
+            external_url,
             comment,
             id,
             tags,
@@ -929,6 +881,11 @@ mod tests {
         assert_eq!(updated_at.as_deref(), Some("2026-03-03"));
         assert_eq!(created_at.as_deref(), Some("2026-01-01"));
         assert_eq!(mbz_album_id.as_deref(), Some("mbz-7"));
+        assert_eq!(notes.as_deref(), Some("the notes"));
+        assert_eq!(
+            external_url.as_deref(),
+            Some("https://www.last.fm/music/x/y")
+        );
         assert_eq!(comment.as_deref(), Some("a comment"));
         assert_eq!(id, "al-7");
         assert_eq!(tags, vec![("Media".to_string(), "CD".to_string())]);
@@ -937,5 +894,93 @@ mod tests {
             vec![("Producer".to_string(), "Someone".to_string())]
         );
         assert_eq!(representative_path, None);
+    }
+
+    fn labels(item: &InfoModalItem) -> Vec<String> {
+        item.properties()
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect()
+    }
+
+    fn value(item: &InfoModalItem, label: &str) -> Option<String> {
+        item.properties()
+            .into_iter()
+            .find(|(l, _)| l == label)
+            .map(|(_, value)| value)
+    }
+
+    /// An album whose notes the server holds shows them, and its page, the
+    /// way an artist shows its biography: the page above the text, both
+    /// before the comment.
+    #[test]
+    fn an_album_with_notes_lists_its_page_and_notes() {
+        let view = view_from_json(serde_json::json!({
+            "id": "al-1",
+            "name": "Born Like This",
+            "mbzAlbumId": "28ccaa4b",
+            "comment": "ripped from CD",
+            "description": "The sixth album.",
+            "externalUrl": "https://www.last.fm/music/MF+DOOM/Born+Like+This",
+        }));
+        let item = InfoModalItem::from_album_view_data(&view, None);
+        assert_eq!(
+            value(&item, "External URL").as_deref(),
+            Some("https://www.last.fm/music/MF+DOOM/Born+Like+This")
+        );
+        assert_eq!(value(&item, "Notes").as_deref(), Some("The sixth album."));
+        let labels = labels(&item);
+        let at = |label: &str| {
+            labels
+                .iter()
+                .position(|l| l == label)
+                .unwrap_or_else(|| panic!("no {label} row in {labels:?}"))
+        };
+        assert!(at("MusicBrainz") < at("External URL"));
+        assert!(at("External URL") < at("Notes"));
+        assert!(at("Notes") < at("Comment"));
+    }
+
+    /// An album nobody asked the server about has neither row.
+    #[test]
+    fn an_album_without_notes_has_no_notes_rows() {
+        let view = view_from_json(serde_json::json!({ "id": "al-1", "name": "Unasked" }));
+        let labels = labels(&InfoModalItem::from_album_view_data(&view, None));
+        assert!(!labels.iter().any(|l| l == "Notes" || l == "External URL"));
+    }
+
+    /// The answer fetched this session fills what the album row lacks; a
+    /// filled row keeps its own text.
+    #[test]
+    fn a_fetched_answer_fills_an_album_items_empty_fields() {
+        use crate::types::album::AlbumInfo;
+        let fetched = AlbumInfo {
+            notes: Some("fetched notes".to_string()),
+            external_url: Some("https://www.last.fm/music/A/A".to_string()),
+        };
+
+        let unfilled = view_from_json(serde_json::json!({ "id": "al-1", "name": "A" }));
+        let mut item = InfoModalItem::from_album_view_data(&unfilled, None);
+        assert!(item.fill_album_info(&fetched), "both fields were filled");
+        assert_eq!(value(&item, "Notes").as_deref(), Some("fetched notes"));
+        assert_eq!(
+            value(&item, "External URL").as_deref(),
+            Some("https://www.last.fm/music/A/A")
+        );
+
+        let filled = view_from_json(serde_json::json!({
+            "id": "al-1", "name": "A", "description": "row notes",
+        }));
+        let mut item = InfoModalItem::from_album_view_data(&filled, None);
+        assert!(item.fill_album_info(&fetched), "the link was filled");
+        assert_eq!(value(&item, "Notes").as_deref(), Some("row notes"));
+        assert_eq!(
+            value(&item, "External URL").as_deref(),
+            Some("https://www.last.fm/music/A/A")
+        );
+        // A second fill, or an answer with nothing in it, adds nothing.
+        assert!(!item.fill_album_info(&fetched));
+        let mut bare = InfoModalItem::from_album_view_data(&unfilled, None);
+        assert!(!bare.fill_album_info(&AlbumInfo::default()));
     }
 }

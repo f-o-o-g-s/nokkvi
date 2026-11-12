@@ -1,37 +1,46 @@
-//! A session cache of answers asked for the artist the Artists view centres:
-//! one ask per artist id, once the artist has stayed centred for a moment.
+//! A session cache of answers asked for the row a view centres: one ask per
+//! id, once the row has stayed centred for a moment.
 //!
-//! Two fetches run on this shape: the server's `getArtistInfo2` answer
-//! (`ArtistInfoState`) and the ListenBrainz similar artists
-//! (`ArtistRecsState`). Each keeps its own copy, because they are asked for at
-//! the same moment but land, fail and are cached on their own.
+//! Three fetches run on this shape. Two are for the artist the Artists view
+//! centres: the server's `getArtistInfo2` answer (`ArtistInfoState`) and the
+//! ListenBrainz and Deezer similar artists (`ArtistRecsState`). The third is
+//! the server's `getAlbumInfo2` answer for the album the Albums view centres
+//! (`AlbumInfoState`). Each keeps its own copy, because they land, fail and
+//! are cached on their own.
 
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use super::{StaleDropGen, snapshotted_lru::SnapshottedLru};
 
-/// Answers fetched this session for centred artists, keyed by artist id.
+/// How long a row must stay centred before its view asks the server about it
+/// (`getArtistInfo2`, `getAlbumInfo2`). A first ask makes the server run its
+/// metadata agents and broadcast a library refresh: too much to do for every
+/// row a held arrow key scrolls past.
+pub(crate) const CENTRE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Answers fetched this session for centred rows, keyed by the row's id (an
+/// artist id or an album id).
 ///
-/// The Artists view asks once per artist id, when the artist has stayed
-/// centred for a moment. A result is cached under the id it was asked for, so
-/// one that lands after the user moved on can never show under another
-/// artist; it is kept for when they come back. Only results from before a
-/// logout are dropped, through the session `generation`.
+/// The view asks once per id, when the row has stayed centred for a moment. A
+/// result is cached under the id it was asked for, so one that lands after
+/// the user moved on can never show under another row; it is kept for when
+/// they come back. Only results from before a logout are dropped, through the
+/// session `generation`.
 pub struct CentredFetch<T> {
-    /// Fetched answers per artist id. The view borrows `cache.snapshot`.
+    /// Fetched answers per id. The view borrows `cache.snapshot`.
     pub cache: SnapshottedLru<String, T>,
-    /// Artist ids with a fetch in flight, so re-centring one does not ask
-    /// again before the first answer lands.
+    /// Ids with a fetch in flight, so re-centring one does not ask again
+    /// before the first answer lands.
     pending: HashSet<String>,
     /// Session counter: a result captured under an older value came from a
     /// session since reset, and is dropped.
     generation: StaleDropGen,
-    /// The artist centred last, while its settle timer runs. Scrolling past
-    /// a row replaces it, so only an artist that stays centred is asked
-    /// about: a first ask can make the server run its agents for that artist.
+    /// The row centred last, while its settle timer runs. Scrolling past a
+    /// row replaces it, so only a row that stays centred is asked about: a
+    /// first ask can make the server run its agents for it.
     settling: Option<String>,
-    /// How many answers the cache keeps; an evicted artist is asked about
-    /// again when it is centred.
+    /// How many answers the cache keeps; an evicted row is asked about again
+    /// when it is centred.
     capacity: NonZeroUsize,
 }
 
@@ -46,21 +55,20 @@ impl<T: Clone> CentredFetch<T> {
         }
     }
 
-    /// The Artists view centred `artist_id`. Returns whether to start a
-    /// settle timer for it: not when its answer is cached or already asked
-    /// for. Either way it supersedes the previous artist's timer.
-    pub(crate) fn centre(&mut self, artist_id: &str) -> bool {
-        let wanted = !artist_id.is_empty()
-            && !self.cache.contains(&artist_id.to_string())
-            && !self.pending.contains(artist_id);
-        self.settling = wanted.then(|| artist_id.to_string());
+    /// The view centred the row `id`. Returns whether to start a settle
+    /// timer for it: not when its answer is cached or already asked for.
+    /// Either way it supersedes the previous row's timer.
+    pub(crate) fn centre(&mut self, id: &str) -> bool {
+        let wanted =
+            !id.is_empty() && !self.cache.contains(&id.to_string()) && !self.pending.contains(id);
+        self.settling = wanted.then(|| id.to_string());
         wanted
     }
 
-    /// A settle timer fired for `artist_id`: `true` when nothing was centred
-    /// since, so the artist is worth asking about.
-    pub(crate) fn settled(&mut self, artist_id: &str) -> bool {
-        if self.settling.as_deref() == Some(artist_id) {
+    /// A settle timer fired for `id`: `true` when nothing was centred since,
+    /// so the row is worth asking about.
+    pub(crate) fn settled(&mut self, id: &str) -> bool {
+        if self.settling.as_deref() == Some(id) {
             self.settling = None;
             true
         } else {
@@ -68,13 +76,13 @@ impl<T: Clone> CentredFetch<T> {
         }
     }
 
-    /// Claim a fetch for `artist_id`: `None` when its answer is cached or a
-    /// fetch is already in flight, else marks it in flight and returns the
-    /// generation the result must carry back.
-    pub(crate) fn begin(&mut self, artist_id: &str) -> Option<u64> {
-        if artist_id.is_empty()
-            || self.cache.contains(&artist_id.to_string())
-            || !self.pending.insert(artist_id.to_string())
+    /// Claim a fetch for `id`: `None` when its answer is cached or a fetch is
+    /// already in flight, else marks it in flight and returns the generation
+    /// the result must carry back.
+    pub(crate) fn begin(&mut self, id: &str) -> Option<u64> {
+        if id.is_empty()
+            || self.cache.contains(&id.to_string())
+            || !self.pending.insert(id.to_string())
         {
             return None;
         }
@@ -87,35 +95,35 @@ impl<T: Clone> CentredFetch<T> {
         self.generation.current()
     }
 
-    /// Whether a fetch for `artist_id` is in flight.
-    pub(crate) fn is_pending(&self, artist_id: &str) -> bool {
-        self.pending.contains(artist_id)
+    /// Whether a fetch for `id` is in flight.
+    pub(crate) fn is_pending(&self, id: &str) -> bool {
+        self.pending.contains(id)
     }
 
-    /// Whether `artist_id`'s answer is cached.
-    pub(crate) fn is_cached(&self, artist_id: &str) -> bool {
-        self.cache.contains(&artist_id.to_string())
+    /// Whether `id`'s answer is cached.
+    pub(crate) fn is_cached(&self, id: &str) -> bool {
+        self.cache.contains(&id.to_string())
     }
 
     /// Land a fetch's outcome: `Some(answer)` is cached, `None` (a failure)
     /// only releases the id so the next centring asks again. Returns `false`
     /// and changes nothing when the result is from a session since reset.
-    pub(crate) fn finish(&mut self, generation: u64, artist_id: &str, answer: Option<T>) -> bool {
+    pub(crate) fn finish(&mut self, generation: u64, id: &str, answer: Option<T>) -> bool {
         if !self.generation.accepts(generation) {
             return false;
         }
-        self.pending.remove(artist_id);
+        self.pending.remove(id);
         if let Some(answer) = answer {
-            self.cache.put(artist_id.to_string(), answer);
+            self.cache.put(id.to_string(), answer);
         }
         true
     }
 
-    /// Record an answer for `artist_id` that needed no fetch, such as
-    /// "nothing to ask with". It is cached like a fetched one.
-    pub(crate) fn settle_with(&mut self, artist_id: &str, answer: T) {
-        self.pending.remove(artist_id);
-        self.cache.put(artist_id.to_string(), answer);
+    /// Record an answer for `id` that needed no fetch, such as "nothing to
+    /// ask with". It is cached like a fetched one.
+    pub(crate) fn settle_with(&mut self, id: &str, answer: T) {
+        self.pending.remove(id);
+        self.cache.put(id.to_string(), answer);
     }
 
     /// Logout: the cached answers belonged to the old server. The generation
