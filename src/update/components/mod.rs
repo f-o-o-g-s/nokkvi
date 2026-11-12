@@ -969,7 +969,9 @@ impl Nokkvi {
     /// replays the event the server no longer echoes to nokkvi
     /// ([`LibraryChange::for_annotation`]).
     /// A song's confirmed love goes to `SongLoved` instead, which rates it
-    /// five stars and replays the same event.
+    /// five stars and replays the same event. A playlist's goes to
+    /// `PlaylistAnnotated`, which reloads the list only under a sort the
+    /// star or rating can reorder.
     ///
     /// [`LibraryChange::for_annotation`]: crate::services::navidrome_sse::LibraryChange::for_annotation
     pub(crate) fn star_result_message(
@@ -981,6 +983,9 @@ impl Nokkvi {
         match result {
             Ok(()) if star && kind == ItemKind::Song => {
                 Message::Hotkey(HotkeyMessage::SongLoved(id))
+            }
+            Ok(()) if kind == ItemKind::Playlist => {
+                Message::Hotkey(HotkeyMessage::PlaylistAnnotated(id))
             }
             Ok(()) => Message::LibraryChanged(
                 crate::services::navidrome_sse::LibraryChange::for_annotation(kind, id),
@@ -1102,6 +1107,9 @@ impl Nokkvi {
         current_rating: u32,
     ) -> Message {
         match result {
+            Ok(()) if kind == ItemKind::Playlist => {
+                Message::Hotkey(HotkeyMessage::PlaylistAnnotated(id))
+            }
             Ok(()) => Message::LibraryChanged(
                 crate::services::navidrome_sse::LibraryChange::for_annotation(kind, id),
             ),

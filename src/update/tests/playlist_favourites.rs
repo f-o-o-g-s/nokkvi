@@ -393,30 +393,61 @@ fn a_background_reload_keeps_a_viewport_inside_an_expansion() {
     );
 }
 
-/// nokkvi's own confirmed star replays the server's playlist event: the
-/// list reloads, except under Random, where a reload would reshuffle the
-/// rows under the one just starred.
+/// nokkvi's own confirmed star or rating reloads the list only under the
+/// two sorts it can reorder. Under Updated At a reload reshuffles the rows
+/// (the server stamps smart playlists as it reads them), which took the row
+/// just rated out from under the pointer.
 #[test]
-fn a_confirmed_playlist_star_reloads_the_list_except_under_random() {
-    let confirmed =
-        || crate::Nokkvi::star_result_message(Ok(()), "p1".into(), ItemKind::Playlist, true);
-    assert!(
-        matches!(
-            confirmed(),
-            Message::LibraryChanged(LibraryChange { ref playlist_ids, .. })
-                if playlist_ids == &["p1".to_string()]
-        ),
-        "got {:?}",
-        confirmed()
-    );
+fn a_confirmed_playlist_star_or_rating_reloads_only_under_favorited_and_rating() {
+    let confirmed = [
+        crate::Nokkvi::star_result_message(Ok(()), "p1".into(), ItemKind::Playlist, true),
+        crate::Nokkvi::star_result_message(Ok(()), "p1".into(), ItemKind::Playlist, false),
+        crate::Nokkvi::rating_result_message(Ok(()), "p1".into(), ItemKind::Playlist, 0),
+    ];
+    for msg in &confirmed {
+        assert!(
+            matches!(
+                msg,
+                Message::Hotkey(HotkeyMessage::PlaylistAnnotated(id)) if id == "p1"
+            ),
+            "got {msg:?}"
+        );
+    }
 
+    for (sort, reloads) in [
+        (SortMode::Name, false),
+        (SortMode::UpdatedAt, false),
+        (SortMode::SongCount, false),
+        (SortMode::Duration, false),
+        (SortMode::Random, false),
+        (SortMode::Favorited, true),
+        (SortMode::Rating, true),
+    ] {
+        let mut app = playlists_app(5, true);
+        app.playlists_page.common.current_sort_mode = sort;
+        let _ = app.update(confirmed[0].clone());
+        assert_eq!(app.library.playlists.is_loading(), reloads, "{sort:?}");
+    }
+}
+
+/// Another client's playlist change still reloads the list, in the
+/// background, except under Random.
+#[test]
+fn a_server_playlist_event_reloads_the_list_except_under_random() {
+    let event = || {
+        Message::LibraryChanged(LibraryChange {
+            playlist_ids: vec!["p1".into()],
+            ..Default::default()
+        })
+    };
     let mut app = playlists_app(5, true);
-    let _ = app.update(confirmed());
+    app.playlists_page.common.current_sort_mode = SortMode::UpdatedAt;
+    let _ = app.update(event());
     assert!(app.library.playlists.is_loading());
 
     let mut app = playlists_app(5, true);
     app.playlists_page.common.current_sort_mode = SortMode::Random;
-    let _ = app.update(confirmed());
+    let _ = app.update(event());
     assert!(!app.library.playlists.is_loading());
 }
 

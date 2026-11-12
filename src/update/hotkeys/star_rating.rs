@@ -724,4 +724,24 @@ impl Nokkvi {
         );
         Task::none()
     }
+
+    /// The server took nokkvi's own star or rating on a playlist. The row
+    /// already shows it (the optimistic update), so the list reloads only
+    /// under the two sorts it can reorder, Favorited and Rating, as an
+    /// album's does. Under any other sort a reload brings nothing new, and
+    /// under Updated At it reshuffles the rows: the server re-evaluates
+    /// smart playlists as the list is read, which stamps them updated, and
+    /// the row just rated slid out from under the pointer.
+    pub(crate) fn handle_playlist_annotated(&mut self, playlist_id: &str) -> Task<Message> {
+        use crate::widgets::view_header::SortMode;
+        let reorders = matches!(
+            self.playlists_page.common.current_sort_mode,
+            SortMode::Favorited | SortMode::Rating
+        );
+        if !reorders || self.library.playlists.is_empty() {
+            debug!("⭐ Playlist {playlist_id} annotated: no reload under this sort");
+            return Task::none();
+        }
+        self.reload_playlists_in_background()
+    }
 }

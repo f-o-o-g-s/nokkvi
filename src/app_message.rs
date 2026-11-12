@@ -485,6 +485,9 @@ pub enum HotkeyMessage {
     ArtistRatingUpdated(String, u32),
     /// Update playlist rating locally (playlist_id, new_rating)
     PlaylistRatingUpdated(String, u32),
+    /// The server took nokkvi's star or rating on a playlist (playlist_id).
+    /// The list reloads only under a sort that orders by it.
+    PlaylistAnnotated(String),
     /// Expand/collapse center item inline (Shift+Enter)
     ExpandCenter,
     /// Move centered queue track up (Shift+↑)

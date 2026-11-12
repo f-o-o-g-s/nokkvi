@@ -320,7 +320,6 @@ fn star_result_message_sends_only_a_songs_confirmed_love_to_the_rating() {
         (ItemKind::Song, false),
         (ItemKind::Album, true),
         (ItemKind::Artist, true),
-        (ItemKind::Playlist, true),
     ] {
         let msg = crate::Nokkvi::star_result_message(Ok(()), "x".into(), kind, star);
         assert!(
@@ -448,13 +447,17 @@ fn confirmed_star_refreshes_the_starred_kind() {
             ..Default::default()
         }
     );
+    // A playlist's goes to its own handler, which reloads only under a
+    // sort the star can reorder (`playlist_favourites.rs`).
     let msg = crate::Nokkvi::star_result_message(Ok(()), "p1".into(), ItemKind::Playlist, false);
-    assert_eq!(
-        library_change_of(msg),
-        LibraryChange {
-            playlist_ids: vec!["p1".into()],
-            ..Default::default()
-        }
+    assert!(
+        matches!(
+            msg,
+            crate::app_message::Message::Hotkey(
+                crate::app_message::HotkeyMessage::PlaylistAnnotated(ref id)
+            ) if id == "p1"
+        ),
+        "got {msg:?}"
     );
 }
 

@@ -740,14 +740,32 @@ impl PlaylistsPage {
         };
         let subtitle = String::new();
 
-        // Extra columns reduce the name portion to make room
-        let extra_cols =
-            show_song_count_col as u16 + show_duration_col as u16 + show_updated_at as u16;
-        let name_portion = 55 - extra_cols * 10;
-
-        // Stars and the heart take small fixed shares beside the name's.
-        const STARS_PORTION: u16 = 7;
-        const LOVE_PORTION: u16 = 3;
+        // Fixed portions for each toggleable column, out of 100; the name
+        // takes whatever is left. The same budget and the same Stars / Love
+        // shares as the Artists and Albums rows, so the stars and the heart
+        // sit where they do there.
+        const STARS_PORTION: u16 = 12;
+        const SONGCOUNT_PORTION: u16 = 16;
+        const DURATION_PORTION: u16 = 16;
+        const UPDATEDAT_PORTION: u16 = 16;
+        const LOVE_PORTION: u16 = 5;
+        let mut consumed: u16 = 0;
+        if show_stars {
+            consumed += STARS_PORTION;
+        }
+        if show_song_count_col {
+            consumed += SONGCOUNT_PORTION;
+        }
+        if show_duration_col {
+            consumed += DURATION_PORTION;
+        }
+        if show_updated_at {
+            consumed += UPDATEDAT_PORTION;
+        }
+        if show_love {
+            consumed += LOVE_PORTION;
+        }
+        let name_portion = 100u16.saturating_sub(consumed).max(20);
 
         // Layout: [Index?] [Artwork?] [Name+subtitle] [Stars?] [SongCount?]
         // [Duration?] [UpdatedAt?] [Love?]
@@ -919,7 +937,7 @@ impl PlaylistsPage {
                 Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                 metadata_size,
                 style,
-                20,
+                SONGCOUNT_PORTION,
             ));
         }
         if show_duration_col {
@@ -928,7 +946,7 @@ impl PlaylistsPage {
                 None,
                 metadata_size,
                 style,
-                20,
+                DURATION_PORTION,
             ));
         }
         if show_updated_at {
@@ -938,7 +956,7 @@ impl PlaylistsPage {
                 None,
                 metadata_size,
                 style,
-                20,
+                UPDATEDAT_PORTION,
             ));
         }
 

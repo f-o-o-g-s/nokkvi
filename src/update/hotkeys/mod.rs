@@ -322,6 +322,9 @@ impl Nokkvi {
             HotkeyMessage::PlaylistRatingUpdated(playlist_id, new_rating) => {
                 self.handle_playlist_rating_updated(playlist_id, new_rating)
             }
+            HotkeyMessage::PlaylistAnnotated(playlist_id) => {
+                self.handle_playlist_annotated(&playlist_id)
+            }
             HotkeyMessage::ExpandCenter => self.handle_expand_center(),
             HotkeyMessage::FocusNavigation => self.handle_focus_navigation(),
             HotkeyMessage::EditCenteredPlaylist => self.handle_edit_centered_playlist(),
