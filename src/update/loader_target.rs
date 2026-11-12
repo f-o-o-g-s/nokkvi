@@ -7,10 +7,11 @@
 //!
 //! The three paged views (Albums, Artists, Songs) additionally share the
 //! paged-fetch dispatch wrapper — `Nokkvi::load_paged<T>` owns the
-//! page-size, defensive-gate, `PaginatedFetch` build, and `set_loading(true)`
-//! sequence so the "always call `set_loading(true)` before dispatching"
+//! page-size, defensive-gate, `PaginatedFetch` build, and mark-as-loading
+//! sequence so the "always mark the buffer loading before dispatching"
 //! invariant (CLAUDE.md gotcha — "rapid scroll triggers duplicate fetches"
-//! otherwise) lives in one place. Per-view fetch closures supply only the
+//! otherwise) lives in one place, with its choice between a load that covers
+//! the rows and one that leaves them on screen. Per-view fetch closures supply only the
 //! per-entity backend call and the UI-projection mapping.
 
 use std::future::Future;
@@ -800,10 +801,12 @@ impl Nokkvi {
     /// 3. Build `PaginatedFetch` from the page's common state and the per-
     ///    entity sort mapper (`T::sort_mode_to_api`).
     /// 4. Emit a `LoadXxx` debug log keyed by `T::entity_label()`.
-    /// 5. **`set_loading(true)`** on the entity's `PagedBuffer` BEFORE
-    ///    dispatching — codifies the CLAUDE.md "always call `set_loading(true)`
-    ///    before dispatching a page fetch" invariant so rapid scroll cannot
-    ///    trigger duplicate fetches.
+    /// 5. **Mark the entity's `PagedBuffer` loading** BEFORE dispatching —
+    ///    codifies the CLAUDE.md "always mark the buffer loading before
+    ///    dispatching a fetch" invariant so rapid scroll cannot trigger
+    ///    duplicate fetches: `set_loading(true)` for a first load (the view
+    ///    shows "Loading..."), `set_loading_quiet()` for a background reload
+    ///    or a page (the rows stay on screen).
     /// 6. `shell_task` with the caller-supplied `fetch` closure. The closure
     ///    receives the prepared `PaginatedFetch` and the `AppService` shell,
     ///    and is responsible for the per-entity backend call + UI-projection
@@ -859,7 +862,18 @@ impl Nokkvi {
             params.search_query,
         );
 
-        T::library_mut(self).set_loading(true);
+        // A load the user asked for covers the rows with "Loading..." until
+        // it lands. A background reload (a server event) and a next page
+        // leave them on screen: the rows are still the ones to show, and
+        // blanking them made the list and the artwork panel blink at every
+        // event. Either way the buffer counts as loading for the gates.
+        let buffer = T::library_mut(self);
+        match load {
+            PagedLoad::First => buffer.set_loading(true),
+            PagedLoad::Reload(_) | PagedLoad::Page(_) | PagedLoad::ForcedPage(_) => {
+                buffer.set_loading_quiet();
+            }
+        }
 
         self.shell_task(
             move |shell| fetch(shell, params),

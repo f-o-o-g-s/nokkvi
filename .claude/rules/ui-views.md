@@ -138,7 +138,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Cross-cutt
 
 **`update/loader_target.rs`** — paged-loader unification:
 - `LoaderTarget` trait, one impl per library entity: drives the shared load-result handlers (`handle_loaded_with` / `handle_page_loaded_with`) plus the `page_common()` / `sort_mode_to_api()` / buffer / artwork / viewport hooks.
-- `Nokkvi::load_paged<T: LoaderTarget>(...)` owns the paged views' shared body (the `force`-bypassable `offset > 0 && needs_fetch().is_none()` gate, `set_loading(true)`, `shell_task` build). Page size is read from `settings.library_page_size` inside `load_paged`; the entity-specific paged-fetch closure is a per-call parameter captured at the call site, not threaded through the trait. Per-entity callers (`handle_load_*` / `handle_*_load_page` / `force_load_*_page`) shrink to a single `self.load_paged::<TargetType>(...)` line. New paged views implement `LoaderTarget` rather than copying the body.
+- `Nokkvi::load_paged<T: LoaderTarget>(...)` owns the paged views' shared body (the `force`-bypassable `offset > 0 && needs_fetch().is_none()` gate, the loading mark, covering for a first load and quiet for a reload or a page (gotchas/async-state.md), `shell_task` build). Page size is read from `settings.library_page_size` inside `load_paged`; the entity-specific paged-fetch closure is a per-call parameter captured at the call site, not threaded through the trait. Per-entity callers (`handle_load_*` / `handle_*_load_page` / `force_load_*_page`) shrink to a single `self.load_paged::<TargetType>(...)` line. New paged views implement `LoaderTarget` rather than copying the body.
 
 ## View Data Refresh
 

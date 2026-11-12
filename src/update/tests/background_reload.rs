@@ -257,3 +257,99 @@ fn a_reload_landing_after_a_clear_is_dropped() {
     );
     assert!(!app.library.artists.is_loading());
 }
+
+// ---------------------------------------------------------------------------
+// The rows stay on screen while a reload or a next page is out
+// ---------------------------------------------------------------------------
+
+/// The server's events arrive while the user browses: a scrobble, a rating
+/// from another device, the album and artist info nokkvi's own lookups make
+/// it fetch. Each reloads the list in the background. The list used to give
+/// way to "Loading..." (and the artwork panel to nothing) for as long as the
+/// request took, a blink per event; two per album rested on, since a first
+/// album-info ask broadcasts twice.
+#[test]
+fn a_background_reload_keeps_the_rows_on_screen() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.library.albums.set_first_page(albums_indexed(50), 50);
+    app.library.artists.set_first_page(artists(0..50), 50);
+    app.library.songs.set_first_page(songs_indexed(50), 50);
+
+    let _ = app.handle_library_changed(LibraryChange {
+        album_ids: vec!["a1".to_string()],
+        artist_ids: vec!["r1".to_string()],
+        song_ids: vec!["s1".to_string()],
+        ..Default::default()
+    });
+
+    for (view, loading, shows) in [
+        (
+            "Albums",
+            app.library.albums.is_loading(),
+            app.library.albums.shows_loading(),
+        ),
+        (
+            "Artists",
+            app.library.artists.is_loading(),
+            app.library.artists.shows_loading(),
+        ),
+        (
+            "Songs",
+            app.library.songs.is_loading(),
+            app.library.songs.shows_loading(),
+        ),
+    ] {
+        assert!(loading, "{view}: the reload is out");
+        assert!(!shows, "{view}: its rows stay on screen meanwhile");
+    }
+}
+
+/// Scrolling near the loaded edge fetches the next page: the rows already
+/// there stay on screen while it is out.
+#[test]
+fn a_next_page_keeps_the_rows_on_screen() {
+    let mut app = test_app();
+    app.library.albums.set_first_page(albums_indexed(500), 1000);
+    app.albums_page.common.slot_list.viewport_offset = 480;
+
+    let _ = app.handle_albums_load_page(500);
+    assert!(app.library.albums.is_loading(), "the page is out");
+    assert!(!app.library.albums.shows_loading());
+
+    // So does a page a find-and-expand chain forces.
+    let mut app = test_app();
+    app.library.albums.set_first_page(albums_indexed(500), 1000);
+    let _ = app.force_load_albums_page(500);
+    assert!(app.library.albums.is_loading());
+    assert!(!app.library.albums.shows_loading());
+}
+
+/// A load the user asked for (a first load, a sort, a search, a refresh)
+/// still shows "Loading..." until its rows land.
+#[test]
+fn a_load_the_user_asked_for_still_shows_loading() {
+    let mut app = test_app();
+    app.library.albums.set_first_page(albums_indexed(50), 50);
+    let _ = app.handle_load_albums(None);
+    assert!(app.library.albums.shows_loading());
+}
+
+/// The Playlists list reloads whole in the background (a playlist changed on
+/// the server, nokkvi's own confirmed star or rating): its rows stay too.
+#[test]
+fn a_background_playlists_reload_keeps_the_rows_on_screen() {
+    let mut app = test_app();
+    app.library
+        .playlists
+        .set_from_vec(vec![make_playlist("p1", "One")]);
+    let _ = app.reload_playlists_in_background();
+    assert!(app.library.playlists.is_loading());
+    assert!(!app.library.playlists.shows_loading());
+
+    let _ = app.handle_load_playlists();
+    assert!(
+        app.library.playlists.shows_loading(),
+        "a load the user asked for covers them"
+    );
+}

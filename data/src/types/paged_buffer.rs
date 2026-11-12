@@ -27,15 +27,29 @@ use std::{
 /// MUST go through these methods; touching `items` directly via the
 /// `DerefMut` slice impl will not bump the counter (only the items'
 /// fields can change that way, not the slice's identity).
+/// The fetch a buffer has in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Fetch {
+    #[default]
+    Idle,
+    /// A background reload or a next page: the rows on screen are still the
+    /// ones to show, so the view keeps them.
+    Quiet,
+    /// A load the user is waiting on (a first load, a sort or search change,
+    /// a refresh): the view draws "Loading..." in the rows' place.
+    Covering,
+}
+
 #[derive(Debug, Clone)]
 pub struct PagedBuffer<T> {
     /// Loaded items (contiguous from offset 0, expanded as pages arrive)
     items: Vec<T>,
     /// Total count from X-Total-Count header (full server-side count)
     total_count: usize,
-    /// Whether a page fetch is currently in progress
-    loading: bool,
-    /// When loading was set to true (for stale-load watchdog detection)
+    /// The fetch in flight, if any, and whether the view covers the rows
+    /// for it.
+    fetch: Fetch,
+    /// When the fetch in flight was sent (for stale-load watchdog detection)
     loading_since: Option<Instant>,
     /// Mutation counter — bumped by every method that mutates `items`.
     generation: u64,
@@ -79,7 +93,7 @@ impl<T> PagedBuffer<T> {
         Self {
             items: Vec::new(),
             total_count: 0,
-            loading: false,
+            fetch: Fetch::Idle,
             loading_since: None,
             generation: 0,
             epoch: 0,
@@ -157,19 +171,51 @@ impl<T> PagedBuffer<T> {
 
     /// Whether a page fetch is in progress.
     pub fn is_loading(&self) -> bool {
-        self.loading
+        self.fetch != Fetch::Idle
     }
 
-    /// Mark a fetch as in progress.
+    /// Whether a view draws "Loading..." in place of the rows: a load the
+    /// user is waiting on is out ([`set_loading`](Self::set_loading)), or
+    /// any fetch is out and there are no rows to keep. A background reload
+    /// or a next page ([`set_loading_quiet`](Self::set_loading_quiet))
+    /// leaves the rows on screen. The gates read
+    /// [`is_loading`](Self::is_loading), which is true for both.
+    pub fn shows_loading(&self) -> bool {
+        match self.fetch {
+            Fetch::Idle => false,
+            Fetch::Quiet => self.items.is_empty(),
+            Fetch::Covering => true,
+        }
+    }
+
+    /// Mark a load the user is waiting on as in progress (a first load, a
+    /// sort or search change, a refresh), or with `false` clear the mark.
+    /// The view covers the rows until it lands
+    /// ([`shows_loading`](Self::shows_loading)).
     pub fn set_loading(&mut self, loading: bool) {
-        self.loading = loading;
-        self.loading_since = if loading { Some(Instant::now()) } else { None };
+        self.fetch = if loading {
+            Fetch::Covering
+        } else {
+            Fetch::Idle
+        };
+        self.loading_since = loading.then(Instant::now);
+    }
+
+    /// Mark a fetch the rows stay on screen for as in progress: a background
+    /// reload (a server event), a next page. Blanking the view for those
+    /// made the list and the artwork panel blink at every event. A load the
+    /// user is still waiting on keeps the rows covered.
+    pub fn set_loading_quiet(&mut self) {
+        if self.fetch == Fetch::Idle {
+            self.fetch = Fetch::Quiet;
+        }
+        self.loading_since = Some(Instant::now());
     }
 
     /// Check whether loading has been stuck for longer than `timeout`.
     /// Used by the tick-handler watchdog to auto-clear stale loading states.
     pub fn is_stale_loading(&self, timeout: Duration) -> bool {
-        self.loading
+        self.is_loading()
             && self
                 .loading_since
                 .is_some_and(|since| since.elapsed() > timeout)
@@ -187,7 +233,7 @@ impl<T> PagedBuffer<T> {
     /// already fetching, or all data loaded).
     pub fn needs_fetch(&self, viewport_offset: usize, page_size: usize) -> Option<(usize, usize)> {
         // Don't fetch if already loading or fully loaded
-        if self.loading || self.fully_loaded() {
+        if self.is_loading() || self.fully_loaded() {
             return None;
         }
 
@@ -211,7 +257,7 @@ impl<T> PagedBuffer<T> {
     pub fn set_first_page(&mut self, items: Vec<T>, total_count: usize) {
         self.items = items;
         self.total_count = total_count;
-        self.loading = false;
+        self.fetch = Fetch::Idle;
         self.loading_since = None;
         self.bump_generation();
         self.replace_list();
@@ -222,7 +268,7 @@ impl<T> PagedBuffer<T> {
     pub fn append_page(&mut self, items: Vec<T>, total_count: usize) {
         self.total_count = total_count;
         self.items.extend(items);
-        self.loading = false;
+        self.fetch = Fetch::Idle;
         self.loading_since = None;
         self.bump_generation();
     }
@@ -246,7 +292,7 @@ impl<T> PagedBuffer<T> {
     pub fn clear(&mut self) {
         self.items.clear();
         self.total_count = 0;
-        self.loading = false;
+        self.fetch = Fetch::Idle;
         self.loading_since = None;
         self.bump_generation();
         self.replace_list();
@@ -304,7 +350,7 @@ impl<T> PagedBuffer<T> {
         let count = items.len();
         self.items = items;
         self.total_count = count;
-        self.loading = false;
+        self.fetch = Fetch::Idle;
         self.loading_since = None;
         self.bump_generation();
         self.replace_list();
@@ -414,6 +460,65 @@ mod tests {
         buf.set_first_page(vec![1, 2, 3], 3);
 
         assert!(buf.needs_fetch(2, PAGE_SIZE).is_none());
+    }
+
+    /// A background reload or a next page is a fetch like any other for the
+    /// gates, but the rows on screen stay: only a load the user is waiting
+    /// on puts "Loading..." in their place.
+    #[test]
+    fn a_quiet_fetch_keeps_the_rows_on_screen() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page((0..50).collect(), 200);
+
+        buf.set_loading_quiet();
+        assert!(buf.is_loading(), "a fetch is in flight");
+        assert!(!buf.shows_loading(), "the rows stay on screen");
+        assert_eq!(
+            buf.needs_fetch(40, 50),
+            None,
+            "no second fetch while it is out"
+        );
+        assert!(buf.is_stale_loading(Duration::from_secs(0)));
+
+        buf.set_first_page((0..60).collect(), 200);
+        assert!(!buf.is_loading());
+        assert!(!buf.shows_loading());
+    }
+
+    /// A first load, or a sort or search the user asked for, covers the rows.
+    #[test]
+    fn a_fetch_the_user_waits_on_shows_loading() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page((0..50).collect(), 200);
+        buf.set_loading(true);
+        assert!(buf.is_loading());
+        assert!(buf.shows_loading());
+        buf.set_loading(false);
+        assert!(!buf.shows_loading());
+    }
+
+    /// With no rows to keep, any fetch reads as loading: an empty list is
+    /// never called "no matches" while its rows are on their way.
+    #[test]
+    fn a_quiet_fetch_on_an_empty_list_shows_loading() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_loading_quiet();
+        assert!(buf.shows_loading());
+    }
+
+    /// A background reload that starts while the user's own load is out
+    /// does not uncover the rows early, and one that follows it is quiet.
+    #[test]
+    fn a_quiet_fetch_never_uncovers_a_load_the_user_waits_on() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page((0..50).collect(), 200);
+        buf.set_loading(true);
+        buf.set_loading_quiet();
+        assert!(buf.shows_loading(), "still covered");
+
+        buf.set_first_page((0..50).collect(), 200);
+        buf.set_loading_quiet();
+        assert!(!buf.shows_loading(), "a reload on its own is quiet");
     }
 
     #[test]

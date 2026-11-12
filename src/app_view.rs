@@ -1625,7 +1625,7 @@ impl Nokkvi {
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_album_count: self.library.counts.albums,
-            loading: self.library.albums.is_loading(),
+            loading: self.library.albums.shows_loading(),
             stable_viewport,
             in_browsing_panel,
             bleed,
@@ -1663,7 +1663,7 @@ impl Nokkvi {
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_artist_count: self.library.counts.artists,
-            loading: self.library.artists.is_loading(),
+            loading: self.library.artists.shows_loading(),
             stable_viewport,
             in_browsing_panel,
             bleed,
@@ -1697,7 +1697,7 @@ impl Nokkvi {
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_song_count: self.library.counts.songs,
-            loading: self.library.songs.is_loading(),
+            loading: self.library.songs.shows_loading(),
             stable_viewport,
             in_browsing_panel,
             bleed,
@@ -1732,7 +1732,7 @@ impl Nokkvi {
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_genre_count: self.library.counts.genres,
-            loading: self.library.genres.is_loading(),
+            loading: self.library.genres.shows_loading(),
             stable_viewport,
             in_browsing_panel,
             bleed,
@@ -2607,7 +2607,7 @@ impl Nokkvi {
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
                     total_playlist_count: self.library.counts.playlists,
-                    loading: self.library.playlists.is_loading(),
+                    loading: self.library.playlists.shows_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     bleed,
                     default_playlist_name: &self.settings.default_playlist_name,
@@ -2706,6 +2706,38 @@ impl Nokkvi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A view draws "Loading..." in place of its rows and its artwork panel
+    /// while its view data says `loading`. That is for a load the user is
+    /// waiting on. While a background reload is out (a server event) the
+    /// rows are still the ones to show: saying `loading` then made the whole
+    /// view blink at every event.
+    #[test]
+    fn a_view_does_not_say_loading_during_a_background_reload() {
+        use crate::{services::navidrome_sse::LibraryChange, test_helpers::*};
+
+        let mut app = test_app();
+        app.screen = crate::Screen::Home;
+        seed_albums(&mut app, albums_indexed(50));
+        seed_artists(&mut app, artists_indexed(50));
+        seed_songs(&mut app, songs_indexed(50));
+        let _ = app.handle_library_changed(LibraryChange {
+            album_ids: vec!["a1".to_string()],
+            artist_ids: vec!["ar1".to_string()],
+            song_ids: vec!["s1".to_string()],
+            ..Default::default()
+        });
+        assert!(app.library.albums.is_loading(), "the reload is out");
+
+        let bleed = ArtworkBleed::NONE;
+        assert!(!app.build_albums_view_data(false, true, bleed).loading);
+        assert!(!app.build_artists_view_data(false, true, bleed).loading);
+        assert!(!app.build_songs_view_data(false, true, bleed).loading);
+
+        // A load the user asked for still says so.
+        let _ = app.handle_load_albums(None);
+        assert!(app.build_albums_view_data(false, true, bleed).loading);
+    }
 
     /// Every `View` variant must convert to either `Some(NavView)` or `None`.
     /// The `None` set is the views with no permanent nav tab: the contextual

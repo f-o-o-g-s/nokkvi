@@ -195,8 +195,14 @@ impl Nokkvi {
         let sort_ascending = self.playlists_page.common.sort_ascending;
         let search_query_clone = self.playlists_page.common.search_query.clone();
 
-        // Mark buffer as loading to prevent duplicate fetches
-        self.library.playlists.set_loading(true);
+        // Mark buffer as loading to prevent duplicate fetches. A background
+        // reload keeps the rows on screen meanwhile; a load the user asked
+        // for covers them with "Loading...".
+        if background {
+            self.library.playlists.set_loading_quiet();
+        } else {
+            self.library.playlists.set_loading(true);
+        }
         // This load replaces the list: a newer one outranks it when it lands.
         let replace = Some(self.library.playlists.begin_replace());
 
