@@ -297,6 +297,9 @@ impl Nokkvi {
             HotkeyMessage::ArtistStarredStatusUpdated(artist_id, new_starred_status) => {
                 self.handle_artist_starred_status_updated(artist_id, new_starred_status)
             }
+            HotkeyMessage::PlaylistStarredStatusUpdated(playlist_id, new_starred_status) => {
+                self.handle_playlist_starred_status_updated(playlist_id, new_starred_status)
+            }
             HotkeyMessage::AddToQueue => self.handle_add_to_queue(),
             HotkeyMessage::SaveQueueAsPlaylist => self.handle_save_queue_as_playlist(),
             HotkeyMessage::RemoveFromQueue => self.handle_remove_from_queue(),
@@ -315,6 +318,9 @@ impl Nokkvi {
             }
             HotkeyMessage::ArtistRatingUpdated(artist_id, new_rating) => {
                 self.handle_artist_rating_updated(artist_id, new_rating)
+            }
+            HotkeyMessage::PlaylistRatingUpdated(playlist_id, new_rating) => {
+                self.handle_playlist_rating_updated(playlist_id, new_rating)
             }
             HotkeyMessage::ExpandCenter => self.handle_expand_center(),
             HotkeyMessage::FocusNavigation => self.handle_focus_navigation(),

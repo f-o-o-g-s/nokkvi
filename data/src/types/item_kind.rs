@@ -6,13 +6,11 @@
 //! routed any unknown string (typo, future variant) silently to `Song`.
 //!
 //! Note: `Genre` is intentionally absent. Navidrome genres aren't
-//! starrable or ratable today, and the rating-handler enumeration in
-//! `src/update/hotkeys/star_rating.rs::get_center_item_info()` hard-codes
-//! `SlotListEntry::Parent(_) => None` for the genre and playlist-parent
-//! cases. `ItemKind::Playlist` is kept as a forward-compat slot since
-//! the audit recommendation explicitly named it; today it's reachable
-//! only via `BatchItem::Playlist` flattening, not via the star/rating
-//! UI surface.
+//! starrable or ratable, and `Nokkvi::center_item()`
+//! (`src/update/hotkeys/star_rating.rs`) only names a genre row.
+//! `ItemKind::Playlist` is starred and rated against Navidrome 0.64+
+//! (`ServerCaps::playlist_annotations`); against an older server a
+//! playlist row is only named, like a genre's.
 //!
 //! Variant-count drift between `ItemKind` and `BatchItem` is locked by
 //! `const _:` length anchors in this module — see the bottom of the file.

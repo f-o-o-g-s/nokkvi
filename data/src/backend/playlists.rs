@@ -45,6 +45,10 @@ pub struct PlaylistUIViewData {
     pub owner_id: String,
     /// Navidrome 0.64 image info (default on older servers).
     pub image: crate::types::image_info::ImageInfo,
+    /// The session user's star (Navidrome 0.64+; always `false` before).
+    pub is_starred: bool,
+    /// The session user's 1-5 rating; `None` when unrated.
+    pub rating: Option<u32>,
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
 }
@@ -56,6 +60,8 @@ impl From<Playlist> for PlaylistUIViewData {
         let uploaded_image = playlist.custom_image().map(str::to_string);
         let is_smart = playlist.is_smart();
         let is_file_backed = playlist.is_file_backed();
+        let is_starred = playlist.is_starred();
+        let rating = playlist.user_rating();
         let rules = if is_smart {
             playlist.rules.clone()
         } else {
@@ -79,6 +85,8 @@ impl From<Playlist> for PlaylistUIViewData {
             sync: playlist.sync,
             owner_id: playlist.owner_id,
             image: playlist.image,
+            is_starred,
+            rating,
             searchable_lower,
         }
     }
@@ -90,6 +98,30 @@ impl From<&Playlist> for PlaylistUIViewData {
     /// including fields the projection drops (`size`, `created_at`).
     fn from(playlist: &Playlist) -> Self {
         Self::from(playlist.clone())
+    }
+}
+
+impl crate::backend::Starable for PlaylistUIViewData {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn set_starred(&mut self, starred: bool) {
+        self.is_starred = starred;
+    }
+    fn display_label(&self) -> String {
+        self.name.clone()
+    }
+}
+
+impl crate::backend::Ratable for PlaylistUIViewData {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn set_rating(&mut self, rating: Option<u32>) {
+        self.rating = rating;
+    }
+    fn display_label(&self) -> String {
+        self.name.clone()
     }
 }
 
@@ -135,6 +167,8 @@ mod tests {
             evaluated_at: Some("2026-07-01T10:00:00Z".to_owned()),
             path: "/music/Library/road_trip.nsp".to_owned(),
             sync: true,
+            starred: Some(true),
+            rating: Some(4),
             image: Default::default(),
         };
 
@@ -158,6 +192,10 @@ mod tests {
         assert_eq!(by_ref.sync, by_value.sync);
         assert_eq!(by_ref.owner_id, by_value.owner_id);
         assert_eq!(by_ref.searchable_lower, by_value.searchable_lower);
+        assert_eq!(by_ref.is_starred, by_value.is_starred);
+        assert_eq!(by_ref.rating, by_value.rating);
+        assert!(by_value.is_starred);
+        assert_eq!(by_value.rating, Some(4));
 
         // The five smart-layer fields carry real values through the
         // projection (not defaults) — the parity assert above would pass

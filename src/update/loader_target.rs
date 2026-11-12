@@ -127,6 +127,53 @@ pub(crate) struct RowPlace {
     below: usize,
 }
 
+/// The anchor-keeping viewport rule, [`LoaderTarget::apply_viewport_on_load`]'s
+/// default: a foreground load starts at the top, a background reload stays
+/// on its row. A free function so a target that overrides the foreground
+/// half (Playlists) can still take the background half.
+fn anchored_viewport_on_load<T: LoaderTarget + ?Sized>(
+    app: &mut Nokkvi,
+    background: bool,
+    anchor_id: Option<&str>,
+) {
+    if !background {
+        let sl = T::slot_list_mut(app);
+        sl.viewport_offset = 0;
+        // The whole buffer is replaced and the viewport goes back to 0, so
+        // the click-to-focus marker goes with the indices and the anchor:
+        // it is an absolute index into the OLD rows, and
+        // `get_effective_center_index` prefers it, so Enter / Shift+Q would
+        // act on an off-screen row after a sort change. Same reset as the
+        // background branch below.
+        sl.clear_selection_for_refresh();
+    } else {
+        let current = T::slot_list_mut(app).viewport_offset;
+        let anchor_idx = anchor_id.and_then(|id| {
+            T::library(app)
+                .iter()
+                .position(|item| T::item_id(item) == id)
+        });
+        // The clamp is against the rows shown, flattened under an
+        // expansion (`reanchor` then lands the viewport exactly).
+        let shown = T::flattened_len(app);
+        let new_offset = anchor_idx.unwrap_or_else(|| current.min(shown.saturating_sub(1)));
+        let sl = T::slot_list_mut(app);
+        sl.viewport_offset = new_offset;
+        // Clear the multi-selection rather than retaining in-range indices:
+        // `set_first_page` wholesale-replaces the buffer, so retained
+        // absolute indices would point at DIFFERENT items after a
+        // reorder / membership change, and a later positional batch op
+        // would silently target the wrong songs. Matches the foreground
+        // branch and the queue precedent (gotchas/queue.md "Stale
+        // multi-selection across refreshes"). The anchor-id VIEWPORT
+        // relocation above is preserved. The highlighted row is then put
+        // back by id (`refocus`, from `handle_loaded_with`), so a reload
+        // the server's artist refresh triggers no longer drops the row a
+        // jump just landed on.
+        sl.clear_selection_for_refresh();
+    }
+}
+
 pub(crate) trait LoaderTarget {
     type Item: Send + 'static;
 
@@ -141,6 +188,12 @@ pub(crate) trait LoaderTarget {
     // ── Required: artwork ─────────────────────────────────────────────────
     fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>>;
     fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>>;
+    /// The artwork tasks after a background reload. Default: the same as a
+    /// foreground load's. `PlaylistsTarget` overrides it: its foreground
+    /// tasks click row 0, which a reload that keeps its place must not.
+    fn background_prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
+        Self::prefetch_artwork_tasks(app)
+    }
 
     // ── Required: pending expand ──────────────────────────────────────────
     /// `None` for views with no pending-expand chain (Playlists).
@@ -157,47 +210,13 @@ pub(crate) trait LoaderTarget {
     /// reload the viewport's centred row (its anchor) is found again by id
     /// (the reload fetched every row down to it, `reload_rows`), keeping the user's position in
     /// large libraries; a row gone from the list leaves the viewport at the
-    /// same offset, clamped to the new length. `GenresTarget` and
-    /// `PlaylistsTarget` override to reset to 0 unconditionally because these
-    /// are small, fully-refreshed lists where a background sync may reorder
-    /// entries — preserving an arbitrary offset would be misleading.
+    /// same offset, clamped to the new length. `GenresTarget` overrides to
+    /// reset to 0 unconditionally (a small, fully-refreshed list);
+    /// `PlaylistsTarget` resets to 0 on a foreground load only and keeps its
+    /// row on a background reload, which follows every star and rating the
+    /// user gives a playlist.
     fn apply_viewport_on_load(app: &mut Nokkvi, background: bool, anchor_id: Option<&str>) {
-        if !background {
-            let sl = Self::slot_list_mut(app);
-            sl.viewport_offset = 0;
-            // The whole buffer is replaced and the viewport goes back to 0, so
-            // the click-to-focus marker goes with the indices and the anchor:
-            // it is an absolute index into the OLD rows, and
-            // `get_effective_center_index` prefers it, so Enter / Shift+Q would
-            // act on an off-screen row after a sort change. Same reset as the
-            // background branch below.
-            sl.clear_selection_for_refresh();
-        } else {
-            let current = Self::slot_list_mut(app).viewport_offset;
-            let anchor_idx = anchor_id.and_then(|id| {
-                Self::library(app)
-                    .iter()
-                    .position(|item| Self::item_id(item) == id)
-            });
-            // The clamp is against the rows shown, flattened under an
-            // expansion (`reanchor` then lands the viewport exactly).
-            let shown = Self::flattened_len(app);
-            let new_offset = anchor_idx.unwrap_or_else(|| current.min(shown.saturating_sub(1)));
-            let sl = Self::slot_list_mut(app);
-            sl.viewport_offset = new_offset;
-            // Clear the multi-selection rather than retaining in-range indices:
-            // `set_first_page` wholesale-replaces the buffer, so retained
-            // absolute indices would point at DIFFERENT items after a
-            // reorder / membership change, and a later positional batch op
-            // would silently target the wrong songs. Matches the foreground
-            // branch and the queue precedent (gotchas/queue.md "Stale
-            // multi-selection across refreshes"). The anchor-id VIEWPORT
-            // relocation above is preserved. The highlighted row is then put
-            // back by id (`refocus`, from `handle_loaded_with`), so a reload
-            // the server's artist refresh triggers no longer drops the row a
-            // jump just landed on.
-            sl.clear_selection_for_refresh();
-        }
+        anchored_viewport_on_load::<Self>(app, background, anchor_id);
     }
 
     // ── Defaulted: the highlighted row across a background reload ─────────
@@ -672,13 +691,58 @@ impl LoaderTarget for PlaylistsTarget {
 
     const CANCEL_PENDING_ON_ERR: bool = false;
 
-    // Playlists are a small, fully-refreshed list — always start at 0.
-    fn apply_viewport_on_load(app: &mut Nokkvi, _background: bool, _anchor_id: Option<&str>) {
-        Self::slot_list_mut(app).viewport_offset = 0;
+    fn flat_to_parent(app: &Nokkvi, flat: usize) -> Option<(usize, usize)> {
+        let expansion = &app.playlists_page.expansion;
+        let parents = &app.library.playlists;
+        let parent = expansion.owning_parent_index(flat, parents, |x| &x.id)?;
+        let below = flat.checked_sub(expansion.flat_index_of_parent(parent, parents, |x| &x.id))?;
+        Some((parent, below))
+    }
+
+    fn parent_to_flat(app: &Nokkvi, parent: usize) -> usize {
+        app.playlists_page
+            .expansion
+            .flat_index_of_parent(parent, &app.library.playlists, |x| &x.id)
+    }
+
+    fn flattened_len(app: &Nokkvi) -> usize {
+        app.playlists_page
+            .expansion
+            .flattened_len(&app.library.playlists)
+    }
+
+    // A load the user asked for (first visit, sort, search, refresh) starts
+    // at the top: the post-load click on row 0 below replaces the selection.
+    // A background reload (the server announced a change, or nokkvi's own
+    // star or rating was confirmed) stays on its row like the paged views.
+    fn apply_viewport_on_load(app: &mut Nokkvi, background: bool, anchor_id: Option<&str>) {
+        if background {
+            anchored_viewport_on_load::<Self>(app, true, anchor_id);
+        } else {
+            Self::slot_list_mut(app).viewport_offset = 0;
+        }
     }
 
     fn post_load_ok_hook(app: &mut Nokkvi) {
         app.refresh_default_playlist_picker_after_load();
+    }
+
+    /// The reload kept its place, so no click on row 0: warm the collages
+    /// and the artwork of the rows now on screen instead.
+    fn background_prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
+        let mut tasks = vec![Task::done(Message::Artwork(
+            ArtworkMessage::StartCollagePrefetch(CollageTarget::Playlist),
+        ))];
+        let total = Self::flattened_len(app);
+        let centre = app
+            .playlists_page
+            .common
+            .get_center_item_index(total)
+            .and_then(|flat| Self::flat_to_parent(app, flat));
+        if let Some((parent, _)) = centre {
+            tasks.push(app.load_playlist_viewport_artwork(parent));
+        }
+        tasks
     }
 
     fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
@@ -932,7 +996,11 @@ impl Nokkvi {
                 }
                 T::post_load_ok_hook(self);
 
-                let mut tasks: Vec<Task<Message>> = T::prefetch_artwork_tasks(self);
+                let mut tasks: Vec<Task<Message>> = if background {
+                    T::background_prefetch_artwork_tasks(self)
+                } else {
+                    T::prefetch_artwork_tasks(self)
+                };
                 if let Some(task) = T::center_large_artwork_task(self) {
                     tasks.push(task);
                 }

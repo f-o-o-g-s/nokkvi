@@ -70,10 +70,12 @@ pub(in crate::update) struct CenterItemInfo {
 /// the star and rating keys, the IPC `selection` record and the IPC
 /// `add-to-queue` reply.
 pub(in crate::update) enum CenterItem {
-    /// A song, album or artist: the star and rating keys act on it.
+    /// A song, album, artist or (Navidrome 0.64+) playlist: the star and
+    /// rating keys act on it.
     Rateable(CenterItemInfo),
-    /// A row Shift+A enqueues that nothing stars or rates: a playlist or
-    /// genre parent, a Harbour item or Random row.
+    /// A row Shift+A enqueues that nothing stars or rates: a genre parent,
+    /// a playlist on a server that doesn't star them, a Harbour item or
+    /// Random row.
     Named(String),
 }
 
@@ -223,7 +225,20 @@ impl Nokkvi {
                         rating: song.rating.unwrap_or(0),
                         kind: ItemKind::Song,
                     }),
-                    // Playlists themselves can't be starred or rated.
+                    // A playlist is starred and rated where the server
+                    // does that (Navidrome 0.64+); elsewhere the row is
+                    // only named, and the keys find nothing on it.
+                    SlotListEntry::Parent(playlist) if self.playlists_page.annotations => {
+                        CenterItem::Rateable(CenterItemInfo {
+                            id: playlist.id.clone(),
+                            name: playlist.name.clone(),
+                            artist: String::new(),
+                            artist_id: None,
+                            starred: playlist.is_starred,
+                            rating: playlist.rating.unwrap_or(0),
+                            kind: ItemKind::Playlist,
+                        })
+                    }
                     SlotListEntry::Parent(playlist) => CenterItem::Named(playlist.name.clone()),
                 }),
             View::Genres => self
@@ -290,7 +305,7 @@ impl Nokkvi {
                     info.artist_id.unwrap_or_default(),
                     info.artist,
                 )),
-                // No list centres a playlist as a rateable row.
+                // A playlist names no artist.
                 ItemKind::Playlist => None,
             },
             CenterItem::Named(_) => None,
@@ -497,6 +512,24 @@ impl Nokkvi {
         Task::none()
     }
 
+    pub(crate) fn handle_playlist_starred_status_updated(
+        &mut self,
+        playlist_id: String,
+        new_starred_status: bool,
+    ) -> Task<Message> {
+        debug!(
+            "🔄 Updating starred status for playlist {} to {}",
+            playlist_id, new_starred_status
+        );
+        nokkvi_data::backend::update_starred_in_list(
+            &mut self.library.playlists,
+            &playlist_id,
+            new_starred_status,
+            "playlists",
+        );
+        Task::none()
+    }
+
     /// Handle increasing the rating of the currently centered item
     pub(crate) fn handle_increase_rating(&mut self) -> Task<Message> {
         self.handle_rating_change(true)
@@ -663,6 +696,31 @@ impl Nokkvi {
             &artist_id,
             rating_opt,
             "artist",
+        );
+        Task::none()
+    }
+
+    /// Update playlist rating in local state: the user's own change, or the
+    /// restore after the server refused it.
+    pub(crate) fn handle_playlist_rating_updated(
+        &mut self,
+        playlist_id: String,
+        new_rating: u32,
+    ) -> Task<Message> {
+        debug!(
+            "🔄 Updating rating for playlist {} to {}",
+            playlist_id, new_rating
+        );
+        let rating_opt = if new_rating == 0 {
+            None
+        } else {
+            Some(new_rating)
+        };
+        nokkvi_data::backend::update_rating_in_list(
+            &mut self.library.playlists,
+            &playlist_id,
+            rating_opt,
+            "playlist",
         );
         Task::none()
     }

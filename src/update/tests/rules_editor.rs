@@ -22,6 +22,8 @@ fn smart_row(
     owner_id: &str,
 ) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
     nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: id.into(),
         name: name.into(),
         comment: String::new(),

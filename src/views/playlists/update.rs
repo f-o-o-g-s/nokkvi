@@ -290,13 +290,43 @@ impl PlaylistsPage {
                                     !song.is_starred,
                                 ),
                             ),
-                            SlotListEntry::Parent(_playlist) => {
-                                // Playlists don't have starred state
-                                (Task::none(), PlaylistsAction::None)
-                            }
+                            // The heart draws only where the server stars
+                            // playlists; a stray click elsewhere does nothing.
+                            SlotListEntry::Parent(playlist) if self.annotations => (
+                                Task::none(),
+                                PlaylistsAction::ToggleStar(
+                                    playlist.id.clone(),
+                                    ItemKind::Playlist,
+                                    !playlist.is_starred,
+                                ),
+                            ),
+                            SlotListEntry::Parent(_) => (Task::none(), PlaylistsAction::None),
                         }
                     } else {
                         (Task::none(), PlaylistsAction::None)
+                    }
+                }
+                PlaylistsMessage::ClickSetRating(item_index, rating) => {
+                    use nokkvi_data::utils::formatters::compute_rating_toggle;
+                    match self
+                        .expansion
+                        .get_entry_at(item_index, playlists, |p| &p.id)
+                    {
+                        Some(SlotListEntry::Parent(playlist)) if self.annotations => {
+                            let current = playlist.rating.unwrap_or(0) as usize;
+                            (
+                                Task::none(),
+                                PlaylistsAction::SetRating(
+                                    playlist.id.clone(),
+                                    ItemKind::Playlist,
+                                    compute_rating_toggle(current, rating),
+                                ),
+                            )
+                        }
+                        // Only playlist rows carry the stars column.
+                        Some(SlotListEntry::Parent(_) | SlotListEntry::Child(..)) | None => {
+                            (Task::none(), PlaylistsAction::None)
+                        }
                     }
                 }
                 PlaylistsMessage::NavigateAndFilter(view, filter) => (

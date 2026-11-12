@@ -90,6 +90,8 @@ fn genres_menu_add_to_mix_seeds_the_crate() {
 fn playlists_menu_add_to_mix_seeds_the_crate() {
     let mut app = test_app();
     let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: "p1".to_string(),
         name: "Night Drive".to_string(),
         comment: String::new(),

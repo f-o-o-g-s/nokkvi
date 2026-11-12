@@ -2,8 +2,8 @@
 //! preview.
 //!
 //! ONE `define_settings!` invocation owns every `<view>_show_<col>` boolean
-//! (Queue 9, Albums 7, Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6,
-//! Preview 5 — 55 total) via the `view_columns:` clause, emitting the three
+//! (Queue 9, Albums 7, Songs 9, Artists 8, Genres 5, Playlists 8, Similar 6,
+//! Preview 5 — 57 total) via the `view_columns:` clause, emitting the three
 //! orchestrator
 //! copy functions:
 //!
@@ -99,13 +99,15 @@ crate::define_settings! {
             genres_show_albumcount,
             genres_show_songcount,
             genres_show_select,
-            // -- Playlists (6) --
+            // -- Playlists (8) --
             playlists_show_index,
             playlists_show_thumbnail,
             playlists_show_songcount,
             playlists_show_duration,
             playlists_show_updatedat,
             playlists_show_select,
+            playlists_show_stars,
+            playlists_show_love,
             // -- Similar (6) --
             similar_show_index,
             similar_show_thumbnail,

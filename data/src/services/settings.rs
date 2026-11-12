@@ -1124,6 +1124,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_playlists_show_stars(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.view_columns.playlists_show_stars = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_love(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.view_columns.playlists_show_love = enabled;
+        self.save()
+    }
+
     pub fn set_playlists_show_select(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.view_columns.playlists_show_select = enabled;
         self.save()
@@ -1417,7 +1427,7 @@ impl SettingsManager {
         crate::services::settings_tables::dump_playback_tab_player_settings(p, &mut out);
 
         // Consolidated view-column dumper (define_settings! `view_columns:`
-        // clause) — all 55 column booleans across the 7 slot-list views + the
+        // clause) — all 57 column booleans across the 7 slot-list views + the
         // rules preview.
         crate::services::settings_tables::dump_columns_tab_player_settings(p, &mut out);
 
@@ -1463,7 +1473,7 @@ fn apply_toml_settings_to_internal(
     crate::services::settings_tables::apply_toml_playback_tab(ts, p);
 
     // Consolidated view-column applier (define_settings! `view_columns:`
-    // clause) — all 55 column booleans, including queue_show_genre /
+    // clause) — all 57 column booleans, including queue_show_genre /
     // songs_show_genre whose silent drop the original hand-written body
     // caused (pinned by queue_and_songs_genre_columns_apply_correctly).
     crate::services::settings_tables::apply_toml_columns_tab(ts, p);
@@ -1731,6 +1741,8 @@ mod sentinel_roundtrip_tests {
                 playlists_show_duration: true,   // default false
                 playlists_show_updatedat: true,  // default false
                 playlists_show_select: true,     // default false
+                playlists_show_stars: true,      // default false
+                playlists_show_love: false,      // default true
 
                 // Similar columns
                 similar_show_index: false,     // default true
@@ -2224,6 +2236,14 @@ mod sentinel_roundtrip_tests {
         assert_eq!(
             ui_ps1.view_columns.playlists_show_select,
             ui_ps2.view_columns.playlists_show_select
+        );
+        assert_eq!(
+            ui_ps1.view_columns.playlists_show_stars,
+            ui_ps2.view_columns.playlists_show_stars
+        );
+        assert_eq!(
+            ui_ps1.view_columns.playlists_show_love,
+            ui_ps2.view_columns.playlists_show_love
         );
 
         // Similar columns
@@ -3112,6 +3132,8 @@ name = "sentinel preset"
             playlists_show_duration: !d.playlists_show_duration,
             playlists_show_updatedat: !d.playlists_show_updatedat,
             playlists_show_select: !d.playlists_show_select,
+            playlists_show_stars: !d.playlists_show_stars,
+            playlists_show_love: !d.playlists_show_love,
             similar_show_index: !d.similar_show_index,
             similar_show_thumbnail: !d.similar_show_thumbnail,
             similar_show_album: !d.similar_show_album,
@@ -3126,14 +3148,14 @@ name = "sentinel preset"
         }
     }
 
-    /// M1 characterization: every one of the 55 view-column booleans survives
+    /// M1 characterization: every one of the 57 view-column booleans survives
     /// the FULL orchestrator round-trip — redb-backed Persisted →
     /// `get_player_settings` (dump) → `from_player_settings_with_existing`
     /// (write) → TOML bytes → parse → `apply_toml_settings_to_internal`
     /// (apply) → `get_player_settings` again. Written against the pre-rewire
     /// 7-helper path and kept green across the consolidated single-call
     /// rewire; `ViewColumns` derives `PartialEq`, so each whole-struct
-    /// equality assert covers all 55 fields.
+    /// equality assert covers all 57 fields.
     #[test]
     fn all_view_columns_survive_full_orchestrator_roundtrip() {
         let flipped = flipped_view_columns();
@@ -3145,7 +3167,7 @@ name = "sentinel preset"
         let live = sm.get_player_settings();
         assert_eq!(
             live.view_columns, flipped,
-            "dump direction must carry all 55 flipped columns onto LivePlayerSettings"
+            "dump direction must carry all 57 flipped columns onto LivePlayerSettings"
         );
 
         // Live → TOML (write direction) → bytes → parse.
@@ -3154,7 +3176,7 @@ name = "sentinel preset"
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("parse TomlSettings");
         assert_eq!(
             parsed.view_columns, flipped,
-            "TOML round-trip must preserve all 55 flipped columns"
+            "TOML round-trip must preserve all 57 flipped columns"
         );
 
         // TOML → Persisted (apply direction) → Live again.
@@ -3164,7 +3186,7 @@ name = "sentinel preset"
         let live2 = sm2.get_player_settings();
         assert_eq!(
             live2.view_columns, flipped,
-            "apply direction must land all 55 flipped columns back on the live view"
+            "apply direction must land all 57 flipped columns back on the live view"
         );
     }
 

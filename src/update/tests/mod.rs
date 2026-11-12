@@ -49,6 +49,7 @@ mod notifications;
 mod page_loader;
 mod playback;
 mod playlist_artwork;
+mod playlist_favourites;
 mod playlists;
 mod queue;
 mod radio_artwork;

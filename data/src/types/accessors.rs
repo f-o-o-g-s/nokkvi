@@ -208,6 +208,8 @@ mod tests {
             evaluated_at: None,
             path: String::new(),
             sync: false,
+            starred: None,
+            rating: None,
             image: Default::default(),
         };
         assert_eq!(<Playlist as Named>::display_name(&playlist), "My Playlist");

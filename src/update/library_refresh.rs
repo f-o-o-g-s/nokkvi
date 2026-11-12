@@ -104,10 +104,15 @@ impl Nokkvi {
             tasks.push(self.handle_load_songs(Some(reload)));
         }
 
-        // 4. Playlists: single-shot reload (not paged, no anchor-based
-        //    re-positioning needed).
-        if affects_playlists && !self.library.playlists.is_empty() {
-            tasks.push(self.handle_load_playlists());
+        // 4. Playlists: one whole-list reload (not paged) that keeps the
+        //    viewport and the highlight on their row. Random is skipped as
+        //    above: nokkvi's own confirmed star or rating arrives here too,
+        //    and would reshuffle the list under the row just starred.
+        if affects_playlists
+            && self.playlists_page.common.current_sort_mode != SortMode::Random
+            && !self.library.playlists.is_empty()
+        {
+            tasks.push(self.reload_playlists_in_background());
         }
 
         // 5. Genres: single-shot reload, same shape as playlists.

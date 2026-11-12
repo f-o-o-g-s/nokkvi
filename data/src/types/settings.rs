@@ -771,7 +771,7 @@ mod tests {
         assert!(parsed.replay_gain_prevent_clipping);
     }
 
-    /// True for the 55 per-view column-visibility keys (`<view>_show_<col>`).
+    /// True for the 57 per-view column-visibility keys (`<view>_show_<col>`).
     /// `queue_show_default_playlist` (the header chip) is NOT a column; the
     /// `strip_show_*` / `mini_player_show_*` / `*_artwork_overlay` toggles
     /// don't carry a view prefix and never match.
@@ -812,8 +812,8 @@ mod tests {
             .collect();
         assert_eq!(
             column_keys.len(),
-            55,
-            "expected the 55 per-view column keys at the top level, got {column_keys:?}"
+            57,
+            "expected the 57 per-view column keys at the top level, got {column_keys:?}"
         );
     }
 
@@ -857,7 +857,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 55, "expected to check all 55 column keys");
+        assert_eq!(checked, 57, "expected to check all 57 column keys");
     }
 
     #[test]

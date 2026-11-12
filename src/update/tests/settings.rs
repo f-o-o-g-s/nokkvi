@@ -611,7 +611,7 @@ fn player_settings_loaded_restores_all_column_visibility() {
     let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
 
-    // Every one of the 55 column `*_show_*` fields, set to an alternating
+    // Every one of the 57 column `*_show_*` fields, set to an alternating
     // true/false pattern by declaration order so each adjacent pair differs.
     // Any assertion below fails if `restore_from` read the wrong field (the
     // realistic drift is a copy-pasted `@ token` matching a neighbor) or if the
@@ -654,6 +654,8 @@ fn player_settings_loaded_restores_all_column_visibility() {
             playlists_show_songcount: false,
             playlists_show_duration: true,
             playlists_show_updatedat: false,
+            playlists_show_stars: true,
+            playlists_show_love: false,
             // Albums
             albums_show_select: true,
             albums_show_index: false,
@@ -731,6 +733,8 @@ fn player_settings_loaded_restores_all_column_visibility() {
     assert_eq!(p.songcount, settings.view_columns.playlists_show_songcount);
     assert_eq!(p.duration, settings.view_columns.playlists_show_duration);
     assert_eq!(p.updatedat, settings.view_columns.playlists_show_updatedat);
+    assert_eq!(p.stars, settings.view_columns.playlists_show_stars);
+    assert_eq!(p.love, settings.view_columns.playlists_show_love);
 
     // Albums
     let al = app.albums_page.column_visibility;
@@ -790,13 +794,13 @@ fn column_macro_covers_expected_field_count() {
     // struct sizes unchanged); catching that direction relies on also adding the
     // column + its per-page round-trip assertion.
     //
-    // 55 column fields total today (verified against
+    // 57 column fields total today (verified against
     // data/src/types/view_columns.rs). The 6 INTENTIONALLY-EXCLUDED
     // `*_show_*` fields are NOT columns and must NOT be counted here:
     //   - queue_show_default_playlist  (header chip, read directly in app_view)
     //   - strip_show_title / strip_show_artist / strip_show_album /
     //     strip_show_format_info / strip_show_labels  (metadata-strip toggles)
-    const EXPECTED_COLUMN_FIELDS: usize = 55;
+    const EXPECTED_COLUMN_FIELDS: usize = 57;
 
     let total = size_of::<crate::views::queue::QueueColumnVisibility>()
         + size_of::<crate::views::artists::ArtistsColumnVisibility>()

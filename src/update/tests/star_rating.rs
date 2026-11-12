@@ -293,13 +293,11 @@ fn starred_flag_message_routes_each_kind_to_its_flag_handler() {
         ),
         "got {msg:?}"
     );
-    // Playlist starring isn't surfaced yet: it rides the song flag handler,
-    // which only touches matching ids.
     let msg = crate::Nokkvi::starred_flag_message("pl1".to_string(), ItemKind::Playlist, true);
     assert!(
         matches!(
             msg,
-            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            Message::Hotkey(HotkeyMessage::PlaylistStarredStatusUpdated(ref id, true))
             if id == "pl1"
         ),
         "got {msg:?}"
@@ -407,7 +405,7 @@ fn rating_revert_message_routes_song_to_song_handler() {
 }
 
 #[test]
-fn rating_revert_message_routes_playlist_through_song_handler_for_now() {
+fn rating_revert_message_routes_playlist_to_its_own_handler() {
     use nokkvi_data::types::ItemKind;
 
     use crate::app_message::{HotkeyMessage, Message};
@@ -415,10 +413,10 @@ fn rating_revert_message_routes_playlist_through_song_handler_for_now() {
     assert!(
         matches!(
             msg,
-            Message::Hotkey(HotkeyMessage::SongRatingUpdated(ref id, 2))
+            Message::Hotkey(HotkeyMessage::PlaylistRatingUpdated(ref id, 2))
             if id == "pl1"
         ),
-        "Playlist kind must collapse into SongRatingUpdated until playlist rating ships"
+        "got {msg:?}"
     );
 }
 

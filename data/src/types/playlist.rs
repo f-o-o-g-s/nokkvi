@@ -65,6 +65,18 @@ pub struct Playlist {
     /// [`Self::is_file_backed`]).
     #[serde(rename = "sync", default)]
     pub sync: bool,
+    /// The session user's star on this playlist (Navidrome 0.64+, written
+    /// through Subsonic `star` / `unstar` with the playlist id). Emitted
+    /// with `omitempty`: absent means not starred, and absent is all an
+    /// older server ever sends.
+    #[serde(rename = "starred", default)]
+    #[serde(deserialize_with = "crate::types::deserialize_starred_opt")]
+    pub starred: Option<bool>,
+    /// The session user's 1-5 rating (Navidrome 0.64+, Subsonic
+    /// `setRating`). `omitempty` as well: absent or 0 means unrated. Read
+    /// it through [`Self::user_rating`].
+    #[serde(rename = "rating", default)]
+    pub rating: Option<u32>,
 
     /// Navidrome 0.64 image info (six flat keys; default on older servers).
     #[serde(flatten)]
@@ -126,6 +138,17 @@ impl DraftMarker {
 }
 
 impl Playlist {
+    /// Whether the session user starred this playlist.
+    pub fn is_starred(&self) -> bool {
+        self.starred.unwrap_or(false)
+    }
+
+    /// The session user's rating, 1-5; `None` when unrated (the wire's
+    /// absent key and an explicit 0 both collapse here).
+    pub fn user_rating(&self) -> Option<u32> {
+        self.rating.filter(|rating| *rating > 0)
+    }
+
     /// Get display name for the playlist
     pub fn display_name(&self) -> &str {
         &self.name
@@ -176,6 +199,53 @@ impl std::fmt::Display for Playlist {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The native `/api/playlist` row of Navidrome 0.64 (`model.Playlist`
+    /// embeds `Annotations`, whose keys are all `omitempty`): a starred,
+    /// rated playlist carries them, an untouched one and every older
+    /// server's row carry none.
+    #[test]
+    fn star_and_rating_parse_from_the_064_row() {
+        let json = r#"{
+            "playCount": 3,
+            "playDate": "2026-11-10T08:00:00Z",
+            "rating": 4,
+            "ratedAt": "2026-11-11T09:30:00Z",
+            "starred": true,
+            "starredAt": "2026-11-11T09:29:00Z",
+            "id": "p1",
+            "name": "Road Trip",
+            "comment": "",
+            "duration": 5421.5,
+            "size": 123456789,
+            "songCount": 31,
+            "ownerName": "foogs",
+            "ownerId": "u1",
+            "public": true,
+            "path": "",
+            "sync": false,
+            "uploadedImage": "",
+            "createdAt": "2026-01-02T03:04:05Z",
+            "updatedAt": "2026-06-07T08:09:10Z",
+            "rules": null,
+            "evaluatedAt": null
+        }"#;
+        let p: Playlist = serde_json::from_str(json).expect("deserialize");
+        assert!(p.is_starred());
+        assert_eq!(p.user_rating(), Some(4));
+
+        let plain: Playlist =
+            serde_json::from_str(r#"{ "id": "p2", "name": "Mix" }"#).expect("deserialize");
+        assert!(!plain.is_starred());
+        assert_eq!(plain.user_rating(), None);
+
+        // An explicit zero is unrated too, never "0 stars".
+        let zero: Playlist =
+            serde_json::from_str(r#"{ "id": "p3", "name": "Mix", "rating": 0, "starred": false }"#)
+                .expect("deserialize");
+        assert!(!zero.is_starred());
+        assert_eq!(zero.user_rating(), None);
+    }
 
     /// Mirrors the `radio_station.rs` test trio: present / empty-string /
     /// absent forms of the wire field, plus the collapsing accessor.

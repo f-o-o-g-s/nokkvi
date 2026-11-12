@@ -647,6 +647,8 @@ fn playlist_edit_public_only_change_is_metadata_dirty() {
 
 fn full_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
     nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: id.to_string(),
         name: name.to_string(),
         comment: "synced comment".to_string(),

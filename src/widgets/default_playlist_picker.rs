@@ -305,6 +305,8 @@ mod tests {
 
     fn make_playlist(id: &str, name: &str) -> PlaylistUIViewData {
         PlaylistUIViewData {
+            is_starred: false,
+            rating: None,
             id: id.to_string(),
             name: name.to_string(),
             comment: String::new(),

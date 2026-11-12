@@ -1,7 +1,7 @@
 //! Canonical per-view column-visibility toggles.
 //!
-//! One struct owns all 55 `<view>_show_<col>` booleans (Queue 9, Albums 7,
-//! Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6, Preview 5) and the
+//! One struct owns all 57 `<view>_show_<col>` booleans (Queue 9, Albums 7,
+//! Songs 9, Artists 8, Genres 5, Playlists 8, Similar 6, Preview 5) and the
 //! ONE `Default` impl that every consumer shares:
 //!
 //! - [`PersistedPlayerSettings`][crate::types::settings::PersistedPlayerSettings]
@@ -138,6 +138,13 @@ pub struct ViewColumns {
     pub playlists_show_updatedat: bool,
     /// Leading multi-select checkbox column (default: false).
     pub playlists_show_select: bool,
+    /// Star-rating column (default: false). Auto-shows when sort = Rating
+    /// regardless of toggle. Drawn only against a server that rates
+    /// playlists (Navidrome 0.64+).
+    pub playlists_show_stars: bool,
+    /// Heart column (default: true). Drawn only against a server that
+    /// stars playlists (Navidrome 0.64+).
+    pub playlists_show_love: bool,
 
     // -- Similar view column toggles (Find Similar / Top Songs results) --
     /// Leading row-index column.
@@ -214,6 +221,8 @@ impl Default for ViewColumns {
             playlists_show_duration: false,
             playlists_show_updatedat: false,
             playlists_show_select: false,
+            playlists_show_stars: false,
+            playlists_show_love: true,
             similar_show_index: true,
             similar_show_thumbnail: true,
             similar_show_album: true,

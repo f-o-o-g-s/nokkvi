@@ -22,6 +22,8 @@ pub(super) fn playlist_row(
     smart: bool,
 ) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
     nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: id.into(),
         name: name.into(),
         comment: String::new(),

@@ -172,6 +172,8 @@
   "playlists_show_duration": true,
   "playlists_show_updatedat": true,
   "playlists_show_select": true,
+  "playlists_show_stars": true,
+  "playlists_show_love": false,
   "similar_show_index": false,
   "similar_show_thumbnail": false,
   "similar_show_album": false,

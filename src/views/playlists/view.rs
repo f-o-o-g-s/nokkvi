@@ -47,6 +47,22 @@ pub(crate) fn playlists_updated_at_visible(
     user_visible || matches!(sort, crate::widgets::view_header::SortMode::UpdatedAt)
 }
 
+/// Stars column: the user toggle, or a Rating sort, and only where the
+/// server rates playlists (`PlaylistsPage::annotations`).
+pub(crate) fn playlists_stars_visible(
+    sort: crate::widgets::view_header::SortMode,
+    user_visible: bool,
+    annotations: bool,
+) -> bool {
+    annotations && (user_visible || matches!(sort, crate::widgets::view_header::SortMode::Rating))
+}
+
+/// Love (heart) column: the user toggle, only where the server stars
+/// playlists.
+pub(crate) fn playlists_love_visible(user_visible: bool, annotations: bool) -> bool {
+    annotations && user_visible
+}
+
 /// The ownership half of the Edit Rules gate. Compares ids, NEVER names:
 /// Navidrome logins are case-insensitive, so a user logging in as "Foogs"
 /// against DB user_name "foogs" would fail a name compare and silently lose
@@ -208,7 +224,19 @@ impl PlaylistsPage {
         let column_dropdown: Element<'a, PlaylistsMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Playlists,
-                self.column_visibility.dropdown_entries(),
+                // Stars and Love are offered where the server rates and
+                // stars playlists; elsewhere the toggles would do nothing.
+                self.column_visibility
+                    .dropdown_entries()
+                    .into_iter()
+                    .filter(|(column, ..)| {
+                        self.annotations
+                            || !matches!(
+                                column,
+                                super::PlaylistsColumn::Stars | super::PlaylistsColumn::Love
+                            )
+                    })
+                    .collect(),
                 PlaylistsMessage::ToggleColumnVisible,
                 PlaylistsMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,
@@ -229,7 +257,7 @@ impl PlaylistsPage {
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
-            view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Playlists),
+            view_options: self.sort_modes(),
             sort_ascending: self.common.sort_ascending,
             search_query: &self.common.search_query,
             filtered_count: data.playlists.len(),
@@ -539,8 +567,16 @@ impl PlaylistsPage {
                     .unwrap_or(&playlist.updated_at);
                 stats.push(format!("Updated: {ymd}"));
 
-                use crate::widgets::metadata_pill::dot_row;
+                use crate::widgets::metadata_pill::{auth_status_row, dot_row};
                 if let Some(row) = dot_row::<PlaylistsMessage>(stats, 13.0, theme::fg3()) {
+                    col = col.push(row);
+                }
+                // "Favorited ♥ • Rated ★★★" like the album and artist pills;
+                // nothing on an unstarred, unrated playlist (every playlist
+                // of a server that doesn't star them).
+                if let Some(row) =
+                    auth_status_row::<PlaylistsMessage>(playlist.is_starred, playlist.rating)
+                {
                     col = col.push(row);
                 }
 
@@ -690,6 +726,9 @@ impl PlaylistsPage {
             playlists_duration_visible(sort_mode, self.column_visibility.duration);
         let show_updated_at =
             playlists_updated_at_visible(sort_mode, self.column_visibility.updatedat);
+        let show_stars =
+            playlists_stars_visible(sort_mode, self.column_visibility.stars, self.annotations);
+        let show_love = playlists_love_visible(self.column_visibility.love, self.annotations);
 
         // Song-count text is only consumed by the dedicated column below
         // (when toggled on or auto-shown by sort). The subtitle no longer
@@ -706,7 +745,12 @@ impl PlaylistsPage {
             show_song_count_col as u16 + show_duration_col as u16 + show_updated_at as u16;
         let name_portion = 55 - extra_cols * 10;
 
-        // Layout: [Index?] [Artwork?] [Name+subtitle] [SongCount?] [Duration?] [UpdatedAt?]
+        // Stars and the heart take small fixed shares beside the name's.
+        const STARS_PORTION: u16 = 7;
+        const LOVE_PORTION: u16 = 3;
+
+        // Layout: [Index?] [Artwork?] [Name+subtitle] [Stars?] [SongCount?]
+        // [Duration?] [UpdatedAt?] [Love?]
         use crate::widgets::slot_list::{slot_list_artwork_column, slot_list_metadata_column};
 
         let mut columns: Vec<Element<'a, PlaylistsMessage>> = Vec::new();
@@ -855,6 +899,20 @@ impl PlaylistsPage {
             .boxed()
         });
 
+        // Stars column (auto-shows on sort = Rating), clickable like an
+        // artist row's.
+        if show_stars {
+            use crate::widgets::slot_list::slot_list_star_rating;
+            let idx = ctx.item_index;
+            columns.push(slot_list_star_rating(
+                playlist.rating.unwrap_or(0).min(5) as usize,
+                title_size,
+                style,
+                Some(STARS_PORTION),
+                Some(move |star: usize| PlaylistsMessage::ClickSetRating(idx, star)),
+            ));
+        }
+
         if show_song_count_col {
             columns.push(slot_list_metadata_column(
                 count_text,
@@ -882,6 +940,29 @@ impl PlaylistsPage {
                 style,
                 20,
             ));
+        }
+
+        // Heart (Love) column, last like every other view's.
+        if show_love {
+            use crate::widgets::slot_list::{FavoriteIconKind, slot_list_favorite_icon};
+            columns.push(
+                container(slot_list_favorite_icon(
+                    playlist.is_starred,
+                    style,
+                    m.star_size,
+                    FavoriteIconKind::Heart,
+                    Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
+                ))
+                .width(Length::FillPortion(LOVE_PORTION))
+                .padding(iced::Padding {
+                    left: 4.0,
+                    right: 4.0,
+                    ..Default::default()
+                })
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .boxed(),
+            );
         }
 
         let content = iced::widget::Row::with_children(columns)

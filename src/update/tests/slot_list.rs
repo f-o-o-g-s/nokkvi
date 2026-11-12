@@ -120,7 +120,7 @@ fn playlists_loaded_error_clears_loading() {
     app.library.playlists.set_loading(true);
     assert!(app.library.playlists.is_loading());
 
-    let _ = app.handle_playlists_loaded(Err("network error".to_string()), 0, None);
+    let _ = app.handle_playlists_loaded(Err("network error".to_string()), 0, None, false);
     assert!(
         !app.library.playlists.is_loading(),
         "loading flag should be cleared on error"

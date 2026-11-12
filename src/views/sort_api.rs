@@ -77,6 +77,7 @@ fn explicit_api_string(view: View, sort_mode: SortMode) -> Option<&'static str> 
         (V::Playlists, S::SongCount) => "songCount",
         (V::Playlists, S::Duration) => "duration",
         (V::Playlists, S::UpdatedAt) => "updatedAt",
+        (V::Playlists, S::Rating) => "rating",
 
         _ => return None,
     })
@@ -148,13 +149,34 @@ pub(crate) fn sort_modes_for_view(view: View) -> &'static [SortMode] {
             S::Comment,
         ],
         View::Genres => &[S::Name, S::AlbumCount, S::SongCount, S::Random],
-        View::Playlists => &[S::Name, S::SongCount, S::Duration, S::UpdatedAt, S::Random],
+        View::Playlists => playlist_sort_modes(true),
         View::Queue => &[],
         View::Radios => &[],
         // Harbour is not a slot-list view — no sort dropdown.
         View::Harbour => &[],
         View::Settings => &[],
         View::PlaylistEditor => &[],
+    }
+}
+
+/// The Playlists view's sort modes. Favorited and Rating need a server that
+/// stars and rates playlists (`ServerCaps::playlist_annotations`, Navidrome
+/// 0.64+): an older one has no annotation columns to sort by, so the list
+/// leaves both out there.
+pub(crate) fn playlist_sort_modes(annotations: bool) -> &'static [SortMode] {
+    use SortMode as S;
+    if annotations {
+        &[
+            S::Name,
+            S::Favorited,
+            S::SongCount,
+            S::Duration,
+            S::UpdatedAt,
+            S::Rating,
+            S::Random,
+        ]
+    } else {
+        &[S::Name, S::SongCount, S::Duration, S::UpdatedAt, S::Random]
     }
 }
 
@@ -175,6 +197,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A server that doesn't star playlists is offered every other mode and
+    /// neither annotation sort.
+    #[test]
+    fn playlist_sorts_drop_favorited_and_rating_without_annotations() {
+        let with = playlist_sort_modes(true);
+        let without = playlist_sort_modes(false);
+        assert!(with.contains(&SortMode::Favorited) && with.contains(&SortMode::Rating));
+        assert!(!without.contains(&SortMode::Favorited));
+        assert!(!without.contains(&SortMode::Rating));
+        let kept: Vec<_> = with
+            .iter()
+            .filter(|m| !matches!(m, SortMode::Favorited | SortMode::Rating))
+            .collect();
+        assert_eq!(kept, without.iter().collect::<Vec<_>>());
     }
 
     #[test]

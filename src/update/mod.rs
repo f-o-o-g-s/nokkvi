@@ -224,12 +224,21 @@ impl Nokkvi {
                         // Derive the smart-playlist capability set from the
                         // same post-auth fetch (all-false on unparseable —
                         // conservative: feature-hidden).
-                        self.rules_editor.caps_state = crate::state::CapsState::Fetched(
-                            nokkvi_data::types::smart_criteria::ServerCaps::from_version_str(
-                                version,
-                            ),
+                        let caps = nokkvi_data::types::smart_criteria::ServerCaps::from_version_str(
+                            version,
                         );
+                        self.rules_editor.caps_state = crate::state::CapsState::Fetched(caps);
                         self.server_version = ver;
+                        // Playlist hearts, stars and their two sorts follow
+                        // the server (Navidrome 0.64+). A Favorited or
+                        // Rating sort kept from a newer server goes back to
+                        // Name, and the list loaded under it is reloaded.
+                        if self
+                            .playlists_page
+                            .set_annotations(caps.playlist_annotations)
+                        {
+                            return self.handle_load_playlists();
+                        }
                     }
                     None => {
                         // A transient failure must not silently hide the

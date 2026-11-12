@@ -125,6 +125,8 @@ fn seed_all(app: &mut crate::Nokkvi) {
     app.library
         .playlists
         .set_from_vec(vec![nokkvi_data::backend::playlists::PlaylistUIViewData {
+            is_starred: false,
+            rating: None,
             id: "p0".into(),
             name: "Playlist 0".into(),
             comment: String::new(),

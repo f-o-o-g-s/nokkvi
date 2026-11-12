@@ -461,6 +461,8 @@ pub enum HotkeyMessage {
     AlbumStarredStatusUpdated(String, bool),
     /// Update starred status locally for artist (artist_id, new_starred_status)
     ArtistStarredStatusUpdated(String, bool),
+    /// Update starred status locally for a playlist (playlist_id, new_starred_status)
+    PlaylistStarredStatusUpdated(String, bool),
 
     /// Add centered album/song to queue (Shift+A)
     AddToQueue,
@@ -481,6 +483,8 @@ pub enum HotkeyMessage {
     /// Update album rating locally (album_id, new_rating)
     AlbumRatingUpdated(String, u32),
     ArtistRatingUpdated(String, u32),
+    /// Update playlist rating locally (playlist_id, new_rating)
+    PlaylistRatingUpdated(String, u32),
     /// Expand/collapse center item inline (Shift+Enter)
     ExpandCenter,
     /// Move centered queue track up (Shift+↑)
@@ -1389,14 +1393,16 @@ pub enum GenresLoaderMessage {
 // --- Playlists Loader ------------------------------------------------------
 
 /// Playlists loader results — single-shot full-list response (playlists are
-/// not paged). `(result, total_count, replace)`; `replace` as on
-/// `AlbumsLoaderMessage::Loaded`.
+/// not paged). `(result, total_count, replace, background)`; `replace` as on
+/// `AlbumsLoaderMessage::Loaded`; `background` marks a reload the user
+/// didn't ask for, which keeps the viewport and the highlight on their row.
 #[derive(Debug, Clone)]
 pub enum PlaylistsLoaderMessage {
     Loaded(
         Result<Vec<nokkvi_data::backend::playlists::PlaylistUIViewData>, String>,
         usize,
         Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
+        bool,
     ),
 }
 

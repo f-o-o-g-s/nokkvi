@@ -229,6 +229,8 @@ fn picker_offset(app: &Nokkvi) -> Option<usize> {
 /// A playlist picker with one row under its Clear entry, so a step moves it.
 fn open_picker_with_a_row(app: &mut Nokkvi) {
     let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: "p1".to_string(),
         name: "One".to_string(),
         comment: String::new(),

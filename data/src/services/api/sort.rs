@@ -220,6 +220,12 @@ fn map_playlists(sort_mode: &str) -> &'static str {
         "songCount" => "song_count",
         "duration" => "duration",
         "updatedAt" => "updated_at",
+        // Navidrome 0.64+: the playlist query joins the user's annotations,
+        // so their columns sort like an album's. An older server has no
+        // such columns; the UI offers neither mode there
+        // (`ServerCaps::playlist_annotations`).
+        "favorited" => "starred_at",
+        "rating" => "rating",
         "random" => "name", // Random is handled client-side
         _ => "name",
     }
@@ -227,7 +233,7 @@ fn map_playlists(sort_mode: &str) -> &'static str {
 
 fn default_order_playlists(sort_mode: &str) -> &'static str {
     match sort_mode {
-        "songCount" | "duration" | "updatedAt" => "DESC",
+        "songCount" | "duration" | "updatedAt" | "favorited" | "rating" => "DESC",
         _ => "ASC",
     }
 }
@@ -291,6 +297,19 @@ mod tests {
     #[test]
     fn genres_most_played_falls_through_to_name() {
         assert_eq!(map_sort_mode(SortDomain::Genres, "mostPlayed"), "name");
+    }
+
+    /// Playlists sort by the user's star date and rating (Navidrome 0.64+),
+    /// newest / highest first by default, like albums.
+    #[test]
+    fn playlists_sort_by_star_date_and_rating() {
+        assert_eq!(
+            map_sort_mode(SortDomain::Playlists, "favorited"),
+            "starred_at"
+        );
+        assert_eq!(map_sort_mode(SortDomain::Playlists, "rating"), "rating");
+        assert_eq!(default_order(SortDomain::Playlists, "favorited"), "DESC");
+        assert_eq!(default_order(SortDomain::Playlists, "rating"), "DESC");
     }
 
     /// Playlists has no `mostPlayed` arm — falls through to wildcard which is `"name"`.

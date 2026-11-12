@@ -677,6 +677,13 @@ pub struct ServerCaps {
     /// Per-playlist `refreshDelay` (`model/criteria/criteria.go`). Shipped
     /// in v0.64.0 with the same commit; older servers drop the key. ≥0.64.0.
     pub per_playlist_refresh_delay: bool,
+    /// Playlists carry the user's star and rating: Subsonic `star` /
+    /// `unstar` / `setRating` take a playlist id, the native playlist JSON
+    /// returns `starred` / `rating`, and the list sorts and filters on
+    /// them (`model.Playlist` embeds `Annotations`). Shipped in v0.64.0;
+    /// an older server skips an unknown id on `star` and has no annotation
+    /// columns to sort by. ≥0.64.0.
+    pub playlist_annotations: bool,
 }
 
 impl ServerCaps {
@@ -694,6 +701,7 @@ impl ServerCaps {
             nullable_column_presence_ops: v >= (0, 63, 0),
             put_nils_evaluated_at: v >= (0, 64, 0),
             per_playlist_refresh_delay: v >= (0, 64, 0),
+            playlist_annotations: v >= (0, 64, 0),
         }
     }
 }
@@ -2719,6 +2727,17 @@ mod tests {
         assert_eq!(c.version, Some((0, 64, 0)));
         assert!(c.put_nils_evaluated_at);
         assert!(c.per_playlist_refresh_delay);
+    }
+
+    /// Playlist stars and ratings shipped in v0.64.0: off for every older
+    /// server and for a version that doesn't parse.
+    #[test]
+    fn server_caps_gate_playlist_annotations_at_064() {
+        assert!(ServerCaps::from_version_str("0.64.0").playlist_annotations);
+        assert!(ServerCaps::from_version_str("0.64.2 (10114574)").playlist_annotations);
+        assert!(!ServerCaps::from_version_str("0.63.2").playlist_annotations);
+        assert!(!ServerCaps::from_version_str("garbage").playlist_annotations);
+        assert!(!ServerCaps::default().playlist_annotations);
     }
 
     fn caps_064() -> ServerCaps {

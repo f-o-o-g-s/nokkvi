@@ -164,6 +164,8 @@ fn playlist_lib_row(
     is_smart: bool,
 ) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
     nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: id.to_string(),
         name: "Row".to_string(),
         comment: String::new(),
@@ -1022,6 +1024,8 @@ fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
     let mut app = test_app();
     let playlists: Vec<nokkvi_data::backend::playlists::PlaylistUIViewData> =
         vec![nokkvi_data::backend::playlists::PlaylistUIViewData {
+            is_starred: false,
+            rating: None,
             id: "p1".to_string(),
             name: "Playlist 1".to_string(),
             comment: String::new(),

@@ -174,8 +174,21 @@ impl Nokkvi {
         Task::batch([outcome, next_task])
     }
 
+    /// Load the list the user asked for (first visit, sort, search,
+    /// refresh): it lands at the top.
     pub(crate) fn handle_load_playlists(&mut self) -> Task<Message> {
-        debug!(" LoadPlaylists message received, loading playlists...");
+        self.load_playlists(false)
+    }
+
+    /// Reload the list behind the user's back (the server announced a
+    /// playlist change, or confirmed nokkvi's own star or rating): the
+    /// viewport and the highlight stay on their row.
+    pub(crate) fn reload_playlists_in_background(&mut self) -> Task<Message> {
+        self.load_playlists(true)
+    }
+
+    fn load_playlists(&mut self, background: bool) -> Task<Message> {
+        debug!(" Loading playlists (background: {background})...");
         let view_str = views::PlaylistsPage::sort_mode_to_api_string(
             self.playlists_page.common.current_sort_mode,
         );
@@ -224,6 +237,7 @@ impl Nokkvi {
                     result,
                     total_count,
                     replace,
+                    background,
                 ))
             },
         )
@@ -234,9 +248,15 @@ impl Nokkvi {
         result: Result<Vec<PlaylistUIViewData>, String>,
         total_count: usize,
         replace: Option<nokkvi_data::types::paged_buffer::ReplaceTicket>,
+        background: bool,
     ) -> Task<Message> {
-        let task =
-            self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None, replace);
+        let task = self.handle_loaded_with::<PlaylistsTarget>(
+            result,
+            total_count,
+            background,
+            None,
+            replace,
+        );
         // The restored banner context can be stale (persisted at last play);
         // re-sync it against the freshly loaded metadata so count / duration /
         // updated-date / visibility always reflect the server.
@@ -244,6 +264,85 @@ impl Nokkvi {
         // The row says whether the active playlist has an uploaded cover; the
         // viewport prefetch only covers the rows on screen.
         Task::batch([task, self.prefetch_active_playlist_custom_cover()])
+    }
+
+    /// Load the artwork of the playlist rows on screen: the full collage
+    /// for the playlist at `center_index` (an index into the playlist
+    /// buffer, the row the artwork panel shows), a mini for every other
+    /// visible row, plus their quad tiles and custom covers.
+    pub(crate) fn load_playlist_viewport_artwork(&mut self, center_index: usize) -> Task<Message> {
+        use crate::services::collage_artwork::{self, CollageArtworkContext};
+
+        let Some(shell) = &self.app_service else {
+            return Task::none();
+        };
+        let total = self.library.playlists.len();
+        if total == 0 {
+            return Task::none();
+        }
+
+        // Centered playlist gets the full collage fetch (mini +
+        // 9 tiles for the right-side panel); every other visible
+        // slot only renders a mini in its slot row.
+        let center_id = self
+            .library
+            .playlists
+            .get(center_index)
+            .map(|p| p.id.clone());
+
+        let ctx = CollageArtworkContext {
+            slot_list: &self.playlists_page.common.slot_list,
+            pending_ids: &self.artwork.playlist.pending,
+            memory_artwork: &self.artwork.playlist.mini.snapshot,
+            memory_collage: &self.artwork.playlist.collage.snapshot,
+        };
+
+        let (pending_inserts, mut tasks) = collage_artwork::load_visible_artwork(
+            &self.library.playlists,
+            &ctx,
+            shell.auth().clone(),
+            center_id.as_deref(),
+            |a, b, c, d| {
+                Message::Artwork(ArtworkMessage::LoadCollage(
+                    CollageTarget::Playlist,
+                    a,
+                    b,
+                    c,
+                    d,
+                ))
+            },
+            |a, b, c, d| {
+                Message::Artwork(ArtworkMessage::LoadCollageMini(
+                    CollageTarget::Playlist,
+                    a,
+                    b,
+                    c,
+                    d,
+                ))
+            },
+        );
+
+        for id in pending_inserts {
+            self.artwork.playlist.pending.insert(id);
+        }
+
+        // Row 2×2 quads source their tiles from the shared 80px
+        // album_art cache — warm the viewport's tile ids in the
+        // same pass (dedup-gated, so warm viewports add nothing).
+        tasks.extend(self.quad_prefetch_tasks(CollageTarget::Playlist));
+
+        // Custom (user-uploaded) covers: warm the viewport's
+        // minis, plus the centered playlist's large panel image
+        // (the handler gates on the live uploaded_image field,
+        // so this is a no-op for collage playlists).
+        tasks.push(self.prefetch_playlist_custom_art_tasks());
+        if let Some(id) = center_id {
+            tasks.push(Task::done(Message::Artwork(
+                ArtworkMessage::LoadPlaylistCustomLarge(id),
+            )));
+        }
+
+        Task::batch(tasks)
     }
 
     /// Refresh `active_playlist_info` from the freshly loaded playlists list.
@@ -417,85 +516,21 @@ impl Nokkvi {
             }
 
             views::PlaylistsAction::LoadArtwork(playlist_index_str) => {
-                // Load artwork for all visible slot list slots using collage artwork service
-                use crate::services::collage_artwork::{self, CollageArtworkContext};
-
-                if let Ok(center_index) = playlist_index_str.parse::<usize>()
-                    && let Some(shell) = &self.app_service
-                {
-                    let total = self.library.playlists.len();
-                    if total == 0 {
-                        return Task::none();
-                    }
-
-                    // Centered playlist gets the full collage fetch (mini +
-                    // 9 tiles for the right-side panel); every other visible
-                    // slot only renders a mini in its slot row.
-                    let center_id = self
-                        .library
-                        .playlists
-                        .get(center_index)
-                        .map(|p| p.id.clone());
-
-                    let ctx = CollageArtworkContext {
-                        slot_list: &self.playlists_page.common.slot_list,
-                        pending_ids: &self.artwork.playlist.pending,
-                        memory_artwork: &self.artwork.playlist.mini.snapshot,
-                        memory_collage: &self.artwork.playlist.collage.snapshot,
-                    };
-
-                    let (pending_inserts, mut tasks) = collage_artwork::load_visible_artwork(
-                        &self.library.playlists,
-                        &ctx,
-                        shell.auth().clone(),
-                        center_id.as_deref(),
-                        |a, b, c, d| {
-                            Message::Artwork(ArtworkMessage::LoadCollage(
-                                CollageTarget::Playlist,
-                                a,
-                                b,
-                                c,
-                                d,
-                            ))
-                        },
-                        |a, b, c, d| {
-                            Message::Artwork(ArtworkMessage::LoadCollageMini(
-                                CollageTarget::Playlist,
-                                a,
-                                b,
-                                c,
-                                d,
-                            ))
-                        },
-                    );
-
-                    for id in pending_inserts {
-                        self.artwork.playlist.pending.insert(id);
-                    }
-
-                    // Row 2×2 quads source their tiles from the shared 80px
-                    // album_art cache — warm the viewport's tile ids in the
-                    // same pass (dedup-gated, so warm viewports add nothing).
-                    tasks.extend(self.quad_prefetch_tasks(CollageTarget::Playlist));
-
-                    // Custom (user-uploaded) covers: warm the viewport's
-                    // minis, plus the centered playlist's large panel image
-                    // (the handler gates on the live uploaded_image field,
-                    // so this is a no-op for collage playlists).
-                    tasks.push(self.prefetch_playlist_custom_art_tasks());
-                    if let Some(id) = center_id {
-                        tasks.push(Task::done(Message::Artwork(
-                            ArtworkMessage::LoadPlaylistCustomLarge(id),
-                        )));
-                    }
-
-                    if !tasks.is_empty() {
-                        return Task::batch(tasks);
-                    }
+                if let Ok(center_index) = playlist_index_str.parse::<usize>() {
+                    return self.load_playlist_viewport_artwork(center_index);
                 }
             }
             PlaylistsAction::ToggleStar(item_id, kind, star) => {
                 return self.toggle_star_with_revert_task(item_id, kind, star);
+            }
+            PlaylistsAction::SetRating(item_id, kind, new_rating) => {
+                let current = Self::find_current_rating(
+                    &self.library.playlists,
+                    &item_id,
+                    |p| &p.id,
+                    |p| p.rating,
+                );
+                return self.set_item_rating_task(item_id, kind, new_rating, current);
             }
             PlaylistsAction::PlayNextBatch(payload) => {
                 return self.play_next_batch_task(payload);
@@ -740,8 +775,8 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::app_message::PlaylistsLoaderMessage;
         match msg {
-            PlaylistsLoaderMessage::Loaded(result, total_count, replace) => {
-                self.handle_playlists_loaded(result, total_count, replace)
+            PlaylistsLoaderMessage::Loaded(result, total_count, replace, background) => {
+                self.handle_playlists_loaded(result, total_count, replace, background)
             }
         }
     }

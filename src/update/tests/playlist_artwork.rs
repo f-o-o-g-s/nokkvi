@@ -17,6 +17,8 @@ fn handle(bytes: &[u8]) -> image::Handle {
 
 fn make_playlist(id: &str, name: &str, uploaded: bool) -> PlaylistUIViewData {
     PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: id.to_string(),
         name: name.to_string(),
         comment: String::new(),

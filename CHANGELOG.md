@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
 - Albums under Appears On name their own artist.
 - Settings → General has Group Artist Albums by Release Type, on by default; off shows an expanded artist's albums as one list, newest first.
 - Get Info on an album shows its version, like Deluxe Edition, and its record label when the tags carry them.
+- Playlist rows have a clickable heart and star rating on Navidrome 0.64 or newer, like album rows.
+- The star and rating keys work on a focused playlist row.
+- The Playlists view sorts by Favorited and by Rating.
+- The Playlists columns menu has Stars and Love toggles; Stars is off by default and shows under a Rating sort.
+- The playlist artwork panel shows Favorited and the rating.
 
 ### Changed
 
@@ -30,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Dragging a row to the queue from under an expanded album, artist or genre now shows that row on the drag label.
 - A slow album or track load no longer re-opens a row you already closed, or replaces the row you opened after it.
 - Switching between Albums and the Queue no longer downloads the same album thumbnails again each time.
+- The Playlists list no longer jumps back to the top when a playlist changes on the server.
 
 ### Removed
 

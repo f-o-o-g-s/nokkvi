@@ -33,19 +33,29 @@ pub struct PlaylistsPage {
     pub expansion: ExpansionState<SongUIViewData>,
     /// Per-column visibility toggles surfaced via the columns-cog dropdown.
     pub column_visibility: PlaylistsColumnVisibility,
+    /// Whether the server stars and rates playlists
+    /// (`ServerCaps::playlist_annotations`, Navidrome 0.64+), set when the
+    /// server version lands. Off, the page offers no heart, no stars, and
+    /// neither the Favorited nor the Rating sort: an older server ignores
+    /// the write and has no such columns to sort by.
+    pub annotations: bool,
 }
 
 // Toggleable playlists columns. The playlist name (title) is always shown;
-// SongCount/Duration/UpdatedAt also auto-show when their matching sort mode
-// is active regardless of the user toggle (see view::playlists_*_visible).
+// SongCount/Duration/UpdatedAt/Stars also auto-show when their matching sort
+// mode is active regardless of the user toggle (see view::playlists_*_visible).
+// Stars and Love draw only where the server rates and stars playlists
+// (`PlaylistsPage::annotations`).
 super::define_view_columns! {
     PlaylistsColumn => PlaylistsColumnVisibility {
         Select("Select"): select = false => set_playlists_show_select @ playlists_show_select,
         Index("Index"): index = true => set_playlists_show_index @ playlists_show_index,
         Thumbnail("Thumbnail"): thumbnail = true => set_playlists_show_thumbnail @ playlists_show_thumbnail,
+        Stars("Stars"): stars = false => set_playlists_show_stars @ playlists_show_stars,
         SongCount("Song count"): songcount = false => set_playlists_show_songcount @ playlists_show_songcount,
         Duration("Duration"): duration = false => set_playlists_show_duration @ playlists_show_duration,
         UpdatedAt("Updated at"): updatedat = false => set_playlists_show_updatedat @ playlists_show_updatedat,
+        Love("Love"): love = true => set_playlists_show_love @ playlists_show_love,
     }
 }
 
@@ -138,8 +148,9 @@ pub enum PlaylistsMessage {
     // Slot list navigation (wrapped carrier — 10 variants, no CenterOnPlaying for Playlists)
     SlotList(crate::widgets::SlotListPageMessage),
 
-    // Mouse click on heart
-    ClickToggleStar(usize), // item_index
+    // Mouse click on star/heart (item_index, value)
+    ClickSetRating(usize, usize), // (item_index, rating 1-5), playlist rows
+    ClickToggleStar(usize),       // item_index
 
     // Context menu (shared library entries for child tracks)
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
@@ -228,6 +239,8 @@ pub enum PlaylistsAction {
     SortOrderChanged(bool), // trigger reload
     RefreshViewData,        // trigger reload
     ToggleStar(String, ItemKind, bool), // (item_id, kind, starred)
+    /// Set an absolute rating on a playlist row (item_id, kind, rating).
+    SetRating(String, ItemKind, usize),
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     DeletePlaylist(String),                     // playlist_id
     RenamePlaylist(String),                     // playlist_id — triggers rename flow
@@ -296,6 +309,7 @@ impl Default for PlaylistsPage {
             ),
             expansion: ExpansionState::default(),
             column_visibility: PlaylistsColumnVisibility::default(),
+            annotations: false,
         }
     }
 }
@@ -303,6 +317,25 @@ impl Default for PlaylistsPage {
 impl PlaylistsPage {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The sort modes this server can serve: all of them where it stars and
+    /// rates playlists, else the list without Favorited and Rating.
+    pub fn sort_modes(&self) -> &'static [SortMode] {
+        super::sort_api::playlist_sort_modes(self.annotations)
+    }
+
+    /// Take the server's answer on starring and rating playlists. Returns
+    /// `true` when that left the page on a sort the server can't serve, now
+    /// put back on Name: the caller reloads the list.
+    pub fn set_annotations(&mut self, available: bool) -> bool {
+        self.annotations = available;
+        let stranded = !self.sort_modes().contains(&self.common.current_sort_mode);
+        if stranded {
+            self.common.current_sort_mode = SortMode::Name;
+            self.common.sort_ascending = true;
+        }
+        stranded
     }
 
     /// Convert sort mode to API string for server requests.
@@ -338,7 +371,7 @@ impl super::ViewPage for PlaylistsPage {
     }
 
     fn sort_mode_options(&self) -> Option<&'static [SortMode]> {
-        Some(super::sort_api::sort_modes_for_view(crate::View::Playlists))
+        Some(self.sort_modes())
     }
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
         Some(Message::Playlists(PlaylistsMessage::SortModeSelected(mode)))

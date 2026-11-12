@@ -474,7 +474,7 @@ impl TomlSettings {
     /// Composition: start from default TOML, apply each tab's macro-emitted
     /// `write_<tab>_toml` (whose `write:`/copy-only closures cover every
     /// user-facing key), then the consolidated `write_columns_tab_toml`
-    /// (all 55 column-visibility booleans, including `queue_show_genre` and
+    /// (all 57 column-visibility booleans, including `queue_show_genre` and
     /// `songs_show_genre` that the legacy hand-written body silently
     /// omitted).
     ///
@@ -509,7 +509,7 @@ impl TomlSettings {
         crate::services::settings_tables::write_playback_tab_toml(ps, &mut ts);
 
         // Consolidated view-column writer (define_settings! `view_columns:`
-        // clause) — all 55 column booleans across the 7 slot-list views + the
+        // clause) — all 57 column booleans across the 7 slot-list views + the
         // rules preview.
         crate::services::settings_tables::write_columns_tab_toml(ps, &mut ts);
 
@@ -698,7 +698,7 @@ mod tests {
         assert!(!parsed.view_columns.artists_show_love);
     }
 
-    /// True for the 55 per-view column-visibility keys (`<view>_show_<col>`).
+    /// True for the 57 per-view column-visibility keys (`<view>_show_<col>`).
     /// `queue_show_default_playlist` (the header chip) is NOT a column; the
     /// `strip_show_*` / `mini_player_show_*` / `*_artwork_overlay` toggles
     /// don't carry a view prefix and never match.
@@ -736,7 +736,7 @@ mod tests {
             "column toggles must not nest under a view_columns table, got:\n{toml_str}"
         );
 
-        // The sparse writer prunes the toml::Value table form — the 55
+        // The sparse writer prunes the toml::Value table form — the 57
         // column keys must stay top-level there too, or pruning would stop
         // seeing them and verbose/sparse round-trips would drift.
         let v = toml::Value::try_from(TomlSettings::default()).expect("to toml::Value");
@@ -752,8 +752,8 @@ mod tests {
             .collect();
         assert_eq!(
             column_keys.len(),
-            55,
-            "expected the 55 per-view column keys at the top level, got {column_keys:?}"
+            57,
+            "expected the 57 per-view column keys at the top level, got {column_keys:?}"
         );
     }
 

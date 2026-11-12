@@ -531,6 +531,8 @@ fn picker_nav_key_passes_through_when_picker_open() {
     // Seed the picker with a playlist so its filtered list has a "Clear" entry
     // plus a row — enough for SlotListDown to advance the offset.
     let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        is_starred: false,
+        rating: None,
         id: "p1".to_string(),
         name: "One".to_string(),
         comment: String::new(),
@@ -734,7 +736,7 @@ fn genres_and_playlists_loaded_unauthorized_trigger_logout() {
 
     let mut app = test_app();
     app.screen = crate::Screen::Home;
-    let _ = app.handle_playlists_loaded(Err(err()), 0, None);
+    let _ = app.handle_playlists_loaded(Err(err()), 0, None, false);
     assert_eq!(app.screen, crate::Screen::Login, "playlists");
 }
 
@@ -782,6 +784,7 @@ fn a_failed_genres_or_playlists_load_keeps_the_rows_and_toasts() {
         Err("API GET /api/playlist failed with status 500: boom".into()),
         0,
         None,
+        false,
     );
     assert_eq!(app.library.playlists.len(), 1, "the playlist rows stay");
     assert_eq!(app.library.counts.playlists, 1);
