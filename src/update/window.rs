@@ -290,15 +290,9 @@ impl Nokkvi {
             }
             View::Artists => {
                 let artist_id = self.centred_artist_id()?;
-                // A roulette spin sweeps past dozens of artists; asking the
-                // server about each would run its agents for every one. The
-                // spin plays its pick, and the next centring asks.
-                if self.roulette.is_some() {
-                    if self.artwork.large_artwork.peek(&artist_id).is_some() {
-                        return None;
-                    }
-                    return Some(self.handle_load_artist_large_artwork(artist_id));
-                }
+                // The art, and the info settle. A roulette spin asks about
+                // none of the artists it sweeps past (`artist_info_wanted`):
+                // it plays its pick, and the next centring asks.
                 Some(self.artist_center_tasks(artist_id))
             }
             // Shared with the `RadiosAction::None` browse arm so both center-load

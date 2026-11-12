@@ -41,6 +41,8 @@ All notable changes to this project will be documented in this file.
 - The Playlists list no longer jumps back to the top when a playlist changes on the server.
 - The Albums artwork panel no longer repeats the year, like "2003 (2003)", for an album with no original date.
 - The Albums artwork panel no longer reads "0 (2021)" for an album tagged with only a year.
+- Launching nokkvi no longer asks the server, ListenBrainz and Deezer about the first artist in the Artists list before that view is opened.
+- A roulette spin in Artists no longer looks up the artists it passes when the list reloads mid-spin.
 
 ### Removed
 

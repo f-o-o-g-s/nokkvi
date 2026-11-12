@@ -15,6 +15,17 @@ use crate::{
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
 
+/// Whether each ask about a centred row is wanted
+/// ([`Nokkvi::centred_asks_wanted`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CentredAsks {
+    /// The Albums view's album notes ([`Nokkvi::album_notes_wanted`]).
+    album_notes: bool,
+    /// The Artists view's biography and similar artists
+    /// ([`Nokkvi::artist_info_wanted`]).
+    artist_info: bool,
+}
+
 impl Nokkvi {
     /// The album whose cover the Albums view's panel shows: the effective
     /// centre (a clicked row's highlight, else the viewport centre), with a
@@ -53,34 +64,67 @@ impl Nokkvi {
         )
     }
 
-    /// Whether the centred album's notes are wanted now, the one gate on
-    /// asking the server about it. An ask makes the server run its agents
-    /// and tell every client, which reloads their Albums lists, so it is
-    /// made only for an album whose panel text someone can read:
+    /// Whether the row `view`'s list centres may be asked about on the
+    /// server now: the part of the gate the Albums and Artists views share
+    /// ([`Self::album_notes_wanted`], [`Self::artist_info_wanted`]). An ask
+    /// makes the server run its metadata agents and tell every client, which
+    /// reloads their lists, so it is made only for a row someone is looking
+    /// at and has stopped on:
     ///
-    /// - the Albums panel shows text (Text Overlay On Artwork);
     /// - the list is on screen: the current view, or the split view's active
     ///   tab, and not behind Theater Mode. It also loads at login behind the
     ///   start view and reloads in the background under any view;
     /// - no roulette spin is sweeping it, and no find-and-expand chain is
-    ///   paging through it: either centres albums in passing, and the reload
-    ///   an answer's broadcast triggers would feed a spin its next album or
+    ///   paging through it: either centres rows in passing, and the reload
+    ///   an answer's broadcast triggers would feed a spin its next row or
     ///   throw away the pages a chain has loaded.
     ///
-    /// The root `update` watches this for the moment it turns true
-    /// ([`Self::album_notes_now_wanted_task`]).
-    pub(crate) fn album_notes_wanted(&self) -> bool {
-        self.settings.albums_artwork_overlay
-            && !self.theater.active
-            && self.panel_art_steered(Some(View::Albums))
+    /// A new reason to hold these asks back goes here.
+    pub(crate) fn centred_ask_allowed(&self, view: View) -> bool {
+        !self.theater.active
+            && self.panel_art_steered(Some(view))
             && self.roulette.is_none()
             && self.pending_expand.target.is_none()
     }
 
-    /// The centred album's notes just became wanted (the view or the
-    /// browsing tab switched to Albums, the split view opened on it, Theater
-    /// Mode ended, a spin or a find chain finished): it was not asked about
-    /// while they were not, and nothing else centres it again.
+    /// Which of the centred-row asks are wanted now. The root `update` reads
+    /// it before and after every message ([`Self::newly_wanted_asks_task`]).
+    pub(crate) fn centred_asks_wanted(&self) -> CentredAsks {
+        CentredAsks {
+            album_notes: self.album_notes_wanted(),
+            artist_info: self.artist_info_wanted(),
+        }
+    }
+
+    /// Centre the album and the artist whose ask turned from unwanted
+    /// (`before`) to wanted during a message: the view or the browsing tab
+    /// switched to its list, the split view opened on it, Theater Mode
+    /// ended, a spin or a find chain finished, the Albums text overlay was
+    /// switched on. The row was not asked about while it could not be, and
+    /// nothing else centres it again, so no such route needs a hook of its
+    /// own. `None` when neither turned on.
+    pub(crate) fn newly_wanted_asks_task(&mut self, before: CentredAsks) -> Option<Task<Message>> {
+        let now = self.centred_asks_wanted();
+        let albums =
+            (now.album_notes && !before.album_notes).then(|| self.album_notes_now_wanted_task());
+        let artists =
+            (now.artist_info && !before.artist_info).then(|| self.artist_info_now_wanted_task());
+        match (albums, artists) {
+            (None, None) => None,
+            (albums, artists) => Some(Task::batch(albums.into_iter().chain(artists))),
+        }
+    }
+
+    /// Whether the centred album's notes are wanted now, the one gate on
+    /// asking the server about it: the Albums panel shows text (Text Overlay
+    /// On Artwork), so there is somewhere to read them, and the album is on
+    /// screen and stopped on ([`Self::centred_ask_allowed`]).
+    pub(crate) fn album_notes_wanted(&self) -> bool {
+        self.settings.albums_artwork_overlay && self.centred_ask_allowed(View::Albums)
+    }
+
+    /// The centred album's notes just became wanted
+    /// ([`Self::newly_wanted_asks_task`]): start its settle timer.
     pub(crate) fn album_notes_now_wanted_task(&mut self) -> Task<Message> {
         match self.centred_album_id() {
             Some(album_id) => self.album_info_settle_task(album_id),
@@ -118,7 +162,8 @@ impl Nokkvi {
 
     /// An album's settle timer fired: ask for its info if it is still the
     /// album centred last and its notes are still wanted (when they are
-    /// wanted again, the root `update` centres it again).
+    /// wanted again, the root `update` centres it again:
+    /// [`Self::newly_wanted_asks_task`]).
     pub(crate) fn handle_album_info_settled(&mut self, album_id: String) -> Task<Message> {
         if self.album_info.settled(&album_id) && self.album_notes_wanted() {
             self.album_info_task(album_id)

@@ -11,17 +11,18 @@ use nokkvi_data::types::{
 };
 
 use crate::{
-    Nokkvi,
-    app_message::{ArtistsLoaderMessage, Message},
+    Nokkvi, View,
+    app_message::{ArtistsLoaderMessage, Message, NavigationMessage},
     test_helpers::*,
     views::{ArtistsAction, ArtistsMessage},
     widgets::SlotListPageMessage,
 };
 
-/// An app with `count` artists, each tagged with a MusicBrainz id when
-/// `tagged`.
+/// An app on the Artists view with `count` artists, each tagged with a
+/// MusicBrainz id when `tagged`.
 fn app_with_artists(count: usize, tagged: bool) -> Nokkvi {
     let mut app = test_app();
+    app.current_view = View::Artists;
     app.library.artists.set_from_vec(
         (0..count)
             .map(|i| {
@@ -382,6 +383,9 @@ fn the_lists_show_with_only_deezer_on() {
 fn a_change_of_sources_drops_the_lists_and_asks_again() {
     let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = app_with_artists(20, true);
+    // A running app: its first settings load, which also moves to the start
+    // view, is behind it. The user stays on Artists throughout.
+    app.start_view_applied = true;
     let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
     app.artist_recs.settle_with(&centred, vec![rec("Muse")]);
     app.artist_recs.settle_with("a9", vec![rec("Blur")]);
@@ -401,6 +405,74 @@ fn a_change_of_sources_drops_the_lists_and_asks_again() {
     assert!(
         app.artist_recs.is_pending(&centred),
         "the centred artist is asked again"
+    );
+}
+
+/// ListenBrainz and Deezer are not asked about an artist nobody is looking
+/// at: the Artists list loads at login behind the start view, and each
+/// similar-artists ask sends the artist's MusicBrainz id or name to them.
+#[test]
+fn similar_artists_are_not_asked_for_behind_another_view() {
+    let mut app = app_with_artists(20, true);
+    app.current_view = View::Queue;
+    let _ = app.artist_center_tasks("a0".to_string());
+    app.current_view = View::Artists;
+    settle(&mut app, "a0");
+    assert!(!app.artist_recs.is_pending("a0"));
+}
+
+/// An artist centred just before the user left Artists is not sent to
+/// ListenBrainz or Deezer once they are gone.
+#[test]
+fn leaving_artists_before_the_centre_settles_asks_for_no_similar_artists() {
+    let mut app = app_with_artists(20, true);
+    let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    app.current_view = View::Queue;
+    settle(&mut app, &centred);
+    assert!(!app.artist_recs.is_pending(&centred));
+}
+
+/// Opening the Artists view asks for its centred artist's similar artists.
+#[test]
+fn opening_the_artists_view_asks_for_the_centred_artists_similar_artists() {
+    let mut app = app_with_artists(20, true);
+    app.current_view = View::Queue;
+    let centred = app.centred_artist_id().expect("an artist is centred");
+    let _ = app.update(Message::Navigation(NavigationMessage::SwitchView(
+        View::Artists,
+    )));
+    settle(&mut app, &centred);
+    assert!(app.artist_recs.is_pending(&centred));
+}
+
+/// A change of sources made in Settings drops the old lists at once, but the
+/// centred artist is asked about only when the Artists view is back in front.
+#[test]
+fn a_change_of_sources_behind_another_view_asks_once_artists_is_opened() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = app_with_artists(20, true);
+    app.start_view_applied = true;
+    let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    app.artist_recs.settle_with(&centred, vec![rec("Muse")]);
+
+    app.current_view = View::Settings;
+    let mut deezer_off = app.settings.clone();
+    deezer_off.similar_artists_deezer = false;
+    let _ = app.handle_player_settings_loaded(deezer_off);
+    assert_eq!(cached_names(&app, &centred), None, "the old mix is dropped");
+    assert_eq!(app.current_view, View::Settings);
+    assert!(
+        !app.artist_recs.is_pending(&centred),
+        "nothing is asked behind Settings"
+    );
+
+    let _ = app.update(Message::Navigation(NavigationMessage::SwitchView(
+        View::Artists,
+    )));
+    settle(&mut app, &centred);
+    assert!(
+        app.artist_recs.is_pending(&centred),
+        "asked once the artist can be seen"
     );
 }
 

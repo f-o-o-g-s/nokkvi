@@ -5,15 +5,17 @@
 use nokkvi_data::types::{artist::ArtistInfo, error::NokkviError};
 
 use crate::{
-    Nokkvi,
-    app_message::{ArtistsLoaderMessage, Message},
+    Nokkvi, View,
+    app_message::{ArtistsLoaderMessage, Message, NavigationMessage},
     test_helpers::*,
     views::ArtistsMessage,
     widgets::SlotListPageMessage,
 };
 
+/// An app on the Artists view, with `count` artists.
 fn app_with_artists(count: usize) -> Nokkvi {
     let mut app = test_app();
+    app.current_view = View::Artists;
     app.library.artists.set_from_vec(
         (0..count)
             .map(|i| make_artist(&format!("a{i}"), &format!("Artist {i}")))
@@ -236,6 +238,185 @@ fn a_rejected_session_routes_to_login() {
         ),
         "got: {msg:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Only an artist on screen is asked about
+// ---------------------------------------------------------------------------
+
+/// The same app with the Queue in front of the loaded Artists list.
+fn app_on_the_queue(count: usize) -> Nokkvi {
+    let mut app = app_with_artists(count);
+    app.current_view = View::Queue;
+    app
+}
+
+/// What every centring path runs for the artist it centred: a list load (at
+/// login, or a background reload), a row step, an expand.
+fn centre(app: &mut Nokkvi, id: &str) {
+    let _ = app.artist_center_tasks(id.to_string());
+}
+
+/// The Artists list loads at login behind the start view and reloads in the
+/// background under any view. An ask makes the server run its agents and
+/// tell every client, and the similar-artists ask goes to ListenBrainz and
+/// Deezer, so an artist nobody is looking at is not asked about: its load
+/// starts no timer, so none can fire once the list is on screen.
+#[test]
+fn an_artist_centred_behind_another_view_is_not_asked_about() {
+    let mut app = app_on_the_queue(20);
+    centre(&mut app, "a0");
+    app.current_view = View::Artists;
+    settle(&mut app, "a0");
+    assert!(!app.artist_info.is_pending("a0"));
+}
+
+/// Opening the Artists view shows its centred artist's panel, so that artist
+/// is asked about without a row step.
+#[test]
+fn opening_the_artists_view_asks_about_its_centred_artist() {
+    let mut app = app_on_the_queue(20);
+    let centred = app.centred_artist_id().expect("an artist is centred");
+
+    let _ = app.update(Message::Navigation(NavigationMessage::SwitchView(
+        View::Artists,
+    )));
+    assert_eq!(app.current_view, View::Artists);
+    settle(&mut app, &centred);
+    assert!(app.artist_info.is_pending(&centred));
+}
+
+/// So does switching the split view's browsing pane to its Artists tab: the
+/// list is loaded already, so nothing else centres it.
+#[test]
+fn switching_the_browsing_pane_to_artists_asks_about_its_centred_artist() {
+    let mut app = app_on_the_queue(20);
+    let centred = app.centred_artist_id().expect("an artist is centred");
+    let mut panel = crate::views::BrowsingPanel::new();
+    panel.active_view = crate::views::BrowsingView::Songs;
+    app.browsing_panel = Some(panel);
+    assert!(app.split_view_active());
+
+    let _ = app.update(Message::BrowsingPanel(
+        crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Artists),
+    ));
+    settle(&mut app, &centred);
+    assert!(app.artist_info.is_pending(&centred));
+}
+
+/// A step in that tab asks too, though the current view is the Queue.
+#[test]
+fn a_step_in_the_browsing_panes_artists_tab_asks() {
+    let mut app = app_on_the_queue(20);
+    let mut panel = crate::views::BrowsingPanel::new();
+    panel.active_view = crate::views::BrowsingView::Artists;
+    app.browsing_panel = Some(panel);
+    assert!(app.split_view_active());
+
+    let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    settle(&mut app, &centred);
+    assert!(app.artist_info.is_pending(&centred));
+}
+
+/// An artist centred just before the user left Artists is not asked about
+/// once they are gone; coming back centres it again.
+#[test]
+fn leaving_artists_before_the_centre_settles_asks_nothing() {
+    let mut app = app_with_artists(20);
+    let centred = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    app.current_view = View::Queue;
+    settle(&mut app, &centred);
+    assert!(!app.artist_info.is_pending(&centred));
+}
+
+/// A roulette spin sweeps past dozens of artists. A reload landing mid-spin
+/// centres whichever is under the wheel, and a timer started just before the
+/// spin fires during it: neither asks, or each answer's broadcast would
+/// reload the list and ask about the next artist under the wheel.
+#[test]
+fn a_spin_asks_about_no_artist() {
+    let mut app = app_with_artists(20);
+    let before_spin = navigate(&mut app, SlotListPageMessage::NavigateDown);
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Artists));
+    assert!(app.roulette.is_some());
+
+    settle(&mut app, &before_spin);
+    assert!(
+        !app.artist_info.is_pending(&before_spin),
+        "a timer from before the spin asks nothing"
+    );
+
+    centre(&mut app, "a7");
+    settle(&mut app, "a7");
+    assert!(
+        !app.artist_info.is_pending("a7"),
+        "a reload mid-spin asks nothing"
+    );
+}
+
+/// A find-and-expand chain pages through the list to its target with row 0
+/// centred. Asking about row 0 in passing would make the server broadcast a
+/// reload that throws away the pages the chain has loaded.
+#[test]
+fn a_find_and_expand_chain_asks_about_no_artist_in_passing() {
+    let mut app = app_with_artists(20);
+    arm_pending_artist(&mut app, "a400");
+    centre(&mut app, "a0");
+    settle(&mut app, "a0");
+    assert!(!app.artist_info.is_pending("a0"));
+}
+
+/// A chain that ends (here: called off by a search edit) leaves the list on
+/// whatever artist it centred; that artist is asked about then.
+#[test]
+fn the_artist_centred_when_a_find_chain_ends_is_asked_about() {
+    let mut app = app_with_artists(20);
+    arm_pending_artist(&mut app, "a400");
+    let centred = app.centred_artist_id().expect("an artist is centred");
+    centre(&mut app, &centred);
+
+    let _ = app.update(Message::Artists(ArtistsMessage::SearchQueryChanged(
+        "a".to_string(),
+    )));
+    assert!(app.pending_expand.target.is_none(), "the chain is over");
+    let centred = app.centred_artist_id().expect("an artist is centred");
+    settle(&mut app, &centred);
+    assert!(app.artist_info.is_pending(&centred));
+}
+
+/// The usual jump: a similar-artist chip or an artist link finds its artist
+/// in the loaded list and expands it. The artist it lands on is asked about.
+#[test]
+fn a_jump_to_an_artist_asks_about_the_artist_it_lands_on() {
+    let mut app = app_with_artists(0);
+    arm_pending_artist(&mut app, "ar5");
+    let _ = app.update(Message::ArtistsLoader(ArtistsLoaderMessage::Loaded {
+        result: Ok(artists_indexed(20)),
+        total_count: 20,
+        background: false,
+        anchor_id: None,
+        replace: None,
+    }));
+    assert!(
+        app.pending_expand.target.is_none(),
+        "the chain found its artist"
+    );
+
+    // The chain's last step, which the load dispatched.
+    let _ = app.update(Message::Artists(ArtistsMessage::FocusAndExpand(5)));
+    assert_eq!(app.centred_artist_id().as_deref(), Some("ar5"));
+    settle(&mut app, "ar5");
+    assert!(app.artist_info.is_pending("ar5"));
+}
+
+/// Theater Mode hides the list (the current view stays Artists behind it).
+#[test]
+fn theater_mode_asks_about_no_artist() {
+    let mut app = app_with_artists(20);
+    app.theater.active = true;
+    centre(&mut app, "a0");
+    settle(&mut app, "a0");
+    assert!(!app.artist_info.is_pending("a0"));
 }
 
 // ---------------------------------------------------------------------------
