@@ -207,7 +207,10 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_load_artist_large_artwork(&mut self, artist_id: String) -> Task<Message> {
-        if self.artwork.large_artwork.peek(&artist_id).is_some() {
+        // Shown already, or on its way onto the GPU (`large_staging`).
+        if self.artwork.large_artwork.peek(&artist_id).is_some()
+            || self.artwork.large_staging.contains_key(&artist_id)
+        {
             return Task::none();
         }
 

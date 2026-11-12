@@ -594,6 +594,15 @@ pub enum ArtworkMessage {
     Loaded(String, Option<String>, MiniArt),
     LargeLoaded(String, Option<image::Handle>),
     LargeArtistLoaded(String, Option<image::Handle>),
+    /// The full-size cover staged for `id` (`ArtworkState::large_staging`,
+    /// the handle `handle_id`) is on the GPU, `allocation` holding it there,
+    /// or with `None` could not be put there (a decode error, no window
+    /// open): either way the panel is given it now.
+    LargeStaged {
+        id: String,
+        handle_id: iced::advanced::image::Id,
+        allocation: Option<image::Allocation>,
+    },
     LoadLarge(String),
     /// A navigation step in `source`'s list (`None`: the Similar tab, as in
     /// `Nokkvi::current_target_view`) centred a row: its big panel cover is

@@ -953,8 +953,9 @@ fn large_artist_loaded_for_stale_id_preserves_active_marker() {
         "stale A completion must not clear B's in-flight marker",
     );
     assert!(
-        app.artwork.large_artwork.snapshot.contains_key("artist_a"),
-        "A's handle should still cache so the user sees it when they return",
+        app.artwork.large_staging.contains_key("artist_a"),
+        "A's cover is still kept (on its way onto the GPU, then into the \
+         cache) so the user sees it when they return",
     );
 }
 
@@ -975,8 +976,9 @@ fn large_artist_loaded_with_handle_clears_matching_marker_and_caches() {
         "happy-path completion clears the in-flight marker",
     );
     assert!(
-        app.artwork.large_artwork.snapshot.contains_key("artist_a"),
-        "happy-path completion populates the artwork cache",
+        app.artwork.large_staging.contains_key("artist_a"),
+        "happy-path completion keeps the cover: staged for the GPU first, \
+         then into the artwork cache (`handle_large_staged`)",
     );
 }
 

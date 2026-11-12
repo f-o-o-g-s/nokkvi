@@ -353,8 +353,23 @@ pub struct ArtworkState {
     /// ThumbHash changed is decoded again at its next claim. Reset on logout
     /// via `Default`.
     pub placeholders: SnapshottedLru<String, Placeholder>,
-    /// Large artwork cache for detail views (LRU-bounded).
+    /// Large artwork cache for detail views (LRU-bounded). A cover enters it
+    /// once it is on the GPU ([`Self::large_staging`]), so a panel that
+    /// reads it never draws a cover the renderer is still decoding.
     pub large_artwork: SnapshottedLru<String, image::Handle>,
+    /// Full-size covers whose bytes arrived and which are being decoded
+    /// onto the GPU (`image::allocate`), by album or artist id. The renderer
+    /// decodes a new image on a worker thread and draws nothing for it
+    /// meanwhile: handed to the panel at once, a cover left it empty for a
+    /// frame or more between the thumbnail and the cover. Staged, it stays
+    /// out of [`Self::large_artwork`], so the panel keeps the thumbnail
+    /// (`views::panel_cover`) until `Nokkvi::handle_large_staged` shows it.
+    pub large_staging: HashMap<String, image::Handle>,
+    /// The allocations of the covers shown most recently, which keep them
+    /// on the GPU: stepping back onto one draws it at once. Held within
+    /// [`READY_COVER_PIXEL_BUDGET`]; an older cover is decoded again when it
+    /// is next shown.
+    pub(crate) large_on_gpu: Budgeted<image::Allocation>,
     /// The Navidrome 0.64 image hash each large-art request carried
     /// (album/artist id -> hash), recorded when the load is dispatched and
     /// removed when a load carries no hash. A mini that later arrives at the
@@ -485,6 +500,83 @@ pub struct LyricsBlurredCover {
     pub allocations: Vec<image::Allocation>,
 }
 
+/// How many pixels of full-size covers are held on the GPU after they leave
+/// the screen ([`ArtworkState::large_on_gpu`]): 16 MP is 64 MB of RGBA,
+/// sixteen 1000 px covers or four 2000 px ones. A pixel budget rather than a
+/// count, because the Artwork Resolution setting goes up to the original.
+pub(crate) const READY_COVER_PIXEL_BUDGET: u64 = 16_000_000;
+
+/// Values held newest first within a size budget. The newest is always
+/// held, whatever its size.
+#[derive(Clone)]
+pub(crate) struct Budgeted<T> {
+    /// `(id, size, value)`, newest first.
+    held: std::collections::VecDeque<(String, u64, T)>,
+    budget: u64,
+}
+
+impl<T> Budgeted<T> {
+    pub(crate) fn new(budget: u64) -> Self {
+        Self {
+            held: std::collections::VecDeque::new(),
+            budget,
+        }
+    }
+
+    /// Hold `value` for `id` as the newest, in place of any older value for
+    /// that id, then let go of the oldest while the total is over budget.
+    pub(crate) fn hold(&mut self, id: String, size: u64, value: T) {
+        self.release(&id);
+        self.held.push_front((id, size, value));
+        while self.held.len() > 1 && self.total() > self.budget {
+            self.held.pop_back();
+        }
+    }
+
+    /// Mark `id` as the newest. Returns whether it is held.
+    pub(crate) fn touch(&mut self, id: &str) -> bool {
+        match self.held.iter().position(|(held, _, _)| held == id) {
+            Some(at) => {
+                if let Some(entry) = self.held.remove(at) {
+                    self.held.push_front(entry);
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Let go of `id`'s value.
+    pub(crate) fn release(&mut self, id: &str) {
+        self.held.retain(|(held, _, _)| held != id);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn holds(&self, id: &str) -> bool {
+        self.held.iter().any(|(held, _, _)| held == id)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    fn total(&self) -> u64 {
+        self.held.iter().map(|(_, size, _)| size).sum()
+    }
+}
+
+impl ArtworkState {
+    /// Forget `id`'s full-size cover wherever it is: shown, on its way onto
+    /// the GPU, or held there. For a cover that changed on the server or is
+    /// being refreshed; an allocation answer for the dropped cover finds
+    /// nothing staged and changes nothing.
+    pub(crate) fn drop_large_cover(&mut self, id: &str) {
+        self.large_artwork.pop(&id.to_string());
+        self.large_staging.remove(id);
+        self.large_on_gpu.release(id);
+    }
+}
+
 impl Default for ArtworkState {
     fn default() -> Self {
         Self {
@@ -494,6 +586,8 @@ impl Default for ArtworkState {
             failed_art: HashMap::new(),
             placeholders: SnapshottedLru::new(PLACEHOLDER_CACHE_CAPACITY),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
+            large_staging: HashMap::new(),
+            large_on_gpu: Budgeted::new(READY_COVER_PIXEL_BUDGET),
             large_artwork_hashes: HashMap::new(),
             large_artwork_pending: InFlight::default(),
             panel_gate: PanelArtGate::default(),
@@ -526,6 +620,8 @@ impl std::fmt::Debug for ArtworkState {
             .field("album_art", &self.album_art)
             .field("album_art_versions", &self.album_art_versions)
             .field("large_artwork", &self.large_artwork)
+            .field("large_staging", &self.large_staging.len())
+            .field("large_on_gpu", &self.large_on_gpu.len())
             .field("radio_art", &self.radio_art)
             .field("radio_large_art", &self.radio_large_art)
             .field("genre", &self.genre)
@@ -640,5 +736,57 @@ mod tests {
         gate.claim("b".into(), "v1".into());
         gate.forget("b");
         assert!(gate.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod budgeted_tests {
+    use super::Budgeted;
+
+    fn ids(held: &Budgeted<()>) -> Vec<&str> {
+        held.held.iter().map(|(id, _, _)| id.as_str()).collect()
+    }
+
+    #[test]
+    fn the_newest_values_are_held_within_the_budget() {
+        let mut held = Budgeted::new(10);
+        held.hold("a".into(), 4, ());
+        held.hold("b".into(), 4, ());
+        assert_eq!(ids(&held), ["b", "a"]);
+        held.hold("c".into(), 4, ());
+        assert_eq!(ids(&held), ["c", "b"], "the oldest gives way");
+        assert!(held.holds("b") && !held.holds("a"));
+    }
+
+    /// The cover on screen is never let go of, however large it is.
+    #[test]
+    fn the_newest_is_held_even_when_it_alone_is_over_budget() {
+        let mut held = Budgeted::new(10);
+        held.hold("a".into(), 4, ());
+        held.hold("huge".into(), 50, ());
+        assert_eq!(ids(&held), ["huge"]);
+    }
+
+    #[test]
+    fn a_touched_value_becomes_the_newest() {
+        let mut held = Budgeted::new(10);
+        held.hold("a".into(), 4, ());
+        held.hold("b".into(), 4, ());
+        assert!(held.touch("a"));
+        held.hold("c".into(), 4, ());
+        assert_eq!(ids(&held), ["c", "a"], "b was the oldest after the touch");
+        assert!(!held.touch("gone"));
+    }
+
+    #[test]
+    fn holding_an_id_again_replaces_its_value() {
+        let mut held = Budgeted::new(10);
+        held.hold("a".into(), 4, ());
+        held.hold("b".into(), 4, ());
+        held.hold("a".into(), 6, ());
+        assert_eq!(ids(&held), ["a", "b"]);
+        assert_eq!(held.len(), 2);
+        held.release("a");
+        assert_eq!(ids(&held), ["b"]);
     }
 }

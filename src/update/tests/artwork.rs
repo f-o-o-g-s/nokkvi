@@ -557,3 +557,131 @@ fn a_passive_surface_does_not_retry_a_cover_that_failed_at_a_hash() {
     assert!(!needs(&app, Some("hash-1")));
     assert!(needs(&app, Some("hash-2")), "a changed version asks again");
 }
+
+// ---------------------------------------------------------------------------
+// A full-size cover reaches the panel only once it is on the GPU
+// ---------------------------------------------------------------------------
+
+/// A cover: any handle will do, each with its own id.
+fn cover() -> iced::widget::image::Handle {
+    iced::widget::image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255])
+}
+
+fn shown(app: &crate::Nokkvi, id: &str) -> Option<iced::advanced::image::Id> {
+    app.artwork
+        .large_artwork
+        .peek(&id.to_string())
+        .map(iced::widget::image::Handle::id)
+}
+
+fn staged(app: &crate::Nokkvi, id: &str) -> Option<iced::advanced::image::Id> {
+    app.artwork
+        .large_staging
+        .get(id)
+        .map(iced::widget::image::Handle::id)
+}
+
+/// The renderer answers for the staged cover `handle`. A test cannot make an
+/// allocation, so this is the answer without one (a picture that would not
+/// decode, no window open): the panel is given the cover either way.
+fn staging_ends(app: &mut crate::Nokkvi, id: &str, handle: &iced::widget::image::Handle) {
+    let _ = app.dispatch_artwork(ArtworkMessage::LargeStaged {
+        id: id.to_string(),
+        handle_id: handle.id(),
+        allocation: None,
+    });
+}
+
+/// The renderer decodes a new image on a worker thread and draws nothing for
+/// it meanwhile. A cover handed to the panel the moment its bytes arrived
+/// left the panel empty for a frame or more, between the thumbnail and the
+/// cover. It now waits out of the panel's cache, so the thumbnail stays up.
+#[test]
+fn a_cover_that_just_arrived_is_staged_and_the_panel_keeps_the_thumbnail() {
+    let mut app = test_app();
+    let cover = cover();
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(cover.clone()));
+    assert_eq!(shown(&app, "a1"), None, "not in the panel's cache yet");
+    assert_eq!(staged(&app, "a1"), Some(cover.id()));
+
+    staging_ends(&mut app, "a1", &cover);
+    assert_eq!(shown(&app, "a1"), Some(cover.id()), "now the panel has it");
+    assert_eq!(staged(&app, "a1"), None);
+}
+
+/// A cover shown again while it was no longer held on the GPU is allocated
+/// again, and that answer arrives with nothing staged: it changes nothing.
+#[test]
+fn an_answer_with_nothing_staged_changes_nothing() {
+    let mut app = test_app();
+    let cover = cover();
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(cover.clone()));
+    staging_ends(&mut app, "a1", &cover);
+    staging_ends(&mut app, "a1", &cover);
+    assert_eq!(shown(&app, "a1"), Some(cover.id()));
+    assert_eq!(staged(&app, "a1"), None);
+}
+
+/// A cover that changed on the server, or is being refreshed, is dropped
+/// while it is staged: its answer must not put the old picture back. A newer
+/// cover staged under the same id is not shown by the older one's answer.
+#[test]
+fn an_answer_for_a_cover_no_longer_staged_shows_nothing() {
+    let mut app = test_app();
+    let old = cover();
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(old.clone()));
+    app.artwork.drop_large_cover("a1");
+    staging_ends(&mut app, "a1", &old);
+    assert_eq!(shown(&app, "a1"), None);
+
+    let new = cover();
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(old.clone()));
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(new.clone()));
+    staging_ends(&mut app, "a1", &old);
+    assert_eq!(shown(&app, "a1"), None, "the older cover's answer");
+    assert_eq!(staged(&app, "a1"), Some(new.id()));
+    staging_ends(&mut app, "a1", &new);
+    assert_eq!(shown(&app, "a1"), Some(new.id()));
+}
+
+/// While its cover is staged an album or artist is centred again and again
+/// (a held key, a reload): the bytes are here, so nothing is fetched.
+#[test]
+fn a_staged_cover_is_not_fetched_again() {
+    let mut app = test_app();
+    seed_albums(&mut app, vec![make_album("a1", "Album", "Artist")]);
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist")]);
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(cover()));
+    let _ = app.handle_large_artwork_loaded("ar1".into(), Some(cover()));
+
+    let _ = app.handle_load_large_artwork("a1".into());
+    assert_eq!(app.artwork.loading_large_artwork, None, "no album fetch");
+    let _ = app.handle_load_artist_large_artwork("ar1".into());
+    assert_eq!(app.artwork.loading_large_artwork, None, "no artist fetch");
+}
+
+/// A cover the panel already shows is delivered again whenever its row is
+/// centred (the loader answers from the cache). It stays where it is: taking
+/// it out to stage it would swap the panel back to the thumbnail.
+#[test]
+fn a_cover_already_shown_stays_shown_when_it_is_delivered_again() {
+    let mut app = test_app();
+    let cover = cover();
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(cover.clone()));
+    staging_ends(&mut app, "a1", &cover);
+
+    let _ = app.handle_large_artwork_loaded("a1".into(), Some(cover.clone()));
+    assert_eq!(shown(&app, "a1"), Some(cover.id()));
+    assert_eq!(staged(&app, "a1"), None);
+}
+
+/// A manual Refresh Artwork brings a new picture: it is staged like any
+/// other, the panel on the thumbnail until it is ready.
+#[test]
+fn a_refreshed_cover_is_staged_too() {
+    let mut app = test_app();
+    let cover = cover();
+    let _ = app.handle_refresh_complete("a1".into(), None, Some(cover.clone()));
+    assert_eq!(shown(&app, "a1"), None);
+    assert_eq!(staged(&app, "a1"), Some(cover.id()));
+}

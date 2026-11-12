@@ -82,6 +82,11 @@ impl Nokkvi {
             | ArtworkMessage::LargeArtistLoaded(id, handle) => {
                 self.handle_large_artwork_loaded(id, handle)
             }
+            ArtworkMessage::LargeStaged {
+                id,
+                handle_id,
+                allocation,
+            } => self.handle_large_staged(id, handle_id, allocation),
             ArtworkMessage::RefreshAlbumArtwork(album_id) => {
                 self.handle_refresh_album_artwork(album_id)
             }

@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 - A roulette spin in Artists no longer looks up the artists it passes when the list reloads mid-spin.
 - The Albums, Artists, Songs and Playlists lists no longer blink to "Loading..." when the server reports a change, like a scrobble.
 - Scrolling to the end of the loaded rows no longer blanks the list while the next page loads.
+- The big cover no longer goes blank for an instant between the thumbnail and the full-size picture when you land on an album or artist.
 
 ### Removed
 

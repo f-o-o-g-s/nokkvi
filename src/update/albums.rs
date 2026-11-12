@@ -337,7 +337,7 @@ impl Nokkvi {
         if self.record_mini_art(&id, &updated_at, art)
             && self.large_art_is_stale(&id, updated_at.as_deref())
         {
-            self.artwork.large_artwork.pop(&id);
+            self.artwork.drop_large_cover(&id);
             self.artwork.large_artwork_hashes.remove(&id);
             return self
                 .center_large_artwork_load_task(self.current_view)
@@ -620,6 +620,10 @@ impl Nokkvi {
                 album_id, handle,
             )));
         }
+        // On its way onto the GPU (`large_staging`): the bytes are here.
+        if self.artwork.large_staging.contains_key(&album_id) {
+            return Task::none();
+        }
         // Absent art: no request, and the panel keeps its blank placeholder.
         if self.album_image_absent(&album_id) {
             return Task::none();
@@ -766,7 +770,7 @@ impl Nokkvi {
         // Do NOT evict from album_art — that would gray out every slot list row
         // sharing this album_id. The old mini thumbnail stays visible until
         // RefreshComplete replaces it atomically.
-        self.artwork.large_artwork.pop(&album_id);
+        self.artwork.drop_large_cover(&album_id);
 
         let Some(shell) = &self.app_service else {
             return Task::none();
@@ -840,13 +844,98 @@ impl Nokkvi {
                 .insert(album_id.clone(), version);
             self.artwork.album_art.put(album_id.clone(), h);
         }
-        if let Some(h) = large {
-            let version = self.album_art_version(&album_id);
-            self.record_large_art_hash(&album_id, version.as_deref());
-            self.artwork.large_artwork.put(album_id, h);
-        }
+        // The new picture goes onto the GPU before the panel is given it,
+        // like any cover that just arrived.
+        let staged = match large {
+            Some(h) => {
+                let version = self.album_art_version(&album_id);
+                self.record_large_art_hash(&album_id, version.as_deref());
+                self.stage_large_cover(album_id, h)
+            }
+            None => Task::none(),
+        };
         self.toast_success("Artwork refreshed");
+        staged
+    }
+
+    /// Ask the renderer to decode `handle` onto the GPU. The answer is a
+    /// [`ArtworkMessage::LargeStaged`] with the allocation that keeps it
+    /// there, or `None` for a picture it could not decode. It always
+    /// arrives: `collect` yields when the request ends, empty when no window
+    /// could take it (closed to the tray), as for the lyrics backdrop
+    /// (`hold_lyrics_covers`).
+    fn allocate_large_cover(id: String, handle: image::Handle) -> Task<Message> {
+        let handle_id = handle.id();
+        image::allocate(handle).collect().map(move |answers| {
+            Message::Artwork(ArtworkMessage::LargeStaged {
+                id: id.clone(),
+                handle_id,
+                allocation: answers.into_iter().next().and_then(Result::ok),
+            })
+        })
+    }
+
+    /// A full-size cover for `id` arrived: keep it out of the panel's cache
+    /// until it is on the GPU (`ArtworkState::large_staging`), so the panel
+    /// goes from the thumbnail straight to the cover with no empty frame
+    /// between them. `handle_large_staged` shows it when the renderer
+    /// answers.
+    pub(crate) fn stage_large_cover(&mut self, id: String, handle: image::Handle) -> Task<Message> {
+        self.artwork
+            .large_staging
+            .insert(id.clone(), handle.clone());
+        Self::allocate_large_cover(id, handle)
+    }
+
+    /// The cover `handle_id` staged for `id` is on the GPU (`allocation`
+    /// holds it there), or could not be put there (`None`: a decode error,
+    /// no window open): the panel is given it now. An answer for a cover
+    /// that is no longer the one staged shows nothing: a newer cover
+    /// replaced it, or a refresh or a logout dropped it.
+    ///
+    /// The allocation is held for as long as that very cover is the one
+    /// shown and the pixel budget allows (`ArtworkState::large_on_gpu`), so
+    /// stepping back onto it draws at once.
+    pub(crate) fn handle_large_staged(
+        &mut self,
+        id: String,
+        handle_id: iced::advanced::image::Id,
+        allocation: Option<image::Allocation>,
+    ) -> Task<Message> {
+        let is = |handle: Option<&image::Handle>| handle.map(image::Handle::id) == Some(handle_id);
+        if is(self.artwork.large_staging.get(&id))
+            && let Some(handle) = self.artwork.large_staging.remove(&id)
+        {
+            self.artwork.large_artwork.put(id.clone(), handle);
+        }
+        if let Some(allocation) = allocation
+            && is(self.artwork.large_artwork.peek(&id))
+        {
+            let size = allocation.size();
+            let pixels = u64::from(size.width) * u64::from(size.height);
+            self.artwork.large_on_gpu.hold(id, pixels, allocation);
+        }
         Task::none()
+    }
+
+    /// A full-size cover for `id` is here: fetched just now, or answered
+    /// from the cache by its loader, which does that at every centring.
+    fn take_large_cover(&mut self, id: String, handle: image::Handle) -> Task<Message> {
+        let shown = self.artwork.large_artwork.peek(&id).map(image::Handle::id);
+        if shown != Some(handle.id()) {
+            return self.stage_large_cover(id, handle);
+        }
+        // The cover the panel already draws stays where it is: taking it
+        // out to stage it would swap the panel back to the thumbnail. The
+        // put only marks it as used.
+        self.artwork.large_artwork.put(id.clone(), handle.clone());
+        if self.artwork.large_on_gpu.touch(&id) {
+            return Task::none();
+        }
+        // Shown, but no longer held on the GPU (other covers took the
+        // budget since): the renderer may have let it go, in which case it
+        // decodes it again as it is drawn, as it always did. Hold it again.
+        Self::allocate_large_cover(id, handle)
     }
 
     pub(crate) fn handle_large_artwork_loaded(
@@ -856,11 +945,12 @@ impl Nokkvi {
     ) -> Task<Message> {
         // Release on every outcome so a failed fetch can be retried.
         self.artwork.large_artwork_pending.release(&id);
-        // Always cache artwork that arrives (even if user navigated away)
+        // Always keep artwork that arrives (even if user navigated away)
         // This fixes the bug where rapid navigation discarded completed loads
-        if let Some(h) = handle {
-            self.artwork.large_artwork.put(id.clone(), h);
-        }
+        let taken = match handle {
+            Some(h) => self.take_large_cover(id.clone(), h),
+            None => Task::none(),
+        };
         // Clear loading_large_artwork if this was the most recent request
         if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
             self.artwork.loading_large_artwork = None;
@@ -869,12 +959,13 @@ impl Nokkvi {
         // newest row that waited for it goes next, through the gate again
         // (a cached cover shows at once), while its list is still the one
         // being steered; after a view switch or a pane change it is dropped.
-        match self.artwork.panel_gate.landed(&id) {
+        let next = match self.artwork.panel_gate.landed(&id) {
             Some((source, next)) if self.panel_art_steered(source) => {
                 self.panel_art_step(source, next)
             }
             Some(_) | None => Task::none(),
-        }
+        };
+        Task::batch([taken, next])
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {
