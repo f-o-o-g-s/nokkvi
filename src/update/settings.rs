@@ -161,6 +161,7 @@ impl Nokkvi {
             radio_scrobbling_enabled: self.settings.radio_scrobbling_enabled,
             radio_scrobble_threshold_secs: i64::from(self.settings.radio_scrobble_threshold_secs),
             radio_now_playing_enabled: self.settings.radio_now_playing_enabled,
+            discord_app_id: self.settings.discord_app_id.clone().into(),
             listenbrainz_source,
             lastfm_credentials_source,
             lastfm_username: lastfm_username.into(),
@@ -395,10 +396,15 @@ impl Nokkvi {
                 current_value,
                 label,
             } => {
+                let placeholder = if key == "general.discord_app_id" {
+                    "Application ID, e.g. 1234567890123456789"
+                } else {
+                    "e.g. /music/Library"
+                };
                 self.text_input_dialog.open(
                     format!("Edit: {label}"),
                     current_value,
-                    "e.g. /music/Library",
+                    placeholder,
                     crate::widgets::text_input_dialog::TextInputDialogAction::WriteGeneralSetting {
                         key,
                     },

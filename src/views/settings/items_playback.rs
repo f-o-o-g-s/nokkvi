@@ -1,13 +1,13 @@
 //! Playback tab setting entries.
 //!
-//! Contains eight sections: Transitions (crossfade), Fading (smooth track
+//! Contains nine sections: Transitions (crossfade), Fading (smooth track
 //! starts + pause/resume/stop transport fades + the M8 content-aware overlap
 //! knobs — skip-silence, gap/overlap trim, bar-snap), Volume Normalization
 //! (mode dropdown + AGC target knob + ReplayGain knobs), Streaming Quality
 //! (stream format + max bitrate, then a read-only row for what nokkvi's
 //! player row on the server forces, only while it forces something),
 //! Scrobbling, Radio Scrobbling, Rating
-//! Reminder (enable + conditional timing/percentage), and Playlists. Flat
+//! Reminder (enable + conditional timing/percentage), Playlists, and Discord. Flat
 //! rows come from `define_settings!` via `build_playback_tab_settings_items`.
 //! The conditional AGC target-level knob, the four ReplayGain knobs (only
 //! shown in RG modes), the Rating Reminder timing/percentage rows (only shown
@@ -55,6 +55,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     const LOGOUT: &str = "assets/icons/log-out.svg";
     const REMIND: &str = "assets/icons/star.svg";
     const LIST: &str = "assets/icons/list-music.svg";
+    const DISCORD: &str = "assets/icons/monitor.svg";
 
     // Status-aware values for the radio-scrobble action rows so the user can
     // see what's configured (and from which source) at a glance.
@@ -372,6 +373,16 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         .with_enter_hint()
         .with_activate(ActivateKind::PlaylistPicker),
         macro_rows.take("general.queue_show_default_playlist"),
+        // --- Discord ---
+        SettingsEntry::Header {
+            label: "Discord",
+            icon: DISCORD,
+        },
+        // Opens the free-text input dialog, like the Local Music Path row.
+        macro_rows
+            .take("general.discord_app_id")
+            .with_enter_hint()
+            .with_activate(ActivateKind::TextInputDialog),
     ]);
 
     macro_rows.finish();

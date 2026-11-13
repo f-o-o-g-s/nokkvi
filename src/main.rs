@@ -355,6 +355,8 @@ pub struct Nokkvi {
     /// The track id, length and CanSeek last published to MPRIS: what an
     /// MPRIS `SetPosition` call is checked against.
     pub(crate) mpris_track: services::mpris::PublishedTrack,
+    /// Discord Rich Presence worker, driven from the playback tick.
+    pub(crate) discord: crate::state::DiscordState,
     /// Handle to push rate-this-track reminders to the notification service.
     /// `None` until the subscription connects (or while the feature is off).
     pub notification_connection: Option<services::notifications::NotificationConnection>,
@@ -586,6 +588,7 @@ impl Default for Nokkvi {
             mpris_connection: None,
             last_mpris_position_us: 0,
             mpris_track: services::mpris::PublishedTrack::default(),
+            discord: crate::state::DiscordState::default(),
             notification_connection: None,
             last_reminded_song_id: None,
             tray_connection: None,

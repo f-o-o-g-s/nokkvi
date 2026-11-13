@@ -1258,6 +1258,17 @@ impl Nokkvi {
             random,
         });
 
+        if let Some(task) = self.sync_discord_presence(
+            song_id.as_deref(),
+            &album,
+            dur,
+            position_is_current.then_some(pos),
+            playing,
+            paused,
+        ) {
+            tasks.push(task);
+        }
+
         // Fold in the off-thread device-rate probe (when one was dispatched for
         // the honest bit-perfect badge this tick).
         if let Some(probe) = bit_perfect_probe_task {

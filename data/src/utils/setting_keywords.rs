@@ -456,6 +456,16 @@ keyword_table! {
         "general.replay_gain_fallback_to_agc" => &["replaygain", "rg", "automatic gain"],
         "general.replay_gain_prevent_clipping" => &["replaygain", "rg", "limiter", "distortion"],
 
+        // ── Playback · Discord ───────────────────────────────────────────────
+        "general.discord_app_id" => &[
+            "rich presence",
+            "rpc",
+            "now playing",
+            "status",
+            "activity",
+            "application id",
+        ],
+
         // ── Playback · Scrobbling / Rating ───────────────────────────────────
         "general.scrobbling_enabled" => &["last.fm", "lastfm", "listenbrainz", "play history"],
         "general.scrobble_threshold" => &["last.fm", "lastfm", "play count", "submit point"],
