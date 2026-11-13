@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The About modal now credits Fable 5.2 instead of Fable 5.1 among the shipwrights.
+
 ### Fixed
 
 ### Removed
