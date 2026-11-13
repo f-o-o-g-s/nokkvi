@@ -12,6 +12,8 @@ use std::{
 
 use iced::widget::image;
 use nokkvi_data::types::player_settings::LyricsBackdropBlur;
+// The gate's clock: the system's in the app, one a test can hold still.
+use tokio::time::Instant;
 
 use super::snapshotted_lru::SnapshottedLru;
 
@@ -159,6 +161,15 @@ impl PanelArt {
     }
 }
 
+/// Steps closer together than this are a held key's repeats (every 40 ms at
+/// the default rate) or a wheel flick. Taps and single notches come slower
+/// and are never paced ([`PanelArtGate`]).
+pub(crate) const PACED_RUN_MAX_GAP: Duration = Duration::from_millis(60);
+
+/// A cover that lands faster than this is on screen a few frames after its
+/// step, so a server that fast is never paced.
+pub(crate) const PACED_RUN_MIN_LANDING: Duration = Duration::from_millis(25);
+
 /// What [`PanelArtGate::step`] decided for a centred row.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PanelArtStep {
@@ -168,6 +179,21 @@ pub enum PanelArtStep {
     /// that cover lands, or after [`PANEL_ART_OVERDUE`]
     /// (`ArtworkMessage::PanelArtOverdue`) when it is slow.
     Wait(PanelArt),
+    /// The row is one of a run of steps that come faster than a cover
+    /// lands: it waits as the newest, and is fetched `after` this long if no
+    /// step follows it (`ArtworkMessage::PanelArtOverdue`), which is the run
+    /// stopping on it.
+    Paced { target: PanelArt, after: Duration },
+}
+
+/// The newest row waiting at the gate.
+#[derive(Debug, Clone)]
+struct WaitingRow {
+    /// The list it was centred in.
+    source: Option<crate::View>,
+    target: PanelArt,
+    /// It waits for its run of steps to stop, not for the cover on its way.
+    paced: bool,
 }
 
 /// Keeps one full-size cover for the big panel on its way at a time. A step
@@ -180,6 +206,21 @@ pub enum PanelArtStep {
 /// of the thumbnails of the rows the scroll stopped on. The panel shows the
 /// thumbnail or the blurred placeholder (`views::panel_cover`) meanwhile.
 ///
+/// A held key or a wheel flick steps faster than a cover lands on any
+/// server that is not on this machine (a key repeats every 40 ms; a 1000 px
+/// cover took about 45 ms from a server on the LAN). Each of those rows has
+/// left the centre before its cover could show, yet one was fetched per
+/// landing: a 40 s held scroll asked for 897 covers, 1.1 GB, and drew none
+/// of them. Such a run is paced: while steps come closer together than
+/// [`PACED_RUN_MAX_GAP`] and than the last cover took to land, a row waits
+/// for the run to stop instead, a quarter of a step longer than the steps
+/// are apart, and is fetched then, past any cover still on its way. The
+/// first step of a run, a tap, a single wheel notch and every step on a
+/// server that lands a cover between two steps load at once as before: the
+/// gate measures the landing, it never assumes one. Releasing the key ends
+/// the run at once ([`Self::run_stopped`]); the timer is for a run with no
+/// release to go by.
+///
 /// Only steps in the list the user is steering reach the gate
 /// (`Nokkvi::panel_art_step`); one waiting slot is enough because a step
 /// from any other list loads directly. Reset on logout via
@@ -187,11 +228,16 @@ pub enum PanelArtStep {
 /// ended session finds nothing waiting.
 #[derive(Debug, Clone, Default)]
 pub struct PanelArtGate {
-    /// The cover on its way, recorded once its loader claimed the fetch.
-    in_flight: Option<PanelArt>,
-    /// The newest row a step centred while that cover was on its way, with
-    /// the list it was centred in.
-    waiting: Option<(Option<crate::View>, PanelArt)>,
+    /// The cover on its way and when it went out, recorded once its loader
+    /// claimed the fetch.
+    in_flight: Option<(PanelArt, Instant)>,
+    /// The newest row a step centred while that cover was on its way, or in
+    /// a paced run.
+    waiting: Option<WaitingRow>,
+    /// When the steered list last stepped.
+    last_step: Option<Instant>,
+    /// How long the last cover on its way took to land.
+    landing: Option<Duration>,
 }
 
 impl PanelArtGate {
@@ -203,13 +249,53 @@ impl PanelArtGate {
         target: PanelArt,
         cached: bool,
     ) -> PanelArtStep {
-        if !cached && self.in_flight.is_some() {
-            self.waiting = Some((source, target.clone()));
-            PanelArtStep::Wait(target)
-        } else {
+        self.step_at(source, target, cached, Instant::now())
+    }
+
+    /// [`Self::step`] at `now`.
+    fn step_at(
+        &mut self,
+        source: Option<crate::View>,
+        target: PanelArt,
+        cached: bool,
+        now: Instant,
+    ) -> PanelArtStep {
+        let gap = self
+            .last_step
+            .map(|last| now.saturating_duration_since(last));
+        self.last_step = Some(now);
+        if cached {
             self.waiting = None;
-            PanelArtStep::Now(target)
+            return PanelArtStep::Now(target);
         }
+        if let Some(after) = self.paced_wait(gap) {
+            self.waiting = Some(WaitingRow {
+                source,
+                target: target.clone(),
+                paced: true,
+            });
+            return PanelArtStep::Paced { target, after };
+        }
+        if self.in_flight.is_some() {
+            self.waiting = Some(WaitingRow {
+                source,
+                target: target.clone(),
+                paced: false,
+            });
+            return PanelArtStep::Wait(target);
+        }
+        self.waiting = None;
+        PanelArtStep::Now(target)
+    }
+
+    /// How long a step that came `gap` after the one before it waits for
+    /// its run to stop, or `None` when it is not one of a paced run: the
+    /// first step, a step slower than a held key, or a server whose covers
+    /// land between two such steps.
+    fn paced_wait(&self, gap: Option<Duration>) -> Option<Duration> {
+        let (gap, landing) = (gap?, self.landing?);
+        (gap < PACED_RUN_MAX_GAP && landing >= PACED_RUN_MIN_LANDING && gap < landing)
+            .then(|| gap + gap / 4)
     }
 
     /// Whether a row from a list other than `source` is waiting. In the split
@@ -219,40 +305,55 @@ impl PanelArtGate {
     pub fn another_list_waits(&self, source: Option<crate::View>) -> bool {
         self.waiting
             .as_ref()
-            .is_some_and(|(owner, _)| *owner != source)
+            .is_some_and(|row| row.source != source)
     }
 
     /// A fetch for `target` went out: it is the cover on its way.
     pub fn sent(&mut self, target: PanelArt) {
-        self.in_flight = Some(target);
+        self.sent_at(target, Instant::now());
+    }
+
+    /// [`Self::sent`] at `now`.
+    fn sent_at(&mut self, target: PanelArt, now: Instant) {
+        self.in_flight = Some((target, now));
     }
 
     /// A full-size cover for `id` landed, on any outcome. When it was the
     /// cover on its way, the gate opens and hands back the newest row that
-    /// waited for it.
+    /// waited for it. A paced row stays: its own timer sends it.
     pub fn landed(&mut self, id: &str) -> Option<(Option<crate::View>, PanelArt)> {
-        if self
-            .in_flight
-            .as_ref()
-            .is_some_and(|cover| cover.id() == id)
-        {
-            self.in_flight = None;
-            self.waiting.take()
-        } else {
-            None
-        }
+        self.landed_at(id, Instant::now())
     }
 
-    /// The overdue timer of a waiting `target` fired: `true` when it is
-    /// still the newest waiting row, which stops waiting (the caller fetches
-    /// it past the slow cover).
+    /// [`Self::landed`] at `now`.
+    fn landed_at(&mut self, id: &str, now: Instant) -> Option<(Option<crate::View>, PanelArt)> {
+        let (_, sent) = self.in_flight.take_if(|(cover, _)| cover.id() == id)?;
+        self.landing = Some(now.saturating_duration_since(sent));
+        self.waiting
+            .take_if(|row| !row.paced)
+            .map(|row| (row.source, row.target))
+    }
+
+    /// The timer of a waiting `target` fired (a cover that is overdue, or a
+    /// paced run that stopped): `true` when it is still the newest waiting
+    /// row, which stops waiting (the caller fetches it).
     pub fn overdue(&mut self, target: &PanelArt) -> bool {
-        if self.waiting.as_ref().is_some_and(|(_, row)| row == target) {
-            self.waiting = None;
-            true
-        } else {
-            false
-        }
+        self.waiting.take_if(|row| row.target == *target).is_some()
+    }
+
+    /// The run of steps a paced row is the last of has stopped (the held key
+    /// was released): the row stops waiting and is handed back to be
+    /// fetched. A row waiting for the cover on its way stays.
+    pub fn run_stopped(&mut self) -> Option<(Option<crate::View>, PanelArt)> {
+        self.waiting
+            .take_if(|row| row.paced)
+            .map(|row| (row.source, row.target))
+    }
+
+    /// As if the last cover on its way had taken `landing` to land.
+    #[cfg(test)]
+    pub(crate) fn set_landing_for_test(&mut self, landing: Duration) {
+        self.landing = Some(landing);
     }
 }
 
@@ -691,7 +792,9 @@ impl std::fmt::Debug for ArtworkState {
 
 #[cfg(test)]
 mod tests {
-    use super::{InFlight, PanelArt, PanelArtGate, PanelArtStep};
+    use std::time::Duration;
+
+    use super::{InFlight, Instant, PanelArt, PanelArtGate, PanelArtStep};
     use crate::View;
 
     fn album(id: &str) -> PanelArt {
@@ -771,6 +874,160 @@ mod tests {
             None,
             "the slow cover then lands to nothing waiting"
         );
+    }
+
+    /// A gate whose last cover took `landing_ms` to land, and the moment
+    /// that was measured.
+    fn gate_with_landing(landing_ms: u64) -> (PanelArtGate, Instant) {
+        let mut gate = PanelArtGate::default();
+        let start = Instant::now();
+        gate.sent_at(album("first"), start);
+        let landed = start + Duration::from_millis(landing_ms);
+        assert_eq!(gate.landed_at("first", landed), None);
+        (gate, landed)
+    }
+
+    fn ms(ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
+
+    /// A held key repeats every 40 ms; a cover that takes 45 ms to land
+    /// could not show before its row has left the centre. Those rows fetch
+    /// nothing: each waits a quarter of a step longer than the steps are
+    /// apart, and only the one the run stops on is fetched.
+    #[test]
+    fn a_run_of_steps_faster_than_a_cover_lands_fetches_only_where_it_stops() {
+        let (mut gate, t) = gate_with_landing(45);
+
+        // The first step after a rest loads at once, as a tap does.
+        assert_eq!(
+            gate.step_at(ALBUMS, album("a"), false, t + ms(1000)),
+            PanelArtStep::Now(album("a"))
+        );
+        gate.sent_at(album("a"), t + ms(1000));
+
+        let paced = |target: PanelArt| PanelArtStep::Paced {
+            target,
+            after: ms(50),
+        };
+        assert_eq!(
+            gate.step_at(ALBUMS, album("b"), false, t + ms(1040)),
+            paced(album("b"))
+        );
+        // The first step's cover lands mid-run: the paced row is not its to
+        // send (it would land after the row left, like every one before).
+        assert_eq!(gate.landed_at("a", t + ms(1045)), None);
+        assert_eq!(
+            gate.step_at(ALBUMS, album("c"), false, t + ms(1080)),
+            paced(album("c")),
+            "paced with nothing on its way too"
+        );
+
+        assert!(
+            !gate.overdue(&album("b")),
+            "a passed row's timer does nothing"
+        );
+        assert!(gate.overdue(&album("c")), "the run stopped on c");
+    }
+
+    /// Letting go of the key is the run stopping: the row it stopped on is
+    /// handed back at once, and its timer then finds nothing waiting. A row
+    /// that waits for the cover on its way is not a paced run's and stays.
+    #[test]
+    fn a_key_release_ends_a_paced_run_at_once() {
+        let (mut gate, t) = gate_with_landing(45);
+        gate.step_at(ALBUMS, album("a"), false, t + ms(1000));
+        gate.step_at(ALBUMS, album("b"), false, t + ms(1040));
+        assert_eq!(gate.run_stopped(), Some((ALBUMS, album("b"))));
+        assert_eq!(gate.run_stopped(), None, "once");
+        assert!(!gate.overdue(&album("b")), "its timer does nothing after");
+
+        gate.sent_at(album("b"), t + ms(1050));
+        assert_eq!(
+            gate.step_at(ALBUMS, album("c"), false, t + ms(1200)),
+            PanelArtStep::Wait(album("c"))
+        );
+        assert_eq!(gate.run_stopped(), None, "c waits for b to land");
+        assert_eq!(
+            gate.landed_at("b", t + ms(1300)),
+            Some((ALBUMS, album("c")))
+        );
+    }
+
+    /// Taps and wheel notches come slower than a held key: each one loads
+    /// at once, or waits for the cover on its way and follows its landing,
+    /// exactly as before the gate paced anything.
+    #[test]
+    fn steps_slower_than_a_held_key_are_never_paced() {
+        let (mut gate, t) = gate_with_landing(300);
+
+        assert_eq!(
+            gate.step_at(ALBUMS, album("a"), false, t + ms(1000)),
+            PanelArtStep::Now(album("a"))
+        );
+        gate.sent_at(album("a"), t + ms(1000));
+        assert_eq!(
+            gate.step_at(ALBUMS, album("b"), false, t + ms(1060)),
+            PanelArtStep::Wait(album("b")),
+            "60 ms apart is a tap: it waits for the cover, not for a timer"
+        );
+        assert_eq!(
+            gate.landed_at("a", t + ms(1300)),
+            Some((ALBUMS, album("b"))),
+            "and follows its landing"
+        );
+        assert_eq!(
+            gate.step_at(ALBUMS, album("c"), false, t + ms(1400)),
+            PanelArtStep::Now(album("c"))
+        );
+    }
+
+    /// A server that lands a cover between two repeats of a held key (one
+    /// on this machine) shows every row's cover as it passes: nothing waits.
+    #[test]
+    fn a_server_that_lands_covers_between_steps_is_never_paced() {
+        let (mut gate, t) = gate_with_landing(30);
+        for (n, at) in [1000, 1040, 1080].into_iter().enumerate() {
+            let row = album(&format!("a{n}"));
+            assert_eq!(
+                gate.step_at(ALBUMS, row.clone(), false, t + ms(at)),
+                PanelArtStep::Now(row.clone())
+            );
+            gate.sent_at(row, t + ms(at));
+            assert_eq!(gate.landed_at(&format!("a{n}"), t + ms(at + 30)), None);
+        }
+
+        // Nor is anything paced before a landing was ever measured, or on a
+        // landing too fast to tell from one frame.
+        let mut fresh = PanelArtGate::default();
+        let (mut fast, _) = gate_with_landing(10);
+        for gate in [&mut fresh, &mut fast] {
+            assert_eq!(
+                gate.step_at(ALBUMS, album("a"), false, t + ms(2000)),
+                PanelArtStep::Now(album("a"))
+            );
+            assert_eq!(
+                gate.step_at(ALBUMS, album("b"), false, t + ms(2005)),
+                PanelArtStep::Now(album("b"))
+            );
+        }
+    }
+
+    /// A cached cover shows at once in the middle of a paced run, and the
+    /// row that was waiting is dropped with it.
+    #[test]
+    fn a_cached_cover_goes_now_in_a_paced_run() {
+        let (mut gate, t) = gate_with_landing(45);
+        gate.step_at(ALBUMS, album("a"), false, t + ms(1000));
+        assert!(matches!(
+            gate.step_at(ALBUMS, album("b"), false, t + ms(1040)),
+            PanelArtStep::Paced { .. }
+        ));
+        assert_eq!(
+            gate.step_at(ALBUMS, album("c"), true, t + ms(1080)),
+            PanelArtStep::Now(album("c"))
+        );
+        assert!(!gate.overdue(&album("b")));
     }
 
     #[test]

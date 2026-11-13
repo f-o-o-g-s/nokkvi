@@ -1912,6 +1912,10 @@ pub enum Message {
     ),
     /// Tracks global keyboard modifiers (shift/ctrl/alt/logo) for mouse interaction (e.g. shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
+    /// A key was released. A held key's run of navigation steps is over, so
+    /// the big panel fetches the row it stopped on now instead of waiting
+    /// out that row's timer (`Nokkvi::handle_key_released`).
+    KeyReleased,
 
     // --- Toast Notifications ---
     Toast(ToastMessage),

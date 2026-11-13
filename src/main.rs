@@ -709,6 +709,7 @@ impl Nokkvi {
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }
+            Event::Keyboard(keyboard::Event::KeyReleased { .. }) => Some(Message::KeyReleased),
             _ => None,
         });
 

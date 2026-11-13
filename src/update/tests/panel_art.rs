@@ -337,3 +337,114 @@ fn a_loader_claim_marks_the_cover_on_its_way() {
     assert_eq!(waiting.units(), 1, "a4 waits for a3");
     assert_eq!(loading(&app), Some("a3"));
 }
+
+// ---------------------------------------------------------------------------
+// A run of steps faster than a cover lands fetches only where it stops
+// ---------------------------------------------------------------------------
+
+/// The timer of `id`'s waiting row fires.
+fn timer_fires(app: &mut Nokkvi, id: &str) {
+    let _ = app.update(Message::Artwork(ArtworkMessage::PanelArtOverdue {
+        source: Some(View::Albums),
+        target: PanelArt::Album(id.to_string()),
+    }));
+}
+
+/// A held key repeats every 40 ms, and the server's covers take 45 ms to
+/// land: none of the rows it passes could show its cover before the next
+/// step. A 40 s held scroll used to ask for 897 covers (1.1 GB) and draw
+/// none. Now the first step loads as any step does, the rows passed fetch
+/// nothing, and the row the run stops on is fetched when its timer fires.
+#[tokio::test(start_paused = true)]
+async fn a_held_keys_rows_fetch_nothing_until_the_run_stops() {
+    let mut app = albums_app(20);
+    app.artwork
+        .panel_gate
+        .set_landing_for_test(std::time::Duration::from_millis(45));
+
+    let first = album_step(&mut app);
+    assert_eq!(loading(&app), Some(first.as_str()), "the first step loads");
+
+    tokio::time::advance(std::time::Duration::from_millis(40)).await;
+    let second = album_step(&mut app);
+    tokio::time::advance(std::time::Duration::from_millis(40)).await;
+    let third = album_step(&mut app);
+    assert_eq!(
+        loading(&app),
+        Some(first.as_str()),
+        "the rows a held key passes fetch nothing"
+    );
+
+    timer_fires(&mut app, &second);
+    assert_eq!(
+        loading(&app),
+        Some(first.as_str()),
+        "a passed row's timer finds a newer row waiting"
+    );
+    timer_fires(&mut app, &third);
+    assert_eq!(loading(&app), Some(third.as_str()), "the run stopped here");
+}
+
+/// The key is let go: the run is over, and the row it stopped on is fetched
+/// without waiting for its timer.
+#[tokio::test(start_paused = true)]
+async fn releasing_the_key_fetches_the_row_the_run_stopped_on() {
+    let mut app = albums_app(20);
+    app.artwork
+        .panel_gate
+        .set_landing_for_test(std::time::Duration::from_millis(45));
+    let first = album_step(&mut app);
+    tokio::time::advance(std::time::Duration::from_millis(40)).await;
+    let second = album_step(&mut app);
+    assert_eq!(loading(&app), Some(first.as_str()));
+
+    let _ = app.update(Message::KeyReleased);
+    assert_eq!(loading(&app), Some(second.as_str()));
+
+    // A release with nothing paced waiting changes nothing.
+    app.artwork.loading_large_artwork = None;
+    let _ = app.update(Message::KeyReleased);
+    assert_eq!(loading(&app), None);
+}
+
+/// The cover the first step of a run asked for lands while the key is still
+/// held. It sends nothing after it: the row waiting is paced, and its own
+/// timer decides.
+#[tokio::test(start_paused = true)]
+async fn a_landing_inside_a_paced_run_sends_nothing() {
+    let mut app = albums_app(20);
+    app.artwork
+        .panel_gate
+        .set_landing_for_test(std::time::Duration::from_millis(45));
+    let first = album_step(&mut app);
+    app.artwork.panel_gate.sent(PanelArt::Album(first.clone()));
+    tokio::time::advance(std::time::Duration::from_millis(40)).await;
+    let second = album_step(&mut app);
+
+    tokio::time::advance(std::time::Duration::from_millis(5)).await;
+    land(&mut app, &first);
+    assert_eq!(
+        loading(&app),
+        None,
+        "the landing cleared it and sent nothing"
+    );
+
+    timer_fires(&mut app, &second);
+    assert_eq!(loading(&app), Some(second.as_str()));
+}
+
+/// Taps and wheel notches are slower than a held key. Each loads at once on
+/// any server: a delay there is the one the old stop-then-fetch timer added
+/// to every step ("the image loading doesnt feel snappy anymore").
+#[tokio::test(start_paused = true)]
+async fn taps_load_at_once_however_slow_the_server() {
+    let mut app = albums_app(20);
+    app.artwork
+        .panel_gate
+        .set_landing_for_test(std::time::Duration::from_millis(300));
+    for _ in 0..4 {
+        let row = album_step(&mut app);
+        assert_eq!(loading(&app), Some(row.as_str()));
+        tokio::time::advance(std::time::Duration::from_millis(70)).await;
+    }
+}

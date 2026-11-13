@@ -706,15 +706,16 @@ impl Nokkvi {
             return self.load_panel_art(target);
         }
         let cached = self.artwork.large_artwork.contains(&target.id().to_owned());
-        match self.artwork.panel_gate.step(source, target, cached) {
-            PanelArtStep::Now(target) => self.send_panel_art(target),
-            // The timer is made when the task first runs, inside the
-            // runtime, not here.
-            PanelArtStep::Wait(target) => Task::perform(
-                async { tokio::time::sleep(PANEL_ART_OVERDUE).await },
-                move |()| Message::Artwork(ArtworkMessage::PanelArtOverdue { source, target }),
-            ),
-        }
+        let (target, wait) = match self.artwork.panel_gate.step(source, target, cached) {
+            PanelArtStep::Now(target) => return self.send_panel_art(target),
+            PanelArtStep::Wait(target) => (target, PANEL_ART_OVERDUE),
+            PanelArtStep::Paced { target, after } => (target, after),
+        };
+        // The timer is made when the task first runs, inside the runtime,
+        // not here.
+        Task::perform(async move { tokio::time::sleep(wait).await }, move |()| {
+            Message::Artwork(ArtworkMessage::PanelArtOverdue { source, target })
+        })
     }
 
     /// Load `target` through the gate: when its loader sends a fetch (a claim
@@ -729,8 +730,10 @@ impl Nokkvi {
         task
     }
 
-    /// The cover a waiting row trusted to land is overdue: fetch the row past
-    /// it, when it is still the newest waiting and its list is still steered.
+    /// A waiting row's timer fired: the cover it trusted to land is overdue,
+    /// or the paced run it was a step of has stopped on it. Fetch the row,
+    /// past any cover still on its way, when it is still the newest waiting
+    /// and its list is still steered.
     pub(crate) fn handle_panel_art_overdue(
         &mut self,
         source: Option<View>,
@@ -740,6 +743,16 @@ impl Nokkvi {
             self.send_panel_art(target)
         } else {
             Task::none()
+        }
+    }
+
+    /// A key was released, so a held key's run of steps is over: the row a
+    /// paced run stopped on is fetched now. Its timer covers a run with no
+    /// release to go by (a wheel flick, the `nav-down` CLI verb in a loop).
+    pub(crate) fn handle_key_released(&mut self) -> Task<Message> {
+        match self.artwork.panel_gate.run_stopped() {
+            Some((source, target)) if self.panel_art_steered(source) => self.send_panel_art(target),
+            Some(_) | None => Task::none(),
         }
     }
 
@@ -965,13 +978,12 @@ impl Nokkvi {
             self.artwork.loading_large_artwork = None;
         }
         // The big panel's cover on its way landed (on any outcome): the
-        // newest row that waited for it goes next, through the gate again
-        // (a cached cover shows at once), while its list is still the one
-        // being steered; after a view switch or a pane change it is dropped.
+        // newest row that waited for it goes next (a cached cover shows at
+        // once), while its list is still the one being steered; after a
+        // view switch or a pane change it is dropped. It is sent, not
+        // stepped: the gate times the user's steps, and this is not one.
         let next = match self.artwork.panel_gate.landed(&id) {
-            Some((source, next)) if self.panel_art_steered(source) => {
-                self.panel_art_step(source, next)
-            }
+            Some((source, next)) if self.panel_art_steered(source) => self.send_panel_art(next),
             Some(_) | None => Task::none(),
         };
         Task::batch([taken, next])
