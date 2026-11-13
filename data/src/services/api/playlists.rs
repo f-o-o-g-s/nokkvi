@@ -46,11 +46,28 @@ pub struct SubsonicPlaylistAttrs {
     pub readonly: Option<bool>,
 }
 
+/// A native playlist-track row read for its album id alone. The collage
+/// needs nothing else, and serde skips the rest of the row without building
+/// it: a `Song` or a `serde_json::Value` tree per row is what made the
+/// collage read of a 10,000-song playlist cost hundreds of MB.
 #[derive(Debug, serde::Deserialize)]
-struct SubsonicSongEntry {
+struct AlbumIdRow {
     #[serde(rename = "albumId")]
     album_id: Option<String>,
 }
+
+/// Covers a playlist's collage shows at most.
+const COLLAGE_ALBUM_LIMIT: usize = 9;
+/// Tracks the collage read asks for first. A mixed playlist has nine albums
+/// well inside it; one built from whole albums reads on.
+const COLLAGE_FIRST_WINDOW: u32 = 50;
+/// Each further window is this many times the one before, so a playlist
+/// whose albums run long is still read in a handful of requests.
+const COLLAGE_WINDOW_GROWTH: u32 = 4;
+/// Windows the collage read asks for at most (over a million tracks). Bounds
+/// the loop against a server that ignores the paging and answers every
+/// request with a full window.
+const COLLAGE_MAX_WINDOWS: u32 = 8;
 
 #[derive(Clone)]
 pub struct PlaylistsApiService {
@@ -231,41 +248,60 @@ impl PlaylistsApiService {
         Ok(songs.into_iter().map(|song| song.id).collect())
     }
 
-    /// Load album IDs from a playlist (for artwork collage)
-    /// Returns up to 9 unique album IDs. Status-checked like every
-    /// `getPlaylist` read; the collage callers show no art on `Err`.
+    /// The first nine distinct album ids of a playlist, in track order, for
+    /// its artwork collage. Status-checked like every read; the collage
+    /// callers show no art on `Err`.
+    ///
+    /// Reads `/api/playlist/:id/tracks` a window at a time and stops at the
+    /// ninth album or the playlist's end, instead of one whole `getPlaylist`:
+    /// the Playlists view asks this for every playlist at once, and whole
+    /// track lists (a smart playlist can hold the library) cost 259 MB of
+    /// heap in two seconds on a 36-playlist server. Like `getPlaylist`, the
+    /// first window makes the server re-evaluate a smart playlist (see
+    /// [`Self::load_playlist_tracks_page`]); unlike it, the native rows
+    /// include tracks whose file is missing, whose album still has a cover.
     pub async fn load_playlist_albums(&self, playlist_id: &str) -> Result<Vec<String>> {
-        let inner: PlaylistInner = subsonic::subsonic_get_envelope_checked(
-            &self.client.http_client(),
-            &self.server_url,
-            "getPlaylist",
-            &self.subsonic_credential,
-            &[("id", playlist_id)],
-            "Subsonic playlist",
-        )
-        .await?;
+        let endpoint = format!("/api/playlist/{playlist_id}/tracks");
+        let mut album_ids: Vec<String> = Vec::new();
+        let mut start = 0u32;
+        let mut window = COLLAGE_FIRST_WINDOW;
 
-        let mut album_ids = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        for _ in 0..COLLAGE_MAX_WINDOWS {
+            let end = start.saturating_add(window);
+            let (start_str, end_str) = (start.to_string(), end.to_string());
+            let (body, _total) = self
+                .client
+                .get_with_headers(
+                    &endpoint,
+                    &[
+                        ("_start", start_str.as_str()),
+                        ("_end", end_str.as_str()),
+                        // Track order, as the web UI asks for it.
+                        ("_sort", "id"),
+                        ("_order", "ASC"),
+                    ],
+                )
+                .await?;
+            let rows: Vec<AlbumIdRow> = serde_json::from_str(&body)
+                .context("Failed to parse playlist tracks for the collage")?;
+            let read = rows.len();
 
-        if let Some(playlist) = inner.playlist
-            && let Some(entry_value) = playlist.entry
-        {
-            // Subsonic returns a single object instead of a one-element
-            // array; `deserialize_one_or_many` absorbs that quirk.
-            let entries: Vec<SubsonicSongEntry> = subsonic::deserialize_one_or_many(entry_value)?;
-
-            for entry in entries {
-                if let Some(album_id) = entry.album_id
-                    && !seen.contains(&album_id)
-                {
-                    seen.insert(album_id.clone());
+            for album_id in rows.into_iter().filter_map(|row| row.album_id) {
+                if !album_ids.contains(&album_id) {
                     album_ids.push(album_id);
-                    if album_ids.len() >= 9 {
-                        break;
+                    if album_ids.len() >= COLLAGE_ALBUM_LIMIT {
+                        return Ok(album_ids);
                     }
                 }
             }
+            // Only a full window has more behind it: a short one is the
+            // playlist's end, a longer one a server that ignored the window
+            // and sent everything.
+            if u32::try_from(read) != Ok(window) {
+                break;
+            }
+            start = end;
+            window = window.saturating_mul(COLLAGE_WINDOW_GROWTH);
         }
 
         Ok(album_ids)
@@ -931,20 +967,176 @@ mod tests {
         assert!(songs.is_empty());
     }
 
-    /// The collage read takes the same checked path, so a failed envelope is
-    /// an error its callers can tell from a playlist with no songs.
+    /// The collage read is status-checked like every other read, so a failed
+    /// request is an error its callers can tell from a playlist with no songs.
     #[tokio::test]
-    async fn load_playlist_albums_turns_a_failed_envelope_into_an_error() {
-        service_at(&one_shot_server("200 OK", NOT_FOUND_ENVELOPE).await)
+    async fn load_playlist_albums_turns_a_failed_request_into_an_error() {
+        service_at(&one_shot_server("500 Internal Server Error", "boom").await)
             .load_playlist_albums("pl1")
             .await
-            .expect_err("a failed envelope must be an error");
+            .expect_err("a failed request must be an error");
 
-        let ids = service_at(&one_shot_server("200 OK", EMPTY_PLAYLIST).await)
+        let ids = service_at(&one_shot_server("200 OK", "[]").await)
             .load_playlist_albums("pl1")
             .await
-            .expect("a playlist with no entries is not an error");
+            .expect("a playlist with no tracks is not an error");
         assert!(ids.is_empty());
+    }
+
+    /// Answer one request per body, in order, each on its own connection,
+    /// and record every request line. Returns the base URL and the lines.
+    async fn scripted_server(
+        bodies: Vec<String>,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = lines.clone();
+        tokio::spawn(async move {
+            for body in bodies {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while let Ok(read) = socket.read(&mut chunk).await
+                    && read > 0
+                {
+                    request.extend_from_slice(&chunk[..read]);
+                    if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&request);
+                seen.lock()
+                    .expect("request lines")
+                    .push(text.lines().next().unwrap_or_default().to_owned());
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (format!("http://{addr}"), lines)
+    }
+
+    /// `count` native playlist-track rows starting at position `first`, the
+    /// row at position `p` on album `album_of(p)`. Rows carry the fields a
+    /// real one does around the album id (position `id`, `mediaFileId`, a
+    /// nested object), which the collage read must skip over.
+    fn track_rows(first: u32, count: u32, album_of: impl Fn(u32) -> String) -> String {
+        let rows: Vec<serde_json::Value> = (first..first + count)
+            .map(|p| {
+                json!({
+                    "id": p.to_string(),
+                    "mediaFileId": format!("s{p}"),
+                    "playlistId": "pl1",
+                    "title": format!("Song {p}"),
+                    "albumId": album_of(p),
+                    "participants": { "artist": [{ "id": "ar1", "name": "A" }] },
+                })
+            })
+            .collect();
+        serde_json::Value::Array(rows).to_string()
+    }
+
+    /// The collage shows at most nine covers, so it reads the playlist's first
+    /// tracks, not all of them: one whole `getPlaylist` per playlist cost
+    /// 259 MB at once on a library with a 10,571-song smart playlist.
+    #[tokio::test]
+    async fn load_playlist_albums_reads_the_first_tracks_only() {
+        // 50 tracks cycling over 12 albums: nine distinct inside the window.
+        let (url, lines) =
+            scripted_server(vec![track_rows(1, 50, |p| format!("al{}", (p - 1) % 12))]).await;
+
+        let ids = service_at(&url)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("collage album ids");
+
+        let expected: Vec<String> = (0..9).map(|n| format!("al{n}")).collect();
+        assert_eq!(
+            ids, expected,
+            "the first nine distinct albums, in track order"
+        );
+        let lines = lines.lock().expect("request lines");
+        assert_eq!(lines.len(), 1, "one request: {lines:?}");
+        assert!(
+            lines[0].starts_with("GET /api/playlist/pl1/tracks?"),
+            "the paged native read, got: {}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("_start=0") && lines[0].contains("_end=50"),
+            "a bounded window, got: {}",
+            lines[0]
+        );
+    }
+
+    /// A playlist built from whole albums has fewer than nine in its first
+    /// window: the read goes on, a larger window each time, until it has nine.
+    #[tokio::test]
+    async fn load_playlist_albums_reads_on_while_albums_run_long() {
+        // Tracks 1-50 sit on 4 albums; 51-250 bring 20 more.
+        let (url, lines) = scripted_server(vec![
+            track_rows(1, 50, |p| format!("al{}", (p - 1) / 13)),
+            track_rows(51, 200, |p| format!("al{}", 4 + (p - 51) / 10)),
+        ])
+        .await;
+
+        let ids = service_at(&url)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("collage album ids");
+
+        let expected: Vec<String> = (0..9).map(|n| format!("al{n}")).collect();
+        assert_eq!(ids, expected);
+        let lines = lines.lock().expect("request lines");
+        assert_eq!(lines.len(), 2, "two windows: {lines:?}");
+        assert!(
+            lines[1].contains("_start=50") && lines[1].contains("_end=250"),
+            "the second window starts where the first ended, got: {}",
+            lines[1]
+        );
+    }
+
+    /// A window that comes back short is the playlist's end: the read stops
+    /// with the albums it has, however few.
+    #[tokio::test]
+    async fn load_playlist_albums_stops_where_the_playlist_ends() {
+        let (url, lines) =
+            scripted_server(vec![track_rows(1, 20, |p| format!("al{}", (p - 1) / 7))]).await;
+
+        let ids = service_at(&url)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("collage album ids");
+
+        assert_eq!(ids, vec!["al0", "al1", "al2"]);
+        assert_eq!(lines.lock().expect("request lines").len(), 1);
+    }
+
+    /// A server that ignores the window and answers with every track has
+    /// nothing more to send: it is asked once, not once per window.
+    #[tokio::test]
+    async fn load_playlist_albums_asks_once_when_the_window_is_ignored() {
+        let (url, lines) =
+            scripted_server(vec![track_rows(1, 80, |p| format!("al{}", (p - 1) / 20))]).await;
+
+        let ids = service_at(&url)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("collage album ids");
+
+        assert_eq!(ids, vec!["al0", "al1", "al2", "al3"]);
+        assert_eq!(lines.lock().expect("request lines").len(), 1);
     }
 
     /// The typed envelope navigation shared by `load_playlist_songs` and
