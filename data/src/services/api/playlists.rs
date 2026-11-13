@@ -54,6 +54,11 @@ pub struct SubsonicPlaylistAttrs {
 struct AlbumIdRow {
     #[serde(rename = "albumId")]
     album_id: Option<String>,
+    /// The track's file is gone from the library. `getPlaylist` leaves such
+    /// a track out; the native rows keep it, and its album has no cover (the
+    /// server answers with its placeholder disc).
+    #[serde(default)]
+    missing: bool,
 }
 
 /// Covers a playlist's collage shows at most.
@@ -258,8 +263,9 @@ impl PlaylistsApiService {
     /// track lists (a smart playlist can hold the library) cost 259 MB of
     /// heap in two seconds on a 36-playlist server. Like `getPlaylist`, the
     /// first window makes the server re-evaluate a smart playlist (see
-    /// [`Self::load_playlist_tracks_page`]); unlike it, the native rows
-    /// include tracks whose file is missing, whose album still has a cover.
+    /// [`Self::load_playlist_tracks_page`]), and a track whose file is
+    /// missing is left out (the native rows mark it; `getPlaylist` never
+    /// sent it).
     pub async fn load_playlist_albums(&self, playlist_id: &str) -> Result<Vec<String>> {
         let endpoint = format!("/api/playlist/{playlist_id}/tracks");
         let mut album_ids: Vec<String> = Vec::new();
@@ -286,7 +292,8 @@ impl PlaylistsApiService {
                 .context("Failed to parse playlist tracks for the collage")?;
             let read = rows.len();
 
-            for album_id in rows.into_iter().filter_map(|row| row.album_id) {
+            let present = rows.into_iter().filter(|row| !row.missing);
+            for album_id in present.filter_map(|row| row.album_id) {
                 if !album_ids.contains(&album_id) {
                     album_ids.push(album_id);
                     if album_ids.len() >= COLLAGE_ALBUM_LIMIT {
@@ -1121,6 +1128,28 @@ mod tests {
 
         assert_eq!(ids, vec!["al0", "al1", "al2"]);
         assert_eq!(lines.lock().expect("request lines").len(), 1);
+    }
+
+    /// A track whose file is gone from the library still has its row in the
+    /// native answer, marked `missing`; `getPlaylist` leaves it out. Its
+    /// album has no cover to show (the server answers with its placeholder
+    /// disc), so the collage skips it as it did when it read `getPlaylist`.
+    #[tokio::test]
+    async fn load_playlist_albums_skips_tracks_whose_file_is_missing() {
+        let rows = json!([
+            { "id": "1", "mediaFileId": "s1", "albumId": "gone", "missing": true },
+            { "id": "2", "mediaFileId": "s2", "albumId": "gone", "missing": true },
+            { "id": "3", "mediaFileId": "s3", "albumId": "al1", "missing": false },
+            { "id": "4", "mediaFileId": "s4", "albumId": "al2" },
+        ]);
+        let (url, _) = scripted_server(vec![rows.to_string()]).await;
+
+        let ids = service_at(&url)
+            .load_playlist_albums("pl1")
+            .await
+            .expect("collage album ids");
+
+        assert_eq!(ids, vec!["al1", "al2"]);
     }
 
     /// A server that ignores the window and answers with every track has
