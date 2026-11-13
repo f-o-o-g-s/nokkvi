@@ -906,7 +906,7 @@ impl Nokkvi {
         if is(self.artwork.large_staging.get(&id))
             && let Some(handle) = self.artwork.large_staging.remove(&id)
         {
-            self.artwork.large_artwork.put(id.clone(), handle);
+            self.cache_large_cover(id.clone(), handle);
         }
         if let Some(allocation) = allocation
             && is(self.artwork.large_artwork.peek(&id))
@@ -916,6 +916,15 @@ impl Nokkvi {
             self.artwork.large_on_gpu.hold(id, pixels, allocation);
         }
         Task::none()
+    }
+
+    /// Put the full-size cover of `id` in the panel's cache, which keeps
+    /// the playing song's cover whatever else it lets go of
+    /// (`ArtworkState::cache_large_cover`).
+    fn cache_large_cover(&mut self, id: String, cover: image::Handle) {
+        let playing = self.current_queue_song_cover_key().map(str::to_owned);
+        self.artwork
+            .cache_large_cover(id, cover, playing.as_deref());
     }
 
     /// A full-size cover for `id` is here: fetched just now, or answered
@@ -928,7 +937,7 @@ impl Nokkvi {
         // The cover the panel already draws stays where it is: taking it
         // out to stage it would swap the panel back to the thumbnail. The
         // put only marks it as used.
-        self.artwork.large_artwork.put(id.clone(), handle.clone());
+        self.cache_large_cover(id.clone(), handle.clone());
         if self.artwork.large_on_gpu.touch(&id) {
             return Task::none();
         }

@@ -685,3 +685,53 @@ fn a_refreshed_cover_is_staged_too() {
     assert_eq!(shown(&app, "a1"), None);
     assert_eq!(staged(&app, "a1"), Some(cover.id()));
 }
+
+// ---------------------------------------------------------------------------
+// The panel's cover cache is bounded by bytes, not only by entries
+// ---------------------------------------------------------------------------
+
+/// A cover of `mib` MiB. Its bytes are never read, so the test pays for none
+/// of them.
+fn big_cover(mib: usize) -> iced::widget::image::Handle {
+    iced::widget::image::Handle::from_bytes(vec![0u8; mib * 1024 * 1024])
+}
+
+/// A full-size cover arrives and reaches the panel's cache.
+fn cover_lands(app: &mut crate::Nokkvi, id: &str, cover: iced::widget::image::Handle) {
+    let _ = app.handle_large_artwork_loaded(id.into(), Some(cover.clone()));
+    staging_ends(app, id, &cover);
+}
+
+/// Navidrome answers nokkvi's square covers as PNG, about 1.3 MB each at
+/// 1000 px, so the 200-entry cache held 255 MB after one long scroll. Covers
+/// past the byte budget leave it, oldest first.
+#[test]
+fn the_panel_cache_lets_go_of_the_oldest_covers_over_its_byte_budget() {
+    let mut app = test_app();
+    for id in ["a1", "a2", "a3", "a4"] {
+        cover_lands(&mut app, id, big_cover(20));
+    }
+
+    assert_eq!(shown(&app, "a1"), None, "the oldest gave way");
+    for id in ["a2", "a3", "a4"] {
+        assert!(shown(&app, id).is_some(), "{id} is still cached");
+    }
+}
+
+/// The playing song's cover stays through any amount of browsing: the Queue
+/// panel, Theater Mode and the lyrics backdrop read it the whole song long.
+#[test]
+fn the_playing_songs_cover_outlasts_the_covers_browsed_past_it() {
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    cover_lands(&mut app, "album_s1", big_cover(20));
+
+    for id in ["a2", "a3", "a4", "a5"] {
+        cover_lands(&mut app, id, big_cover(20));
+    }
+
+    assert!(shown(&app, "album_s1").is_some(), "the playing cover stays");
+    assert_eq!(shown(&app, "a2"), None, "the oldest browsed cover gave way");
+    assert!(shown(&app, "a5").is_some());
+}

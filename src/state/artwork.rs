@@ -15,10 +15,17 @@ use nokkvi_data::types::player_settings::LyricsBackdropBlur;
 
 use super::snapshotted_lru::SnapshottedLru;
 
-/// Maximum entries in the large artwork LRU cache.
-/// Each 500px image handle is ~80KB, so 200 entries ≈ 16MB cap.
+/// Maximum entries in the large artwork LRU cache. The entry count bounds
+/// small covers; [`LARGE_ARTWORK_BYTE_BUDGET`] bounds the cache's memory.
 const LARGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(200).expect("capacity must be > 0");
+/// Bytes of full-size covers the panel's cache holds at most
+/// ([`ArtworkState::cache_large_cover`]). A byte budget beside the entry
+/// count, because a cover's size follows the Artwork Resolution setting and
+/// the server's encoder: Navidrome answers the square covers nokkvi asks for
+/// as PNG, about 1.3 MB each at 1000 px (measured 2026-11-13), so 200 of
+/// them held 255 MB. 64 MB keeps about 50 of those for stepping back.
+pub(crate) const LARGE_ARTWORK_BYTE_BUDGET: usize = 64 * 1024 * 1024;
 /// Capacity for the mini-artwork (`album_art`) LRU. Sized roughly 6× a typical
 /// 80px slot list viewport so recently-visited slot regions stay warm but
 /// memory stays bounded as the user scrolls a large library. Doubled when the
@@ -565,7 +572,56 @@ impl<T> Budgeted<T> {
     }
 }
 
+/// The bytes a cover's handle keeps in memory.
+fn cover_bytes(cover: &image::Handle) -> usize {
+    match cover {
+        image::Handle::Bytes(_, bytes) => bytes.len(),
+        image::Handle::Rgba { pixels, .. } => pixels.len(),
+        image::Handle::Path(..) => 0,
+    }
+}
+
 impl ArtworkState {
+    /// Give the panel's cache the full-size cover of `id` as its newest:
+    /// one that just reached the GPU, or one shown again (which marks it as
+    /// used). The least recently used covers then leave while the cache is
+    /// over [`LARGE_ARTWORK_BYTE_BUDGET`]. Two covers stay whatever the
+    /// total: the one just given (the panel is about to draw it), and
+    /// `playing`'s, the playing song's, which the now-playing surfaces read
+    /// the whole song long with no centring to mark it as used. A cover
+    /// that left is fetched again when its row is next centred.
+    pub(crate) fn cache_large_cover(
+        &mut self,
+        id: String,
+        cover: image::Handle,
+        playing: Option<&str>,
+    ) {
+        self.large_artwork.put(id.clone(), cover);
+        let mut total: usize = self
+            .large_artwork
+            .iter()
+            .map(|(_, cover)| cover_bytes(cover))
+            .sum();
+        if total <= LARGE_ARTWORK_BYTE_BUDGET {
+            return;
+        }
+        // Oldest first.
+        let mut leaving = Vec::new();
+        for (key, cover) in self.large_artwork.iter().rev() {
+            if total <= LARGE_ARTWORK_BYTE_BUDGET {
+                break;
+            }
+            if *key == id || playing == Some(key.as_str()) {
+                continue;
+            }
+            total -= cover_bytes(cover);
+            leaving.push(key.clone());
+        }
+        for key in leaving {
+            self.large_artwork.pop(&key);
+        }
+    }
+
     /// Forget `id`'s full-size cover wherever it is: shown, on its way onto
     /// the GPU, or held there. For a cover that changed on the server or is
     /// being refreshed; an allocation answer for the dropped cover finds
@@ -788,5 +844,89 @@ mod budgeted_tests {
         assert_eq!(held.len(), 2);
         held.release("a");
         assert_eq!(ids(&held), ["b"]);
+    }
+}
+
+#[cfg(test)]
+mod large_cover_cache_tests {
+    use iced::widget::image;
+
+    use super::ArtworkState;
+
+    /// A cover of `mib` MiB. Its bytes are never read, so the test pays for
+    /// none of them.
+    fn cover(mib: usize) -> image::Handle {
+        image::Handle::from_bytes(vec![0u8; mib * 1024 * 1024])
+    }
+
+    /// The cached ids, newest first.
+    fn cached(state: &ArtworkState) -> Vec<&str> {
+        state
+            .large_artwork
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect()
+    }
+
+    /// Three 20 MiB covers fit the 64 MiB budget; a fourth does not.
+    #[test]
+    fn the_oldest_covers_give_way_over_the_byte_budget() {
+        let mut state = ArtworkState::default();
+        for id in ["a", "b", "c"] {
+            state.cache_large_cover(id.into(), cover(20), None);
+        }
+        assert_eq!(cached(&state), ["c", "b", "a"]);
+
+        state.cache_large_cover("d".into(), cover(20), None);
+        assert_eq!(cached(&state), ["d", "c", "b"], "the oldest gives way");
+        assert!(!state.large_artwork.snapshot.contains_key("a"));
+    }
+
+    /// The cover the panel is about to draw is kept, however large it is.
+    #[test]
+    fn the_cover_just_cached_is_kept_even_when_it_alone_is_over_budget() {
+        let mut state = ArtworkState::default();
+        state.cache_large_cover("a".into(), cover(20), None);
+        state.cache_large_cover("huge".into(), cover(70), None);
+        assert_eq!(cached(&state), ["huge"]);
+    }
+
+    /// Centring a cached cover caches it again: it is the newest then, and
+    /// the next one over budget takes an older cover's place.
+    #[test]
+    fn a_cover_cached_again_becomes_the_newest() {
+        let mut state = ArtworkState::default();
+        let first = cover(20);
+        state.cache_large_cover("a".into(), first.clone(), None);
+        state.cache_large_cover("b".into(), cover(20), None);
+        state.cache_large_cover("c".into(), cover(20), None);
+        state.cache_large_cover("a".into(), first, None);
+
+        state.cache_large_cover("d".into(), cover(20), None);
+        assert_eq!(cached(&state), ["d", "a", "c"], "b was the oldest");
+    }
+
+    /// The now-playing surfaces (Queue panel, Theater, the lyrics backdrop)
+    /// read the playing song's cover for as long as it plays, and nothing
+    /// marks it as used meanwhile: browsing past it must not drop it.
+    #[test]
+    fn the_playing_songs_cover_is_never_let_go_of() {
+        let mut state = ArtworkState::default();
+        for id in ["playing", "b", "c", "d", "e"] {
+            state.cache_large_cover(id.into(), cover(20), Some("playing"));
+        }
+        assert_eq!(cached(&state), ["e", "d", "playing"]);
+    }
+
+    /// Small covers (a low Artwork Resolution, a JPEG-serving server) never
+    /// reach the byte budget: the entry count bounds them as before.
+    #[test]
+    fn small_covers_fill_the_whole_entry_capacity() {
+        let mut state = ArtworkState::default();
+        for n in 0..250 {
+            let small = image::Handle::from_bytes(vec![0u8; 16]);
+            state.cache_large_cover(format!("a{n}"), small, None);
+        }
+        assert_eq!(state.large_artwork.len(), 200);
     }
 }
