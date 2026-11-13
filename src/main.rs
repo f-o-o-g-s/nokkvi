@@ -1219,6 +1219,41 @@ impl Nokkvi {
 // SECTION: Entry Point
 // ============================================================================
 
+/// How often freed heap memory is handed back to the system.
+#[cfg(target_env = "gnu")]
+const HEAP_TRIM_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Hand freed heap memory back to the system every [`HEAP_TRIM_INTERVAL`].
+///
+/// glibc keeps the pages of freed memory for the next allocation unless
+/// they sit at the very top of the heap, so a burst (a long scroll's
+/// covers, a big queue built and cleared) left the process as large as its
+/// peak for the rest of the session: after a stress run 204 MB of a 716 MB
+/// process was freed memory, and one `malloc_trim` returned 156 MB of it.
+/// The call took at most 1.6 ms on a 400 MB heap and 0.06 ms with nothing
+/// to return, so it runs on a timer of its own thread rather than on a
+/// guess at when the app is quiet. Started after the CLI paths have
+/// returned: a `nokkvi <verb>` client never gets here.
+#[cfg(target_env = "gnu")]
+fn spawn_heap_trimmer() {
+    let spawned = std::thread::Builder::new()
+        .name("heap-trim".into())
+        .spawn(|| {
+            loop {
+                std::thread::sleep(HEAP_TRIM_INTERVAL);
+                // Safety: malloc_trim is thread-safe (it takes each arena's
+                // lock in turn) and touches only memory the allocator holds
+                // as free.
+                unsafe { libc::malloc_trim(0) };
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(
+            "could not start the heap trim thread ({err}); freed memory stays with the process"
+        );
+    }
+}
+
 pub fn main() -> iced::Result {
     // Cap glibc malloc arenas to 2 before any thread spawns. The default cap
     // (8 × num_cores) hoards ~330 MiB across mostly-empty per-thread arenas
@@ -1428,6 +1463,9 @@ pub fn main() -> iced::Result {
             nokkvi_ipc::instance_lock::lock_path().display()
         );
     }
+
+    #[cfg(target_env = "gnu")]
+    spawn_heap_trimmer();
 
     // Run the legacy → XDG-state-dir migration now that tracing is up,
     // and before iced::daemon spins up `Nokkvi::default()` (which loads

@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Opening the Playlists view no longer holds hundreds of megabytes of memory on a library with very large playlists.
 - Full-size covers kept in memory for stepping back are now limited to about 64 MB.
 - Holding a navigation key now skips the full-size covers that could not arrive before their row scrolls past.
+- nokkvi now hands freed memory back to the system every 30 seconds.
 
 ### Fixed
 
