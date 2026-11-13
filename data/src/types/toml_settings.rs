@@ -38,6 +38,8 @@ pub struct TomlSettings {
     /// press.
     pub harbour_expandable_shelves: bool,
     pub local_music_path: String,
+    /// Discord application id for Rich Presence; empty keeps presence off.
+    pub discord_app_id: String,
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool values load via the compat shim (`true` → On, `false` → Off).
     #[serde(deserialize_with = "deserialize_verbose_config_with_bool_compat")]
@@ -359,6 +361,7 @@ impl Default for TomlSettings {
             enter_shuffle: false,
             harbour_expandable_shelves: false,
             local_music_path: String::new(),
+            discord_app_id: String::new(),
             verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),

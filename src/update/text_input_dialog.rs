@@ -327,6 +327,20 @@ impl Nokkvi {
                         "Local music path saved".to_string(),
                         "set local music path",
                     )
+                } else if key == "general.discord_app_id" {
+                    let new_value = new_value.trim().to_string();
+                    self.settings.discord_app_id = new_value.clone();
+                    tracing::info!(
+                        " [SETTINGS] Discord app id updated (empty: {})",
+                        new_value.is_empty()
+                    );
+                    self.settings_page.config_dirty = true;
+                    self.refresh_settings_entries_if_dirty();
+                    self.shell_fire_and_forget_task(
+                        move |shell| async move { shell.settings().set_discord_app_id(new_value).await },
+                        "Discord App ID saved".to_string(),
+                        "set discord app id",
+                    )
                 } else {
                     tracing::warn!(" [SETTINGS] WriteGeneralSetting: unhandled key {key:?}");
                     Task::none()

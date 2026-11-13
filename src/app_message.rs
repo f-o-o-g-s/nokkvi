@@ -1742,6 +1742,12 @@ pub enum Message {
     /// reload every kind but still skip per-album artwork eviction to avoid
     /// mass re-downloads.
     LibraryChanged(crate::services::navidrome_sse::LibraryChange),
+    /// The public cover link the server gave for an album, for the Discord
+    /// presence (`None`: no usable link).
+    DiscordCover {
+        album_id: String,
+        url: Option<String>,
+    },
     LoadAlbums,
     LoadQueue,
     LoadArtists,

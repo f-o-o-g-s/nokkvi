@@ -48,6 +48,7 @@ mod components;
 mod config;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod discord;
 mod dynamic_accent;
 mod editor;
 mod eq_modal;
@@ -160,6 +161,10 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::Navigation(nav) => self.handle_navigation(nav),
             Message::LibraryChanged(change) => self.handle_library_changed(change),
+            Message::DiscordCover { album_id, url } => {
+                self.discord.set_cover(album_id, url);
+                Task::none()
+            }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

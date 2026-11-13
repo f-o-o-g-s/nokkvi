@@ -652,6 +652,31 @@ define_settings! {
             write: |ps, ts| ts.replay_gain_prevent_clipping = ps.replay_gain_prevent_clipping,
         },
 
+        // -- Discord ----------------------------------------------------------
+        // Free text through the text-input dialog (like `local_music_path`);
+        // the UI mirror on `Nokkvi.settings` is repopulated by
+        // `handle_player_settings_loaded`, and the presence worker follows it.
+        DiscordAppId {
+            key: "general.discord_app_id",
+            value_type: Text,
+            setter: |mgr, v: String| mgr.set_discord_app_id(v.trim().to_string()),
+            toml_apply: |ts, p| p.discord_app_id = ts.discord_app_id.clone(),
+            read: |src, out| out.discord_app_id = src.discord_app_id.clone(),
+            write: |ps, ts| ts.discord_app_id = ps.discord_app_id.clone(),
+            ui_meta: {
+                label: "Discord App ID",
+                category: "Discord",
+                subtitle: Some(
+                    "Show what you're listening to on your Discord profile. Create an \
+                     application at discord.com/developers and paste its Application ID \
+                     here · the cover shows when your server is reachable from the \
+                     internet · empty turns it off · press Enter to edit",
+                ),
+                default: "",
+                read_field: |d| d.discord_app_id.as_ref(),
+            },
+        },
+
         // -- Scrobbling -------------------------------------------------------
         ScrobblingEnabled {
             key: "general.scrobbling_enabled",
@@ -1078,6 +1103,7 @@ mod tests {
             radio_scrobbling_enabled: false,
             radio_scrobble_threshold_secs: 60,
             radio_now_playing_enabled: true,
+            discord_app_id: "".into(),
             listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_username: "".into(),
@@ -1117,7 +1143,7 @@ mod tests {
     fn build_playback_tab_settings_items_emits_the_pinned_row_count() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 39);
+        assert_eq!(entries.len(), 40);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -2095,6 +2121,7 @@ mod tests {
             radio_scrobbling_enabled: live.radio_scrobbling_enabled,
             radio_scrobble_threshold_secs: i64::from(live.radio_scrobble_threshold_secs),
             radio_now_playing_enabled: live.radio_now_playing_enabled,
+            discord_app_id: live.discord_app_id.clone().into(),
             // Connection status is sourced from redb in build_settings_view_data,
             // not from LivePlayerSettings — not part of this macro round-trip.
             listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,

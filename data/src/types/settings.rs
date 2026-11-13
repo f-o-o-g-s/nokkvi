@@ -486,6 +486,10 @@ crate::player_settings_schema! {
     /// (default 75; `RATING_REMINDER_PERCENT_MIN`..=`_MAX`).
     #[serde(default = "default_rating_reminder_percent")]
     same rating_reminder_percent: u32 = default_rating_reminder_percent(),
+    /// Discord application id for Rich Presence (default: empty = presence off).
+    /// The user creates the application in Discord's developer portal.
+    #[serde(default)]
+    same discord_app_id: String = String::new(),
     /// Visualizer behavior config — sourced from the in-memory
     /// `SettingsManager.visualizer` field (config.toml `[visualizer]`-only;
     /// NEVER redb). `PersistedPlayerSettings` deliberately has no twin field.

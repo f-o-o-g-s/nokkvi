@@ -294,6 +294,8 @@ pub struct PlaybackSettingsData {
     pub radio_scrobble_threshold_secs: i64,
     /// Whether radio now-playing updates are sent.
     pub radio_now_playing_enabled: bool,
+    /// Discord application id (empty = Rich Presence off).
+    pub discord_app_id: Cow<'static, str>,
     /// Which layer supplies each radio-scrobble credential (env / config.toml /
     /// redb / unset), so the settings rows show "Saved" vs "Set in config.toml"
     /// vs "Set via env var" — and a GUI clear can warn when a higher layer still
@@ -363,6 +365,7 @@ impl Default for PlaybackSettingsData {
             radio_scrobbling_enabled: false,
             radio_scrobble_threshold_secs: 0,
             radio_now_playing_enabled: false,
+            discord_app_id: Cow::Borrowed(""),
             listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_username: Cow::Borrowed(""),
