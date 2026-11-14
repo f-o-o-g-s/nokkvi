@@ -184,6 +184,13 @@ impl VisualizerTiming {
     /// One tick in milliseconds as `f64` — used by the peak-fade math
     /// (`tick_ms / peak_fade_time_ms` per frame).
     pub(crate) const TICK_INTERVAL_MS_F64: f64 = 1000.0 / Self::TICK_RATE_HZ as f64;
+    /// Ticks with no audio arriving before the FFT thread idles: longer than
+    /// the UI's visualizer settle (`state::VISUALIZER_SETTLE`, 4 s), so the
+    /// bars and peaks have fallen before the worker stops ticking.
+    pub(crate) const IDLE_AFTER_EMPTY_TICKS: u32 = Self::TICK_RATE_HZ * 5;
+    /// How often an idle FFT thread looks for audio again: the first bars of
+    /// a resumed track show within this.
+    pub(crate) const IDLE_POLL: Duration = Duration::from_millis(50);
 }
 
 // ========================================
@@ -835,9 +842,23 @@ impl VisualizerState {
             .spawn(move || {
                 debug!("📊 [FFT THREAD] Started background FFT processing at 60fps");
                 let mut frame_count: u64 = 0;
+                let mut empty_ticks: u32 = 0;
                 let target_interval = VisualizerTiming::TICK_INTERVAL;
 
                 while running.load(Ordering::Relaxed) {
+                    // Paused, stopped or off: once no audio has arrived for a
+                    // while, everything has settled and nothing draws, so poll
+                    // for audio instead of ticking at 60 fps.
+                    empty_ticks = if state_clone.awaiting_audio() {
+                        empty_ticks.saturating_add(1)
+                    } else {
+                        0
+                    };
+                    if empty_ticks > VisualizerTiming::IDLE_AFTER_EMPTY_TICKS {
+                        thread::sleep(VisualizerTiming::IDLE_POLL);
+                        continue;
+                    }
+
                     let frame_start = Instant::now();
 
                     // Run FFT processing
@@ -877,6 +898,22 @@ impl VisualizerState {
             running: self.fft_thread_running.clone(),
             handle: self.fft_thread_handle.clone(),
         })
+    }
+
+    /// Less than one analysis chunk of audio is waiting (a pause leaves a
+    /// tail the tick never drains), or the feed is off, and no clear is
+    /// pending. A contended buffer counts as audio arriving.
+    fn awaiting_audio(&self) -> bool {
+        if !self.feed_active.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.pending_clear.load(Ordering::Relaxed) {
+            return false;
+        }
+        let chunk_size = self.cached_chunk_size.load(Ordering::Acquire);
+        self.sample_buffer
+            .try_lock()
+            .is_some_and(|buffer| buffer.len() < chunk_size)
     }
 
     /// Toggle the feed gate. `false` idles the FFT worker (`tick()` early-returns)

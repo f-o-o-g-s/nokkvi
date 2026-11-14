@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- A paused or stopped visualizer now holds still once its bars have fallen, so an idle nokkvi uses almost no CPU.
+- The Harbour sea pauses while nothing plays and the window is unfocused or untouched for a minute, and resumes where it stopped.
+- While paused, long now-playing titles rest at their start instead of scrolling; hovering one scrolls it.
+
 ### Fixed
 
 - A count of one reads singular, like 1 song, 1 album or 1 play, instead of 1 songs.

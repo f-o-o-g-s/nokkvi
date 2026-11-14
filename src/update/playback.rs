@@ -3308,6 +3308,7 @@ impl Nokkvi {
     pub(super) fn dispatch_playback(&mut self, msg: PlaybackMessage) -> Task<Message> {
         match msg {
             PlaybackMessage::Tick => {
+                self.stamp_transport(std::time::Instant::now());
                 // ── Stale-loading watchdog ──────────────────────────────
                 // Safety net: if a buffer has been in "loading" state for
                 // more than 30 seconds, something went wrong (network

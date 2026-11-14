@@ -1927,6 +1927,7 @@ impl Nokkvi {
             visualizer_config: _,
             boat: _,
             harbour_scene: _,
+            idle: _,
             glow_epoch: _,
             mpris_connection: _,
             notification_connection: _,

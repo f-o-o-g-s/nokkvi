@@ -9,11 +9,19 @@ use std::time::Instant;
 use iced::Task;
 use nokkvi_data::types::player_settings::VisualizationMode;
 
-use crate::{Nokkvi, app_message::Message, state::ChromeMotion};
+use crate::{
+    Nokkvi,
+    app_message::Message,
+    state::{
+        AMBIENT_IDLE_AFTER, AMBIENT_INPUT_REARM, ChromeMotion, TICK_IDLE, TICK_LIVELY,
+        TICK_LIVELY_HOLD, VISUALIZER_SETTLE,
+    },
+};
 
 /// Run every per-frame step. Each one gates itself, so none waits on another's
 /// early-out (the Lines boat's, say, when the visualizer is off).
 pub(crate) fn handle_frame_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> {
+    app.stamp_transport(now);
     crate::update::theater::tick(app, now);
     step_now_playing_glow(app, now);
     // The Harbour Trawl scene's sea is procedural (a pure function of a phase
@@ -115,9 +123,12 @@ impl Nokkvi {
     /// rate while nothing moves (17% of a core, paused on a 240 Hz display).
     /// It is on only while a step above has something to move: the transport
     /// runs (the glow, the lyric clock, the boat), a visualizer mode is on
-    /// (its shaders animate on their own clock), Theater Mode's chrome slides
-    /// or is due to flip, the Harbour scene shows (its sea breathes while
-    /// paused) or a lyrics glide or dissolve is in flight, or the lyrics
+    /// and the transport ran within its settle window (its shaders animate on
+    /// their own clock, so a paused or stopped visualizer freezes once the
+    /// bars have fallen), Theater Mode's chrome slides or is due to flip, the
+    /// Harbour scene shows with the music playing or a present user (its sea
+    /// breathes while paused, until the window loses focus or sits a minute
+    /// without input), a lyrics glide or dissolve is in flight, or the lyrics
     /// column has a jump still to land (a paused seek). Everything else
     /// that animates (a hover wash, the centre flash, the marquee, the seek
     /// bar's and the scrollbar's fades, the roulette) requests its own frames,
@@ -125,14 +136,70 @@ impl Nokkvi {
     /// re-read after every update, so a term that changes takes effect at the
     /// next message. A new per-frame step adds its term here.
     pub(crate) fn frames_wanted(&self) -> bool {
-        let transport_running = self.playback.playing && !self.playback.paused;
-        let visualizer_on = self.settings.visualization_mode != VisualizationMode::Off;
         let now = Instant::now();
-        transport_running
-            || visualizer_on
+        self.transport_running()
+            || self.visualizer_settling(now)
             || self.theater_in_motion(now)
-            || self.harbour_scene_on_screen()
+            || self.harbour_scene_breathing(now)
             || self.lyrics_in_motion(now)
+    }
+
+    /// The transport is playing (not paused, not stopped).
+    pub(crate) fn transport_running(&self) -> bool {
+        self.playback.playing && !self.playback.paused
+    }
+
+    /// Note that the transport runs at `now`, for the idle gates below. Called
+    /// from the frame step and the 10 Hz tick, so the stamp is at most a tick
+    /// old when the transport stops.
+    pub(crate) fn stamp_transport(&mut self, now: Instant) {
+        if self.transport_running() {
+            self.idle.transport_seen = Some(now);
+        }
+    }
+
+    /// A visualizer mode is on and the transport ran within
+    /// [`VISUALIZER_SETTLE`]: the bars and peaks fall and a swell settles
+    /// after a pause or stop, then the picture holds still (MilkDrop
+    /// included) until playback resumes, so a paused app costs no frames.
+    fn visualizer_settling(&self, now: Instant) -> bool {
+        self.settings.visualization_mode != VisualizationMode::Off
+            && (self.transport_running() || self.idle.transport_within(now, VISUALIZER_SETTLE))
+    }
+
+    /// The Harbour scene shows and someone is there to watch it: the music
+    /// plays, or the window has focus and saw input within
+    /// [`AMBIENT_IDLE_AFTER`]. Otherwise the sea holds its last frame and
+    /// picks up from it on the next input (its step clamps the gap).
+    fn harbour_scene_breathing(&self, now: Instant) -> bool {
+        self.harbour_scene_on_screen()
+            && (self.transport_running()
+                || (self.theater.window_focused && self.idle.input_within(now, AMBIENT_IDLE_AFTER)))
+    }
+
+    /// The 10 Hz tick's period: [`TICK_LIVELY`] while the transport runs or
+    /// ran within [`TICK_LIVELY_HOLD`], any message other than the idle poll
+    /// arrived within it, frames run or a toast shows; [`TICK_IDLE`]
+    /// otherwise. Whatever starts playback (a click, a hotkey, MPRIS, IPC)
+    /// arrives as a message, so the slow tick never delays a start.
+    pub(crate) fn tick_interval(&self) -> std::time::Duration {
+        let now = Instant::now();
+        let lively = self.transport_running()
+            || self.idle.transport_within(now, TICK_LIVELY_HOLD)
+            || self.idle.event_within(now, TICK_LIVELY_HOLD)
+            || self.frames_wanted()
+            || self.toast.current().is_some();
+        if lively { TICK_LIVELY } else { TICK_IDLE }
+    }
+
+    /// Whether the ambient-input listener runs: the Harbour scene could hold
+    /// for idleness (it shows, nothing plays) and the last input is older than
+    /// [`AMBIENT_INPUT_REARM`], so fresh input never raises a message per
+    /// mouse move.
+    pub(crate) fn ambient_input_wanted(&self) -> bool {
+        self.harbour_scene_on_screen()
+            && !self.transport_running()
+            && !self.idle.input_within(Instant::now(), AMBIENT_INPUT_REARM)
     }
 
     /// Theater Mode's chrome sliding, or due to flip: `theater::tick` flips it

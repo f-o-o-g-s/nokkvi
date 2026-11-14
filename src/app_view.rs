@@ -633,6 +633,9 @@ impl Nokkvi {
     ///
     /// Daemon-mode signature: `_window` is unused (single window only).
     pub fn view(&self, _window: iced::window::Id) -> Element<'_, Message> {
+        // Marquees scroll on their own only while the music plays; paused,
+        // they rest unless hovered, so an idle window asks for no frames.
+        widgets::marquee_text::set_marquee_motion(self.transport_running());
         let screen_view = match self.screen {
             Screen::Login => self.login_view(),
             Screen::Home => self.home_view(),

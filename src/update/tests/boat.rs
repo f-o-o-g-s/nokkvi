@@ -561,26 +561,24 @@ mod harbour_scene_tests {
     }
 
     #[test]
-    fn harbour_sea_cycle_counts_whole_cycles_in_one_dt() {
-        // A single large dt (e.g. resuming after a compositor-occluded
-        // stall) can span multiple 20 s sea cycles — the counter must
-        // count them analytically, not via a wrap compare that misses
-        // every whole cycle whose fractional landing exceeds the start.
+    fn harbour_sea_resumes_where_it_stood_after_a_long_gap() {
+        // The scene holds its frame while the app idles (and through a
+        // compositor-occluded stall); the first frame after the gap advances
+        // one clamped step, so the sea and the boat pick up where they stood
+        // instead of lurching forward.
         let mut app = app_on_harbour();
 
         let t0 = Instant::now();
         let _ = app.update(Message::FrameTick(t0));
-        // 45 s at SEA_DRIFT_HZ 0.05 = 2.25 cycles.
+        let before = app.harbour_scene.sea_phase;
         let _ = app.update(Message::FrameTick(t0 + Duration::from_secs(45)));
-        assert_eq!(
-            app.harbour_scene.sea_cycle, 2,
-            "a 2.25-cycle dt must bump the counter exactly twice"
-        );
+        let step = crate::widgets::harbour_sea::SEA_DRIFT_HZ * 0.1;
         assert!(
-            (0.0..1.0).contains(&app.harbour_scene.sea_phase),
-            "phase must land wrapped, got {}",
+            (app.harbour_scene.sea_phase - (before + step).rem_euclid(1.0)).abs() < 1e-5,
+            "a 45 s gap advances one 100 ms step, got {}",
             app.harbour_scene.sea_phase
         );
+        assert_eq!(app.harbour_scene.sea_cycle, 0, "no cycles skipped");
     }
 
     #[test]
@@ -641,8 +639,9 @@ mod harbour_scene_tests {
         let mut app = app_on_harbour();
         app.harbour_scene.music.reach = [0.9; crate::widgets::visualizer::state::SCENE_BANDS];
         let t0 = Instant::now();
-        let _ = app.update(Message::FrameTick(t0));
-        let _ = app.update(Message::FrameTick(t0 + Duration::from_secs(2)));
+        for frame in 0..=20 {
+            let _ = app.update(Message::FrameTick(t0 + Duration::from_millis(100) * frame));
+        }
         assert!(
             app.harbour_scene.music.level() < 0.01,
             "silence settles the curtain"

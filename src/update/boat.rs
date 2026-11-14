@@ -214,6 +214,10 @@ impl Nokkvi {
     }
 }
 
+/// The longest gap one Harbour step advances: a frame stall or an idle hold
+/// resumes from where the scene stood.
+const HARBOUR_MAX_STEP: std::time::Duration = std::time::Duration::from_millis(100);
+
 pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     let on_harbour = app.harbour_scene_on_screen();
     // The scene keeps the audio analysis open while it shows (its light
@@ -228,8 +232,11 @@ pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
         return;
     }
 
+    // Clamped: the scene holds its frame while the app idles
+    // (`Nokkvi::frames_wanted`), and the first frame after that gap picks up
+    // where it stopped instead of lurching the sea and the boat forward.
     let dt = match app.harbour_scene.boat.last_tick {
-        Some(prev) => now.saturating_duration_since(prev),
+        Some(prev) => now.saturating_duration_since(prev).min(HARBOUR_MAX_STEP),
         None => std::time::Duration::ZERO,
     };
     app.harbour_scene.boat.last_tick = Some(now);
@@ -238,9 +245,8 @@ pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     // physics and render both consume. Full cycles crossed bump the counter
     // that varies the scene's rare events (shooting star, leaping fish)
     // from one ~20 s cycle to the next — counted analytically from the
-    // unwrapped advance (a `new < prev` compare would miss every whole
-    // cycle inside one large dt, e.g. after a compositor-occluded stall,
-    // and replay the previous cycle's events verbatim).
+    // unwrapped advance (the clamped dt keeps it to one step, but the count
+    // does not lean on that).
     let advanced =
         app.harbour_scene.sea_phase + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ;
     app.harbour_scene.sea_phase = advanced.rem_euclid(1.0);

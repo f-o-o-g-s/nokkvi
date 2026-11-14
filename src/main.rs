@@ -345,6 +345,9 @@ pub struct Nokkvi {
     pub boat: crate::widgets::boat::BoatState,
     /// The Harbour Trawl panel's longship + procedural sea.
     pub harbour_scene: crate::state::HarbourScene,
+    /// When the transport last ran and the user last moved, for the frame
+    /// loop's idle gate (`Nokkvi::frames_wanted`).
+    pub idle: crate::state::IdleState,
 
     // -------------------------------------------------------------------------
     // MPRIS D-Bus Integration
@@ -585,6 +588,7 @@ impl Default for Nokkvi {
             visualizer_config: crate::visualizer_config::create_shared_config(),
             boat: crate::widgets::boat::BoatState::default(),
             harbour_scene: crate::state::HarbourScene::default(),
+            idle: crate::state::IdleState::default(),
             mpris_connection: None,
             last_mpris_position_us: 0,
             mpris_track: services::mpris::PublishedTrack::default(),
@@ -687,8 +691,10 @@ impl Nokkvi {
 
     /// Global subscriptions: tick timer, keyboard, window events
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        let tick = time::every(Duration::from_millis(100))
-            .map(|_| Message::Playback(app_message::PlaybackMessage::Tick)); // 10 times per second for smooth position updates
+        // 10 times per second for smooth position updates; slowed while the
+        // app idles (`Nokkvi::tick_interval`).
+        let tick = time::every(self.tick_interval())
+            .map(|_| Message::Playback(app_message::PlaybackMessage::Tick));
 
         // Audio rendering no longer driven by iced subscription.
         // It runs on a dedicated std::thread with a 5ms timer (see engine.rs).
@@ -781,6 +787,26 @@ impl Nokkvi {
                     | iced::mouse::Event::WheelScrolled { .. }
                     | iced::mouse::Event::ButtonPressed(_),
                 ) => Some(Message::Theater(app_message::TheaterMessage::Activity)),
+                _ => None,
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        // Ambient input: while an idle-gated animation could hold still, any
+        // mouse move, wheel, press or key stamps the user as present
+        // (`Nokkvi::ambient_input_wanted`). Off while the last input is
+        // fresh, so moving the mouse over a running scene raises no message.
+        let ambient_input = if self.ambient_input_wanted() {
+            event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(
+                    iced::mouse::Event::CursorMoved { .. }
+                    | iced::mouse::Event::WheelScrolled { .. }
+                    | iced::mouse::Event::ButtonPressed(_),
+                )
+                | Event::Keyboard(keyboard::Event::KeyPressed { .. }) => {
+                    Some(Message::UserActivity)
+                }
                 _ => None,
             })
         } else {
@@ -908,6 +934,7 @@ impl Nokkvi {
             window_events,
             login_events,
             theater_events,
+            ambient_input,
             mpris,
             tray,
             notifications,

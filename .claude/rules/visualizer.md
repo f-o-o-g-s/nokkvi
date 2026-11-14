@@ -121,3 +121,4 @@ Plays MilkDrop presets (Butterchurn's pre-converted JSON) through `particle-milk
 - `apply_config()` sets `pending_engine_reinit` — FFT thread picks it up, prevents stutter
 - Resize debouncing: 100ms for bar count changes
 - The FFT tick takes the spectrum-engine, sample-buffer, display and peak locks with `try_lock()` and skips the tick on contention (CLAUDE.md)
+- The FFT thread idles while no audio arrives: after `IDLE_AFTER_EMPTY_TICKS` (5 s, past the UI's `VISUALIZER_SETTLE`) with less than one chunk buffered it stops calling `tick()` and polls every `IDLE_POLL` (50 ms) instead, so a paused or stopped app costs no 60 Hz worker

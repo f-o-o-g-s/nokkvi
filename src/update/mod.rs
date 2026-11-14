@@ -122,6 +122,11 @@ impl Nokkvi {
     /// Routes the message to its domain handler, then re-sizes every page's
     /// stored `slot_count` against the state the handler left behind.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        // Anything but the idle poll keeps the tick fast for a while
+        // (`Nokkvi::tick_interval`).
+        if !message.is_idle_poll() {
+            self.idle.last_event = Some(std::time::Instant::now());
+        }
         // Theater Mode's backstop: any message that changes what the hidden
         // layout would show (the view, the split view, the editor) leaves
         // theater, so no mouse or async route changes the view invisibly.
@@ -560,7 +565,13 @@ impl Nokkvi {
                 }
                 Task::none()
             }
+            Message::UserActivity => {
+                self.idle.last_input = Some(std::time::Instant::now());
+                Task::none()
+            }
             Message::WindowFocused => {
+                // Coming back to the window counts as being there.
+                self.idle.last_input = Some(std::time::Instant::now());
                 // Re-enable transient reveals; the toolbar stays collapsed until
                 // a genuine cursor move re-fires the header hover.
                 self.set_all_window_focused(true);

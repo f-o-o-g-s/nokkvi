@@ -12,7 +12,10 @@ use nokkvi_data::types::{
 
 use crate::{
     Screen, View,
-    state::{ChromeMotion, OutgoingLyrics},
+    state::{
+        AMBIENT_IDLE_AFTER, AMBIENT_INPUT_REARM, ChromeMotion, OutgoingLyrics, TICK_IDLE,
+        TICK_LIVELY, TICK_LIVELY_HOLD, VISUALIZER_SETTLE,
+    },
     test_helpers::*,
 };
 
@@ -49,32 +52,117 @@ fn a_running_transport_wants_frames_and_a_paused_one_does_not() {
 }
 
 #[test]
-fn the_visualizer_theater_and_harbour_want_frames_while_paused() {
+fn a_paused_visualizer_wants_frames_only_while_its_bars_settle() {
     let mut app = idle_app();
     app.playback.playing = true;
     app.playback.paused = true;
-
     app.settings.visualization_mode = VisualizationMode::Bars;
-    assert!(
-        app.frames_wanted(),
-        "the shaders animate on their own clock"
-    );
-    app.settings.visualization_mode = VisualizationMode::Off;
 
+    app.idle.transport_seen = Some(Instant::now());
+    assert!(app.frames_wanted(), "just paused: the bars and peaks fall");
+
+    app.idle.transport_seen = Some(Instant::now() - VISUALIZER_SETTLE - Duration::from_secs(1));
+    assert!(!app.frames_wanted(), "settled: the picture holds still");
+
+    app.idle.transport_seen = None;
+    assert!(!app.frames_wanted(), "never played: nothing to settle");
+
+    app.playback.paused = false;
+    assert!(app.frames_wanted(), "playing: the visualizer runs");
+}
+
+#[test]
+fn the_tick_stamps_the_transport_only_while_it_runs() {
+    let mut app = idle_app();
+    let now = Instant::now();
+    app.stamp_transport(now);
+    assert!(app.idle.transport_seen.is_none(), "stopped: no stamp");
+    app.playback.playing = true;
+    app.stamp_transport(now);
+    assert_eq!(app.idle.transport_seen, Some(now));
+    app.playback.paused = true;
+    app.stamp_transport(now + Duration::from_secs(1));
+    assert_eq!(app.idle.transport_seen, Some(now), "paused: the stamp ages");
+}
+
+#[test]
+fn theater_wants_frames_right_after_it_was_raised() {
+    let mut app = idle_app();
     app.theater.active = true;
     assert!(
         app.frames_wanted(),
         "theater's chrome is mid-slide right after it was raised"
     );
-    app.theater.active = false;
+}
 
+#[test]
+fn the_harbour_sea_breathes_while_paused_only_for_a_present_user() {
+    let mut app = idle_app();
+    app.playback.playing = true;
+    app.playback.paused = true;
     app.current_view = View::Harbour;
+    app.theater.window_focused = true;
+
+    app.idle.last_input = Some(Instant::now());
     assert!(
         app.frames_wanted(),
-        "the Harbour sea keeps breathing while paused"
+        "focused and just touched: the sea breathes"
     );
+
+    app.idle.last_input = Some(Instant::now() - AMBIENT_IDLE_AFTER - Duration::from_secs(1));
+    assert!(
+        !app.frames_wanted(),
+        "a minute without input: the sea holds"
+    );
+
+    app.idle.last_input = Some(Instant::now());
+    app.theater.window_focused = false;
+    assert!(!app.frames_wanted(), "unfocused: the sea holds");
+
+    app.playback.paused = false;
+    assert!(app.frames_wanted(), "playing: the scene follows the music");
+
+    app.playback.paused = true;
+    app.theater.window_focused = true;
     app.harbour.search_query = "x".into();
     assert!(!app.frames_wanted(), "a Harbour search hides the scene");
+}
+
+#[test]
+fn the_ambient_listener_runs_only_when_input_could_wake_the_scene() {
+    let mut app = idle_app();
+    app.current_view = View::Harbour;
+    app.idle.last_input = Some(Instant::now() - AMBIENT_INPUT_REARM - Duration::from_secs(1));
+    assert!(app.ambient_input_wanted(), "stale input on a still scene");
+
+    app.idle.last_input = Some(Instant::now());
+    assert!(
+        !app.ambient_input_wanted(),
+        "fresh input: a mouse move raises no message"
+    );
+
+    app.idle.last_input = None;
+    app.playback.playing = true;
+    assert!(
+        !app.ambient_input_wanted(),
+        "playing: the scene runs anyway"
+    );
+
+    app.playback.playing = false;
+    app.current_view = View::Queue;
+    assert!(!app.ambient_input_wanted(), "no scene on screen");
+}
+
+#[test]
+fn user_activity_and_refocus_stamp_the_user_as_present() {
+    let mut app = idle_app();
+    app.idle.last_input = None;
+    let _ = app.update(crate::app_message::Message::UserActivity);
+    assert!(app.idle.input_within(Instant::now(), AMBIENT_INPUT_REARM));
+
+    app.idle.last_input = None;
+    let _ = app.update(crate::app_message::Message::WindowFocused);
+    assert!(app.idle.input_within(Instant::now(), AMBIENT_INPUT_REARM));
 }
 
 #[test]
@@ -185,4 +273,45 @@ fn theater_wants_frames_only_while_its_chrome_slides_or_is_due_to_flip() {
         !app.frames_wanted(),
         "a bar that is always shown never moves"
     );
+}
+
+#[test]
+fn an_idle_app_ticks_slowly_and_a_lively_one_at_ten_hertz() {
+    let mut app = idle_app();
+    app.idle.last_event = None;
+    assert_eq!(app.tick_interval(), TICK_IDLE, "nothing happens: slow poll");
+
+    app.idle.last_event = Some(Instant::now());
+    assert_eq!(app.tick_interval(), TICK_LIVELY, "a message just arrived");
+    app.idle.last_event = Some(Instant::now() - TICK_LIVELY_HOLD - Duration::from_secs(1));
+    assert_eq!(app.tick_interval(), TICK_IDLE);
+
+    app.idle.transport_seen = Some(Instant::now());
+    assert_eq!(
+        app.tick_interval(),
+        TICK_LIVELY,
+        "just stopped: holds play out"
+    );
+    app.idle.transport_seen = None;
+
+    app.playback.playing = true;
+    assert_eq!(app.tick_interval(), TICK_LIVELY, "playing: smooth position");
+}
+
+#[test]
+fn only_the_idle_poll_leaves_the_tick_slow() {
+    use crate::app_message::{Message, PlaybackMessage};
+
+    let mut app = idle_app();
+    app.idle.last_event = None;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let _ = app.update(Message::FrameTick(Instant::now()));
+    let _ = app.update(Message::SessionScoped {
+        generation: 0,
+        message: Box::new(Message::Playback(PlaybackMessage::Tick)),
+    });
+    assert!(app.idle.last_event.is_none(), "polling is not activity");
+
+    let _ = app.update(Message::NoOp);
+    assert!(app.idle.last_event.is_some(), "any other message is");
 }

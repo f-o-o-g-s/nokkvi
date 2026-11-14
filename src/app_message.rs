@@ -1871,6 +1871,11 @@ pub enum Message {
     /// transient reveals; the toolbar stays collapsed until a genuine cursor
     /// move re-fires the header hover (no auto-reveal on focus).
     WindowFocused,
+    /// A mouse move, wheel, click or key press heard by the ambient-input
+    /// listener, which runs only while an idle-gated animation (the Harbour
+    /// scene with nothing playing) could hold still. Stamps
+    /// `Nokkvi.idle.last_input`.
+    UserActivity,
 
     /// Play sound effect
     PlaySfx(nokkvi_data::audio::SfxType),
@@ -2010,6 +2015,20 @@ pub enum Message {
     /// [`services::ipc::IpcResponder`] handle; the dispatcher builds an
     /// `IpcResponse` and calls `incoming.responder.send(resp)`.
     Ipc(Box<services::ipc::IpcIncoming>),
+}
+
+impl Message {
+    /// The app's own polling while it idles: the position tick, a frame, and
+    /// the tick's engine snapshot coming back. Every other message is
+    /// activity that keeps the tick fast (`Nokkvi::tick_interval`).
+    pub fn is_idle_poll(&self) -> bool {
+        match self {
+            Self::Playback(PlaybackMessage::Tick | PlaybackMessage::PlaybackStateUpdated(_))
+            | Self::FrameTick(_) => true,
+            Self::SessionScoped { message, .. } => message.is_idle_poll(),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
