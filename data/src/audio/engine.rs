@@ -12821,13 +12821,23 @@ mod tests {
         let swapped_in = engine.decoder.lock().await.url() == next_url;
         let completion_pending = engine.gapless_transition_info.lock().await.is_some();
         engine.consume_gapless_transition().await;
-        // Past the join: the next song is heard from its start.
-        let heard: Vec<u64> = (0..2_000)
-            .map(|_| {
-                play_out(&mut mixer, 1);
-                next_heard_ms(&mut mixer)
-            })
-            .collect();
+        // Past the join: the next song is heard from its start. Played out
+        // all at once, two seconds of output can run through the old song's
+        // tail and empty the ring before a decode loop short of CPU has
+        // written the next song's first samples (a CI runner, 2026-11-14),
+        // so an empty ring waits for the loop.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut heard: Vec<u64> = Vec::new();
+        while !heard.last().is_some_and(|ms| (1..3_000).contains(ms))
+            && std::time::Instant::now() < deadline
+        {
+            play_out(&mut mixer, 1);
+            let ms = next_heard_ms(&mut mixer);
+            if ms == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            heard.push(ms);
+        }
         let (source, at_its_end) = (
             engine.source().to_owned(),
             engine.decoder.lock().await.is_eof(),
@@ -12844,7 +12854,7 @@ mod tests {
         assert!(
             heard.iter().any(|&ms| (1..3_000).contains(&ms)),
             "the next song is heard from its start: {:?}",
-            &heard[heard.len() - 5..]
+            &heard[heard.len().saturating_sub(5)..]
         );
     }
 
