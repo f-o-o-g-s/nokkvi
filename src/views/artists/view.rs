@@ -258,10 +258,10 @@ impl ArtistsPage {
 
         // Build artwork column — show parent artist art even when on a child album row
         let centered_artist = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(SlotListEntry::Parent(artist)) => {
-                Some(artists.iter().find(|a| a.id == artist.id)?)
+            Some(SlotListEntry::Parent(artist)) => Some(*artist),
+            Some(SlotListEntry::Child(_, parent_id)) => {
+                artists.iter().find(|a| a.id == **parent_id)
             }
-            Some(SlotListEntry::Child(_, parent_id)) => artists.iter().find(|a| &a.id == parent_id),
             None => None,
         });
 

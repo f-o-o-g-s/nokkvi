@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Most of the GPU memory the Bars, Lines or Scope visualizer takes in fullscreen Theater Mode is now freed once it is off screen.
+- The Albums view now uses about half the CPU while a song plays.
+- The Artists, Genres and Playlists views now use less CPU while a song plays.
 
 ### Fixed
 

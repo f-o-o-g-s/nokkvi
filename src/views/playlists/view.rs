@@ -481,7 +481,7 @@ impl PlaylistsPage {
                     // server rejects track mutations on smart playlists).
                     let parent_is_smart = playlists
                         .iter()
-                        .find(|p| &p.id == parent_playlist_id)
+                        .find(|p| p.id == **parent_playlist_id)
                         .is_some_and(|p| p.is_smart);
                     let row = Self::render_track_row(
                         song,
@@ -507,9 +507,9 @@ impl PlaylistsPage {
 
         // Build artwork column — show parent playlist art even when on a child track
         let centered_playlist = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(SlotListEntry::Parent(playlist)) => Some(playlist),
+            Some(SlotListEntry::Parent(playlist)) => Some(*playlist),
             Some(SlotListEntry::Child(_, parent_id)) => {
-                playlists.iter().find(|p| &p.id == parent_id)
+                playlists.iter().find(|p| p.id == **parent_id)
             }
             None => None,
         });

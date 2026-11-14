@@ -226,8 +226,8 @@ impl GenresPage {
 
         // Build artwork column — show parent genre art even when on a child album
         let centered_genre = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(SlotListEntry::Parent(genre)) => Some(genre),
-            Some(SlotListEntry::Child(_, parent_id)) => genres.iter().find(|g| &g.id == parent_id),
+            Some(SlotListEntry::Parent(genre)) => Some(*genre),
+            Some(SlotListEntry::Child(_, parent_id)) => genres.iter().find(|g| g.id == **parent_id),
             None => None,
         });
         let genre_id = centered_genre.map(|g| g.id.clone()).unwrap_or_default();

@@ -6,13 +6,20 @@
 
 use crate::widgets::SlotListPageState;
 
-/// Generic slot list entry — either a parent item or an expanded child item
+/// Generic slot list entry — either a parent item or an expanded child item.
+/// `I` is how a child names its parent: an owned id by default, a borrowed
+/// one in the list a view builds per frame ([`FlatRow`]).
 #[derive(Debug, Clone)]
-pub enum SlotListEntry<P, C> {
+pub enum SlotListEntry<P, C, I = String> {
     Parent(P),
     /// Child within an expanded parent (child data, parent_id)
-    Child(C, String),
+    Child(C, I),
 }
+
+/// One row of the list a view renders ([`ExpansionState::build_flattened_list`]):
+/// the caller's own parent or the expansion's own child, and the open
+/// parent's id, all borrowed.
+pub(crate) type FlatRow<'a, P, C> = SlotListEntry<&'a P, &'a C, &'a str>;
 
 /// Generic inline expansion state
 ///
@@ -91,20 +98,27 @@ impl<C: Clone> ExpansionState<C> {
         );
     }
 
-    /// Build the flattened list of parents + expanded children
-    pub fn build_flattened_list<P: Clone>(
-        &self,
-        parents: &[P],
+    /// Build the flattened list of parents + expanded children.
+    ///
+    /// Every row is borrowed. A view calls this on each frame (the display's
+    /// rate while a song plays), so a copy per row costs more than the rest
+    /// of the frame once a few hundred rows are loaded: cloning and dropping
+    /// the album rows was 55% of the UI thread in the Albums view.
+    pub fn build_flattened_list<'a, P>(
+        &'a self,
+        parents: &'a [P],
         id_fn: impl Fn(&P) -> &str,
-    ) -> Vec<SlotListEntry<P, C>> {
+    ) -> Vec<FlatRow<'a, P, C>> {
+        let open = self.expanded_id.as_deref();
         let mut entries = Vec::with_capacity(parents.len() + self.children.len());
         for parent in parents {
-            let pid = id_fn(parent).to_string();
-            entries.push(SlotListEntry::Parent(parent.clone()));
-            if Some(&pid) == self.expanded_id.as_ref() {
-                for child in &self.children {
-                    entries.push(SlotListEntry::Child(child.clone(), pid.clone()));
-                }
+            entries.push(SlotListEntry::Parent(parent));
+            if let Some(open_id) = open.filter(|open_id| id_fn(parent) == *open_id) {
+                entries.extend(
+                    self.children
+                        .iter()
+                        .map(|child| SlotListEntry::Child(child, open_id)),
+                );
             }
         }
         entries
@@ -936,7 +950,8 @@ mod tests {
     #[test]
     fn build_flattened_list_no_expansion() {
         let state: ExpansionState<TestChild> = ExpansionState::default();
-        let flat = state.build_flattened_list(&parents(), id_fn);
+        let p = parents();
+        let flat = state.build_flattened_list(&p, id_fn);
         assert_eq!(flat.len(), 3);
         for entry in &flat {
             assert!(matches!(entry, SlotListEntry::Parent(_)));
@@ -953,9 +968,42 @@ mod tests {
         assert_eq!(flat.len(), 5);
         assert!(matches!(&flat[0], SlotListEntry::Parent(p) if p.id == "a"));
         assert!(matches!(&flat[1], SlotListEntry::Parent(p) if p.id == "b"));
-        assert!(matches!(&flat[2], SlotListEntry::Child(c, pid) if c.id == "c1" && pid == "b"));
-        assert!(matches!(&flat[3], SlotListEntry::Child(c, pid) if c.id == "c2" && pid == "b"));
+        assert!(matches!(&flat[2], SlotListEntry::Child(c, pid) if c.id == "c1" && *pid == "b"));
+        assert!(matches!(&flat[3], SlotListEntry::Child(c, pid) if c.id == "c2" && *pid == "b"));
         assert!(matches!(&flat[4], SlotListEntry::Parent(p) if p.id == "c"));
+    }
+
+    /// A view rebuilds this list on every frame, so it borrows its rows: an
+    /// entry is the caller's own parent or child, never a copy of it.
+    #[test]
+    fn build_flattened_list_borrows_its_rows() {
+        use std::borrow::Borrow;
+
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        state.set_children("b".into(), children(), &p, &mut common);
+        let flat = state.build_flattened_list(&p, id_fn);
+
+        let SlotListEntry::Parent(first) = &flat[0] else {
+            panic!("row 0 is a parent");
+        };
+        assert!(
+            std::ptr::eq(<_ as Borrow<TestParent>>::borrow(first), &p[0]),
+            "a parent row is the caller's parent"
+        );
+        let SlotListEntry::Child(child, parent_id) = &flat[2] else {
+            panic!("row 2 is the open parent's first child");
+        };
+        assert!(
+            std::ptr::eq(<_ as Borrow<TestChild>>::borrow(child), &state.children[0]),
+            "a child row is the expansion's child"
+        );
+        let open = state.expanded_id.as_deref().unwrap();
+        assert!(
+            std::ptr::eq(parent_id.as_ptr(), open.as_ptr()),
+            "a child row names its parent by the expansion's own id"
+        );
     }
 
     #[test]

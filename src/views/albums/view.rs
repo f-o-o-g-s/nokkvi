@@ -235,8 +235,8 @@ impl AlbumsPage {
 
         // Build artwork column component — show parent album art even when on a child track
         let centered_album = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(SlotListEntry::Parent(album)) => Some(album),
-            Some(SlotListEntry::Child(_, parent_id)) => albums.iter().find(|a| &a.id == parent_id),
+            Some(SlotListEntry::Parent(album)) => Some(*album),
+            Some(SlotListEntry::Child(_, parent_id)) => albums.iter().find(|a| a.id == **parent_id),
             None => None,
         });
 
