@@ -5,7 +5,10 @@
 //! even during other UI operations like slot list navigation.
 
 // Global start time for animation - lazily initialized
-use std::{sync::OnceLock, time::Instant};
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use iced::{
     Color, Rectangle, mouse, wgpu,
@@ -730,6 +733,9 @@ pub(crate) struct VisualizerPipeline {
     pub(super) blit_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) sampler: wgpu::Sampler,
     pub(super) msaa_size: (u32, u32),
+    /// When a scene was last prepared: targets left undrawn are released
+    /// ([`Self::trim`]).
+    pub(super) last_prepared: Option<Instant>,
     /// The last prepared primitive's band within its canvas (`prepare`).
     pub(super) band: BandLayout,
     /// Its canvas in target px: the widget's bounds, plus the water a
@@ -1192,7 +1198,10 @@ impl shader::Primitive for VisualizerDraw {
         viewport: &Viewport,
     ) {
         match self {
-            Self::Scene(scene) => scene.prepare(pipeline, device, queue, bounds, viewport),
+            Self::Scene(scene) => {
+                pipeline.last_prepared = Some(Instant::now());
+                scene.prepare(pipeline, device, queue, bounds, viewport);
+            }
             // The scene's prepare (an earlier layer) planned it.
             Self::Spill => {}
         }
@@ -2324,15 +2333,66 @@ impl VisualizerPipeline {
     }
 }
 
+/// How long the visualizer may go undrawn before its offscreen targets are
+/// released ([`VisualizerPipeline::release_targets`]). Long enough that a
+/// quick trip to another view and back keeps the trails and echo it had.
+const TARGETS_IDLE: Duration = Duration::from_secs(2);
+
+/// Whether offscreen targets last drawn into at `last_prepared` have gone
+/// unused for [`TARGETS_IDLE`].
+fn targets_idle(last_prepared: Option<Instant>, now: Instant) -> bool {
+    last_prepared.is_none_or(|drawn| now.saturating_duration_since(drawn) >= TARGETS_IDLE)
+}
+
+impl VisualizerPipeline {
+    /// Let go of the offscreen targets (the 4x MSAA scene, its resolve, the
+    /// bloom pair, the trail and echo accumulators) and what binds them.
+    /// `prepare` builds them again, cleared, the next time a mode that
+    /// needs them is drawn.
+    ///
+    /// They are sized to the widget, and nothing else ever freed them:
+    /// Scope in fullscreen Theater at 2560x1440 left 352 MB of GPU memory
+    /// allocated after the visualizer was switched off, where 160 MB came
+    /// back the moment it was drawn again in the small panel (measured
+    /// 2026-11-14). MilkDrop frees its renderer the same way
+    /// (`MilkdropPipeline::trim`).
+    fn release_targets(&mut self) {
+        self.msaa_texture = None;
+        self.resolve_texture = None;
+        self.ring_only_texture = None;
+        self.blit_bind_group = None;
+        self.bloom_texture_a = None;
+        self.bloom_texture_b = None;
+        self.bloom_bg_scene = None;
+        self.bloom_bg_a = None;
+        self.bloom_bg_b = None;
+        self.trail_texture = None;
+        self.blit_bg_trail = None;
+        self.echo_texture = None;
+        self.echo_temp = None;
+        self.echo_feedback_bg = None;
+        self.blit_bg_echo = None;
+        self.msaa_size = (0, 0);
+        // The accumulators come back empty: start them as a first frame does.
+        self.trails_were_active = false;
+        self.echo_were_active = false;
+    }
+}
+
 impl shader::Pipeline for VisualizerPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         Self::new(device, queue, format)
     }
 
-    /// iced trims every pipeline once a frame is drawn: the spill plan only
-    /// ever describes the frame whose scene made it.
+    /// iced trims every pipeline once a frame is drawn, mounted or not: the
+    /// spill plan only ever describes the frame whose scene made it, and
+    /// targets nothing has drawn into for [`TARGETS_IDLE`] are released
+    /// (the visualizer was switched off, or its panel left the screen).
     fn trim(&mut self) {
         self.spill = None;
+        if self.msaa_size != (0, 0) && targets_idle(self.last_prepared, Instant::now()) {
+            self.release_targets();
+        }
     }
 }
 
@@ -2430,6 +2490,34 @@ impl<Message> shader::Program<Message> for ReflectionSpill {
         _bounds: Rectangle,
     ) -> Self::Primitive {
         VisualizerDraw::Spill
+    }
+}
+
+#[cfg(test)]
+mod target_release_tests {
+    use super::*;
+
+    /// The targets stay while the visualizer draws, and through a short
+    /// absence: a quick look at another view must not cost the trails.
+    #[test]
+    fn targets_are_kept_while_the_visualizer_is_drawn() {
+        let drawn = Instant::now();
+        assert!(!targets_idle(Some(drawn), drawn));
+        assert!(!targets_idle(
+            Some(drawn),
+            drawn + Duration::from_millis(1900)
+        ));
+    }
+
+    /// Scope in fullscreen Theater builds its targets at 2560x1440; with
+    /// the visualizer switched off they stayed allocated until the app
+    /// quit. Undrawn for the grace, they are released.
+    #[test]
+    fn targets_undrawn_for_the_grace_are_released() {
+        let drawn = Instant::now();
+        assert!(targets_idle(Some(drawn), drawn + TARGETS_IDLE));
+        assert!(targets_idle(Some(drawn), drawn + Duration::from_secs(60)));
+        assert!(targets_idle(None, drawn), "nothing ever drew into them");
     }
 }
 

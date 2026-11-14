@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Most of the GPU memory the Bars, Lines or Scope visualizer takes in fullscreen Theater Mode is now freed once it is off screen.
+
 ### Fixed
 
 ### Removed

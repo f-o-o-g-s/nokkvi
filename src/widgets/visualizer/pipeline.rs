@@ -966,6 +966,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             blit_bind_group_layout,
             sampler,
             msaa_size: (0, 0),
+            last_prepared: None,
             band: BandLayout::default(),
             canvas_px: [0.0; 4],
             spill: None,
