@@ -26,7 +26,7 @@
 
 use std::{
     sync::{Arc, Weak},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use iced::{
@@ -325,6 +325,20 @@ impl<'a, Message> ProgressBar<'a, Message> {
     }
 }
 
+/// Fastest and slowest redraw pacing for the playing fill.
+const PROGRESS_FRAME_MIN: Duration = Duration::from_millis(16);
+const PROGRESS_FRAME_MAX: Duration = Duration::from_millis(250);
+
+/// Time for a `track_width` fill over a `duration`-second track to move half
+/// a pixel, clamped to [`PROGRESS_FRAME_MIN`]..=[`PROGRESS_FRAME_MAX`].
+fn progress_frame(track_width: f32, duration: f32) -> Duration {
+    if track_width <= 0.0 || duration <= 0.0 {
+        return PROGRESS_FRAME_MAX;
+    }
+    let secs_per_half_px = 0.5 * duration / track_width;
+    Duration::from_secs_f32(secs_per_half_px).clamp(PROGRESS_FRAME_MIN, PROGRESS_FRAME_MAX)
+}
+
 /// A time string for the widest elapsed time the left cap can show: the
 /// longer of `elapsed` and `duration`, every digit swapped for `0` (the
 /// widest digit in most UI fonts).
@@ -506,9 +520,11 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             state.last_update = Some(Instant::now());
         }
 
-        // If playing, request continuous redraws for smooth interpolation
+        // If playing, redraw as often as the fill moves half a pixel: a
+        // three-minute track on a 600 px bar moves ~3 px a second, so a
+        // redraw per display frame was nearly all repeats.
         if self.is_playing && !state.is_dragging {
-            shell.request_redraw();
+            shell.request_redraw_at(Instant::now() + progress_frame(track.width, self.duration));
         }
 
         // A newly arrived waveform fades in; keep redrawing until it has.
@@ -1324,6 +1340,29 @@ pub(crate) fn progress_bar<'a, Message: Clone + 'a>(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_playing_fill_redraws_per_half_pixel_within_bounds() {
+        use std::time::Duration;
+
+        // 180 s over 600 px: 0.15 s per half pixel.
+        assert_eq!(
+            super::progress_frame(600.0, 180.0),
+            Duration::from_secs_f32(0.15)
+        );
+        // A short track on a wide bar is capped at ~60 fps.
+        assert_eq!(
+            super::progress_frame(2000.0, 10.0),
+            super::PROGRESS_FRAME_MIN
+        );
+        // A long track on a narrow bar still redraws four times a second.
+        assert_eq!(
+            super::progress_frame(100.0, 3600.0),
+            super::PROGRESS_FRAME_MAX
+        );
+        assert_eq!(super::progress_frame(0.0, 180.0), super::PROGRESS_FRAME_MAX);
+    }
+
     use super::*;
 
     fn bar(duration: f32, style: SeekbarStyle) -> ProgressBar<'static, ()> {

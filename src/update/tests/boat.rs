@@ -620,8 +620,10 @@ mod harbour_scene_tests {
             "Harbour wants the feed with the visualizer Off"
         );
 
+        // Any message closes it, not only a frame: with nothing animating on
+        // the new view, no frame tick follows the switch.
         app.current_view = View::Queue;
-        let _ = app.update(Message::FrameTick(Instant::now()));
+        let _ = app.update(Message::NoOp);
         assert!(
             !app.harbour_scene.feeds_visualizer,
             "leaving Harbour drops the mark"

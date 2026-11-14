@@ -45,6 +45,11 @@ const SCROLL_PX_PER_SEC: f32 = 30.0;
 /// Gap between the two copies of the text (pixels).
 const LOOP_GAP: f32 = 60.0;
 
+/// Redraw pacing while scrolling: half a pixel at [`SCROLL_PX_PER_SEC`],
+/// so a high-refresh display doesn't redraw the window for sub-pixel steps.
+const MARQUEE_FRAME: std::time::Duration =
+    std::time::Duration::from_millis((500.0 / SCROLL_PX_PER_SEC) as u64);
+
 /// Whether overflowing marquees scroll on their own: the transport runs.
 static MOTION: AtomicBool = AtomicBool::new(false);
 
@@ -421,7 +426,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
             return;
         }
         state.offset = next;
-        shell.request_redraw();
+        shell.request_redraw_at(now + MARQUEE_FRAME);
     }
 
     fn mouse_interaction(

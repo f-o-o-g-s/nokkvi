@@ -40,15 +40,23 @@ fn an_idle_app_wants_no_frames() {
 }
 
 #[test]
-fn a_running_transport_wants_frames_and_a_paused_one_does_not() {
+fn plain_playback_wants_no_frames_and_a_lyric_sheet_does() {
     let mut app = idle_app();
     app.playback.playing = true;
     assert!(
-        app.frames_wanted(),
-        "the glow, the lyric clock and the boat step while playing"
+        !app.frames_wanted(),
+        "the seek bar, marquee and glow pace their own redraws"
     );
+
+    app.settings.lyrics_mode = LyricsMode::On;
+    app.lyrics.matched_song_id = Some("s1".into());
+    assert!(
+        app.frames_wanted(),
+        "the word highlight reads the frame clock"
+    );
+
     app.playback.paused = true;
-    assert!(!app.frames_wanted(), "paused: every per-frame step holds");
+    assert!(!app.frames_wanted(), "paused: the lyric clock holds");
 }
 
 #[test]
@@ -314,4 +322,29 @@ fn only_the_idle_poll_leaves_the_tick_slow() {
 
     let _ = app.update(Message::NoOp);
     assert!(app.idle.last_event.is_some(), "any other message is");
+}
+
+#[test]
+fn the_harbour_scene_alone_runs_on_the_ambient_timer() {
+    use crate::update::FrameDemand;
+
+    let mut app = idle_app();
+    app.playback.playing = true;
+    app.current_view = View::Harbour;
+    assert_eq!(
+        app.frame_demand(),
+        FrameDemand::Ambient,
+        "only the sea moves"
+    );
+
+    app.settings.visualization_mode = VisualizationMode::Bars;
+    assert_eq!(
+        app.frame_demand(),
+        FrameDemand::Display,
+        "a visualizer tracks the music at the display's rate"
+    );
+
+    app.settings.visualization_mode = VisualizationMode::Off;
+    app.current_view = View::Queue;
+    assert_eq!(app.frame_demand(), FrameDemand::None);
 }

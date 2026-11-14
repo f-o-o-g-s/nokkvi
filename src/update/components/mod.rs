@@ -1928,7 +1928,6 @@ impl Nokkvi {
             boat: _,
             harbour_scene: _,
             idle: _,
-            glow_epoch: _,
             mpris_connection: _,
             notification_connection: _,
             tray_connection: _,

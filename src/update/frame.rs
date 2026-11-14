@@ -23,7 +23,6 @@ use crate::{
 pub(crate) fn handle_frame_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> {
     app.stamp_transport(now);
     crate::update::theater::tick(app, now);
-    step_now_playing_glow(app, now);
     // The Harbour Trawl scene's sea is procedural (a pure function of a phase
     // this step advances), so it is independent of the visualizer mode, the
     // `lines.boat` toggle, AND the audio-pause freeze: the scene keeps
@@ -52,18 +51,6 @@ fn step_lyrics_clock(app: &mut Nokkvi, now: Instant) {
         app.lyrics.clock_running,
         now,
     );
-}
-
-/// Drive the now-playing breathing glow off the frame tick so it stays smooth
-/// at any display refresh rate (a fixed-interval timer steps visibly on high-Hz
-/// displays). Animates in every visualizer mode; frozen while paused/stopped.
-fn step_now_playing_glow(app: &Nokkvi, now: Instant) {
-    if app.playback.playing && !app.playback.paused {
-        let phase = (now.duration_since(app.glow_epoch).as_secs_f32()
-            / crate::widgets::slot_list::GLOW_PERIOD_SECS)
-            .fract();
-        crate::widgets::slot_list::set_now_playing_phase(phase);
-    }
 }
 
 /// Lyrics column center — the SINGLE publisher, for both kinds of sheet.
@@ -116,6 +103,20 @@ fn lyrics_center_target(app: &Nokkvi, now: Instant) -> Option<f32> {
 /// count as landed: well under a pixel at any row height, above f32 noise.
 const LYRICS_CENTER_LANDED: f32 = 1e-3;
 
+/// Frame pacing for the ambient Harbour scene: 60 fps.
+pub(crate) const AMBIENT_FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
+
+/// What the frame subscription runs ([`Nokkvi::frame_demand`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameDemand {
+    /// Nothing moves: no frame messages.
+    None,
+    /// Only the ambient Harbour scene moves: a 60 fps timer.
+    Ambient,
+    /// Something tracks the music or the hand: every display frame.
+    Display,
+}
+
 impl Nokkvi {
     /// Whether the display-rate frame subscription (`iced::window::frames()`)
     /// is wanted now. A frame message redraws the window and the redraw raises
@@ -136,12 +137,40 @@ impl Nokkvi {
     /// re-read after every update, so a term that changes takes effect at the
     /// next message. A new per-frame step adds its term here.
     pub(crate) fn frames_wanted(&self) -> bool {
+        self.frame_demand() != FrameDemand::None
+    }
+
+    /// Which frame source the subscription runs (`subscription()`): the
+    /// display's own frames for anything that tracks the music or the hand
+    /// (a visualizer, the lyric clock, Theater Mode, a lyrics glide, a Cover
+    /// Beat swell), or a [`AMBIENT_FRAME`] timer when the Harbour scene is
+    /// the only thing moving. Each frame rebuilds the whole view, and the
+    /// ambient sea reads the same at 60 fps on a 120 or 240 Hz display.
+    pub(crate) fn frame_demand(&self) -> FrameDemand {
         let now = Instant::now();
-        self.transport_running()
+        if self.lyric_clock_running()
             || self.visualizer_settling(now)
             || self.theater_in_motion(now)
-            || self.harbour_scene_breathing(now)
             || self.lyrics_in_motion(now)
+        {
+            FrameDemand::Display
+        } else if self.harbour_scene_breathing(now) {
+            FrameDemand::Ambient
+        } else {
+            FrameDemand::None
+        }
+    }
+
+    /// A matched lyric sheet follows a running transport: its word-level
+    /// highlight reads the per-frame clock. Nothing else needs a view rebuild
+    /// per frame just because music plays: the seek bar, the marquee and the
+    /// now-playing glow pace their own redraws, the visualizer and the
+    /// Harbour scene have their own terms, and the Lines boat rides the
+    /// visualizer's.
+    fn lyric_clock_running(&self) -> bool {
+        self.transport_running()
+            && self.settings.lyrics_mode.is_active()
+            && self.lyrics.matched_song_id.is_some()
     }
 
     /// The transport is playing (not paused, not stopped).

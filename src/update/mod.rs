@@ -53,6 +53,7 @@ mod dynamic_accent;
 mod editor;
 mod eq_modal;
 mod frame;
+pub(crate) use frame::{AMBIENT_FRAME, FrameDemand};
 mod genres;
 mod harbour;
 mod hotkeys;
@@ -155,6 +156,7 @@ impl Nokkvi {
         // covers every writer. It reads no rows, so the pointer-motion
         // messages stay O(1) in the queue length.
         self.resync_slot_counts();
+        self.sync_harbour_feed();
         task
     }
 

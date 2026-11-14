@@ -245,10 +245,6 @@ pub struct Nokkvi {
     pub playback: crate::state::PlaybackState,
     /// Synced-lyrics state: resolved document, active-line cursor, store index.
     pub lyrics: crate::state::LyricsState,
-    /// Monotonic epoch for the now-playing breathing glow. The per-frame tick
-    /// (`update::frame::handle_frame_tick`) derives
-    /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
-    pub glow_epoch: std::time::Instant,
     pub scrobble: crate::state::ScrobbleState,
     /// One-seek-in-flight arbitration plus the live Seek Step setting.
     /// See [`crate::state::SeekState`] for why every seek producer goes
@@ -562,7 +558,6 @@ impl Default for Nokkvi {
             active_playback: crate::state::ActivePlayback::default(),
             playback: crate::state::PlaybackState::default(),
             lyrics: crate::state::LyricsState::default(),
-            glow_epoch: std::time::Instant::now(),
             scrobble: crate::state::ScrobbleState::default(),
             seek: crate::state::SeekState::default(),
             radio_scrobble: crate::state::RadioScrobbleState::default(),
@@ -912,10 +907,12 @@ impl Nokkvi {
         // moves: a frame message redraws, and the redraw raises the next
         // frame message, so left on it redraws at the monitor's rate while
         // paused (`Nokkvi::frames_wanted` lists the terms).
-        let frames = if self.frames_wanted() {
-            iced::window::frames().map(Message::FrameTick)
-        } else {
-            iced::Subscription::none()
+        let frames = match self.frame_demand() {
+            update::FrameDemand::Display => iced::window::frames().map(Message::FrameTick),
+            update::FrameDemand::Ambient => {
+                time::every(update::AMBIENT_FRAME).map(Message::FrameTick)
+            }
+            update::FrameDemand::None => iced::Subscription::none(),
         };
 
         // Roulette spin tick — only armed while a spin is active. Iced

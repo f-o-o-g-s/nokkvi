@@ -205,6 +205,19 @@ pub(crate) fn step_boat(app: &mut Nokkvi, now: Instant) {
 ///   `step()` each tick — pinning after would let the fire-check inside the
 ///   step land first and stall the boat for a frame every 45–120 s.
 impl Nokkvi {
+    /// The scene keeps the audio analysis open while it shows (its light
+    /// follows the music with the visualizer Off): re-sync on the edge. Run
+    /// after every message (`Nokkvi::update`), not from the frame step, which
+    /// stops once nothing animates and would leave the feed open after the
+    /// view moved on.
+    pub(crate) fn sync_harbour_feed(&mut self) {
+        let on_harbour = self.harbour_scene_on_screen();
+        if self.harbour_scene.feeds_visualizer != on_harbour {
+            self.harbour_scene.feeds_visualizer = on_harbour;
+            self.sync_visualizer_feed();
+        }
+    }
+
     /// The Harbour Trawl scene is on screen: the Harbour view on the home
     /// screen with no search (a search replaces the panel with results).
     pub(crate) fn harbour_scene_on_screen(&self) -> bool {
@@ -220,12 +233,6 @@ const HARBOUR_MAX_STEP: std::time::Duration = std::time::Duration::from_millis(1
 
 pub(crate) fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     let on_harbour = app.harbour_scene_on_screen();
-    // The scene keeps the audio analysis open while it shows (its light
-    // follows the music with the visualizer Off): re-sync on the edge.
-    if app.harbour_scene.feeds_visualizer != on_harbour {
-        app.harbour_scene.feeds_visualizer = on_harbour;
-        app.sync_visualizer_feed();
-    }
     if !on_harbour {
         app.harbour_scene.boat.visible = false;
         app.harbour_scene.boat.last_tick = None;

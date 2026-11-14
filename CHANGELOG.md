@@ -11,11 +11,14 @@ All notable changes to this project will be documented in this file.
 - A paused or stopped visualizer now holds still once its bars have fallen, so an idle nokkvi uses almost no CPU.
 - The Harbour sea pauses while nothing plays and the window is unfocused or untouched for a minute, and resumes where it stopped.
 - While paused, long now-playing titles rest at their start instead of scrolling; hovering one scrolls it.
+- Playing music now uses a fraction of the CPU it did, since the seek bar and now-playing glow no longer redraw the whole window every frame.
+- The Harbour scene animates at 60 fps on high-refresh displays, which cuts its CPU use while music plays.
 
 ### Fixed
 
 - A count of one reads singular, like 1 song, 1 album or 1 play, instead of 1 songs.
 - Harbour's Most Played genres read 1 of your top tracks instead of 1 of your top track.
+- Leaving the Harbour view with the visualizer off now stops the background audio analysis it had started.
 
 ### Removed
 

@@ -5,12 +5,18 @@
 //!
 //! Provides reusable slot list rendering with configurable item rendering
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::{
+    sync::{
+        LazyLock,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use iced::{
     Background, Color, Element, Gradient, Length, Radians, Widget as _,
     gradient::Linear,
-    widget::{Space, Stack, button, column, container, mouse_area},
+    widget::{Stack, button, column, container, mouse_area},
 };
 
 use crate::{
@@ -159,10 +165,15 @@ impl SlotListRowContext {
 // Now-playing breathing highlight
 // ============================================================================
 
-/// Period of one full breath / one shimmer cycle, in seconds. Driven per frame
-/// by the frame tick (`update::frame::handle_frame_tick`) so the motion stays
-/// smooth at any display refresh rate. Tune here to change the speed.
+/// Period of one full breath / one shimmer cycle, in seconds. The glow layer
+/// ([`GlowLayer`]) paces its own redraws, so the motion needs no view rebuild.
+/// Tune here to change the speed.
 pub(crate) const GLOW_PERIOD_SECS: f32 = 3.4;
+
+/// Redraw pacing for the glow: about 60 fps while the sheen sweeps (it
+/// crosses the row in ~1.5 s), 20 fps while only the edges breathe.
+const GLOW_SWEEP_FRAME: Duration = Duration::from_millis(16);
+const GLOW_BREATH_FRAME: Duration = Duration::from_millis(50);
 
 // The now-playing row is a NORMAL full-bleed slot (the same loud fill as the
 // drag-preview ghost; in-list selection is border-only and has no fill). Two
@@ -191,15 +202,41 @@ const SHIMMER_SWEEP_FRACTION: f32 = 0.45;
 const INNER_GLOW_LIGHT_LIFT: f32 = 0.55;
 const SHIMMER_LIGHT_LIFT: f32 = 0.85;
 
-/// Global breathing/shimmer phase in `0.0..1.0`, written each frame by the
-/// frame tick (`update::frame::handle_frame_tick`) while audio is playing, and
-/// read by the now-playing overlays. A process global (like the theme tokens) so
-/// the row builders stay pure functions of `(state, theme, phase)`.
+/// Global breathing/shimmer phase in `0.0..1.0`, advanced by the glow layer
+/// while the transport runs and frozen while it doesn't. A process global
+/// (like the theme tokens) so a row rebuilt elsewhere in the list picks up
+/// the same phase instead of restarting its breath.
 static NOW_PLAYING_PHASE: AtomicU32 = AtomicU32::new(0);
 
-/// Store the current phase (`0.0..1.0`). Called once per frame while playing.
-pub(crate) fn set_now_playing_phase(phase: f32) {
+/// Whether the glow breathes: the transport runs. The root view sets it each
+/// render (`set_glow_motion`).
+static GLOW_MOTION: AtomicBool = AtomicBool::new(false);
+
+/// The breath's time origin, shared by every glow layer.
+static GLOW_EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Store the current phase (`0.0..1.0`).
+fn set_now_playing_phase(phase: f32) {
     NOW_PLAYING_PHASE.store(phase.to_bits(), Ordering::Relaxed);
+}
+
+/// Let the now-playing glow breathe (`true`) or hold its phase (`false`).
+pub(crate) fn set_glow_motion(on: bool) {
+    GLOW_MOTION.store(on, Ordering::Relaxed);
+}
+
+/// The breath phase at `now`.
+fn glow_phase_at(now: Instant) -> f32 {
+    (now.saturating_duration_since(*GLOW_EPOCH).as_secs_f32() / GLOW_PERIOD_SECS).fract()
+}
+
+/// How long until the glow at `phase` needs its next frame.
+fn glow_frame_after(phase: f32) -> Duration {
+    if phase < SHIMMER_SWEEP_FRACTION {
+        GLOW_SWEEP_FRAME
+    } else {
+        GLOW_BREATH_FRAME
+    }
 }
 
 fn now_playing_phase() -> f32 {
@@ -292,46 +329,99 @@ pub(crate) fn glow_overlay<'a, M: 'a>(
     };
     // The glow sits on the row's card: inset like it, with its corners.
     let card_padding = ctx.card_padding;
-    let on_card = move |layer: Element<'a, M>| {
-        container(layer)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(card_padding)
-            .boxed()
-    };
-    let inner = container(Space::new().width(Length::Fill).height(Length::Fill))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_theme| container::Style {
-            background: Some(Background::Gradient(inner_glow_gradient(
-                seed,
-                now_playing_phase(),
-            ))),
-            border: iced::Border {
-                radius: style.border_radius,
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let shimmer = container(Space::new().width(Length::Fill).height(Length::Fill))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_theme| container::Style {
-            background: Some(Background::Gradient(shimmer_gradient(
-                seed,
-                now_playing_phase(),
-            ))),
-            border: iced::Border {
-                radius: style.border_radius,
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    Stack::new()
-        .push(row)
-        .push(on_card(inner.boxed()))
-        .push(on_card(shimmer.boxed()))
-        .boxed()
+    let glow = container(
+        GlowLayer {
+            seed,
+            border_radius: style.border_radius,
+        }
+        .boxed(),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(card_padding);
+    Stack::new().push(row).push(glow.boxed()).boxed()
+}
+
+/// The now-playing row's glow: the pulsing inner glow and the shimmer drawn
+/// as two gradient quads. While the transport runs it advances the shared
+/// phase and asks for its own next frame at a paced rate, so the breath
+/// redraws the window without rebuilding the view (the whole Queue used to
+/// rebuild at the display's rate for it). Non-interactive.
+struct GlowLayer {
+    seed: Color,
+    border_radius: iced::border::Radius,
+}
+
+impl iced::advanced::widget::Meta for GlowLayer {}
+
+impl<M> iced::advanced::Widget<M, iced::Theme, iced::Renderer> for GlowLayer {
+    fn size(&self) -> iced::Size<Length> {
+        iced::Size {
+            width: Length::Fill,
+            height: Length::Fill,
+        }
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut iced::advanced::widget::Tree,
+        _renderer: &iced::Renderer,
+        limits: &iced::advanced::layout::Limits,
+    ) {
+        tree.size = limits.resolve(Length::Fill, Length::Fill, iced::Size::ZERO);
+    }
+
+    fn update(
+        &mut self,
+        _tree: &mut iced::advanced::widget::Tree,
+        event: &iced::Event,
+        _layout: iced::advanced::Layout,
+        _cursor: iced::mouse::Cursor,
+        _renderer: &iced::Renderer,
+        shell: &mut iced::advanced::Shell<'_, M>,
+        _viewport: &iced::Rectangle,
+    ) {
+        if !GLOW_MOTION.load(Ordering::Relaxed) {
+            return;
+        }
+        if let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event {
+            set_now_playing_phase(glow_phase_at(*now));
+        }
+        let phase = now_playing_phase();
+        shell.request_redraw_at(Instant::now() + glow_frame_after(phase));
+    }
+
+    fn draw(
+        &self,
+        _tree: &iced::advanced::widget::Tree,
+        renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::Layout,
+        _cursor: iced::mouse::Cursor,
+        _viewport: &iced::Rectangle,
+    ) {
+        use iced::advanced::Renderer as _;
+
+        let bounds = layout.bounds();
+        let phase = now_playing_phase();
+        for gradient in [
+            inner_glow_gradient(self.seed, phase),
+            shimmer_gradient(self.seed, phase),
+        ] {
+            renderer.fill_quad(
+                iced::advanced::renderer::Quad {
+                    bounds,
+                    border: iced::Border {
+                        radius: self.border_radius,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                Background::Gradient(gradient),
+            );
+        }
+    }
 }
 
 /// Styling for slot list slots (backgrounds, borders, text colors)
@@ -2549,6 +2639,19 @@ fn make_slot_button<'a, M: Clone + 'a>(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_glow_paces_fast_only_while_the_sheen_sweeps() {
+        assert_eq!(super::glow_frame_after(0.1), super::GLOW_SWEEP_FRAME);
+        assert_eq!(super::glow_frame_after(0.8), super::GLOW_BREATH_FRAME);
+    }
+
+    #[test]
+    fn the_glow_phase_stays_in_one_period() {
+        let phase = super::glow_phase_at(std::time::Instant::now());
+        assert!((0.0..1.0).contains(&phase));
+    }
+
     use super::*;
 
     /// Stars and hearts follow the cover accent, and on a loud-fill row
