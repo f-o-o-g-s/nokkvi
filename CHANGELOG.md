@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Most of the GPU memory the Bars, Lines or Scope visualizer takes in fullscreen Theater Mode is now freed once it is off screen.
 - The Albums view now uses about half the CPU while a song plays.
 - The Artists, Genres and Playlists views now use less CPU while a song plays.
+- The night Trawl scene's anchor is now outlined and shaded like the boat instead of a flat shape.
 
 ### Fixed
 

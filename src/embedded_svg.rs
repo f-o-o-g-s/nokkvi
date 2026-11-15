@@ -723,26 +723,14 @@ const ANCHOR_STROKE_WIDTH_SVG_UNITS: f32 = 1.4;
 /// the generation) rebuilds the handle on the next render. The boat renders the
 /// handle with no color override, so the baked color is what shows.
 ///
-/// The lit (night Trawl, [`BoatPaint::Lit`]) anchor is moonlit metal: the
-/// night silhouette lifted halfway to the aurora's light, so it reads on
-/// the dark seabed.
+/// The lit (night Trawl, [`BoatPaint::Lit`]) anchor is an iron object on
+/// the seabed instead of that flat glyph: see [`lit_anchor_svg`].
 pub(crate) fn themed_anchor_svg_painted(paint: BoatPaint) -> String {
     let viz = crate::theme::get_visualizer_colors_dark();
-    let (stroke, opacity) = match paint {
-        BoatPaint::Plain => (viz.border_color.clone(), viz.border_opacity),
-        BoatPaint::Lit => {
-            let ink = crate::widgets::harbour_light::NightInk::from_theme();
-            let (a, b) = (ink.silhouette, ink.rim);
-            (
-                color_to_hex(Color::from_rgb(
-                    a.r + (b.r - a.r) * 0.32,
-                    a.g + (b.g - a.g) * 0.32,
-                    a.b + (b.b - a.b) * 0.32,
-                )),
-                1.0,
-            )
-        }
-    };
+    let (stroke, opacity) = (viz.border_color.clone(), viz.border_opacity);
+    if paint == BoatPaint::Lit {
+        return lit_anchor_svg(&stroke, opacity);
+    }
 
     if crate::theme::icon_set() == IconSet::Phosphor {
         // The Phosphor anchor is a filled glyph with no open stroke to recolor,
@@ -760,11 +748,160 @@ pub(crate) fn themed_anchor_svg_painted(paint: BoatPaint) -> String {
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" \
          fill=\"none\" stroke=\"{stroke}\" stroke-opacity=\"{opacity}\" \
          stroke-width=\"{stroke_w}\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\
-         <path d=\"M12 6v16\" />\
-         <path d=\"m19 13 2-1a9 9 0 0 1-18 0l2 1\" />\
-         <path d=\"M9 11h6\" />\
-         <circle cx=\"12\" cy=\"4\" r=\"2\" />\
-         </svg>"
+         {LUCIDE_ANCHOR_SHAPES}</svg>"
+    )
+}
+
+/// The Lucide anchor's shapes (a 24-unit viewBox), carrying no paint of
+/// their own: shaft, hook, cross-bar and ring.
+const LUCIDE_ANCHOR_SHAPES: &str = "<path d=\"M12 6v16\" />\
+     <path d=\"m19 13 2-1a9 9 0 0 1-18 0l2 1\" />\
+     <path d=\"M9 11h6\" />\
+     <circle cx=\"12\" cy=\"4\" r=\"2\" />";
+
+/// The active icon set's anchor, reduced to what a layered repaint needs.
+struct AnchorGlyph {
+    /// The glyph's shapes with no paint of their own, so each layer's
+    /// wrapping `<g>` paints them.
+    shapes: &'static str,
+    /// ViewBox side: both anchors are square (24 Lucide, 256 Phosphor).
+    side: f32,
+    /// How wide the shapes already draw the anchor's bars, in Lucide units
+    /// (24ths of the side): 0 for Lucide's centre lines, 1.5 for Phosphor's
+    /// 16-unit filled outline.
+    bar: f32,
+}
+
+impl AnchorGlyph {
+    fn active() -> Self {
+        if crate::theme::icon_set() == IconSet::Phosphor {
+            // `get_svg` remaps the Lucide path to the Phosphor file, whose
+            // one `<path>` inherits the root's fill: take it without the root.
+            let file = get_svg("assets/icons/anchor.svg");
+            let shapes = file
+                .find('>')
+                .zip(file.rfind("</svg>"))
+                .map_or("", |(open, close)| &file[open + 1..close]);
+            Self {
+                shapes,
+                side: 256.0,
+                bar: 1.5,
+            }
+        } else {
+            Self {
+                shapes: LUCIDE_ANCHOR_SHAPES,
+                side: 24.0,
+                bar: 0.0,
+            }
+        }
+    }
+
+    /// Lucide units to this glyph's viewBox units.
+    fn units(&self, lucide: f32) -> f32 {
+        lucide * (self.side / 24.0)
+    }
+
+    /// The whole anchor in one `paint`, its bars `width` Lucide units wide:
+    /// the shapes stroked out to that width (and filled, when the set's
+    /// glyph is an outline). `attrs` go on the group as written.
+    fn layer(&self, paint: &str, width: f32, attrs: &str) -> String {
+        let fill = if self.bar > 0.0 { paint } else { "none" };
+        format!(
+            "<g fill=\"{fill}\" stroke=\"{paint}\" stroke-width=\"{}\" \
+             stroke-linecap=\"round\" stroke-linejoin=\"round\"{attrs}>{}</g>",
+            self.units(width - self.bar),
+            self.shapes
+        )
+    }
+}
+
+/// The lit anchor's bar width, in Lucide units. Heavier than the plain
+/// anchor's line ([`ANCHOR_STROKE_WIDTH_SVG_UNITS`]): the bar has to hold a
+/// lit edge, a body and a shaded edge.
+const LIT_ANCHOR_BAR: f32 = 1.8;
+/// The ink outline around the lit anchor, per side, in Lucide units: about
+/// the boat's visible outline, scaled down with the anchor (0.6 of the boat).
+const LIT_ANCHOR_OUTLINE: f32 = 0.5;
+/// How far in from an edge the light reaches, and the shade, in Lucide units.
+const LIT_ANCHOR_LIGHT_EDGE: f32 = 0.45;
+const LIT_ANCHOR_SHADE_EDGE: f32 = 0.4;
+
+/// The night Trawl scene's anchor: an iron object on the seabed, built
+/// from the active icon set's own glyph in four layers.
+///
+/// 1. The boat's ink outline (`ink`, `ink_opacity`), so boat, rope and
+///    anchor stay one drawing.
+/// 2. The body, lit from above like the boat's hull: brightest at the ring,
+///    shading toward the flukes.
+/// 3. Shade along the edges that face away from the moon (down and right).
+/// 4. Light along the edges that face it (up and left).
+///
+/// The colours are the night silhouette lifted toward the aurora's light
+/// ([`NightInk`]), the same two the scene's furniture is drawn from. The
+/// edges are masks: the body minus a copy of itself shifted along the
+/// light, which leaves a sliver on one side of every bar. The sprite is
+/// rasterized once per size, so the masks cost nothing per frame.
+///
+/// [`NightInk`]: crate::widgets::harbour_light::NightInk
+fn lit_anchor_svg(ink: &str, ink_opacity: f32) -> String {
+    let glyph = AnchorGlyph::active();
+    let night = crate::widgets::harbour_light::NightInk::from_theme();
+    // The silhouette lifted `t` of the way to the light.
+    let metal = |t: f32| -> String {
+        let (a, b) = (night.silhouette, night.rim);
+        color_to_hex(Color::from_rgb(
+            a.r + (b.r - a.r) * t,
+            a.g + (b.g - a.g) * t,
+            a.b + (b.b - a.b) * t,
+        ))
+    };
+    let side = glyph.side;
+    let body = |paint: &str, attrs: &str| glyph.layer(paint, LIT_ANCHOR_BAR, attrs);
+    // The body minus itself shifted by `(shift, shift)`: positive leaves the
+    // up-and-left edges, negative the down-and-right ones.
+    let edge_mask = |id: &str, shift: f32| -> String {
+        let shift = glyph.units(shift);
+        format!(
+            "<mask id=\"{id}\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" \
+             width=\"{side}\" height=\"{side}\">{}{}</mask>",
+            body("#fff", ""),
+            body(
+                "#000",
+                &format!(" transform=\"translate({shift} {shift})\"")
+            ),
+        )
+    };
+    let edge = |mask: &str, colour: &str, opacity: f32| -> String {
+        format!(
+            "<rect width=\"{side}\" height=\"{side}\" fill=\"{colour}\" \
+             fill-opacity=\"{opacity}\" mask=\"url(#{mask})\"/>"
+        )
+    };
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {side} {side}\">\
+         <defs>\
+         <linearGradient id=\"nk-anchor-metal\" gradientUnits=\"userSpaceOnUse\" \
+         x1=\"0\" y1=\"{ring}\" x2=\"0\" y2=\"{flukes}\">\
+         <stop offset=\"0\" stop-color=\"{top}\"/><stop offset=\"1\" stop-color=\"{foot}\"/>\
+         </linearGradient>{light_mask}{shade_mask}</defs>\
+         {outline}{metal_body}{shade}{light}</svg>",
+        ring = glyph.units(2.0),
+        flukes = glyph.units(22.0),
+        top = metal(0.56),
+        foot = metal(0.22),
+        light_mask = edge_mask("nk-anchor-light", LIT_ANCHOR_LIGHT_EDGE),
+        shade_mask = edge_mask("nk-anchor-shade", -LIT_ANCHOR_SHADE_EDGE),
+        // Group opacity, not paint opacity: a filled glyph's stroke and
+        // fill overlap, and would add up along every edge.
+        outline = glyph.layer(
+            ink,
+            LIT_ANCHOR_BAR + 2.0 * LIT_ANCHOR_OUTLINE,
+            &format!(" opacity=\"{ink_opacity}\"")
+        ),
+        metal_body = body("url(#nk-anchor-metal)", ""),
+        shade = edge("nk-anchor-shade", &metal(0.0), 0.8),
+        light = edge("nk-anchor-light", &metal(0.88), 0.9),
     )
 }
 
@@ -1496,6 +1633,80 @@ mod tests {
             out.contains("M112,56"),
             "phosphor anchor body (incl. its eye ring) must be present"
         );
+    }
+
+    /// The lit anchor under `set`, with the icon set restored afterwards.
+    fn lit_anchor_under(set: IconSet) -> String {
+        let orig = crate::theme::icon_set();
+        crate::theme::set_icon_set(set);
+        let out = themed_anchor_svg_painted(BoatPaint::Lit);
+        crate::theme::set_icon_set(orig);
+        out
+    }
+
+    /// The night Trawl scene's anchor is an object in the scene, not a flat
+    /// glyph: under either icon set it carries the boat's ink outline, a
+    /// top-lit body, an edge that catches the light and an edge in shade,
+    /// all drawn from that set's own anchor shapes.
+    #[test]
+    fn lit_anchor_is_outlined_and_shaded() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let viz = crate::theme::get_visualizer_colors_dark();
+        for (set, own_shape, other_shape) in [
+            (IconSet::Lucide, "M12 6v16", "M112,56"),
+            (IconSet::Phosphor, "M112,56", "M12 6v16"),
+        ] {
+            let out = lit_anchor_under(set);
+            assert!(
+                out.contains(&format!("=\"{}\"", viz.border_color)),
+                "{set:?}: the lit anchor keeps the boat's ink outline (got: {out})"
+            );
+            for paint in [
+                "url(#nk-anchor-metal)",
+                "url(#nk-anchor-light)",
+                "url(#nk-anchor-shade)",
+            ] {
+                assert!(out.contains(paint), "{set:?}: {paint} must be painted");
+            }
+            assert!(
+                out.contains(own_shape),
+                "{set:?}: the anchor is drawn from its own set's shapes"
+            );
+            assert!(
+                !out.contains(other_shape),
+                "{set:?}: the other set's shapes must stay out"
+            );
+            assert!(
+                !out.contains("currentColor"),
+                "{set:?}: every layer takes a baked colour, the widget sets none"
+            );
+        }
+    }
+
+    /// A `url(#id)` with no matching definition paints nothing, and resvg
+    /// says nothing about it: the layer would silently vanish. Every paint
+    /// and mask the lit anchor references must be defined, exactly once.
+    #[test]
+    fn lit_anchor_references_resolve() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        for set in [IconSet::Lucide, IconSet::Phosphor] {
+            let out = lit_anchor_under(set);
+            let mut refs = 0;
+            for (at, _) in out.match_indices("url(#") {
+                let rest = &out[at + "url(#".len()..];
+                let id = &rest[..rest.find(')').unwrap()];
+                assert_eq!(
+                    out.matches(&format!("id=\"{id}\"")).count(),
+                    1,
+                    "{set:?}: `{id}` must be defined exactly once"
+                );
+                refs += 1;
+            }
+            assert!(
+                refs >= 3,
+                "{set:?}: the body, light and shade are referenced"
+            );
+        }
     }
 
     /// The rope hooks the top of the anchor's ring via
