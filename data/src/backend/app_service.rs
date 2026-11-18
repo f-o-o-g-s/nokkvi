@@ -4104,7 +4104,12 @@ mod tests {
             }
         );
         let ids = qm.song_ids_snapshot();
-        assert_eq!(&ids[..3], ["a", "seed", "m0"]);
+        assert_eq!(&ids[..2], ["a", "seed"]);
+        // A batch is a sample of the answer, so only its source is fixed.
+        assert!(
+            ids[2..].iter().all(|id| id.starts_with('m')),
+            "the batch comes from the similar songs: {ids:?}"
+        );
         assert_eq!(ids.len(), 2 + AUTOPLAY_BATCH);
         assert_eq!(qm.pending_autoplay_entries().len(), AUTOPLAY_BATCH);
         assert_eq!(qm.current_index(), Some(1), "nothing was played");
@@ -4229,7 +4234,10 @@ mod tests {
         let qm = app.queue().queue_manager();
         let qm = qm.lock().await;
         assert_eq!(qm.entry_id_at(0), Some(first_entry_id));
-        assert_eq!(qm.song_id_at(0), Some("m0"));
+        assert!(
+            qm.song_id_at(0).is_some_and(|id| id.starts_with('m')),
+            "a similar song leads the batch"
+        );
         assert_eq!(qm.current_index(), None, "the UI plays it, not the verb");
         drop(qm);
         drop(app);
@@ -4361,7 +4369,10 @@ mod tests {
         let removed = app.clear_pending_autoplay().await;
 
         assert_eq!(removed.len(), AUTOPLAY_BATCH - 1);
-        assert_eq!(queue_song_ids(&app).await, vec!["a", "seed", "m0"]);
+        let left = queue_song_ids(&app).await;
+        assert_eq!(&left[..2], ["a", "seed"]);
+        assert_eq!(left.len(), 3, "the played Autoplay row stays: {left:?}");
+        assert!(left[2].starts_with('m'));
         assert_eq!(app.queue().get_songs().len(), 3, "the projection follows");
         drop(app);
         let _ = std::fs::remove_file(&db_path);

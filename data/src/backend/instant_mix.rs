@@ -21,8 +21,9 @@
 //!
 //! One resolver ([`resolve_mix`]) serves both features through a
 //! [`MixPlan`]: the instant mix ([`MixPlan::INSTANT_MIX`], 50 songs) and
-//! Autoplay's batch ([`MixPlan::AUTOPLAY`], 10 songs, at most two per artist
-//! unless that leaves the batch short). Autoplay's plan adds a last rung
+//! Autoplay's batch ([`MixPlan::AUTOPLAY`], 10 songs sampled from what each
+//! seed's ladder kept, at most two per artist unless that leaves the batch
+//! short). Autoplay's plan adds a last rung
 //! after the merge:
 //!
 //! 5. **Any song** — only when every seed's ladder came back empty (after
@@ -166,6 +167,12 @@ pub(crate) struct MixPlan {
     /// Whether an empty merged ladder asks for random songs from the active
     /// libraries (rung 5).
     pub(crate) random_fallback: bool,
+    /// Whether each seed's songs are shuffled before the merge, so the mix
+    /// is a sample of what the seed's ladder kept rather than its head. A
+    /// similarity agent answers one seed with the same list every time;
+    /// without this the same album would always be followed by the same
+    /// songs.
+    pub(crate) sample: bool,
 }
 
 impl MixPlan {
@@ -175,15 +182,17 @@ impl MixPlan {
         tracks: INSTANT_MIX_TRACKS,
         max_per_artist: None,
         random_fallback: false,
+        sample: false,
     };
 
-    /// An Autoplay batch: [`AUTOPLAY_BATCH`] songs, at most
-    /// [`AUTOPLAY_MAX_PER_ARTIST`] per artist, random songs when the ladder
-    /// found nothing.
+    /// An Autoplay batch: [`AUTOPLAY_BATCH`] songs sampled from what each
+    /// seed's ladder kept, at most [`AUTOPLAY_MAX_PER_ARTIST`] per artist,
+    /// random songs when the ladder found nothing.
     pub(crate) const AUTOPLAY: Self = Self {
         tracks: AUTOPLAY_BATCH,
         max_per_artist: Some(AUTOPLAY_MAX_PER_ARTIST),
         random_fallback: true,
+        sample: true,
     };
 }
 
@@ -342,8 +351,8 @@ pub(crate) struct ResolvedMix {
 /// Resolve a mix for `seeds` under `plan`: every seed's ladder, at most
 /// [`INSTANT_MIX_CONCURRENT_SEEDS`] at once, lists kept in seed order, then
 /// merged one per seed around (take-next-fresh dedupe, like Trawl's
-/// Interleave), capped per artist when the plan says so, and cut to the
-/// plan's `tracks`. When the plan has `random_fallback` and that leaves
+/// Interleave; each seed's list shuffled first when the plan samples),
+/// capped per artist when the plan says so, and cut to the plan's `tracks`. When the plan has `random_fallback` and that leaves
 /// nothing, random songs from the active libraries go through the same gate
 /// instead (rung 5). The mix never holds a song seed, nor an id in
 /// `exclude`. No seeds, or nothing found, is an empty mix, not an error; a
@@ -400,7 +409,15 @@ pub(crate) async fn resolve_mix<S: MixSource>(
     }
     let mut passed: usize = outcomes.iter().map(|o| o.passed).sum();
 
-    let lists = outcomes.into_iter().map(|o| (o.songs, 1)).collect();
+    let lists = outcomes
+        .into_iter()
+        .map(|mut o| {
+            if plan.sample {
+                o.songs.shuffle(&mut rng);
+            }
+            (o.songs, 1)
+        })
+        .collect();
     let mut blended = blend_trawl(lists, TrawlBlend::Interleave, &mut rng);
 
     // Rung 5: any songs, only when the whole ladder found nothing.
@@ -1000,12 +1017,67 @@ mod tests {
         };
         let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
         assert_eq!(out.len(), AUTOPLAY_BATCH);
-        assert_eq!(ids(&out)[0], "s0", "server order kept");
         assert_eq!(
             fake.calls(),
             vec!["similar:seed:40"],
             "a batch of 10: each seed aims for the minimum 20, asked for 40"
         );
+    }
+
+    /// A similarity agent answers one seed with the same list every time, so
+    /// a batch is a sample of the songs the seed's ladder kept (its first 20
+    /// here), not always their head: the same album is not always followed
+    /// by the same songs.
+    #[tokio::test(start_paused = true)]
+    async fn an_autoplay_batch_is_a_sample_of_each_seeds_kept_songs() {
+        let fake = Fake {
+            similar: HashMap::from([("seed".into(), Answer::Songs(run("s", 60)))]),
+            ..Fake::default()
+        };
+        let seeds = [seed_song("seed", None, None)];
+        let kept: HashSet<String> = ids(&run("s", 20)).into_iter().collect();
+        let mut batches: Vec<Vec<String>> = Vec::new();
+        for rng_seed in [1, 2, 3] {
+            let out = resolve_mix(
+                &fake,
+                &seeds,
+                &HashSet::new(),
+                MixPlan::AUTOPLAY,
+                StdRng::seed_from_u64(rng_seed),
+            )
+            .await
+            .expect("autoplay mix")
+            .songs;
+            assert_eq!(out.len(), AUTOPLAY_BATCH);
+            assert!(
+                out.iter().all(|song| kept.contains(&song.id)),
+                "only songs the ladder kept: {:?}",
+                ids(&out)
+            );
+            batches.push(ids(&out));
+        }
+        assert!(
+            batches[0] != batches[1] || batches[1] != batches[2],
+            "different draws give different batches"
+        );
+        assert_ne!(
+            batches[0],
+            ids(&run("s", AUTOPLAY_BATCH)),
+            "not simply the head of the server's answer"
+        );
+
+        // The same rng gives the same batch.
+        let again = resolve_mix(
+            &fake,
+            &seeds,
+            &HashSet::new(),
+            MixPlan::AUTOPLAY,
+            StdRng::seed_from_u64(1),
+        )
+        .await
+        .expect("autoplay mix")
+        .songs;
+        assert_eq!(ids(&again), batches[0]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1018,9 +1090,10 @@ mod tests {
         };
         let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
         assert_eq!(out.len(), AUTOPLAY_BATCH);
-        assert_eq!(
-            out.iter().filter(|s| s.artist == "A").count(),
-            AUTOPLAY_MAX_PER_ARTIST
+        assert!(
+            out.iter().filter(|s| s.artist == "A").count() <= AUTOPLAY_MAX_PER_ARTIST,
+            "at most two by one artist: {:?}",
+            ids(&out)
         );
 
         // Only one artist answers: the cap relaxes to fill the batch.
