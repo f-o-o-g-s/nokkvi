@@ -79,9 +79,7 @@ impl Nokkvi {
                 self.info_modal.toggle_row(idx);
             }
             InfoModalMessage::OpenUrl(url) => {
-                if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                    tracing::warn!("Failed to open URL '{}': {}", url, e);
-                }
+                super::components::open_external_url(&url);
             }
             InfoModalMessage::OpenFolder(path) => {
                 // Resolve the full local path by prepending the user's configured prefix
@@ -100,10 +98,7 @@ impl Nokkvi {
                     self.toast_warn(format!(
                         "Path not found: {full_path}\nCheck your Local Music Path in Settings."
                     ));
-                } else if let Err(e) = std::process::Command::new("xdg-open")
-                    .arg(&full_path)
-                    .spawn()
-                {
+                } else if let Err(e) = super::components::spawn_desktop_open(&full_path) {
                     tracing::warn!("Failed to open folder '{}': {}", full_path, e);
                     self.toast_warn(format!("Could not open file manager: {e}"));
                 }

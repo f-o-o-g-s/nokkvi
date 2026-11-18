@@ -1607,7 +1607,7 @@ impl Nokkvi {
             self.toast_warn(format!(
                 "Path not found: {folder}\nCheck your Local Music Path in Settings."
             ));
-        } else if let Err(e) = std::process::Command::new("xdg-open").arg(&folder).spawn() {
+        } else if let Err(e) = spawn_desktop_open(&folder) {
             tracing::warn!("Failed to open folder '{}': {}", folder, e);
             self.toast_warn(format!("Could not open file manager: {e}"));
         }
@@ -2171,16 +2171,53 @@ impl Nokkvi {
     }
 }
 
-/// Hand `url` to the desktop's opener (`xdg-open`). A failure is logged, not
-/// toasted: the link was the user's own click, and the log names the URL.
+/// Desktop opener binary name (`open` on macOS, `xdg-open` on Linux and
+/// other platforms).
+pub(crate) fn opener_command() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "open"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "xdg-open"
+    }
+}
+
+/// Spawn the desktop opener (`open` on macOS, `xdg-open` elsewhere) for
+/// `target` (a URL or local path).
+pub(crate) fn spawn_desktop_open(target: &str) -> std::io::Result<()> {
+    std::process::Command::new(opener_command())
+        .arg(target)
+        .spawn()
+        .map(|_| ())
+}
+
+/// Hand `url` to the desktop's opener (`open` on macOS, `xdg-open` elsewhere).
+/// A failure is logged, not toasted: the link was the user's own click, and
+/// the log names the URL.
 ///
 /// A test build opens nothing: a handler test that activates a link must not
 /// start a browser on the desktop running `cargo test`.
 pub(crate) fn open_external_url(url: &str) {
     #[cfg(not(test))]
-    if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+    if let Err(e) = spawn_desktop_open(url) {
         tracing::warn!("Failed to open URL '{url}': {e}");
     }
     #[cfg(test)]
     tracing::debug!("Test build: not opening '{url}'");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opener_command;
+
+    #[test]
+    fn opener_command_matches_target_os() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(opener_command(), "open");
+
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(opener_command(), "xdg-open");
+    }
 }
