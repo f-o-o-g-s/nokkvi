@@ -8,9 +8,10 @@
 
 use nokkvi_data::types::player_settings::TrackArtwork;
 
+use super::playback::{make_playback_update, radio_playing};
 use crate::{
     View,
-    app_message::{HarbourLoaderMessage, HarbourShelvesData},
+    app_message::{HarbourLoaderMessage, HarbourShelvesData, PlaybackStateUpdate},
     test_helpers::*,
     views::{
         HarbourMessage,
@@ -4094,12 +4095,14 @@ fn reset_for_session_clears_the_seeds_and_the_busy_flag() {
     app.harbour.instant_mix_seeds = mix_seeds(3);
     app.harbour.instant_mix_pool = Some(crate::state::InstantMixPool::Random);
     app.harbour.instant_mix_building = true;
+    app.harbour.instant_mix_cover_seen = Some("sal0".to_string());
 
     let _ = app.reset_session_state();
 
     assert!(app.harbour.instant_mix_seeds.is_empty());
     assert_eq!(app.harbour.instant_mix_pool, None);
     assert!(!app.harbour.instant_mix_building);
+    assert_eq!(app.harbour.instant_mix_cover_seen, None);
 }
 
 #[test]
@@ -4158,5 +4161,220 @@ fn the_focused_row_name_follows_what_shift_a_adds() {
             Some(crate::update::hotkeys::CenterItem::Named(name)) if name == "Instant Mix"
         ),
         "the row is named once it has seeds"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instant Mix row: its panel cover follows the transport under a still centre
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// What the row mixes from follows the transport: the playing queue song, else
+// the seeds. A pause, a resume, a song change or a station swaps the cover its
+// panel previews while the centre never moves, so no navigation step warms the
+// new one. The playback tick does (`Nokkvi::instant_mix_cover_tick`).
+
+/// Harbour on screen, the Instant Mix row centred, three seeds drawn and a
+/// queue song playing (`q1`, cover `album_q1`; the first seed's is `sal0`).
+fn centred_mix_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.current_view = View::Harbour;
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    center_instant_mix(&mut app);
+    app
+}
+
+/// A playback tick for the queue row under the play cursor
+/// (`play_queue_song`), with the transport as given.
+fn cursor_tick(app: &crate::Nokkvi, playing: bool, paused: bool) -> PlaybackStateUpdate {
+    PlaybackStateUpdate {
+        playing,
+        paused,
+        current_index: Some(0),
+        current_entry_id: app.queue_current.entry_id,
+        song_id: Some("q1".to_string()),
+        ..make_playback_update()
+    }
+}
+
+/// The full-size cover the panel last asked for.
+fn large_cover_asked(app: &crate::Nokkvi) -> Option<&str> {
+    app.artwork.loading_large_artwork.as_deref()
+}
+
+#[test]
+fn a_pause_under_the_centred_instant_mix_row_warms_the_first_seeds_cover() {
+    let mut app = centred_mix_app();
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("album_q1"),
+        "playing: the row previews the playing song"
+    );
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, false, true));
+
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("sal0"),
+        "paused: the row mixes from the seeds, so its panel needs the first seed's cover"
+    );
+}
+
+#[test]
+fn a_resume_under_the_centred_instant_mix_row_warms_the_playing_songs_cover() {
+    let mut app = centred_mix_app();
+    app.playback.playing = false;
+    app.playback.paused = true;
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, false, true));
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("sal0"),
+        "paused: the first seed"
+    );
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("album_q1"),
+        "playing again: the row previews the playing song"
+    );
+}
+
+#[test]
+fn a_song_change_under_the_centred_instant_mix_row_warms_the_new_songs_cover() {
+    let mut app = centred_mix_app();
+    let next = make_queue_song("q2", "Roller", "Kavinsky", "Other Album");
+    let next_entry = next.entry_id;
+    app.library.queue_songs.push(next);
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    assert_eq!(large_cover_asked(&app), Some("album_q1"));
+
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        current_index: Some(1),
+        current_entry_id: Some(next_entry),
+        song_id: Some("q2".to_string()),
+        ..cursor_tick(&app, true, false)
+    });
+
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("album_q2"),
+        "the next song's cover, full size, not only its thumbnail"
+    );
+}
+
+#[test]
+fn a_station_under_the_centred_instant_mix_row_warms_the_first_seeds_cover() {
+    let mut app = centred_mix_app();
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    assert_eq!(large_cover_asked(&app), Some("album_q1"));
+
+    app.active_playback = radio_playing("st");
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        song_id: Some("st".to_string()),
+        station_id: Some("st".to_string()),
+        ..cursor_tick(&app, true, false)
+    });
+
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("sal0"),
+        "a station is not a queue song: the row is back on the seeds"
+    );
+}
+
+#[test]
+fn an_unchanged_instant_mix_cover_is_warmed_once() {
+    let mut app = centred_mix_app();
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    assert_eq!(large_cover_asked(&app), Some("album_q1"));
+    app.artwork.loading_large_artwork = None;
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+
+    assert_eq!(
+        large_cover_asked(&app),
+        None,
+        "ten ticks a second must not ask ten times for a cover that never lands"
+    );
+}
+
+#[test]
+fn a_step_onto_the_instant_mix_row_leaves_the_tick_nothing_to_warm() {
+    let mut app = centred_mix_app();
+    warm_center_matching(&mut app, |r| matches!(r, HarbourRow::InstantMix { .. }));
+    assert_eq!(large_cover_asked(&app), Some("album_q1"));
+    app.artwork.loading_large_artwork = None;
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+
+    assert_eq!(
+        large_cover_asked(&app),
+        None,
+        "the step warmed this cover already"
+    );
+}
+
+#[test]
+fn a_pause_with_another_row_centred_warms_nothing() {
+    let mut app = centred_mix_app();
+    let total = app.harbour_rows().len();
+    app.harbour_page.common.slot_list.set_selected(0, total);
+    assert!(
+        matches!(app.harbour_rows().first(), Some(HarbourRow::Trawl { .. })),
+        "the Trawl door is centred"
+    );
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, false, true));
+
+    assert_eq!(
+        large_cover_asked(&app),
+        None,
+        "the panel shows another row; a step onto the Instant Mix row warms it"
+    );
+}
+
+#[test]
+fn a_pause_behind_another_view_is_warmed_by_the_return_to_harbour() {
+    let mut app = centred_mix_app();
+    app.current_view = View::Queue;
+
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, true, false));
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, false, true));
+    assert_eq!(
+        large_cover_asked(&app),
+        None,
+        "Harbour is not on screen: nothing to warm"
+    );
+
+    let _ = app.handle_switch_view(View::Harbour);
+    assert_eq!(
+        large_cover_asked(&app),
+        Some("sal0"),
+        "the entry warms the centred row as it is now"
+    );
+    app.artwork.loading_large_artwork = None;
+    let _ = app.handle_playback_state_updated(cursor_tick(&app, false, true));
+    assert_eq!(
+        large_cover_asked(&app),
+        None,
+        "and the tick has nothing to add"
+    );
+}
+
+#[test]
+fn the_first_instant_mix_seed_warms_its_thumbnail_with_the_shelves() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+
+    let ids = crate::update::harbour::harbour_song_mini_ids(&app.harbour, TrackArtwork::AlbumCover);
+
+    assert_eq!(
+        ids,
+        vec![vec!["sal0".to_string()]],
+        "the panel previews the first seed only, and needs its thumbnail until the cover lands"
     );
 }

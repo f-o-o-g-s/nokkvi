@@ -1223,6 +1223,13 @@ impl Nokkvi {
             tasks.push(task);
         }
 
+        // Harbour's Instant Mix row previews what it mixes from, and that
+        // follows the transport and the play cursor this tick just applied:
+        // warm the centred row's cover when it changed under it.
+        if let Some(task) = self.instant_mix_cover_tick() {
+            tasks.push(task);
+        }
+
         // Radio scrobbling (direct to ListenBrainz; bypasses Navidrome). Runs
         // unconditionally and self-gates: clears tracking off-radio, otherwise
         // drives now-playing + the wall-clock listen-time scrobble gate.

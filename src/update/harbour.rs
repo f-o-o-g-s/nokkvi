@@ -318,7 +318,9 @@ pub(crate) fn shape_recently_played(
 /// The cover keys whose 80px covers the song rows show (each song's album
 /// id, or its own `mf-` cover under `mode`): the song shelves' (Recently
 /// Played, Most Played Tracks) plus the Random Songs pick's teaser (its first
-/// song), one single-tile group each, songs with no album skipped.
+/// song) and the first Instant Mix seed (the cover that row's panel previews,
+/// drawn until the full-size one lands), one single-tile group each, songs
+/// with no album skipped.
 /// Each shelf shows at most [`HOT_PICKS_PER_SECTION`] songs, so only those warm:
 /// the shelves fetch deeper ([`SHELF_SONG_BATCH`], the tally pool) for what a
 /// press plays, and those covers never show. A free fn so the set is
@@ -333,6 +335,7 @@ pub(crate) fn harbour_song_mini_ids(
         .take(HOT_PICKS_PER_SECTION)
         .chain(harbour.most_played_songs.iter().take(HOT_PICKS_PER_SECTION))
         .chain(harbour.random_songs.first())
+        .chain(harbour.instant_mix_seeds.first())
         .filter_map(|s| s.cover_key(mode).map(str::to_owned))
         .map(|id| vec![id])
         .collect()
@@ -670,6 +673,38 @@ impl Nokkvi {
         })
     }
 
+    /// Warm the centred Instant Mix row's cover when what the row mixes from
+    /// changed under it. The row previews the playing queue song's cover, or
+    /// the first seed's when no queue song plays, so a pause, a resume, a
+    /// song change or a station swaps the cover while the centre never moves
+    /// and no navigation step warms the new one: the panel went blank on a
+    /// pause and stayed so until the user stepped off the row and back.
+    ///
+    /// Run at the end of every playback tick, which is the one place that
+    /// sees every input (transport, play cursor, radio mode) whichever
+    /// handler changed it. It compares the cover the row previews now with
+    /// the one last seen and warms only on a change, so a cover that never
+    /// lands is asked for once, not ten times a second. Behind another view,
+    /// or with another row centred, it only notes the cover: the return to
+    /// Harbour and the step onto the row warm the centre themselves.
+    pub(crate) fn instant_mix_cover_tick(&mut self) -> Option<Task<Message>> {
+        use crate::views::harbour::{MixFrom, instant_mix_cover};
+
+        let from = MixFrom::resolve(&self.harbour, self.instant_mix_playing());
+        let cover = instant_mix_cover(&self.harbour, &from);
+        if cover == self.harbour.instant_mix_cover_seen {
+            return None;
+        }
+        self.harbour.instant_mix_cover_seen = cover;
+        if self.current_view != View::Harbour {
+            return None;
+        }
+        let (rows, center) = self.harbour_centered_rows();
+        let row = center.and_then(|i| rows.get(i));
+        matches!(row, Some(HarbourRow::InstantMix { .. }))
+            .then(|| self.warm_harbour_center_art(row))
+    }
+
     /// The freshly-built flattened Harbour rows plus the center index into them
     /// — the single resolver for "which Harbour row is centered", shared by the
     /// two artwork-warm paths (`warm_harbour_center_art` callers) and the
@@ -785,11 +820,14 @@ impl Nokkvi {
                 ),
             },
             // The Instant Mix row previews the playing song's cover or the
-            // first seed's (`instant_mix_cover`, shared with the panel).
-            Some(HarbourRow::InstantMix { from, .. }) => (
-                crate::views::harbour::instant_mix_cover(&self.harbour, from),
-                None,
-            ),
+            // first seed's (`instant_mix_cover`, shared with the panel). This
+            // warm covers it, so the playback tick has nothing to add until
+            // it changes (`instant_mix_cover_tick`).
+            Some(HarbourRow::InstantMix { from, .. }) => {
+                let cover = crate::views::harbour::instant_mix_cover(&self.harbour, from);
+                self.harbour.instant_mix_cover_seen.clone_from(&cover);
+                (cover, None)
+            }
             _ => (None, None),
         };
         let collage = self.harbour_center_collage_target(center);

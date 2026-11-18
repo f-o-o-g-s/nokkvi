@@ -91,7 +91,7 @@ pub(super) fn make_playback_update() -> PlaybackStateUpdate {
     }
 }
 
-fn radio_playing(id: &str) -> crate::state::ActivePlayback {
+pub(super) fn radio_playing(id: &str) -> crate::state::ActivePlayback {
     crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
         station: nokkvi_data::types::radio_station::RadioStation {
             id: id.into(),

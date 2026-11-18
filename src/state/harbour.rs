@@ -87,6 +87,11 @@ pub struct HarbourState {
     /// `HarbourLoaderMessage::InstantMixSettled` on every outcome and by
     /// [`Self::reset_for_session`].
     pub instant_mix_building: bool,
+    /// The cover the Instant Mix row previewed when the playback tick or a
+    /// warm of the row last looked (`Nokkvi::instant_mix_cover_tick`). The
+    /// row's source follows the transport (a pause, a resume, a song change,
+    /// a station), so the tick warms the centred row again when it differs.
+    pub instant_mix_cover_seen: Option<String>,
 
     // --- Shelf load lifecycle ---
     /// A shelf load is in flight.

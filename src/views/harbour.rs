@@ -439,9 +439,10 @@ pub(crate) struct MixPlaying {
     pub cover: Option<String>,
 }
 
-/// What Enter on the Instant Mix row mixes from. ONE resolution, made by
-/// [`build_harbour_rows`], read by the subtitle, the panel, Enter and
-/// Shift+A, so the row always says what a press runs.
+/// What Enter on the Instant Mix row mixes from. ONE resolution
+/// ([`MixFrom::resolve`]), made by [`build_harbour_rows`], read by the
+/// subtitle, the panel, Enter and Shift+A, so the row always says what a
+/// press runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MixFrom {
     /// A queue song is playing: it keeps playing and songs like it replace
@@ -454,6 +455,22 @@ pub(crate) enum MixFrom {
     /// Nothing to mix from: no song plays and no seeds are drawn (shelves
     /// still loading, an empty library, or every pool song rated one star).
     Nothing,
+}
+
+impl MixFrom {
+    /// The playing queue song wins, else the seeds pre-drawn with the
+    /// shelves. The row ([`build_harbour_rows`]) and the playback tick's
+    /// cover check (`Nokkvi::instant_mix_cover_tick`) both resolve here.
+    pub(crate) fn resolve(
+        harbour: &crate::state::HarbourState,
+        now_playing: Option<MixPlaying>,
+    ) -> Self {
+        match now_playing {
+            Some(playing) => Self::Playing(playing),
+            None if !harbour.instant_mix_seeds.is_empty() => Self::Seeds,
+            None => Self::Nothing,
+        }
+    }
 }
 
 /// Whether Enter or Shift+A on the Instant Mix row starts a build. ONE
@@ -690,11 +707,7 @@ pub(crate) fn build_harbour_rows(
         });
         // The Instant Mix row right under it: the playing queue song wins,
         // else the seeds pre-drawn with the shelves.
-        let from = match now_playing {
-            Some(playing) => MixFrom::Playing(playing),
-            None if !harbour.instant_mix_seeds.is_empty() => MixFrom::Seeds,
-            None => MixFrom::Nothing,
-        };
+        let from = MixFrom::resolve(harbour, now_playing);
         let subtitle = instant_mix_subtitle(harbour, &from);
         rows.push(HarbourRow::InstantMix { from, subtitle });
         push_song_section(
