@@ -198,14 +198,18 @@ pub(crate) fn run() -> impl Sipper<Never, NotificationEvent> {
             Ok(c) => c,
             Err(e) => {
                 warn!(" [NOTIFY] No session bus; rating reminders unavailable: {e}");
-                std::future::pending::<Never>().await
+                loop {
+                    std::future::pending::<Never>().await;
+                }
             }
         };
         let proxy = match NotificationsProxy::new(&conn).await {
             Ok(p) => p,
             Err(e) => {
                 warn!(" [NOTIFY] Could not bind notification proxy: {e}");
-                std::future::pending::<Never>().await
+                loop {
+                    std::future::pending::<Never>().await;
+                }
             }
         };
 
