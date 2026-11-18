@@ -255,11 +255,33 @@ fn player_name_for(host: Option<&str>) -> String {
 
 /// This machine's hostname, or `None` when it can't be read.
 fn host_name() -> Option<String> {
-    let raw = std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .or_else(|_| std::fs::read_to_string("/etc/hostname"))
-        .ok()?;
+    let raw = read_raw_host_name()?;
+    normalize_host_name(&raw)
+}
+
+fn normalize_host_name(raw: &str) -> Option<String> {
     let host: String = raw.trim().chars().take(64).collect();
     (!host.is_empty()).then_some(host)
+}
+
+#[cfg(target_os = "macos")]
+fn read_raw_host_name() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is a valid, writable 256-byte buffer and its exact length
+    // is passed to `libc::gethostname`, which writes at most `len` bytes.
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast::<libc::c_char>(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    std::str::from_utf8(&buf[..len]).ok().map(str::to_owned)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_raw_host_name() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .or_else(|_| std::fs::read_to_string("/etc/hostname"))
+        .ok()
 }
 
 /// The settings a new player starts from: those of the player Navidrome
@@ -595,5 +617,23 @@ mod tests {
         assert!(!waiter.is_finished(), "the next writer waits");
         drop(held);
         let _next = waiter.await.expect("the waiter gets the lock");
+    }
+
+    #[test]
+    fn host_name_is_non_empty_and_bounded() {
+        let host = host_name().expect("hostname should be readable on this OS");
+        assert!(!host.is_empty());
+        assert!(host.chars().count() <= 64);
+    }
+
+    #[test]
+    fn normalize_host_name_trims_and_caps_at_64_chars() {
+        assert_eq!(normalize_host_name("  \n\t "), None);
+        assert_eq!(
+            normalize_host_name("  macbook.local\n"),
+            Some("macbook.local".to_owned())
+        );
+        let long = "a".repeat(80);
+        assert_eq!(normalize_host_name(&long), Some("a".repeat(64)));
     }
 }
