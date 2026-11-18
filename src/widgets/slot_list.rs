@@ -1934,7 +1934,8 @@ fn text_column<'a, Message: Clone + 'a + 'static>(
                 .padding(4),
                 iced::widget::tooltip::Position::Top,
             )
-            .gap(4);
+            .gap(4)
+            .style(theme::container_tooltip);
             iced::widget::row![glyph, subtitle_widget]
                 .spacing((subtitle_size * 0.3).round())
                 .align_y(Alignment::Center)
