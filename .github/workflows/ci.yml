@@ -43,3 +43,32 @@ jobs:
 
       - name: Build (release)
         run: cargo build --release
+
+  check-macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo +nightly fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        timeout-minutes: 15
+        run: cargo test --workspace
+
+      - name: Build (release)
+        run: cargo build --release
