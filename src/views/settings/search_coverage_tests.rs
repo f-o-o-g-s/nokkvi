@@ -243,6 +243,7 @@ fn synonyms_reach_rows_whose_text_lacks_the_word() {
         ("shortcut", "Play / Pause"),
         ("transcode", "Stream Format"),
         ("bandwidth", "Max Bitrate"),
+        ("endless", "Autoplay"),
     ] {
         let hits = search(query);
         assert!(

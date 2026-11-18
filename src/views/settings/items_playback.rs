@@ -86,6 +86,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         macro_rows.take("general.crossfade_album_gapless"),
         macro_rows.take("general.bit_perfect"),
         macro_rows.take("general.rewind_on_previous"),
+        macro_rows.take("general.autoplay_enabled"),
         // --- Fading ---
         SettingsEntry::Header {
             label: "Fading",

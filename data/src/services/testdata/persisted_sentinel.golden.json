@@ -51,6 +51,7 @@
   "crossfade_offset_secs": -2,
   "crossfade_bar_snap": true,
   "rewind_on_previous": true,
+  "autoplay_enabled": true,
   "stream_format": "mp3",
   "stream_max_bitrate": 320,
   "default_playlist_id": "playlist-42",

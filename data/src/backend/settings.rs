@@ -159,6 +159,11 @@ impl SettingsService {
     // =========================================================================
 
     delegate_getter!(get_player_settings, LivePlayerSettings);
+    delegate_getter!(
+        /// Whether Autoplay is on (read without projecting the live settings)
+        autoplay_enabled,
+        bool
+    );
 
     /// Persist volume setting
     pub async fn set_volume(&self, volume: f32) -> anyhow::Result<()> {
@@ -186,6 +191,11 @@ impl SettingsService {
     delegate_setter!(set_eq_gains, [f32; 10]);
     delegate_setter!(delete_custom_eq_preset, usize);
     delegate_setter!(set_crossfade_enabled, bool);
+    delegate_setter!(
+        /// Toggle Autoplay outside the Settings tab (player bar, hotkey, CLI)
+        set_autoplay_enabled,
+        bool
+    );
     delegate_setter!(set_bit_perfect, BitPerfectMode);
     delegate_setter!(set_font_family, String);
     delegate_setter!(

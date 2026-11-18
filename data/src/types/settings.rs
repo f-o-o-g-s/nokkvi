@@ -236,6 +236,10 @@ crate::player_settings_schema! {
     /// played past the threshold (default false).
     #[serde(default)]
     same rewind_on_previous: bool = false,
+    /// Whether Autoplay keeps the music going when the queue runs low by
+    /// appending songs like the last ones played (default false — opt-in).
+    #[serde(default)]
+    same autoplay_enabled: bool = false,
     /// What queue songs stream as: Original (the default) plays every file
     /// as it is; Opus / MP3 ask the server for a smaller copy of the songs
     /// `types::stream_quality::stream_params` picks.

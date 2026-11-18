@@ -714,6 +714,7 @@ mod tests {
                 "general.crossfade_album_gapless",
                 "general.bit_perfect",
                 "general.rewind_on_previous",
+                "general.autoplay_enabled",
                 // Fading (the fade enables / skip mode default off, so their
                 // duration rows are gated out here — see the enabled-variant
                 // test).

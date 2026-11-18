@@ -525,6 +525,24 @@ define_settings! {
                 read_field: |d| d.rewind_on_previous,
             },
         },
+        AutoplayEnabled {
+            key: "general.autoplay_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_autoplay_enabled(v),
+            toml_apply: |ts, p| p.autoplay_enabled = ts.autoplay_enabled,
+            read: |src, out| out.autoplay_enabled = src.autoplay_enabled,
+            write: |ps, ts| ts.autoplay_enabled = ps.autoplay_enabled,
+            ui_meta: {
+                label: "Autoplay",
+                category: "Playback",
+                subtitle: Some(
+                    "Keeps the music going when the queue runs low: adds songs like the last \
+                     ones played.\nOff = playback stops when the queue ends",
+                ),
+                default: false,
+                read_field: |d| d.autoplay_enabled,
+            },
+        },
         // -- Streaming Quality ------------------------------------------------
         // What a queue song's stream URL asks the server for. The rows only
         // persist; the push to the stream URL builder rides
@@ -1046,6 +1064,7 @@ mod tests {
             crossfade_offset_secs: 0,
             crossfade_bar_snap: false,
             rewind_on_previous: false,
+            autoplay_enabled: false,
             stream_format: "Original".into(),
             stream_max_bitrate: "128 kbps".into(),
             volume_normalization: "Off".into(),
@@ -1074,10 +1093,10 @@ mod tests {
         }
     }
 
-    /// 38 entries get ui_meta: 8 unconditional Playback rows (crossfade
+    /// 39 entries get ui_meta: 9 unconditional Playback rows (crossfade
     /// enable, bit-perfect, crossfade duration, crossfade curve, minimum
-    /// track length, keep-gapless-albums, rewind-on-previous, volume
-    /// normalization), 5 Lyrics rows (mode, online fetch, cover blur, word
+    /// track length, keep-gapless-albums, rewind-on-previous, autoplay,
+    /// volume normalization), 5 Lyrics rows (mode, online fetch, cover blur, word
     /// highlight, alignment), 2 Streaming Quality rows (format, max
     /// bitrate), 11 Fading rows (smooth starts, fade-on-pause + its
     /// duration, fade-on-stop + its duration, fade-on-skip + its duration —
@@ -1098,7 +1117,7 @@ mod tests {
     fn build_playback_tab_settings_items_emits_the_pinned_row_count() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 38);
+        assert_eq!(entries.len(), 39);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -1854,6 +1873,7 @@ mod tests {
         ts.crossfade_duration_secs = 9;
         ts.crossfade_curve = crate::types::player_settings::CrossfadeCurve::Linear;
         ts.rewind_on_previous = true;
+        ts.autoplay_enabled = true;
         ts.replay_gain_preamp_db = 4.0;
         ts.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         ts.normalization_level = NormalizationLevel::Loud;
@@ -1873,6 +1893,7 @@ mod tests {
             crate::types::player_settings::CrossfadeCurve::Linear
         );
         assert!(p.rewind_on_previous);
+        assert!(p.autoplay_enabled);
         assert_eq!(p.replay_gain_preamp_db, 4.0);
         assert_eq!(
             p.volume_normalization,
@@ -1905,6 +1926,7 @@ mod tests {
         src.crossfade_duration_secs = 9;
         src.crossfade_curve = crate::types::player_settings::CrossfadeCurve::ConstantGain;
         src.rewind_on_previous = true;
+        src.autoplay_enabled = true;
         src.replay_gain_preamp_db = 4.0;
         src.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         src.normalization_level = NormalizationLevel::Loud;
@@ -1924,6 +1946,7 @@ mod tests {
             crate::types::player_settings::CrossfadeCurve::ConstantGain
         );
         assert!(ui.rewind_on_previous);
+        assert!(ui.autoplay_enabled);
         assert_eq!(ui.replay_gain_preamp_db, 4.0);
         assert_eq!(
             ui.volume_normalization,
@@ -1957,6 +1980,7 @@ mod tests {
         ps.crossfade_duration_secs = 9;
         ps.crossfade_curve = crate::types::player_settings::CrossfadeCurve::Linear;
         ps.rewind_on_previous = true;
+        ps.autoplay_enabled = true;
         ps.replay_gain_preamp_db = 4.0;
         ps.replay_gain_fallback_db = 1.5;
         ps.replay_gain_fallback_to_agc = true;
@@ -1986,6 +2010,7 @@ mod tests {
             crate::types::player_settings::CrossfadeCurve::Linear
         );
         assert!(ts.rewind_on_previous);
+        assert!(ts.autoplay_enabled);
         assert!((ts.replay_gain_preamp_db - 4.0).abs() < f32::EPSILON);
         assert!((ts.replay_gain_fallback_db - 1.5).abs() < f32::EPSILON);
         assert!(ts.replay_gain_fallback_to_agc);
@@ -2056,6 +2081,7 @@ mod tests {
             crossfade_offset_secs: i64::from(live.crossfade_offset_secs),
             crossfade_bar_snap: live.crossfade_bar_snap,
             rewind_on_previous: live.rewind_on_previous,
+            autoplay_enabled: live.autoplay_enabled,
             stream_format: live.stream_format.as_label().into(),
             stream_max_bitrate: live.stream_max_bitrate.as_label().into(),
             volume_normalization: live.volume_normalization.as_label().into(),

@@ -231,6 +231,9 @@ pub struct TomlSettings {
     /// Whether the Previous button restarts the current track (instead of
     /// stepping back) once it has played past the threshold. Default false.
     pub rewind_on_previous: bool,
+    /// Whether Autoplay appends songs like the last ones played when the
+    /// queue runs low. Default false.
+    pub autoplay_enabled: bool,
     /// What queue songs stream as: "original" (the default), "opus" or "mp3".
     pub stream_format: StreamFormat,
     /// The bitrate cap, in kbps, a transcoded stream is asked for (64, 96,
@@ -436,6 +439,7 @@ impl Default for TomlSettings {
             crossfade_offset_secs: 0,
             crossfade_bar_snap: false,
             rewind_on_previous: false,
+            autoplay_enabled: false,
             stream_format: StreamFormat::Original,
             stream_max_bitrate: StreamMaxBitrate::Kbps128,
             volume_normalization: VolumeNormalizationMode::default(),

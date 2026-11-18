@@ -402,6 +402,16 @@ keyword_table! {
             "no dsp",
         ],
         "general.rewind_on_previous" => &["restart track", "back button", "skip back"],
+        "general.autoplay_enabled" => &[
+            "auto dj",
+            "infinite queue",
+            "endless",
+            "continuous",
+            "keep playing",
+            "similar",
+            "radio",
+            "queue end",
+        ],
 
         // ── Playback · Streaming Quality ─────────────────────────────────────
         "general.stream_format" => &[

@@ -268,6 +268,8 @@ pub struct PlaybackSettingsData {
     pub crossfade_bar_snap: bool,
     /// Whether Previous restarts the current track past the threshold (default false).
     pub rewind_on_previous: bool,
+    /// Whether Autoplay adds songs when the queue runs low (default false).
+    pub autoplay_enabled: bool,
     /// Stream format label ("Original" / "Opus" / "MP3").
     pub stream_format: Cow<'static, str>,
     /// Max bitrate label ("64 kbps" … "320 kbps").
@@ -347,6 +349,7 @@ impl Default for PlaybackSettingsData {
             crossfade_offset_secs: 0,
             crossfade_bar_snap: false,
             rewind_on_previous: false,
+            autoplay_enabled: false,
             stream_format: Cow::Borrowed("test-default"),
             stream_max_bitrate: Cow::Borrowed("test-default"),
             volume_normalization: Cow::Borrowed("test-default"),
@@ -707,6 +710,7 @@ mod tests {
         assert_eq!(data.replay_gain_fallback_db, 0);
         assert!(!data.crossfade_enabled);
         assert!(!data.rewind_on_previous);
+        assert!(!data.autoplay_enabled);
         assert!(!data.replay_gain_fallback_to_agc);
         assert!(!data.replay_gain_prevent_clipping);
         assert!(!data.scrobbling_enabled);

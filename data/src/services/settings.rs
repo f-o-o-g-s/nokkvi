@@ -651,6 +651,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_autoplay_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.autoplay_enabled = enabled;
+        self.save()
+    }
+
+    /// Whether Autoplay is on, without projecting the whole live settings.
+    pub fn autoplay_enabled(&self) -> bool {
+        self.settings.player.autoplay_enabled
+    }
+
     pub fn set_rewind_on_previous(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rewind_on_previous = enabled;
         self.save()
@@ -1629,6 +1639,7 @@ mod sentinel_roundtrip_tests {
             crossfade_offset_secs: -2,                        // default 0
             crossfade_bar_snap: true,                         // default false
             rewind_on_previous: true,                         // default false
+            autoplay_enabled: true,                           // default false
             stream_format: StreamFormat::Mp3,                 // default Original
             stream_max_bitrate: StreamMaxBitrate::Kbps320,    // default Kbps128
 
@@ -1889,6 +1900,8 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.skip_silence, ui_ps2.skip_silence);
         assert_eq!(ui_ps1.crossfade_offset_secs, ui_ps2.crossfade_offset_secs);
         assert_eq!(ui_ps1.crossfade_bar_snap, ui_ps2.crossfade_bar_snap);
+        assert!(ui_ps1.autoplay_enabled);
+        assert_eq!(ui_ps1.autoplay_enabled, ui_ps2.autoplay_enabled);
 
         // Streaming quality: the sentinel's values reach the live settings
         // and survive config.toml.
