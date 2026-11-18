@@ -57,6 +57,9 @@ pub struct QueueSongUIViewData {
     pub play_count: Option<u32>, // For Most Played sort
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
+    /// Whether Autoplay added this row (`QueueManager::is_autoplay_entry`).
+    /// Runtime-only, like `entry_id`; always false outside the live queue.
+    pub autoplay: bool,
 }
 
 impl SongCover for QueueSongUIViewData {
@@ -120,11 +123,13 @@ impl crate::utils::search::Searchable for QueueSongUIViewData {
 /// and the playlist editor's buffer load
 /// ([`crate::backend::AppService::resolve_playlist_for_editor`]) so both produce
 /// identical rows. The caller supplies `entry_id`: the queue uses
-/// manager-assigned ids; the editor uses the row's buffer index.
+/// manager-assigned ids; the editor uses the row's buffer index. `autoplay`
+/// marks a queue row Autoplay added (false for the editor).
 pub fn build_queue_song_ui_view_data(
     song: &Song,
     index: usize,
     entry_id: u64,
+    autoplay: bool,
     server_url: &str,
     subsonic_credential: &str,
 ) -> QueueSongUIViewData {
@@ -154,6 +159,7 @@ pub fn build_queue_song_ui_view_data(
         rating: song.rating,
         play_count: song.play_count,
         searchable_lower,
+        autoplay,
     }
 }
 
@@ -296,14 +302,35 @@ impl QueueService {
         self.songs.get()
     }
 
-    /// Add songs to the queue. Returns a [`NextTrackResetEffect`] obligation
-    /// — the audio engine's prepared gapless decoder is stale once the queue
-    /// changes, and the caller must dispatch the effect against the engine.
+    /// Add songs the user queued: at the end, or ahead of the pending
+    /// Autoplay rows at the tail ([`QueueManager::enqueue_songs`]). Returns a
+    /// [`NextTrackResetEffect`] obligation — the audio engine's prepared
+    /// gapless decoder is stale once the queue changes, and the caller must
+    /// dispatch the effect against the engine.
     pub async fn add_songs(&self, songs: Vec<Song>) -> NextTrackResetEffect {
+        self.enqueue_songs(songs).await.effect
+    }
+
+    /// [`Self::add_songs`], also handing back the first new row's
+    /// `entry_id` (Append and Play plays it).
+    pub async fn enqueue_songs(&self, songs: Vec<Song>) -> crate::services::queue::UserAppend {
         let mut queue_manager = self.queue_manager.lock().await;
-        let effect = queue_manager.add_songs(songs);
+        let outcome = queue_manager.enqueue_songs(songs);
         self.refresh_from_locked_manager(&queue_manager).await;
-        effect
+        outcome
+    }
+
+    /// Remove the Autoplay rows that have not played yet
+    /// ([`QueueManager::clear_pending_autoplay`]) under one hold of the queue
+    /// lock. Returns the removed `entry_id`s plus the
+    /// [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn clear_pending_autoplay(&self) -> (Vec<u64>, NextTrackResetEffect) {
+        let mut qm = self.queue_manager.lock().await;
+        let (removed, effect) = qm.clear_pending_autoplay();
+        if !removed.is_empty() {
+            self.refresh_from_locked_manager(&qm).await;
+        }
+        (removed, effect)
     }
 
     /// Set the queue (replace all songs). Returns a [`NextTrackResetEffect`]
@@ -357,6 +384,7 @@ impl QueueService {
                     song,
                     index,
                     row.entry_id,
+                    qm.is_autoplay_entry(row.entry_id),
                     server_url,
                     subsonic_credential,
                 ))
@@ -494,7 +522,7 @@ impl QueueService {
     /// Lock order: caller already holds `queue_manager`; this method then
     /// acquires `auth_gateway` via `get_server_config()`. The same order is
     /// established codebase-wide — do not invert.
-    async fn refresh_from_locked_manager(&self, qm: &QueueManager) {
+    pub(crate) async fn refresh_from_locked_manager(&self, qm: &QueueManager) {
         let (server_url, subsonic_credential) = self.get_server_config().await;
         let ui_data = Self::transform_songs_from_pool(qm, &server_url, &subsonic_credential);
         let song_count = ui_data.len();
@@ -547,7 +575,7 @@ mod tests {
             album_id: Some("a7".to_string()),
             ..Song::test_default("s7", "Own")
         };
-        let row = build_queue_song_ui_view_data(&own, 0, 1, "http://server", "cred");
+        let row = build_queue_song_ui_view_data(&own, 0, 1, false, "http://server", "cred");
         assert_eq!(row.own_cover.as_deref(), Some("mf-s7"));
         assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("mf-s7"));
         assert_eq!(row.cover_key(TrackArtwork::AlbumCover), Some("a7"));
@@ -559,7 +587,7 @@ mod tests {
             album_id: Some("a7".to_string()),
             ..Song::test_default("s8", "Bare")
         };
-        let row = build_queue_song_ui_view_data(&bare, 0, 2, "http://server", "cred");
+        let row = build_queue_song_ui_view_data(&bare, 0, 2, false, "http://server", "cred");
         assert_eq!(row.own_cover, None);
         assert_eq!(row.cover_key(TrackArtwork::OwnCover), Some("a7"));
     }
@@ -567,7 +595,7 @@ mod tests {
     #[test]
     fn build_row_maps_song_fields_and_supplied_entry_id() {
         let song = Song::test_default("s7", "Hello World");
-        let row = build_queue_song_ui_view_data(&song, 4, 99, "http://server", "cred");
+        let row = build_queue_song_ui_view_data(&song, 4, 99, false, "http://server", "cred");
 
         assert_eq!(row.id, "s7");
         // entry_id is caller-supplied (editor uses buffer index), not derived.

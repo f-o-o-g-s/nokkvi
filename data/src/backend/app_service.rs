@@ -876,6 +876,7 @@ impl AppService {
                     song,
                     index,
                     index as u64,
+                    false,
                     &server_url,
                     &subsonic_credential,
                 )
@@ -2264,14 +2265,8 @@ impl AppService {
         seeds: Vec<crate::types::song::Song>,
         exclude: &HashSet<String>,
     ) -> Result<Vec<crate::types::song::Song>> {
-        use crate::{
-            backend::instant_mix::{ServerMixSource, mix_rng, resolve_instant_mix},
-            types::batch::BatchItem,
-        };
-        let seeds: Vec<BatchItem> = seeds
-            .into_iter()
-            .map(|song| BatchItem::Song(Box::new(song)))
-            .collect();
+        use crate::backend::instant_mix::{ServerMixSource, mix_rng, resolve_instant_mix};
+        let seeds = Self::song_seeds(seeds);
         let library_ids = self.active_library_ids_vec();
         let orch = self.library_orchestrator();
         let source = ServerMixSource {
@@ -2279,6 +2274,14 @@ impl AppService {
             library_ids: &library_ids,
         };
         resolve_instant_mix(&source, &seeds, exclude, mix_rng()).await
+    }
+
+    /// Song seeds as the ladder's [`crate::types::batch::BatchItem`]s.
+    fn song_seeds(seeds: Vec<crate::types::song::Song>) -> Vec<crate::types::batch::BatchItem> {
+        seeds
+            .into_iter()
+            .map(|song| crate::types::batch::BatchItem::Song(Box::new(song)))
+            .collect()
     }
 
     /// Replace the queue with an instant mix for `seeds` and play it from
@@ -2349,6 +2352,156 @@ impl AppService {
             OneShotShuffle::None,
         )
         .await
+    }
+
+    // =========================================================================
+    // Autoplay
+    //
+    // While the mode is on, the UI asks for a batch when the queue runs low
+    // (`types::autoplay::autoplay_wants_fill`) and after it ran out
+    // (`queue_ran_out_epoch` moved). A batch is `AUTOPLAY_BATCH` songs like
+    // the last few of the listening trail, through the instant-mix ladder's
+    // Autoplay plan, appended as marked rows that user appends then go
+    // ahead of (`QueueManager::enqueue_songs`).
+    // =========================================================================
+
+    /// Top the queue up with an Autoplay batch when one is wanted, and say
+    /// what happened. Never plays anything.
+    ///
+    /// 1. Under the queue lock: with `after_run_out == false` a batch is
+    ///    wanted while Repeat is off and a current row has at most
+    ///    [`AUTOPLAY_LOW_WATERMARK`] songs after it in play order; with
+    ///    `after_run_out == true` while Repeat is off and NO row is current
+    ///    (the queue ended and nothing was started since), the trail then
+    ///    being the play history alone. The seeds are the last
+    ///    [`AUTOPLAY_SEEDS`] distinct songs of the trail
+    ///    ([`pick_autoplay_seeds`]); every song in the queue or the play
+    ///    history is left out of the batch. The setting is not read here:
+    ///    the UI asks only while the mode is on, and the toggle's write may
+    ///    not have landed yet.
+    /// 2. The batch resolves with no lock held (seconds on a slow
+    ///    similarity agent).
+    /// 3. Under the queue lock again, the batch is appended only if the
+    ///    setting is on and it is still wanted: the step-1 rule, except that
+    ///    a fill started with a current row whose queue ran out meanwhile
+    ///    (no row current now, Repeat still off, and
+    ///    [`Self::queue_ran_out_epoch`] moved since step 1) still appends,
+    ///    so the songs aren't resolved twice. Songs queued meanwhile are
+    ///    dropped.
+    ///
+    /// A rejected session is the one error; a failed request reads as
+    /// nothing found, like the instant mix's ladder.
+    ///
+    /// [`AUTOPLAY_LOW_WATERMARK`]: crate::types::autoplay::AUTOPLAY_LOW_WATERMARK
+    /// [`AUTOPLAY_SEEDS`]: crate::types::autoplay::AUTOPLAY_SEEDS
+    /// [`pick_autoplay_seeds`]: crate::types::autoplay::pick_autoplay_seeds
+    pub async fn autoplay_top_up(
+        &self,
+        after_run_out: bool,
+    ) -> Result<crate::types::autoplay::AutoplayOutcome> {
+        use crate::{
+            backend::instant_mix::{MixPlan, ServerMixSource, mix_rng, resolve_mix},
+            types::{
+                autoplay::{
+                    AUTOPLAY_SEEDS, AutoplayOutcome, autoplay_wants_fill, autoplay_wants_resume,
+                    pick_autoplay_seeds,
+                },
+                queue::RepeatMode,
+            },
+        };
+        // Whether a batch is wanted for this queue state. `ran_out_since`
+        // is false at step 1 (nothing to compare yet).
+        let wanted = |repeat: RepeatMode, runway: Option<usize>, ran_out_since: bool| {
+            let repeat_off = repeat == RepeatMode::None;
+            if after_run_out {
+                autoplay_wants_resume(true, repeat_off, runway)
+            } else {
+                autoplay_wants_fill(true, repeat_off, runway)
+                    || (ran_out_since && autoplay_wants_resume(true, repeat_off, runway))
+            }
+        };
+
+        let queue_manager = self.queue_service.queue_manager();
+        let (seeds, exclude, epoch) = {
+            let qm = queue_manager.lock().await;
+            let epoch = self.playback.queue_ran_out_epoch();
+            if !wanted(qm.get_queue().repeat, qm.runway(), false) {
+                return Ok(AutoplayOutcome::NotNeeded);
+            }
+            let seeds = pick_autoplay_seeds(&qm.autoplay_trail(), AUTOPLAY_SEEDS);
+            (seeds, qm.queued_or_heard_song_ids(), epoch)
+        };
+        if seeds.is_empty() {
+            return Ok(AutoplayOutcome::NotNeeded);
+        }
+
+        let songs = {
+            let seeds = Self::song_seeds(seeds);
+            let library_ids = self.active_library_ids_vec();
+            let orch = self.library_orchestrator();
+            let source = ServerMixSource {
+                orch: &orch,
+                library_ids: &library_ids,
+            };
+            resolve_mix(&source, &seeds, &exclude, MixPlan::AUTOPLAY, mix_rng())
+                .await?
+                .songs
+        };
+
+        if !self.settings_service.autoplay_enabled().await {
+            return Ok(AutoplayOutcome::NotNeeded);
+        }
+        let (first_entry_id, count, effect) = {
+            let mut qm = queue_manager.lock().await;
+            let ran_out_since = self.playback.queue_ran_out_epoch() != epoch;
+            if !wanted(qm.get_queue().repeat, qm.runway(), ran_out_since) {
+                return Ok(AutoplayOutcome::NotNeeded);
+            }
+            let present = qm.queued_or_heard_song_ids();
+            let fresh: Vec<crate::types::song::Song> = songs
+                .into_iter()
+                .filter(|song| !present.contains(&song.id))
+                .collect();
+            if fresh.is_empty() {
+                return Ok(AutoplayOutcome::NothingFound);
+            }
+            let appended = qm.append_autoplay_songs(fresh);
+            self.queue_service.refresh_from_locked_manager(&qm).await;
+            (
+                appended.entry_ids.first().copied(),
+                appended.entry_ids.len(),
+                appended.effect,
+            )
+        };
+        // The engine lock is never taken under the queue lock.
+        effect.apply_to(&self.audio_engine()).await;
+        debug!("Autoplay added {count} songs (after_run_out={after_run_out})");
+        Ok(match first_entry_id {
+            Some(first_entry_id) => AutoplayOutcome::Added {
+                count,
+                first_entry_id,
+            },
+            // A non-empty append always hands out an id.
+            None => AutoplayOutcome::NothingFound,
+        })
+    }
+
+    /// Remove the Autoplay rows that have not played yet (the ones after the
+    /// current row in play order), as when Autoplay is turned off. The
+    /// current row is never among them, so playback is left alone and only
+    /// the gapless prep resets. Returns the removed rows' `entry_id`s (empty
+    /// when there were none).
+    pub async fn clear_pending_autoplay(&self) -> Vec<u64> {
+        let (removed, effect) = self.queue_service.clear_pending_autoplay().await;
+        effect.apply_to(&self.audio_engine()).await;
+        removed
+    }
+
+    /// How many times playback ended because the queue had no next song
+    /// ([`PlaybackController::queue_ran_out_epoch`]). The UI's tick carries
+    /// it; Autoplay resumes playback when it moves.
+    pub fn queue_ran_out_epoch(&self) -> u64 {
+        self.playback.queue_ran_out_epoch()
     }
 
     /// Remove queue rows by per-row `entry_id` and keep the audio engine in
@@ -3723,7 +3876,7 @@ mod tests {
 
     // ---- Instant mix ---------------------------------------------------
 
-    use crate::types::{instant_mix::INSTANT_MIX_TRACKS, song::Song};
+    use crate::types::{autoplay::AUTOPLAY_BATCH, instant_mix::INSTANT_MIX_TRACKS, song::Song};
 
     /// A `getSimilarSongs2` answer holding `ids`, three minutes each.
     fn similar_answer(ids: &[String]) -> String {
@@ -3867,6 +4020,338 @@ mod tests {
             .await
             .expect_err("all queued");
         assert_eq!(err.to_string(), ALL_QUEUED_ERROR);
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    // ---- Autoplay ------------------------------------------------------
+
+    use crate::types::{autoplay::AutoplayOutcome, queue::RepeatMode};
+
+    async fn set_autoplay(app: &AppService, on: bool) {
+        app.settings()
+            .set_autoplay_enabled(on)
+            .await
+            .expect("autoplay setting");
+    }
+
+    /// Replace the queue with `ids` (each its own song), the cursor on
+    /// `current`, and point the navigator at it as a play would.
+    async fn queue_of(app: &AppService, ids: &[&str], current: Option<usize>) {
+        let songs: Vec<Song> = ids.iter().map(|id| Song::test_default(id, id)).collect();
+        let effect = app.queue().set_queue(songs, current).await;
+        effect.apply_to(&app.audio_engine()).await;
+        app.playback().resync_navigator_with_queue().await;
+    }
+
+    fn similar_requests(server: &crate::services::api::test_server::ScriptedServer) -> usize {
+        server
+            .requests()
+            .iter()
+            .filter(|r| r.path == "/rest/getSimilarSongs2")
+            .count()
+    }
+
+    /// The UI runs both verbs through `shell_task` (`Send + 'static`).
+    #[tokio::test]
+    async fn autoplay_verbs_spawn() {
+        let (app, db_path) = test_app().await;
+        let top_up = tokio::spawn({
+            let app = app.clone();
+            async move { app.autoplay_top_up(false).await }
+        });
+        let clear = tokio::spawn({
+            let app = app.clone();
+            async move { app.clear_pending_autoplay().await }
+        });
+        let outcome = top_up.await.expect("join").expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "an empty queue");
+        assert!(clear.await.expect("join").is_empty());
+        assert_eq!(app.queue_ran_out_epoch(), 0);
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// On the last row with Autoplay on, a batch lands behind it as marked
+    /// rows, and the verb names the first one.
+    #[tokio::test]
+    async fn autoplay_top_up_appends_a_marked_batch() {
+        let (server, app, db_path) = instant_mix_app("seed").await;
+        set_autoplay(&app, true).await;
+        queue_of(&app, &["a", "seed"], Some(1)).await;
+
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+
+        let qm = app.queue().queue_manager();
+        let qm = qm.lock().await;
+        let first = qm.entry_id_at(2).expect("a new row");
+        assert_eq!(
+            outcome,
+            AutoplayOutcome::Added {
+                count: AUTOPLAY_BATCH,
+                first_entry_id: first
+            }
+        );
+        let ids = qm.song_ids_snapshot();
+        assert_eq!(&ids[..3], ["a", "seed", "m0"]);
+        assert_eq!(ids.len(), 2 + AUTOPLAY_BATCH);
+        assert_eq!(qm.pending_autoplay_entries().len(), AUTOPLAY_BATCH);
+        assert_eq!(qm.current_index(), Some(1), "nothing was played");
+        drop(qm);
+        assert!(
+            app.queue().get_songs()[2..].iter().all(|row| row.autoplay),
+            "the projection flags the new rows"
+        );
+        assert!(!app.queue().get_songs()[1].autoplay);
+        assert_eq!(similar_requests(&server), 1);
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A long runway, Repeat on, or the mode turned off before the songs
+    /// arrive: nothing is added.
+    #[tokio::test]
+    async fn autoplay_top_up_is_not_needed_unless_the_queue_runs_low() {
+        let (server, app, db_path) = instant_mix_app("seed").await;
+        set_autoplay(&app, true).await;
+
+        queue_of(&app, &["seed", "a", "b"], Some(0)).await;
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "two songs left");
+
+        queue_of(&app, &["a", "seed"], Some(1)).await;
+        let effect = app
+            .queue()
+            .queue_manager()
+            .lock()
+            .await
+            .set_repeat(RepeatMode::Playlist);
+        effect.apply_to(&app.audio_engine()).await;
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "Repeat is on");
+        assert_eq!(similar_requests(&server), 0, "nothing was asked");
+
+        let effect = app
+            .queue()
+            .queue_manager()
+            .lock()
+            .await
+            .set_repeat(RepeatMode::None);
+        effect.apply_to(&app.audio_engine()).await;
+        set_autoplay(&app, false).await;
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "off at the re-check");
+        assert_eq!(similar_requests(&server), 1, "the mix was resolved");
+        assert_eq!(queue_song_ids(&app).await, vec!["a", "seed"]);
+
+        // The ran-out form wants no current row.
+        set_autoplay(&app, true).await;
+        let outcome = app.autoplay_top_up(true).await.expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "a row is current");
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Nothing anywhere (every request fails, the random rung too): nothing
+    /// found, nothing added, no error.
+    #[tokio::test]
+    async fn autoplay_top_up_reports_nothing_found() {
+        use crate::services::api::test_server::ScriptedServer;
+        let server = ScriptedServer::start(|_| (404, r#"{"error":"not found"}"#.to_owned())).await;
+        let (app, db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+        set_autoplay(&app, true).await;
+        queue_of(&app, &["a", "seed"], Some(1)).await;
+
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+
+        assert_eq!(outcome, AutoplayOutcome::NothingFound);
+        assert_eq!(queue_song_ids(&app).await, vec!["a", "seed"]);
+        assert!(
+            server
+                .requests()
+                .iter()
+                .any(|r| r.path == "/rest/getRandomSongs" && r.param("genre").is_none()),
+            "the random rung was tried"
+        );
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// The queue ran out under Consume: the finished song is in the play
+    /// history (and gone from the queue), and the ran-out form seeds from
+    /// it into the empty queue.
+    #[tokio::test]
+    async fn autoplay_after_the_queue_ran_out_seeds_from_the_history() {
+        let (_server, app, db_path) = instant_mix_app("seed").await;
+        set_autoplay(&app, true).await;
+        queue_of(&app, &["seed"], Some(0)).await;
+        let _ = app.playback().toggle_consume().await;
+
+        app.playback().complete_track_for_test().await;
+
+        assert_eq!(app.queue_ran_out_epoch(), 1, "a natural queue end");
+        {
+            let qm = app.queue().queue_manager();
+            let qm = qm.lock().await;
+            assert!(qm.is_queue_empty(), "consumed");
+            assert_eq!(qm.runway(), None);
+            assert_eq!(
+                qm.playback_history.last().map(|h| h.song.id.as_str()),
+                Some("seed"),
+                "the finished song is in the history"
+            );
+        }
+        let outcome = app.autoplay_top_up(false).await.expect("top up");
+        assert_eq!(outcome, AutoplayOutcome::NotNeeded, "no row is current");
+
+        let outcome = app.autoplay_top_up(true).await.expect("top up");
+
+        let AutoplayOutcome::Added {
+            count,
+            first_entry_id,
+        } = outcome
+        else {
+            panic!("expected a batch, got {outcome:?}");
+        };
+        assert_eq!(count, AUTOPLAY_BATCH);
+        let qm = app.queue().queue_manager();
+        let qm = qm.lock().await;
+        assert_eq!(qm.entry_id_at(0), Some(first_entry_id));
+        assert_eq!(qm.song_id_at(0), Some("m0"));
+        assert_eq!(qm.current_index(), None, "the UI plays it, not the verb");
+        drop(qm);
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A fill that starts on the last row and whose queue runs out (under
+    /// Consume, to an empty queue) while the mix resolves still appends
+    /// once the songs arrive; one whose queue the user empties meanwhile
+    /// does not.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    async fn a_fill_whose_queue_runs_out_meanwhile_still_appends() {
+        for ran_out in [true, false] {
+            let (_server, mut arrived, release, app, db_path) = held_mix_app().await;
+            set_autoplay(&app, true).await;
+            queue_of(&app, &["seed"], Some(0)).await;
+            let _ = app.playback().toggle_consume().await;
+
+            let fill = tokio::spawn({
+                let app = app.clone();
+                async move { app.autoplay_top_up(false).await }
+            });
+            arrived.recv().await.expect("the similar request");
+            if ran_out {
+                app.playback().complete_track_for_test().await;
+                assert_eq!(app.queue_ran_out_epoch(), 1);
+            } else {
+                let effect = app.queue().set_queue(Vec::new(), None).await;
+                effect.apply_to(&app.audio_engine()).await;
+                assert_eq!(app.queue_ran_out_epoch(), 0);
+            }
+            assert!(queue_song_ids(&app).await.is_empty());
+            release.send(()).expect("release the answer");
+
+            let outcome = fill.await.expect("join").expect("top up");
+
+            if ran_out {
+                let first = app.queue().queue_manager().lock().await.entry_id_at(0);
+                assert_eq!(
+                    Some(outcome),
+                    first.map(|first_entry_id| AutoplayOutcome::Added {
+                        count: AUTOPLAY_BATCH,
+                        first_entry_id
+                    })
+                );
+                let ids = queue_song_ids(&app).await;
+                assert_eq!(ids.len(), AUTOPLAY_BATCH);
+                assert!(
+                    !ids.contains(&"seed".to_owned()),
+                    "never the song just heard"
+                );
+            } else {
+                assert_eq!(outcome, AutoplayOutcome::NotNeeded, "the user emptied it");
+                assert!(queue_song_ids(&app).await.is_empty());
+            }
+            drop(app);
+            let _ = std::fs::remove_file(&db_path);
+        }
+    }
+
+    /// A logged-in app whose server answers `getSimilarSongs2` for `seed`
+    /// with `m0..m59`, but holds the first answer until `release` fires; the
+    /// receiver hears when that request arrived.
+    async fn held_mix_app() -> (
+        crate::services::api::test_server::ScriptedServer,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+        std::sync::mpsc::Sender<()>,
+        AppService,
+        std::path::PathBuf,
+    ) {
+        use crate::services::api::test_server::ScriptedServer;
+        let answer = similar_answer(&(0..60).map(|i| format!("m{i}")).collect::<Vec<_>>());
+        let (arrived_tx, arrived_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let hold = parking_lot::Mutex::new(Some(release_rx));
+        let server = ScriptedServer::start(move |r| {
+            if r.is("POST", "/rest/getSimilarSongs2") && r.param("id").as_deref() == Some("seed") {
+                if let Some(release) = hold.lock().take() {
+                    let _ = arrived_tx.send(());
+                    // Blocks this server's worker thread (the test runs on
+                    // the multi-thread runtime) until the test lets go.
+                    let _ = release.recv();
+                }
+                return (200, answer.clone());
+            }
+            (404, r#"{"error":"not found"}"#.to_owned())
+        })
+        .await;
+        let (app, db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+        (server, arrived_rx, release_tx, app, db_path)
+    }
+
+    /// The ran-out count moves only at a natural queue end: a user Stop
+    /// leaves it, a completion on the last row bumps it.
+    #[tokio::test]
+    async fn the_ran_out_epoch_counts_natural_queue_ends_only() {
+        let (app, db_path) = test_app().await;
+        queue_of(&app, &["a", "b"], Some(0)).await;
+
+        app.playback().stop().await.expect("stop");
+        assert_eq!(app.queue_ran_out_epoch(), 0, "a user stop");
+        app.playback().complete_track_for_test().await;
+        assert_eq!(app.queue_ran_out_epoch(), 0, "a advanced to b");
+        assert_eq!(
+            app.queue().queue_manager().lock().await.current_index(),
+            Some(1)
+        );
+        app.playback().complete_track_for_test().await;
+        assert_eq!(app.queue_ran_out_epoch(), 1, "b was the last song");
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Turning Autoplay off drops the rows it added that have not played,
+    /// never the playing one.
+    #[tokio::test]
+    async fn clear_pending_autoplay_removes_only_unplayed_autoplay_rows() {
+        let (_server, app, db_path) = instant_mix_app("seed").await;
+        set_autoplay(&app, true).await;
+        queue_of(&app, &["a", "seed"], Some(1)).await;
+        let _ = app.autoplay_top_up(false).await.expect("top up");
+        {
+            let qm = app.queue().queue_manager();
+            let effect = qm.lock().await.reposition_to_index(Some(2));
+            effect.apply_to(&app.audio_engine()).await;
+        }
+
+        let removed = app.clear_pending_autoplay().await;
+
+        assert_eq!(removed.len(), AUTOPLAY_BATCH - 1);
+        assert_eq!(queue_song_ids(&app).await, vec!["a", "seed", "m0"]);
+        assert_eq!(app.queue().get_songs().len(), 3, "the projection follows");
         drop(app);
         let _ = std::fs::remove_file(&db_path);
     }

@@ -8,6 +8,7 @@ pub mod active_playlist;
 pub mod album;
 pub mod artist;
 pub mod artist_recs;
+pub mod autoplay;
 pub mod batch;
 pub mod collage_artwork;
 pub mod discography;

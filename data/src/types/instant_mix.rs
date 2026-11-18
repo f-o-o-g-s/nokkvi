@@ -48,15 +48,17 @@ pub const INSTANT_MIX_MIN_DURATION_SECS: u32 = 60;
 /// never picked as seeds: one star is the user saying "not this".
 pub const INSTANT_MIX_REJECTED_RATING: u32 = 1;
 
-/// The song count each of `seeds` seeds aims for: twice an even share of
-/// [`INSTANT_MIX_TRACKS`], at least [`INSTANT_MIX_MIN_SEED_TARGET`] and at
-/// most the whole mix (one seed: 50; five seeds: 20). The double share
-/// leaves room for the merge's dedupe across seeds.
-pub fn per_seed_target(seeds: usize) -> usize {
-    INSTANT_MIX_TRACKS
-        .div_ceil(seeds.max(1))
-        .saturating_mul(2)
-        .clamp(INSTANT_MIX_MIN_SEED_TARGET, INSTANT_MIX_TRACKS)
+/// The song count each of `seeds` seeds aims for in a mix of `tracks`
+/// songs: twice an even share of `tracks`, at least
+/// [`INSTANT_MIX_MIN_SEED_TARGET`] and at most the whole mix, or the minimum
+/// when the mix is smaller (an instant mix of 50 from one seed: 50, from
+/// five: 20; an Autoplay batch of 10: 20). The double share, and the floor,
+/// leave room for the merge's dedupe across seeds and Autoplay's artist cap.
+pub fn per_seed_target(tracks: usize, seeds: usize) -> usize {
+    tracks.div_ceil(seeds.max(1)).saturating_mul(2).clamp(
+        INSTANT_MIX_MIN_SEED_TARGET,
+        tracks.max(INSTANT_MIX_MIN_SEED_TARGET),
+    )
 }
 
 /// The `count` / `size` a request sends for a seed aiming at `target`:
@@ -69,7 +71,7 @@ pub fn request_count(target: usize) -> usize {
 }
 
 /// Whether a song is rated exactly [`INSTANT_MIX_REJECTED_RATING`] stars.
-fn is_rejected(song: &Song) -> bool {
+pub(crate) fn is_rejected(song: &Song) -> bool {
     song.rating == Some(INSTANT_MIX_REJECTED_RATING)
 }
 
@@ -129,8 +131,9 @@ pub fn dominant_genre(songs: &[Song]) -> Option<&str> {
     best.map(|(genre, _)| genre)
 }
 
-/// The artist identity seeds spread over: the artist id, else the name.
-fn artist_key(song: &Song) -> &str {
+/// The artist identity seeds spread over (and Autoplay's per-artist cap
+/// counts by): the artist id, else the name.
+pub(crate) fn artist_key(song: &Song) -> &str {
     song.artist_id
         .as_deref()
         .filter(|id| !id.is_empty())
@@ -205,12 +208,19 @@ mod tests {
 
     #[test]
     fn per_seed_target_doubles_an_even_share_within_bounds() {
-        assert_eq!(per_seed_target(1), 50, "one seed fills the whole mix");
-        assert_eq!(per_seed_target(2), 50);
-        assert_eq!(per_seed_target(3), 34, "2 * ceil(50 / 3)");
-        assert_eq!(per_seed_target(5), 20);
-        assert_eq!(per_seed_target(9), 20, "never under the minimum");
-        assert_eq!(per_seed_target(0), 50, "no division by zero");
+        let t = INSTANT_MIX_TRACKS;
+        assert_eq!(per_seed_target(t, 1), 50, "one seed fills the whole mix");
+        assert_eq!(per_seed_target(t, 2), 50);
+        assert_eq!(per_seed_target(t, 3), 34, "2 * ceil(50 / 3)");
+        assert_eq!(per_seed_target(t, 5), 20);
+        assert_eq!(per_seed_target(t, 9), 20, "never under the minimum");
+        assert_eq!(per_seed_target(t, 0), 50, "no division by zero");
+    }
+
+    #[test]
+    fn per_seed_target_for_a_small_mix_stays_at_the_minimum() {
+        assert_eq!(per_seed_target(10, 3), INSTANT_MIX_MIN_SEED_TARGET);
+        assert_eq!(per_seed_target(10, 1), INSTANT_MIX_MIN_SEED_TARGET);
     }
 
     #[test]

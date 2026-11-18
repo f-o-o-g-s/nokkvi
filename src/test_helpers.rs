@@ -72,6 +72,7 @@ pub(crate) fn make_queue_song(
         rating: None,
         play_count: None,
         searchable_lower: build_searchable_lower(&[title, artist, album, "Rock"]),
+        autoplay: false,
     }
 }
 
@@ -121,6 +122,7 @@ pub(crate) fn make_queue_song_full(
         rating: None,
         play_count: None,
         searchable_lower: build_searchable_lower(&[title, artist, album, genre]),
+        autoplay: false,
     }
 }
 

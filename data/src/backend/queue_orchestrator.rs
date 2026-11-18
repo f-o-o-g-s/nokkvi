@@ -62,7 +62,9 @@ impl<'a> QueueOrchestrator<'a> {
     }
 
     /// Append to queue without changing playback state.
-    /// Mirrors today's `add_*_to_queue` family.
+    /// Mirrors today's `add_*_to_queue` family. The songs go ahead of the
+    /// Autoplay rows that have not played yet, with shuffle off
+    /// ([`QueueService::add_songs`]).
     ///
     /// Appending in shuffle mode shifts the `order[]` permutation, so
     /// the engine's pre-buffered next-track decoder is now stale —
@@ -74,20 +76,22 @@ impl<'a> QueueOrchestrator<'a> {
         Ok(())
     }
 
-    /// Append, then jump-play the first newly-appended song.
-    /// Mirrors today's `add_*_and_play` family. Records the pre-append
-    /// queue length to know which index the new songs land at.
+    /// Append (like [`Self::enqueue`], ahead of pending Autoplay rows), then
+    /// jump-play the first newly-appended row, addressed by the `entry_id`
+    /// the append handed out. Mirrors today's `add_*_and_play` family.
     pub async fn enqueue_and_play(&self, songs: Vec<Song>) -> Result<()> {
         if songs.is_empty() {
             return Ok(());
         }
-        let first_id = songs[0].id.clone();
-        let queue_index = self.queue.get_songs().len();
-        let effect = self.queue.add_songs(songs).await;
-        effect.apply_to(&self.playback.audio_engine()).await;
-        self.playback
-            .play_song_from_queue(&first_id, queue_index)
-            .await
+        let appended = self.queue.enqueue_songs(songs).await;
+        appended
+            .effect
+            .apply_to(&self.playback.audio_engine())
+            .await;
+        match appended.first_entry_id {
+            Some(entry_id) => self.playback.play_entry_from_queue(entry_id).await,
+            None => Ok(()),
+        }
     }
 
     /// Insert at an explicit position.
@@ -190,6 +194,26 @@ mod tests {
 
         assert_eq!(queue_ids(&fx), vec!["a", "b", "c", "d"]);
         assert_eq!(fx.queue.current_index().await, before_current);
+        Ok(())
+    }
+
+    /// "Add to Queue" (and every verb that ends in `enqueue`) lands ahead
+    /// of the Autoplay rows that have not played yet.
+    #[tokio::test(flavor = "current_thread")]
+    async fn enqueue_goes_ahead_of_pending_autoplay_rows() -> Result<()> {
+        let fx = fixture().await?;
+        let orch = QueueOrchestrator::new(&fx.queue, &fx.playback);
+
+        let _ = fx.queue.set_queue(make_songs(&["a", "b"]), Some(0)).await;
+        let _ = fx
+            .queue
+            .queue_manager()
+            .lock()
+            .await
+            .append_autoplay_songs(make_songs(&["x", "y"]));
+        orch.enqueue(make_songs(&["c"])).await?;
+
+        assert_eq!(queue_ids(&fx), vec!["a", "b", "c", "x", "y"]);
         Ok(())
     }
 

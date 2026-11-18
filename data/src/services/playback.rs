@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::Result;
 use tokio::sync::Mutex;
@@ -452,6 +455,11 @@ pub struct QueueNavigator {
     queue_manager: Arc<Mutex<QueueManager>>,
     // Playback state
     current_song_id: Arc<Mutex<Option<String>>>,
+    /// Bumped each time a track completion ends playback because the queue
+    /// has no next song (the natural queue end). Shared with the
+    /// controller, which reads it without the navigator lock; Autoplay
+    /// resumes playback when it moves.
+    queue_ran_out: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for QueueNavigator {
@@ -475,7 +483,14 @@ impl QueueNavigator {
         Ok(Self {
             queue_manager,
             current_song_id: Arc::new(Mutex::new(initial_song_id)),
+            queue_ran_out: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// The natural-queue-end counter, for a reader that must not take the
+    /// navigator lock (see the field).
+    pub(crate) fn queue_ran_out_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.queue_ran_out)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -698,6 +713,13 @@ impl QueueNavigator {
             *self.current_song_id.lock().await = None;
             let reposition_effect = queue_manager.reposition_to_index(None);
             crate::services::queue::warn_if_unsaved(queue_manager.save_all(), "the queue ran out");
+            // The natural queue end, counted under the queue lock so a
+            // reader holding that lock sees the count and the cleared
+            // cursor together. The other `Stop` plans are no queue end: a
+            // repeat-one row that is gone, or an engine that already moved
+            // to a track the queue no longer holds next; both leave the
+            // cursor where it was.
+            self.queue_ran_out.fetch_add(1, Ordering::SeqCst);
             drop(queue_manager);
             if let Some(effect) = consume_effect {
                 effect.apply_locked(engine).await;

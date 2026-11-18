@@ -60,6 +60,10 @@ pub struct PlaybackController {
     /// engine). Competing NON-skip actions are covered separately by the
     /// source-generation snapshot inside `crossfade_to_next`.
     skip_fade_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// The navigator's natural-queue-end counter
+    /// ([`Self::queue_ran_out_epoch`]), held here so the UI tick reads it
+    /// without the navigator lock.
+    queue_ran_out: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for PlaybackController {
@@ -84,7 +88,9 @@ impl PlaybackController {
         task_manager: Arc<TaskManager>,
     ) -> Result<(Self, UnboundedReceiver<String>, UnboundedReceiver<()>)> {
         let queue_manager = queue_service.queue_manager();
-        let queue_navigator = Arc::new(Mutex::new(QueueNavigator::new(queue_manager).await?));
+        let navigator = QueueNavigator::new(queue_manager).await?;
+        let queue_ran_out = navigator.queue_ran_out_counter();
+        let queue_navigator = Arc::new(Mutex::new(navigator));
         let audio_engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
         let (loop_tx, loop_rx) = mpsc::unbounded_channel::<String>();
         let (queue_changed_tx, queue_changed_rx) = mpsc::unbounded_channel::<()>();
@@ -206,10 +212,42 @@ impl PlaybackController {
                 settings_service,
                 task_manager,
                 skip_fade_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                queue_ran_out,
             },
             loop_rx,
             queue_changed_rx,
         ))
+    }
+
+    /// How many times playback ended because the queue had no next song
+    /// (a track completion at the end of the queue, Repeat off). A user
+    /// Stop, a removal, a skip or a failed load never counts. Autoplay
+    /// compares it across a fill to tell the queue running out from the user
+    /// emptying it.
+    pub fn queue_ran_out_epoch(&self) -> u64 {
+        self.queue_ran_out.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Run the track-completion path for a track that ended (no gapless
+    /// join), as the engine's completion callback does: decide under the
+    /// navigator, then the engine ops. For tests that need a natural
+    /// advance or queue end without decoding audio.
+    #[cfg(test)]
+    pub(crate) async fn complete_track_for_test(&self) {
+        let session = crate::services::playback::StreamSession::new(
+            "http://127.0.0.1:9".to_owned(),
+            "u=t&s=s&t=t".to_owned(),
+        )
+        .expect("a test session");
+        let mut engine = self.audio_engine.lock().await;
+        let ended = engine.ended_now(false);
+        let plan = {
+            let nav = self.queue_navigator.lock().await;
+            nav.decide_transition(&mut engine, &session, ended).await
+        };
+        if let Err(e) = QueueNavigator::execute_transition(plan, &mut engine).await {
+            tracing::debug!("test completion: {e:#}");
+        }
     }
 
     /// Get a clone of the audio engine Arc (for external progress polling).
@@ -1262,22 +1300,24 @@ impl PlaybackController {
         Ok(())
     }
 
-    /// Play a song that's already in the queue by its ID and queue index.
-    ///
-    /// **Internal/orchestrator use only.** UI handlers must use
-    /// [`Self::play_entry_from_queue`] — `queue_index` is drift-prone
-    /// across the optimistic-mutation window. The orchestrator
-    /// (`queue_orchestrator::enqueue_and_play`) uses this method legitimately:
-    /// it appends songs and immediately plays the first new row at the
-    /// known just-appended index, so no other mutation has had a chance
-    /// to shift positions.
+    /// Play a song that's already in the queue by its ID and queue index:
+    /// a test convenience. Production plays a queued row by its `entry_id`
+    /// ([`Self::play_entry_from_queue`]; Append and Play uses the one its
+    /// append handed out), since a raw index drifts across the UI's
+    /// optimistic-mutation window and an append can land ahead of pending
+    /// Autoplay rows.
     ///
     /// Resolves the row to its `entry_id` and plays it through
     /// [`Self::play_entry_from_queue`], so it records history and moves the
     /// cursor exactly as a queue click does, the shuffle re-anchor of a play
     /// that starts playback included. Fails, changing nothing, when the row
     /// at `queue_index` no longer holds `song_id`.
-    pub async fn play_song_from_queue(&self, song_id: &str, queue_index: usize) -> Result<()> {
+    #[cfg(test)]
+    pub(crate) async fn play_song_from_queue(
+        &self,
+        song_id: &str,
+        queue_index: usize,
+    ) -> Result<()> {
         let entry_id = {
             let queue_manager = self.queue_service.queue_manager();
             let qm = queue_manager.lock().await;

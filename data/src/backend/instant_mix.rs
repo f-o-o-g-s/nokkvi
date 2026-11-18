@@ -19,6 +19,17 @@
 //! 4. **The seed's own ground** — still under half: other songs by a song
 //!    seed's artist, or the seed's own tracks, shuffled.
 //!
+//! One resolver ([`resolve_mix`]) serves both features through a
+//! [`MixPlan`]: the instant mix ([`MixPlan::INSTANT_MIX`], 50 songs) and
+//! Autoplay's batch ([`MixPlan::AUTOPLAY`], 10 songs, at most two per artist
+//! unless that leaves the batch short). Autoplay's plan adds a last rung
+//! after the merge:
+//!
+//! 5. **Any song** — only when every seed's ladder came back empty (after
+//!    the filters and the exclude set): random songs from the active
+//!    libraries, through the same gate, so the music never stops. Never a
+//!    top-up.
+//!
 //! Harbour sends song seeds only today; the ladder stays general over
 //! [`BatchItem`] so an album, artist, genre or playlist seed works the same.
 //! A failed request is an empty rung, except a rejected session
@@ -36,6 +47,7 @@ use crate::{
     backend::library_orchestrator::LibraryOrchestrator,
     services::api::{random::RandomApiService, similar::SimilarApiService},
     types::{
+        autoplay::{AUTOPLAY_BATCH, AUTOPLAY_MAX_PER_ARTIST, cap_per_artist},
         batch::BatchItem,
         error::NokkviError,
         instant_mix::{
@@ -79,6 +91,10 @@ pub(crate) trait MixSource: Sync {
 
     /// Every song by `artist_id`.
     fn artist_tracks(&self, artist_id: &str) -> impl Future<Output = Result<Vec<Song>>> + Send;
+
+    /// `getRandomSongs(count)` with no genre: any songs (Autoplay's last
+    /// rung).
+    fn random_songs(&self, count: usize) -> impl Future<Output = Result<Vec<Song>>> + Send;
 }
 
 /// [`MixSource`] over the live server: Subsonic `getSimilarSongs2` /
@@ -87,7 +103,8 @@ pub(crate) trait MixSource: Sync {
 pub(crate) struct ServerMixSource<'o, 'a> {
     pub(crate) orch: &'o LibraryOrchestrator<'a>,
     /// The active libraries, scoping the same-genre rung like Harbour's
-    /// genre draw (empty = every library the user can read).
+    /// genre draw, and Autoplay's any-song rung (empty = every library the
+    /// user can read).
     pub(crate) library_ids: &'o [i32],
 }
 
@@ -125,6 +142,49 @@ impl MixSource for ServerMixSource<'_, '_> {
     async fn artist_tracks(&self, artist_id: &str) -> Result<Vec<Song>> {
         self.orch.resolve_artist(artist_id).await
     }
+
+    async fn random_songs(&self, count: usize) -> Result<Vec<Song>> {
+        let api = self
+            .orch
+            .auth()
+            .build_subsonic_api(RandomApiService::new)
+            .await?;
+        api.get_random_songs(count, None, self.library_ids).await
+    }
+}
+
+/// What one resolve makes: how many songs, whether one artist may fill
+/// them, and whether an empty ladder falls back to any songs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MixPlan {
+    /// Most songs the mix holds; also sizes each seed's target
+    /// ([`per_seed_target`]).
+    pub(crate) tracks: usize,
+    /// At most this many songs per artist ([`cap_per_artist`], relaxed only
+    /// to reach `tracks`); `None` keeps every song the merge gives.
+    pub(crate) max_per_artist: Option<usize>,
+    /// Whether an empty merged ladder asks for random songs from the active
+    /// libraries (rung 5).
+    pub(crate) random_fallback: bool,
+}
+
+impl MixPlan {
+    /// The instant mix: [`INSTANT_MIX_TRACKS`] songs, no artist cap, no
+    /// fallback.
+    pub(crate) const INSTANT_MIX: Self = Self {
+        tracks: INSTANT_MIX_TRACKS,
+        max_per_artist: None,
+        random_fallback: false,
+    };
+
+    /// An Autoplay batch: [`AUTOPLAY_BATCH`] songs, at most
+    /// [`AUTOPLAY_MAX_PER_ARTIST`] per artist, random songs when the ladder
+    /// found nothing.
+    pub(crate) const AUTOPLAY: Self = Self {
+        tracks: AUTOPLAY_BATCH,
+        max_per_artist: Some(AUTOPLAY_MAX_PER_ARTIST),
+        random_fallback: true,
+    };
 }
 
 /// What a rung's songs must get past before they count.
@@ -267,22 +327,39 @@ async fn seed_ladder<S: MixSource>(
     Ok(outcome)
 }
 
-/// Resolve an instant mix for `seeds`: every seed's ladder, at most
+/// What [`resolve_mix`] found.
+#[derive(Debug, Default)]
+pub(crate) struct ResolvedMix {
+    /// The mix, at most the plan's `tracks` songs; empty when nothing was
+    /// found that passed the filters and the exclude set.
+    pub(crate) songs: Vec<Song>,
+    /// Songs the requests returned that were not seeds and passed the
+    /// filters, whether or not the exclude set then dropped them (tells
+    /// "nothing similar" from "all queued").
+    pub(crate) passed: usize,
+}
+
+/// Resolve a mix for `seeds` under `plan`: every seed's ladder, at most
 /// [`INSTANT_MIX_CONCURRENT_SEEDS`] at once, lists kept in seed order, then
 /// merged one per seed around (take-next-fresh dedupe, like Trawl's
-/// Interleave) and cut to [`INSTANT_MIX_TRACKS`]. The mix never holds a song
-/// seed, nor an id in `exclude`. `rng` drives every sample and shuffle, so
-/// a seeded one makes the mix deterministic.
-pub(crate) async fn resolve_instant_mix<S: MixSource>(
+/// Interleave), capped per artist when the plan says so, and cut to the
+/// plan's `tracks`. When the plan has `random_fallback` and that leaves
+/// nothing, random songs from the active libraries go through the same gate
+/// instead (rung 5). The mix never holds a song seed, nor an id in
+/// `exclude`. No seeds, or nothing found, is an empty mix, not an error; a
+/// rejected session is the one error. `rng` drives every sample and
+/// shuffle, so a seeded one makes the mix deterministic.
+pub(crate) async fn resolve_mix<S: MixSource>(
     src: &S,
     seeds: &[BatchItem],
     exclude: &HashSet<String>,
+    plan: MixPlan,
     mut rng: StdRng,
-) -> Result<Vec<Song>> {
+) -> Result<ResolvedMix> {
     if seeds.is_empty() {
-        return Err(anyhow::anyhow!(NO_SEEDS_ERROR));
+        return Ok(ResolvedMix::default());
     }
-    let target = per_seed_target(seeds.len());
+    let target = per_seed_target(plan.tracks, seeds.len());
     let request = request_count(target);
     let gate = MixGate {
         seed_ids: seeds
@@ -314,21 +391,58 @@ pub(crate) async fn resolve_instant_mix<S: MixSource>(
         .await?;
 
     let empty_seeds = outcomes.iter().filter(|o| o.songs.is_empty()).count();
-    let failed_requests: usize = outcomes.iter().map(|o| o.failed_requests).sum();
+    let mut failed_requests: usize = outcomes.iter().map(|o| o.failed_requests).sum();
     if empty_seeds > 0 || failed_requests > 0 {
         tracing::warn!(
-            "Instant mix: {empty_seeds} of {} seeds found no songs, {failed_requests} requests failed",
+            "Mix: {empty_seeds} of {} seeds found no songs, {failed_requests} requests failed",
             seeds.len()
         );
     }
-    let passed: usize = outcomes.iter().map(|o| o.passed).sum();
+    let mut passed: usize = outcomes.iter().map(|o| o.passed).sum();
 
     let lists = outcomes.into_iter().map(|o| (o.songs, 1)).collect();
     let mut blended = blend_trawl(lists, TrawlBlend::Interleave, &mut rng);
-    blended.truncate(INSTANT_MIX_TRACKS);
-    if !blended.is_empty() {
-        Ok(blended)
-    } else if passed == 0 {
+
+    // Rung 5: any songs, only when the whole ladder found nothing.
+    if blended.is_empty() && plan.random_fallback {
+        let mut fallback = SeedOutcome::default();
+        let answer = fallback.answer(src.random_songs(request).await)?;
+        fallback.offer(&gate, answer, request);
+        passed += fallback.passed;
+        failed_requests += fallback.failed_requests;
+        tracing::debug!(
+            "Mix: the ladder found nothing; {} random songs instead ({failed_requests} requests failed)",
+            fallback.songs.len()
+        );
+        blended = fallback.songs;
+    }
+
+    if let Some(per_artist) = plan.max_per_artist {
+        blended = cap_per_artist(blended, per_artist, plan.tracks);
+    }
+    blended.truncate(plan.tracks);
+    Ok(ResolvedMix {
+        songs: blended,
+        passed,
+    })
+}
+
+/// Resolve an instant mix for `seeds` ([`resolve_mix`] under
+/// [`MixPlan::INSTANT_MIX`]), naming the cause when it comes back empty:
+/// no seeds, nothing similar found, or everything found already queued.
+pub(crate) async fn resolve_instant_mix<S: MixSource>(
+    src: &S,
+    seeds: &[BatchItem],
+    exclude: &HashSet<String>,
+    rng: StdRng,
+) -> Result<Vec<Song>> {
+    if seeds.is_empty() {
+        return Err(anyhow::anyhow!(NO_SEEDS_ERROR));
+    }
+    let mix = resolve_mix(src, seeds, exclude, MixPlan::INSTANT_MIX, rng).await?;
+    if !mix.songs.is_empty() {
+        Ok(mix.songs)
+    } else if mix.passed == 0 {
         Err(anyhow::anyhow!(NOTHING_SIMILAR_ERROR))
     } else {
         Err(anyhow::anyhow!(ALL_QUEUED_ERROR))
@@ -381,6 +495,8 @@ mod tests {
         random: HashMap<String, Answer>,
         own: HashMap<String, Answer>,
         artist: HashMap<String, Answer>,
+        /// The no-genre `getRandomSongs` answer (none: no songs).
+        any: Option<Answer>,
         /// Per-id delay on `similar`, to make seeds finish out of order.
         delay: HashMap<String, u64>,
         calls: Mutex<Vec<String>>,
@@ -445,6 +561,15 @@ mod tests {
         fn artist_tracks(&self, artist_id: &str) -> impl Future<Output = Result<Vec<Song>>> + Send {
             self.record(format!("artist:{artist_id}"));
             std::future::ready(Self::answer(&self.artist, artist_id))
+        }
+
+        fn random_songs(&self, count: usize) -> impl Future<Output = Result<Vec<Song>>> + Send {
+            self.record(format!("any:{count}"));
+            std::future::ready(
+                self.any
+                    .as_ref()
+                    .map_or_else(|| Ok(Vec::new()), Answer::result),
+            )
         }
     }
 
@@ -842,5 +967,187 @@ mod tests {
         let heads: Vec<String> = out[..9].iter().map(|s| s.id.clone()).collect();
         let expected: Vec<String> = (0..9).map(|i| format!("m{i}-0")).collect();
         assert_eq!(heads, expected, "results in seed order");
+    }
+
+    // ---- Plans ---------------------------------------------------------
+
+    /// A song by `artist` (id `ar-<artist>`).
+    fn by(id: &str, artist: &str) -> Song {
+        let mut s = song(id);
+        s.artist = artist.to_owned();
+        s.artist_id = Some(format!("ar-{artist}"));
+        s
+    }
+
+    async fn autoplay(fake: &Fake, seeds: &[BatchItem], exclude: &HashSet<String>) -> Vec<Song> {
+        resolve_mix(
+            fake,
+            seeds,
+            exclude,
+            MixPlan::AUTOPLAY,
+            StdRng::seed_from_u64(7),
+        )
+        .await
+        .expect("autoplay mix")
+        .songs
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_autoplay_batch_is_ten_songs_asked_for_at_the_minimum_target() {
+        let fake = Fake {
+            similar: HashMap::from([("seed".into(), Answer::Songs(run("s", 60)))]),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert_eq!(out.len(), AUTOPLAY_BATCH);
+        assert_eq!(ids(&out)[0], "s0", "server order kept");
+        assert_eq!(
+            fake.calls(),
+            vec!["similar:seed:40"],
+            "a batch of 10: each seed aims for the minimum 20, asked for 40"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_autoplay_batch_keeps_two_per_artist_unless_that_leaves_it_short() {
+        let mut answer: Vec<Song> = (0..6).map(|i| by(&format!("a{i}"), "A")).collect();
+        answer.extend((0..10).map(|i| by(&format!("o{i}"), &format!("O{i}"))));
+        let fake = Fake {
+            similar: HashMap::from([("seed".into(), Answer::Songs(answer))]),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert_eq!(out.len(), AUTOPLAY_BATCH);
+        assert_eq!(
+            out.iter().filter(|s| s.artist == "A").count(),
+            AUTOPLAY_MAX_PER_ARTIST
+        );
+
+        // Only one artist answers: the cap relaxes to fill the batch.
+        let fake = Fake {
+            similar: HashMap::from([(
+                "seed".into(),
+                Answer::Songs((0..30).map(|i| by(&format!("a{i}"), "A")).collect()),
+            )]),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert_eq!(out.len(), AUTOPLAY_BATCH);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_random_rung_runs_only_when_the_whole_ladder_is_empty() {
+        // One seed finds a single song: no random rung, a short batch.
+        let fake = Fake {
+            similar: HashMap::from([("seed".into(), Answer::Songs(run("s", 1)))]),
+            any: Some(Answer::Songs(run("r", 40))),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert_eq!(ids(&out), vec!["s0"], "never a top-up");
+        assert_eq!(fake.count("any:"), 0);
+
+        // Nothing anywhere: random songs fill the batch.
+        let fake = Fake {
+            any: Some(Answer::Songs(run("r", 40))),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert_eq!(out.len(), AUTOPLAY_BATCH);
+        assert_eq!(fake.calls().last().map(String::as_str), Some("any:40"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_random_rung_runs_when_the_exclude_set_empties_the_ladder() {
+        let fake = Fake {
+            similar: HashMap::from([("seed".into(), Answer::Songs(run("s", 3)))]),
+            any: Some(Answer::Songs(run("r", 5))),
+            ..Fake::default()
+        };
+        let heard: HashSet<String> = ids(&run("s", 3)).into_iter().collect();
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &heard).await;
+        assert_eq!(sorted_ids(&out), ids(&run("r", 5)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_random_rung_runs_the_filters_the_exclude_set_and_drops_the_seeds() {
+        let mut short = song("r-short");
+        short.duration = 30;
+        let mut one = song("r-one");
+        one.rating = Some(1);
+        let fake = Fake {
+            any: Some(Answer::Songs(vec![
+                short,
+                one,
+                song("seed"),
+                song("heard"),
+                song("r-ok"),
+            ])),
+            ..Fake::default()
+        };
+        let heard = HashSet::from(["heard".to_owned()]);
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &heard).await;
+        assert_eq!(ids(&out), vec!["r-ok"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_empty_autoplay_mix_is_no_error_and_a_rejection_still_is() {
+        let fake = Fake {
+            any: Some(Answer::Fail),
+            ..Fake::default()
+        };
+        let out = autoplay(&fake, &[seed_song("seed", None, None)], &HashSet::new()).await;
+        assert!(out.is_empty(), "nothing found reads as an empty batch");
+        let none = resolve_mix(
+            &fake,
+            &[],
+            &HashSet::new(),
+            MixPlan::AUTOPLAY,
+            StdRng::seed_from_u64(0),
+        )
+        .await
+        .expect("no seeds");
+        assert!(none.songs.is_empty());
+
+        let fake = Fake {
+            any: Some(Answer::Reject),
+            ..Fake::default()
+        };
+        let err = resolve_mix(
+            &fake,
+            &[seed_song("seed", None, None)],
+            &HashSet::new(),
+            MixPlan::AUTOPLAY,
+            StdRng::seed_from_u64(0),
+        )
+        .await
+        .expect_err("a rejected session on the last rung");
+        assert!(NokkviError::is_unauthorized(&err));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_instant_mix_plan_never_caps_artists_or_asks_for_random_songs() {
+        let fake = Fake {
+            similar: HashMap::from([(
+                "seed".into(),
+                Answer::Songs((0..60).map(|i| by(&format!("a{i}"), "A")).collect()),
+            )]),
+            any: Some(Answer::Songs(run("r", 40))),
+            ..Fake::default()
+        };
+        let out = mix(&fake, &[seed_song("seed", None, None)])
+            .await
+            .expect("mix");
+        assert_eq!(out.len(), INSTANT_MIX_TRACKS, "one artist fills it all");
+        let err = mix(
+            &Fake {
+                any: Some(Answer::Songs(run("r", 40))),
+                ..Fake::default()
+            },
+            &[seed_song("seed", None, None)],
+        )
+        .await
+        .expect_err("no fallback");
+        assert_eq!(err.to_string(), NOTHING_SIMILAR_ERROR);
     }
 }

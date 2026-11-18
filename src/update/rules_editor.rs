@@ -2697,6 +2697,7 @@ fn song_to_preview_row(
             &song.artist,
             &song.album,
         ]),
+        autoplay: false,
     }
 }
 

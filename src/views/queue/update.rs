@@ -488,6 +488,7 @@ mod tests {
             rating,
             play_count: None,
             searchable_lower: "t".into(),
+            autoplay: false,
         }
     }
 

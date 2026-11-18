@@ -83,6 +83,27 @@ pub struct QueueManager {
     /// (`QueueRow.entry_id`). Never reused within a process lifetime;
     /// entry ids reseed `0..len` on every `QueueManager::new()`.
     pub(crate) next_entry_id: u64,
+    /// The `entry_id`s of the rows Autoplay added. Runtime only (never
+    /// saved, lost on restart), cleared wherever the play history is (a
+    /// queue replace, a reload). An id whose row was removed since stays
+    /// behind harmlessly: `entry_id`s are never reused within a session.
+    pub(crate) autoplay_entries: HashSet<u64>,
+}
+
+/// Outcome of [`QueueManager::append_autoplay_songs`].
+#[must_use = "carries a NextTrackResetEffect to apply"]
+pub struct AutoplayAppend {
+    /// The new rows' `entry_id`s, in queue order.
+    pub entry_ids: Vec<u64>,
+    pub effect: NextTrackResetEffect,
+}
+
+/// Outcome of [`QueueManager::enqueue_songs`].
+#[must_use = "carries a NextTrackResetEffect to apply"]
+pub struct UserAppend {
+    /// The first new row's `entry_id` (`None` when no songs were given).
+    pub first_entry_id: Option<u64>,
+    pub effect: NextTrackResetEffect,
 }
 
 impl std::fmt::Debug for QueueManager {
@@ -225,6 +246,7 @@ impl QueueManager {
             playback_history: Vec::new(),
             max_history_size: 100,
             next_entry_id,
+            autoplay_entries: HashSet::new(),
         };
 
         // Persist the cleaned state so the repair is durable (best-effort: a
@@ -246,6 +268,7 @@ impl QueueManager {
         self.queue = queue;
         self.pool = pool;
         self.playback_history.clear();
+        self.autoplay_entries.clear();
         if dirty && let Err(e) = self.save_all() {
             warn!(" [QUEUE] Failed to persist reconciled queue on reload: {e}");
         }
@@ -441,6 +464,7 @@ impl QueueManager {
         tx.pool.insert_many(songs);
         // Clear history on context switch (new album/playlist) — Spotify behavior
         tx.playback_history.clear();
+        tx.autoplay_entries.clear();
         // Rebuild order array and anchor the cursor on the requested row
         tx.rebuild_order_and_set_cursor(current_index);
         // If shuffle is on, shuffle the new order
@@ -628,6 +652,152 @@ impl QueueManager {
         KeepCurrentAppend::Appended {
             added,
             effect: removed.and(appended),
+        }
+    }
+
+    // ── Autoplay ──
+
+    /// Whether Autoplay added the row with this `entry_id`.
+    pub fn is_autoplay_entry(&self, entry_id: u64) -> bool {
+        self.autoplay_entries.contains(&entry_id)
+    }
+
+    /// How many songs follow the current one in PLAY order (the shuffled
+    /// order under shuffle), or `None` when no row is current. Autoplay's
+    /// low-water mark reads it (`types::autoplay::autoplay_wants_fill`).
+    pub fn runway(&self) -> Option<usize> {
+        let cursor = self.queue.current_order?;
+        Some(self.queue.order.len().saturating_sub(cursor + 1))
+    }
+
+    /// Every song id the queue holds plus every song id in the play
+    /// history: what Autoplay leaves out, so nothing just heard comes back
+    /// (under Consume a played row is gone from the queue but not from the
+    /// history).
+    pub fn queued_or_heard_song_ids(&self) -> HashSet<String> {
+        self.queue
+            .rows
+            .iter()
+            .map(|row| row.song_id.clone())
+            .chain(self.playback_history.iter().map(|h| h.song.id.clone()))
+            .collect()
+    }
+
+    /// The listening trail Autoplay seeds from, oldest first: the play
+    /// history, then the play order from the current song to the tail (the
+    /// history alone with no current row), each song flagged when Autoplay
+    /// added its row.
+    pub fn autoplay_trail(&self) -> Vec<crate::types::autoplay::TrailSong<'_>> {
+        use crate::types::autoplay::TrailSong;
+        let history = self.playback_history.iter().map(|h| TrailSong {
+            song: &h.song,
+            autoplay: h.entry_id.is_some_and(|eid| self.is_autoplay_entry(eid)),
+        });
+        let ahead = self
+            .queue
+            .current_order
+            .map_or(&[][..], |cursor| {
+                self.queue.order.get(cursor..).unwrap_or_default()
+            })
+            .iter()
+            .filter_map(|&row| self.queue.rows.get(row))
+            .filter_map(|row| {
+                self.pool.get(&row.song_id).map(|song| TrailSong {
+                    song,
+                    autoplay: self.is_autoplay_entry(row.entry_id),
+                })
+            });
+        history.chain(ahead).collect()
+    }
+
+    /// The pending Autoplay rows: rows Autoplay added that come after the
+    /// current one in play order, as `entry_id`s in play order. None with
+    /// no current row. The current row is never among them.
+    pub fn pending_autoplay_entries(&self) -> Vec<u64> {
+        let Some(cursor) = self.queue.current_order else {
+            return Vec::new();
+        };
+        self.queue
+            .order
+            .get(cursor + 1..)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&row| self.queue.rows.get(row))
+            .map(|row| row.entry_id)
+            .filter(|&eid| self.is_autoplay_entry(eid))
+            .collect()
+    }
+
+    /// Append songs as Autoplay rows: the [`Self::add_songs`] row, pool and
+    /// order work, then the new rows are marked. Never goes ahead of
+    /// anything (that is [`Self::enqueue_songs`], for user appends).
+    pub fn append_autoplay_songs(&mut self, songs: Vec<Song>) -> AutoplayAppend {
+        let first = self.next_entry_id;
+        let count = songs.len() as u64;
+        let effect = self.add_songs(songs);
+        let entry_ids: Vec<u64> = (first..first + count).collect();
+        self.autoplay_entries.extend(entry_ids.iter().copied());
+        AutoplayAppend { entry_ids, effect }
+    }
+
+    /// Remove the pending Autoplay rows ([`Self::pending_autoplay_entries`])
+    /// in one pass through [`Self::remove_entries_by_ids`]. The current row
+    /// is never among them, so playback has nothing to follow (like Remove
+    /// Duplicates: only the gapless prep resets). Returns the removed
+    /// `entry_id`s (empty when there were none, and nothing was written).
+    pub fn clear_pending_autoplay(&mut self) -> (Vec<u64>, NextTrackResetEffect) {
+        let pending = self.pending_autoplay_entries();
+        if pending.is_empty() {
+            return (pending, NextTrackResetEffect::new().only_if(false));
+        }
+        let effect = self.remove_entries_by_ids(&pending);
+        for eid in &pending {
+            self.autoplay_entries.remove(eid);
+        }
+        (pending, effect)
+    }
+
+    /// Where a user append lands: the start of the trailing run of
+    /// Autoplay rows that lies after the current row, so the songs the user
+    /// queues play before the ones Autoplay picked. `None` (a plain append)
+    /// under shuffle, with no current row, or with no such run.
+    fn user_append_position(&self) -> Option<usize> {
+        if self.queue.shuffle {
+            return None;
+        }
+        let cursor_row = self.queue.current_index()?;
+        let len = self.queue.rows.len();
+        let run_start = self
+            .queue
+            .rows
+            .iter()
+            .rposition(|row| !self.is_autoplay_entry(row.entry_id))
+            .map_or(0, |last_user| last_user + 1);
+        let at = run_start.max(cursor_row + 1);
+        (at < len).then_some(at)
+    }
+
+    /// Append songs the user queued ("Add to Queue", a progressive page):
+    /// ahead of the pending Autoplay rows at the tail when shuffle is off
+    /// ([`Self::user_append_position`]), else at the end like
+    /// [`Self::add_songs`]. Returns the first new row's `entry_id`.
+    pub fn enqueue_songs(&mut self, songs: Vec<Song>) -> UserAppend {
+        let first_entry_id = (!songs.is_empty()).then_some(self.next_entry_id);
+        let effect = match self.user_append_position() {
+            Some(at) => {
+                // Behind the next song the prepared track stays valid, as
+                // in `add_songs`.
+                let changes_next_track = self
+                    .queue
+                    .current_index()
+                    .is_none_or(|cursor_row| at <= cursor_row + 1);
+                self.insert_songs_at(at, songs).only_if(changes_next_track)
+            }
+            None => self.add_songs(songs),
+        };
+        UserAppend {
+            first_entry_id,
+            effect,
         }
     }
 
@@ -3181,7 +3351,9 @@ pub(crate) mod tests {
                 let mut rows: Vec<_> = songs
                     .iter()
                     .enumerate()
-                    .map(|(i, song)| build_queue_song_ui_view_data(song, i, i as u64, "", ""))
+                    .map(|(i, song)| {
+                        build_queue_song_ui_view_data(song, i, i as u64, false, "", "")
+                    })
                     .collect();
                 mode.sort_songs(ascending, &mut rows);
                 let ui: Vec<String> = rows.into_iter().map(|row| row.id).collect();
@@ -4194,5 +4366,223 @@ pub(crate) mod tests {
             effect_resets_the_next_track(effect).await,
             "under shuffle the append can land next"
         );
+    }
+
+    // ── Autoplay ──
+
+    fn ids_of(qm: &QueueManager) -> Vec<String> {
+        qm.song_ids_snapshot()
+    }
+
+    fn autoplay(qm: &mut QueueManager, ids: &[&str]) -> Vec<u64> {
+        let songs = ids.iter().map(|id| make_test_song(id)).collect();
+        qm.append_autoplay_songs(songs).entry_ids
+    }
+
+    fn user_add(qm: &mut QueueManager, ids: &[&str]) -> Option<u64> {
+        let songs = ids.iter().map(|id| make_test_song(id)).collect();
+        qm.enqueue_songs(songs).first_entry_id
+    }
+
+    #[test]
+    fn autoplay_marks_follow_rows_through_reorders_and_clear_on_replace() {
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let marked = autoplay(&mut qm, &["x", "y"]);
+        assert_eq!(marked.len(), 2);
+        assert_eq!(ids_of(&qm), vec!["a", "b", "x", "y"]);
+        assert_eq!(qm.entry_id_at(2), Some(marked[0]), "the first new row");
+
+        let _ = qm.move_item(3, 0);
+        let _ = qm.sort_queue(QueueSortMode::Title, false);
+        for eid in &marked {
+            let row = qm.index_of_entry(*eid).expect("still queued");
+            assert!(qm.is_autoplay_entry(*eid), "row {row} keeps its mark");
+        }
+        let unmarked = qm
+            .rows()
+            .iter()
+            .filter(|r| !qm.is_autoplay_entry(r.entry_id))
+            .count();
+        assert_eq!(unmarked, 2, "a and b stay unmarked");
+
+        let _ = qm.set_queue(vec![make_test_song("x")], Some(0));
+        assert!(qm.autoplay_entries.is_empty(), "a replace clears the marks");
+        let marked = autoplay(&mut qm, &["z"]);
+        qm.reload();
+        assert!(!qm.is_autoplay_entry(marked[0]), "a reload clears them too");
+    }
+
+    #[test]
+    fn runway_counts_songs_after_the_cursor_in_play_order() {
+        let songs = || ["a", "b", "c", "d"].map(make_test_song).into();
+        let (qm, _t) = make_test_manager(songs(), Some(1));
+        assert_eq!(qm.runway(), Some(2));
+        let (qm, _t) = make_test_manager(songs(), Some(3));
+        assert_eq!(qm.runway(), Some(0), "on the last row");
+        let (qm, _t) = make_test_manager(songs(), None);
+        assert_eq!(qm.runway(), None, "no current row");
+
+        // Shuffle anchors the playing song first in play order, so every
+        // other song is still ahead whatever its physical row.
+        let (mut qm, _t) = make_test_manager(songs(), Some(3));
+        let _ = qm.toggle_shuffle();
+        assert_eq!(qm.runway(), Some(3));
+    }
+
+    #[test]
+    fn pending_autoplay_rows_are_the_marked_rows_after_the_cursor() {
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let marked = autoplay(&mut qm, &["x", "y"]);
+        assert_eq!(qm.pending_autoplay_entries(), marked);
+
+        let _ = qm.reposition_to_index(Some(2));
+        assert_eq!(
+            qm.pending_autoplay_entries(),
+            vec![marked[1]],
+            "the playing autoplay row is not pending"
+        );
+        let _ = qm.reposition_to_index(None);
+        assert!(
+            qm.pending_autoplay_entries().is_empty(),
+            "none with no current row"
+        );
+    }
+
+    #[test]
+    fn clear_pending_autoplay_keeps_the_cursor_row_and_played_rows() {
+        let (mut qm, _t) = make_test_manager(vec![make_test_song("a")], Some(0));
+        let played = autoplay(&mut qm, &["p"]);
+        let current = autoplay(&mut qm, &["x"]);
+        let pending = autoplay(&mut qm, &["y", "z"]);
+        let _ = qm.reposition_to_index(Some(2));
+
+        let (removed, _effect) = qm.clear_pending_autoplay();
+
+        assert_eq!(removed, pending);
+        assert_eq!(ids_of(&qm), vec!["a", "p", "x"]);
+        assert_eq!(qm.current_index(), Some(2), "x still plays");
+        assert_eq!(qm.entry_id_at(2), Some(current[0]));
+        assert!(
+            qm.is_autoplay_entry(played[0]),
+            "a played row keeps its mark"
+        );
+        assert_queue_invariants(&qm, "after clearing pending autoplay rows");
+
+        let (removed, _effect) = qm.clear_pending_autoplay();
+        assert!(removed.is_empty(), "nothing left to clear");
+    }
+
+    #[test]
+    fn a_user_append_goes_ahead_of_the_pending_autoplay_rows() {
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let marked = autoplay(&mut qm, &["x", "y"]);
+
+        let first = user_add(&mut qm, &["u1", "u2"]);
+        assert_eq!(ids_of(&qm), vec!["a", "b", "u1", "u2", "x", "y"]);
+        assert_eq!(first, qm.entry_id_at(2), "the first new row's id");
+        let _ = user_add(&mut qm, &["v"]);
+        assert_eq!(
+            ids_of(&qm),
+            vec!["a", "b", "u1", "u2", "v", "x", "y"],
+            "in order"
+        );
+        assert_eq!(qm.pending_autoplay_entries(), marked, "still pending, last");
+        assert_eq!(qm.current_index(), Some(0), "the cursor stays on a");
+        assert_queue_invariants(&qm, "after a user append ahead of autoplay rows");
+
+        // Playing an autoplay row: what the user adds plays right after it.
+        let _ = qm.reposition_to_index(Some(5));
+        let _ = user_add(&mut qm, &["w"]);
+        assert_eq!(ids_of(&qm), vec!["a", "b", "u1", "u2", "v", "x", "w", "y"]);
+    }
+
+    #[test]
+    fn a_user_append_lands_at_the_end_without_a_pending_tail_or_under_shuffle() {
+        // No autoplay rows.
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let _ = user_add(&mut qm, &["u"]);
+        assert_eq!(ids_of(&qm), vec!["a", "b", "u"]);
+
+        // The autoplay rows are not the tail: a user row follows them.
+        let (mut qm, _t) = make_test_manager(vec![make_test_song("a")], Some(0));
+        let _ = autoplay(&mut qm, &["x"]);
+        qm.queue.shuffle = true;
+        let _ = user_add(&mut qm, &["u"]);
+        qm.queue.shuffle = false;
+        let _ = user_add(&mut qm, &["v"]);
+        assert_eq!(ids_of(&qm), vec!["a", "x", "u", "v"]);
+
+        // Under shuffle, with a pending tail: a plain append.
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let _ = autoplay(&mut qm, &["x", "y"]);
+        let _ = qm.toggle_shuffle();
+        let _ = user_add(&mut qm, &["u"]);
+        assert_eq!(ids_of(&qm).last().map(String::as_str), Some("u"));
+
+        // No current row: a plain append.
+        let (mut qm, _t) = make_test_manager(vec![make_test_song("a")], None);
+        let _ = autoplay(&mut qm, &["x"]);
+        let _ = user_add(&mut qm, &["u"]);
+        assert_eq!(ids_of(&qm), vec!["a", "x", "u"]);
+
+        // The cursor on the last autoplay row: nothing pending, so the end.
+        let (mut qm, _t) = make_test_manager(vec![make_test_song("a")], Some(0));
+        let _ = autoplay(&mut qm, &["x"]);
+        let _ = qm.reposition_to_index(Some(1));
+        let _ = user_add(&mut qm, &["u"]);
+        assert_eq!(ids_of(&qm), vec!["a", "x", "u"]);
+    }
+
+    #[tokio::test]
+    async fn a_user_append_behind_the_next_song_keeps_the_prepared_track() {
+        let (mut qm, _t) =
+            make_test_manager(vec![make_test_song("a"), make_test_song("b")], Some(0));
+        let _ = autoplay(&mut qm, &["x"]);
+        let effect = qm.enqueue_songs(vec![make_test_song("u")]).effect;
+        assert!(
+            !effect_resets_the_next_track(effect).await,
+            "b is still next"
+        );
+
+        let (mut qm, _t) = make_test_manager(vec![make_test_song("a")], Some(0));
+        let _ = autoplay(&mut qm, &["x"]);
+        let effect = qm.enqueue_songs(vec![make_test_song("u")]).effect;
+        assert!(
+            effect_resets_the_next_track(effect).await,
+            "u goes in right after the playing row, ahead of x"
+        );
+    }
+
+    #[test]
+    fn the_autoplay_trail_is_the_history_then_the_play_order_from_the_cursor() {
+        let (mut qm, _t) = make_test_manager(["a", "b", "c"].map(make_test_song).into(), Some(1));
+        qm.add_to_history(make_test_song("h"), None);
+        let marked = autoplay(&mut qm, &["x"]);
+        let trail: Vec<(&str, bool)> = qm
+            .autoplay_trail()
+            .iter()
+            .map(|t| (t.song.id.as_str(), t.autoplay))
+            .collect();
+        assert_eq!(
+            trail,
+            vec![("h", false), ("b", false), ("c", false), ("x", true)],
+            "a sits before the cursor and is not in the history"
+        );
+        let _ = qm.reposition_to_index(Some(3));
+        qm.add_to_history(make_test_song("x"), Some(marked[0]));
+        let _ = qm.reposition_to_index(None);
+        let trail: Vec<(&str, bool)> = qm
+            .autoplay_trail()
+            .iter()
+            .map(|t| (t.song.id.as_str(), t.autoplay))
+            .collect();
+        assert_eq!(trail, vec![("h", false), ("x", true)], "history alone");
+        let heard = qm.queued_or_heard_song_ids();
+        assert!(heard.contains("h") && heard.contains("a") && heard.contains("x"));
     }
 }
