@@ -262,7 +262,7 @@ pub(crate) fn get_state_dir() -> Result<PathBuf> {
 
     let state_dir = base_dirs
         .state_dir()
-        .context("$XDG_STATE_HOME unavailable on this platform")?
+        .unwrap_or_else(|| base_dirs.data_local_dir())
         .join(APP_NAME);
 
     if !state_dir.exists() {
@@ -427,6 +427,9 @@ pub fn migrate_to_state_dir() {
     let Ok(state_dir) = get_state_dir() else {
         return;
     };
+    if config_dir == state_dir {
+        return;
+    }
 
     let old_db = config_dir.join("app.redb");
     let new_db = state_dir.join("app.redb");
@@ -499,7 +502,7 @@ mod tests {
     #[test]
     fn test_config_paths_under_config_dir() {
         let app_dir = get_app_dir().unwrap();
-        assert!(app_dir.to_string_lossy().contains(".config/nokkvi"));
+        assert!(app_dir.ends_with("nokkvi"));
 
         let config_path = get_config_path().unwrap();
         assert!(config_path.starts_with(&app_dir));
@@ -508,7 +511,7 @@ mod tests {
     #[test]
     fn test_state_paths_under_state_dir() {
         let state_dir = get_state_dir().unwrap();
-        assert!(state_dir.to_string_lossy().contains(".local/state/nokkvi"));
+        assert!(state_dir.ends_with("nokkvi"));
 
         let db_path = get_app_db_path().unwrap();
         assert!(db_path.starts_with(&state_dir));
