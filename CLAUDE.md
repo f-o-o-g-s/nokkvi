@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Nokkvi is a native Rust/Iced desktop client for Navidrome music servers. **Linux-only** (built/tested on Arch + Wayland/Hyprland with PipeWire). The codebase is AI-generated and AI-maintained — the human owner directs and tests but does not write code.
+Nokkvi is a native Rust/Iced desktop client for Navidrome music servers. Built and tested on Arch + Wayland/Hyprland with PipeWire; a macOS port is in progress (the `macos-port` skill owns its rules and overrides "Linux-only" wording elsewhere). The codebase is AI-generated and AI-maintained — the human owner directs and tests but does not write code.
 
 ## Common commands
 
@@ -22,7 +22,7 @@ cargo +nightly fmt --all -- --check          # format check
 
 CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build) on the latest unpinned stable + nightly, so a stale local toolchain can pass here and fail there (`/package` runs `rustup update stable nightly`). All must pass before merging. `rustfmt.toml` uses unstable features (`imports_granularity = "Crate"`, `group_imports = "StdExternalCrate"`), which is why nightly is required. A separate Security audit workflow (`.github/workflows/audit.yml`) runs `cargo audit` against `Cargo.lock` when a Cargo manifest or the lockfile changes, daily, and ahead of every release build. It fails only on RustSec vulnerabilities and catches advisories that Dependabot misses. It matches only crates.io packages, so the lockfile's `git+` sources (iced, ojodrop and the other git pins) go unaudited.
 
-System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang`. The audio engine links against `libpipewire-0.3` at build time; `clang` provides the libclang that `bindgen` loads to generate the `pipewire-sys` / `libspa-sys` bindings (build-only); `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3).
+System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake clang`. The audio engine links against `libpipewire-0.3` at build time; `clang` provides the libclang that `bindgen` loads to generate the `pipewire-sys` / `libspa-sys` bindings (build-only); `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.6 ships no native Opus decoder — see GH#3). macOS: Xcode Command Line Tools + `brew install cmake`; no PipeWire (audio goes through cpal → CoreAudio), see the `macos-port` skill.
 
 Per-user data follows the XDG Base Directory Specification, split across four roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`, `milkdrop/`), `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`), `~/.local/share/nokkvi/lyrics/` for the lyrics store, and `~/.cache/nokkvi/` for MPRIS cover art and the Waveform seek bar's per-song envelopes (`waveforms/`). The log file is truncated on every launch. A one-time migration (`migrate_to_state_dir()`, run from `main()`) moves the legacy in-config `app.redb` to the state dir on first run.
 
