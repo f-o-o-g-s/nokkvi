@@ -303,6 +303,22 @@ impl AuthGateway {
         Ok(factory(client))
     }
 
+    /// THE single Subsonic-API construction path, the `/rest` twin of
+    /// [`Self::build_native_api`]: `factory` gets the client, the server URL
+    /// and the session's Subsonic credential (pass the service's `new`, e.g.
+    /// `SimilarApiService::new`). Errors with "Not authenticated" pre-login.
+    pub async fn build_subsonic_api<T>(
+        &self,
+        factory: fn(ApiClient, String, String) -> T,
+    ) -> Result<T> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+        let (server_url, subsonic_credential) = self.server_config().await;
+        Ok(factory(client, server_url, subsonic_credential))
+    }
+
     /// The authenticated user's Navidrome id (empty when unauthenticated).
     /// See `AuthService::user_id` for provenance and the ownership-gate
     /// contract.

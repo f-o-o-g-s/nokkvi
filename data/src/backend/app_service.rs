@@ -1211,13 +1211,7 @@ macro_rules! subsonic_api_factory {
         $(
             /// Construct an authenticated Subsonic-API service. Use `.await?` in `shell_task` closures.
             pub async fn $method(&self) -> anyhow::Result<$ty> {
-                let client = self
-                    .auth_gateway
-                    .get_client()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-                let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
-                Ok(<$ty>::new(client, server_url, subsonic_credential))
+                self.auth_gateway.build_subsonic_api(<$ty>::new).await
             }
         )+
     };
