@@ -118,13 +118,8 @@ impl HotkeyConfig {
         *self = Self::default();
     }
 
-    /// Look up which action a key+modifiers combination is bound to.
-    /// Returns `None` if no action matches.
-    ///
-    /// Two actions CAN share one combo — a user rebinding onto an occupied
-    /// key, or a new default landing on a combo a user already claimed. The
-    /// winner is picked by [`Self::resolve`], never by map order, so the same
-    /// key fires the same action on every launch.
+    /// Look up which action a key + Shift/Ctrl/Alt combination is bound to
+    /// (no logo modifier): [`Self::lookup_combo`] for a combo built by hand.
     pub fn lookup(
         &self,
         key: &KeyCode,
@@ -133,12 +128,30 @@ impl HotkeyConfig {
         alt: bool,
     ) -> Option<HotkeyAction> {
         let combo = KeyCombo {
-            key: key.clone(),
             shift,
             ctrl,
             alt,
+            ..KeyCombo::key(key.clone())
         };
-        self.resolve(&combo, None)
+        self.lookup_combo(&combo)
+    }
+
+    /// Look up which action a key combination is bound to.
+    /// Returns `None` if no action matches.
+    ///
+    /// Two actions CAN share one combo — a user rebinding onto an occupied
+    /// key, or a new default landing on a combo a user already claimed. The
+    /// winner is picked by [`Self::resolve`], never by map order, so the same
+    /// key fires the same action on every launch.
+    ///
+    /// A combo the OS owns ([`KeyCombo::is_os_reserved`], ⌘C and friends on
+    /// macOS) never resolves, even when a hand-edited config binds it: the
+    /// capture UI refuses it, and this keeps a config file from sneaking it in.
+    pub fn lookup_combo(&self, combo: &KeyCombo) -> Option<HotkeyAction> {
+        if combo.is_os_reserved() {
+            return None;
+        }
+        self.resolve(combo, None)
     }
 
     /// Decide which action owns `combo`, in a fixed order that does not depend

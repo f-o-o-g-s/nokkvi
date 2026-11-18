@@ -884,7 +884,7 @@ mod r1 {
         app.current_view = View::Queue;
         app.browsing_panel = Some(crate::views::BrowsingPanel::new());
         let _ = app.enter_theater();
-        press(&mut app, char_key("e"), Modifiers::CTRL);
+        press(&mut app, char_key("e"), Modifiers::COMMAND);
         assert!(!app.theater.active);
         assert!(app.browsing_panel.is_some());
 

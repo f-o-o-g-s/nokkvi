@@ -44,17 +44,18 @@ fn no_duplicate_default_bindings() {
 
 #[test]
 fn keycombo_display() {
-    assert_eq!(KeyCombo::key(KeyCode::Space).display(), "Space");
-    assert_eq!(KeyCombo::shift(KeyCode::Char('l')).display(), "Shift + L");
-    assert_eq!(KeyCombo::ctrl(KeyCode::Char('d')).display(), "Ctrl + D");
+    assert_eq!(KeyCombo::key(KeyCode::Space).to_string(), "Space");
+    assert_eq!(KeyCombo::shift(KeyCode::Char('l')).to_string(), "Shift + L");
+    assert_eq!(KeyCombo::ctrl(KeyCode::Char('d')).to_string(), "Ctrl + D");
     assert_eq!(
         KeyCombo {
             key: KeyCode::Char('a'),
             shift: true,
             ctrl: true,
-            alt: false
+            alt: false,
+            logo: false,
         }
-        .display(),
+        .to_string(),
         "Ctrl + Shift + A"
     );
 }
@@ -140,9 +141,9 @@ fn bare_a_toggles_autoplay_and_shift_a_still_adds_to_queue() {
 #[test]
 fn ctrl_enter_maps_to_shuffle_play_without_shadowing_enter_or_shift_enter() {
     let config = HotkeyConfig::default();
-    // Ctrl+Enter → ShufflePlay (new)
+    // Ctrl+Enter (⌘Enter on macOS) → ShufflePlay
     assert_eq!(
-        config.lookup(&KeyCode::Enter, false, true, false),
+        config.lookup_combo(&KeyCombo::primary(KeyCode::Enter)),
         Some(HotkeyAction::ShufflePlay)
     );
     // Plain Enter → Activate (unchanged)
@@ -348,6 +349,7 @@ fn keycombo_parse_multi_modifier() {
             shift: true,
             ctrl: true,
             alt: false,
+            logo: false,
         }
     );
 }
@@ -362,6 +364,7 @@ fn keycombo_parse_alt_modifier() {
             shift: false,
             ctrl: false,
             alt: true,
+            logo: false,
         }
     );
 }
@@ -387,7 +390,7 @@ fn keycombo_parse_rejects_empty() {
 
 #[test]
 fn keycombo_parse_rejects_unknown_modifier() {
-    let result = "Super + A".parse::<KeyCombo>();
+    let result = "Hyper + A".parse::<KeyCombo>();
     assert!(result.is_err());
 }
 
@@ -408,11 +411,21 @@ fn keycombo_display_roundtrip() {
             shift: true,
             ctrl: true,
             alt: false,
+            logo: false,
+        },
+        KeyCombo {
+            alt: true,
+            ..KeyCombo::logo(KeyCode::Char('s'))
         },
     ];
 
-    for original in combos {
-        let displayed = original.display();
+    // Both the config text and the UI label (glyphs on macOS) parse back.
+    for original in combos
+        .iter()
+        .cloned()
+        .flat_map(|c| [(c.to_string(), c.clone()), (c.display(), c)])
+    {
+        let (displayed, original) = original;
         let parsed: KeyCombo = displayed
             .parse()
             .unwrap_or_else(|e| panic!("Failed to parse '{displayed}': {e}"));
@@ -636,11 +649,11 @@ fn all_default_bindings_are_findable_via_lookup() {
         .chain(HotkeyAction::RESERVED.iter())
     {
         let combo = action.default_binding();
-        let found = config.lookup(&combo.key, combo.shift, combo.ctrl, combo.alt);
+        let found = config.lookup_combo(&combo);
         assert_eq!(
             found,
             Some(*action),
-            "Default binding for {action:?} ({combo}) not found via lookup()"
+            "Default binding for {action:?} ({combo}) not found via lookup_combo()"
         );
     }
 }
@@ -1255,4 +1268,134 @@ fn an_unnamed_key_binding_survives_the_toml_round_trip() {
         reloaded.lookup(&KeyCode::Native(582), false, false, false),
         Some(HotkeyAction::TogglePlay)
     );
+}
+
+// ============================================================================
+// The logo modifier (Cmd on macOS, Super elsewhere)
+// ============================================================================
+
+#[test]
+fn every_logo_spelling_parses_on_every_os() {
+    for text in [
+        "Cmd + L",
+        "Command + L",
+        "Super + L",
+        "Win + L",
+        "Meta + L",
+        "⌘ + L",
+    ] {
+        let combo: KeyCombo = text.parse().unwrap();
+        assert_eq!(combo, KeyCombo::logo(KeyCode::Char('l')), "{text}");
+    }
+    let option: KeyCombo = "Option + Shift + S".parse().unwrap();
+    assert_eq!(
+        option,
+        KeyCombo {
+            alt: true,
+            ..KeyCombo::shift(KeyCode::Char('s'))
+        }
+    );
+}
+
+#[test]
+fn a_logo_combo_round_trips_through_config_text() {
+    let combo = KeyCombo {
+        shift: true,
+        alt: true,
+        ..KeyCombo::logo(KeyCode::ArrowUp)
+    };
+    let text = combo.to_string();
+    let expected = if cfg!(target_os = "macos") {
+        "Shift + Option + Cmd + Up"
+    } else {
+        "Shift + Alt + Super + Up"
+    };
+    assert_eq!(text, expected);
+    assert_eq!(text.parse::<KeyCombo>().unwrap(), combo);
+}
+
+#[test]
+fn a_logo_binding_is_distinct_from_the_bare_key() {
+    let mut config = HotkeyConfig::default();
+    config.set_binding(HotkeyAction::ToggleStar, KeyCombo::logo(KeyCode::Char('j')));
+    assert_eq!(
+        config.lookup_combo(&KeyCombo::logo(KeyCode::Char('j'))),
+        Some(HotkeyAction::ToggleStar)
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::Char('j'), false, false, false),
+        None
+    );
+    // ⌘R is not bare R (Refresh).
+    let refresh = config.lookup(&KeyCode::Char('r'), false, false, false);
+    assert_eq!(refresh, Some(HotkeyAction::RefreshView));
+    assert_ne!(
+        config.lookup_combo(&KeyCombo::logo(KeyCode::Char('r'))),
+        refresh
+    );
+}
+
+#[test]
+fn shortcut_defaults_use_the_platform_primary_modifier() {
+    let combo = HotkeyAction::ToggleBrowsingPanel.default_binding();
+    assert_eq!(combo, KeyCombo::primary(KeyCode::Char('e')));
+    assert_eq!(combo.logo, cfg!(target_os = "macos"));
+    assert_eq!(combo.ctrl, !cfg!(target_os = "macos"));
+}
+
+#[test]
+fn macos_glyph_label_follows_apples_modifier_order() {
+    let combo = KeyCombo {
+        ctrl: true,
+        alt: true,
+        shift: true,
+        ..KeyCombo::logo(KeyCode::Char('l'))
+    };
+    let label = combo.display();
+    if cfg!(target_os = "macos") {
+        assert_eq!(label, "⌃⌥⇧⌘L");
+        assert_eq!(KeyCombo::shift(KeyCode::Space).display(), "⇧Space");
+    } else {
+        assert_eq!(label, "Ctrl + Shift + Alt + Super + L");
+    }
+    // A bare key reads the same everywhere.
+    assert_eq!(KeyCombo::key(KeyCode::F5).display(), "F5");
+}
+
+#[test]
+fn os_reserved_combos_never_resolve() {
+    let mut config = HotkeyConfig::default();
+    let copy = KeyCombo::logo(KeyCode::Char('c'));
+    // A hand-edited config binding ⌘C.
+    config.set_binding(HotkeyAction::ToggleStar, copy.clone());
+    if cfg!(target_os = "macos") {
+        assert!(copy.is_os_reserved());
+        assert!(KeyCombo::logo(KeyCode::Tab).is_os_reserved());
+        assert!(
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::logo(KeyCode::Char('z'))
+            }
+            .is_os_reserved(),
+            "⇧⌘Z is Redo"
+        );
+        assert_eq!(config.lookup_combo(&copy), None);
+    } else {
+        assert!(!copy.is_os_reserved());
+        assert_eq!(config.lookup_combo(&copy), Some(HotkeyAction::ToggleStar));
+    }
+    // Never reserved: a chord with Ctrl or Option, and the shortcut defaults.
+    assert!(
+        !KeyCombo {
+            alt: true,
+            ..KeyCombo::logo(KeyCode::Char('c'))
+        }
+        .is_os_reserved()
+    );
+    for action in HotkeyAction::ALL {
+        assert!(
+            !action.default_binding().is_os_reserved(),
+            "{action:?}'s default is a system shortcut"
+        );
+    }
 }

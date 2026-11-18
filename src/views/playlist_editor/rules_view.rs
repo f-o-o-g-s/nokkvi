@@ -663,7 +663,11 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
             .height(Length::Fill)
             .style(json_editor_style);
         let mut col = column![
-            form_hint("Raw rules JSON — Escape applies a clean parse; Ctrl+Enter validates"),
+            form_hint(if cfg!(target_os = "macos") {
+                "Raw rules JSON — Escape applies a clean parse; ⌘Enter validates"
+            } else {
+                "Raw rules JSON — Escape applies a clean parse; Ctrl+Enter validates"
+            }),
             container(editor)
                 .padding(6)
                 .width(Length::Fill)

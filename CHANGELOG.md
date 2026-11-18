@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - When it finds no similar, same-genre or same-artist songs, Autoplay adds random songs from your library instead.
 - Autoplay waits while Repeat is on, and its button's tooltip says so.
 - If the queue runs out before a batch arrives, Autoplay plays the batch's first song when it lands.
+- On macOS, hotkeys can use Cmd, and Settings → Hotkeys shows modifiers as ⌃⌥⇧⌘ symbols.
+- On macOS, Settings refuses system shortcuts such as ⌘Q, ⌘C or ⌘Tab as hotkeys.
 
 ### Changed
 
@@ -25,6 +27,8 @@ All notable changes to this project will be documented in this file.
 - The Albums view now uses about half the CPU while a song plays.
 - The Artists, Genres and Playlists views now use less CPU while a song plays.
 - The night Trawl scene's anchor is now outlined and shaded like the boat instead of a flat shape.
+- On macOS, the hotkeys that defaulted to Ctrl, like Shuffle Play and Roulette, now default to Cmd.
+- On macOS, Cmd+click replaces Ctrl+click for selecting several rows.
 
 ### Fixed
 

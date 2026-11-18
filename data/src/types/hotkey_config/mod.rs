@@ -1,7 +1,7 @@
 //! Hotkey configuration types — maps logical actions to physical key combinations
 //!
 //! `HotkeyAction` enumerates every bindable action in the application.
-//! `KeyCombo` pairs a `KeyCode` with modifier flags (shift, ctrl, alt).
+//! `KeyCombo` pairs a `KeyCode` with modifier flags (shift, ctrl, alt, logo = Cmd on macOS / Super elsewhere).
 //! `HotkeyConfig` stores the full binding map, supports lookup by key event,
 //! conflict detection, and serde for persistence in redb.
 

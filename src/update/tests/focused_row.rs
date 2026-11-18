@@ -208,8 +208,8 @@ fn ctrl_click_deselect_leaves_the_highlight_on_the_selection() {
     let mut app = app_on_queue();
     for (row, mods) in [
         (5, Modifiers::default()),
-        (8, Modifiers::CTRL),
-        (8, Modifiers::CTRL),
+        (8, Modifiers::COMMAND),
+        (8, Modifiers::COMMAND),
     ] {
         let _ = app.update(Message::Queue(QueueMessage::SlotList(
             SlotListPageMessage::SetOffset(row, mods),

@@ -1046,7 +1046,7 @@ fn songs_enter_plays_a_clicked_row_itself_and_a_selection_as_a_batch() {
     let _ = page.update(
         SongsMessage::SlotList(SlotListPageMessage::SetOffset(
             2,
-            iced::keyboard::Modifiers::CTRL,
+            iced::keyboard::Modifiers::COMMAND,
         )),
         &songs,
     );

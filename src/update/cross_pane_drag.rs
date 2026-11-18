@@ -118,12 +118,13 @@ impl Nokkvi {
         if self.theater.active {
             return Task::none();
         }
-        // When Ctrl or Shift is held the user is multi-selecting, not starting
+        // When Cmd/Ctrl (`command()`: Cmd on macOS, Ctrl elsewhere) or Shift is
+        // held the user is multi-selecting, not starting
         // a drag.  Bail out to avoid clearing the selection state — the button's
         // on_press (which fires on mouse-up) will handle the click via
         // handle_slot_click with the correct modifiers.
         let mods = self.window.keyboard_modifiers;
-        if mods.control() || mods.shift() {
+        if mods.command() || mods.shift() {
             return Task::none();
         }
 

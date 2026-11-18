@@ -995,7 +995,7 @@ fn resolved_save_action_remaps_to_rules_save() {
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Character("s".into()),
         None,
-        iced::keyboard::Modifiers::CTRL,
+        iced::keyboard::Modifiers::COMMAND,
         iced::event::Status::Ignored,
     );
 
@@ -1101,7 +1101,7 @@ fn bare_control_while_editing_keeps_editing() {
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Control),
         None,
-        iced::keyboard::Modifiers::CTRL,
+        iced::keyboard::Modifiers::COMMAND,
         iced::event::Status::Ignored,
     );
 

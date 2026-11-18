@@ -236,7 +236,9 @@ impl SlotListPageState {
         // scrolls should resume click-to-focus snap semantics.
         self.slot_list.selected_offset_pinned = false;
 
-        if modifiers.control() {
+        // Cmd+click on macOS (where Ctrl+click is a right click), Ctrl+click
+        // elsewhere: `command()`.
+        if modifiers.command() {
             // Toggle selection for clicked item
             if self.slot_list.selected_indices.contains(&offset) {
                 self.slot_list.selected_indices.remove(&offset);
@@ -711,7 +713,7 @@ mod tests {
             "a plain click is a focused row, not a selection"
         );
 
-        state.handle_slot_click(7, 10, Modifiers::CTRL);
+        state.handle_slot_click(7, 10, Modifiers::COMMAND);
         assert_eq!(state.activation_batch(), Some(vec![3, 7]));
 
         let mut checkbox = SlotListPageState::default();
@@ -844,7 +846,7 @@ mod tests {
     }
 
     fn ctrl() -> iced::keyboard::Modifiers {
-        iced::keyboard::Modifiers::CTRL
+        iced::keyboard::Modifiers::COMMAND
     }
 
     fn shift() -> iced::keyboard::Modifiers {

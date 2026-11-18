@@ -636,7 +636,7 @@ fn press_no_op_with_ctrl_or_shift_modifier() {
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
     app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 2, 2));
 
-    app.window.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
+    app.window.keyboard_modifiers = iced::keyboard::Modifiers::COMMAND;
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(app.cross_pane_drag.pressed_item, None);
 

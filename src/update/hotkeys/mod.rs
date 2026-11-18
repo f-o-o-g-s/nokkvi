@@ -478,8 +478,9 @@ impl Nokkvi {
             if named == Some(Named::Escape) {
                 return Some(self.update(Message::RulesEditor(R::JsonEscape)));
             }
-            // Ctrl+Enter: apply the parse, then preview only when clean.
-            if named == Some(Named::Enter) && modifiers.control() {
+            // Ctrl+Enter (⌘Enter on macOS): apply the parse, then preview only
+            // when clean.
+            if named == Some(Named::Enter) && modifiers.command() {
                 let apply = self.update(Message::RulesEditor(R::JsonEscape));
                 let clean = self.rules_session().is_some_and(|s| s.json.is_none());
                 if clean {
@@ -601,7 +602,7 @@ impl Nokkvi {
                         self.update(Message::RulesEditor(R::EmptyStateMove { down: true })),
                     );
                 }
-                Some(Named::Enter) if !modifiers.control() => {
+                Some(Named::Enter) if !modifiers.command() => {
                     return Some(self.update(Message::RulesEditor(R::EmptyStateActivate)));
                 }
                 _ => {}
@@ -631,7 +632,7 @@ impl Nokkvi {
                 return Some(self.update(Message::RulesEditor(R::SwitchPane)));
             }
             Some(Named::Tab) => return Some(self.update(Message::RulesEditor(R::StepCell))),
-            Some(Named::Enter) if modifiers.control() => {
+            Some(Named::Enter) if modifiers.command() => {
                 return Some(self.update(Message::RulesEditor(R::Preview)));
             }
             Some(Named::Enter) => {
@@ -800,7 +801,7 @@ impl Nokkvi {
         // while the user is typing. Exceptions:
         //   - Escape: always allowed (close overlays, clear search)
         //   - Tab: always allowed (slot-list navigation)
-        //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
+        //   - Ctrl/Cmd+key: always allowed (intentional shortcuts like Ctrl+S, ⌘S)
         //   - Shift+Tab / Shift+Backspace: allowed for the settings-sidebar
         //     category nav. The exception is scoped to these two named keys
         //     only — plain Shift+character (a capital letter while typing)
@@ -814,7 +815,7 @@ impl Nokkvi {
                         iced::keyboard::key::Named::Tab | iced::keyboard::key::Named::Backspace
                     )
                 );
-            if !is_escape && !is_tab && !modifiers.control() && !is_shift_nav {
+            if !is_escape && !is_tab && !modifiers.control() && !modifiers.logo() && !is_shift_nav {
                 return Task::none();
             }
         }

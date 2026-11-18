@@ -291,7 +291,7 @@ fn ctrl_combo_not_suppressed_when_captured() {
     let _ = send_raw_key(
         &mut app,
         iced::keyboard::Key::Character("e".into()),
-        iced::keyboard::Modifiers::CTRL,
+        iced::keyboard::Modifiers::COMMAND,
         iced::event::Status::Captured,
     );
 

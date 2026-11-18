@@ -215,10 +215,10 @@ where
         // (e.g. PlayAlbum re-stamps fresh entry_ids on rows that briefly
         // collide with the previous queue's ids).
         //
-        // Suppressed while ctrl/shift is held (active multi-selection)
+        // Suppressed while Cmd/Ctrl or Shift is held (active multi-selection)
         // so users can clearly see which items are selected.
         let entry_id = song.entry_id;
-        let is_current = !(ctx.modifiers.shift() || ctx.modifiers.control())
+        let is_current = !(ctx.modifiers.shift() || ctx.modifiers.command())
             && current_playing_entry_id.is_some_and(|eid| eid == entry_id)
             && current_playing_song_id.as_ref() == Some(&song_id);
 

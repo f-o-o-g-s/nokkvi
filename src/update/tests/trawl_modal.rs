@@ -479,7 +479,7 @@ fn ctrl_enter_in_modal_plays_the_mix() {
     let _ = send_raw_key(
         &mut app,
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
-        iced::keyboard::Modifiers::CTRL,
+        iced::keyboard::Modifiers::COMMAND,
     );
 
     assert!(

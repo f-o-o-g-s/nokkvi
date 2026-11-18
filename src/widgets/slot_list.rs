@@ -1032,7 +1032,7 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
         let slot_content: Element<'a, Message> = if let Some(item_index) = item_index_opt {
             if let Some(item) = items.get(item_index) {
                 let disable_fallback_center = config.modifiers.shift()
-                    || config.modifiers.control()
+                    || config.modifiers.command()
                     || sl.selected_indices.len() > 1;
                 let is_center = match sl.selected_offset {
                     Some(sel) => item_index == sel,
@@ -2352,7 +2352,7 @@ pub(crate) fn primary_slot_click_message(
     modifiers: iced::keyboard::Modifiers,
     stable_viewport: bool,
 ) -> SlotListPageMessage {
-    if modifiers.control() || modifiers.shift() {
+    if modifiers.command() || modifiers.shift() {
         SlotListPageMessage::SetOffset(item_index, modifiers)
     } else if is_center {
         SlotListPageMessage::ActivateCenter(false)
@@ -3173,11 +3173,11 @@ mod tests {
     fn primary_click_ctrl_overrides_center_for_multi_select() {
         // Arm 1: ctrl beats is_center so multi-select toggle still works
         // when the user ctrl-clicks the centered row.
-        let m = primary_slot_click_message(5, true, Modifiers::CTRL, true);
+        let m = primary_slot_click_message(5, true, Modifiers::COMMAND, true);
         match m {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 5);
-                assert!(mods.control() && !mods.shift());
+                assert!(mods.command() && !mods.shift());
             }
             other => panic!("expected SetOffset with CTRL, got {other:?}"),
         }
@@ -3189,7 +3189,7 @@ mod tests {
         match m {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 5);
-                assert!(mods.shift() && !mods.control());
+                assert!(mods.shift() && !mods.command());
             }
             other => panic!("expected SetOffset with SHIFT, got {other:?}"),
         }
@@ -3200,11 +3200,11 @@ mod tests {
         // Even in legacy mode (stable_viewport=false), ctrl must still
         // route to multi-select rather than ClickPlay — otherwise ctrl+click
         // would play a song instead of toggling its selection.
-        let m = primary_slot_click_message(7, false, Modifiers::CTRL, false);
+        let m = primary_slot_click_message(7, false, Modifiers::COMMAND, false);
         match m {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 7);
-                assert!(mods.control());
+                assert!(mods.command());
             }
             other => panic!("expected SetOffset with CTRL in legacy mode, got {other:?}"),
         }
@@ -3213,11 +3213,11 @@ mod tests {
     #[test]
     fn primary_click_ctrl_plus_shift_routes_through_set_offset() {
         // Bitflag union pass-through: both modifier bits reach handle_slot_click.
-        let m = primary_slot_click_message(3, false, Modifiers::CTRL | Modifiers::SHIFT, true);
+        let m = primary_slot_click_message(3, false, Modifiers::COMMAND | Modifiers::SHIFT, true);
         match m {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 3);
-                assert!(mods.control() && mods.shift());
+                assert!(mods.command() && mods.shift());
             }
             other => panic!("expected SetOffset with CTRL|SHIFT, got {other:?}"),
         }
@@ -3260,11 +3260,11 @@ mod tests {
 
     #[test]
     fn highlight_only_passes_ctrl_through_for_multi_select() {
-        let m = highlight_only_slot_click_message(3, Modifiers::CTRL);
+        let m = highlight_only_slot_click_message(3, Modifiers::COMMAND);
         match m {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 3);
-                assert!(mods.control());
+                assert!(mods.command());
             }
             other => panic!("expected SetOffset with CTRL, got {other:?}"),
         }
@@ -3393,10 +3393,10 @@ mod tests {
 
     #[test]
     fn child_click_ctrl_overrides_center_matches_primary() {
-        match child_click_routing(5, true, Modifiers::CTRL, true) {
+        match child_click_routing(5, true, Modifiers::COMMAND, true) {
             SlotListPageMessage::SetOffset(idx, mods) => {
                 assert_eq!(idx, 5);
-                assert!(mods.control());
+                assert!(mods.command());
             }
             other => panic!("expected SetOffset with CTRL, got {other:?}"),
         }

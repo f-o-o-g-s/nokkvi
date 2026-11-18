@@ -391,7 +391,7 @@ define_hotkey_actions! {
             category: "Navigation",
             toml_key: "shuffle_play",
             settings_key: "hotkey.shuffle_play",
-            default: KeyCombo::ctrl(KeyCode::Enter),
+            default: KeyCombo::primary(KeyCode::Enter),
         },
         FocusNavigation {
             display: "Focus Navigation",
@@ -409,7 +409,7 @@ define_hotkey_actions! {
             category: "Navigation",
             toml_key: "toggle_browsing_panel",
             settings_key: "hotkey.toggle_browsing_panel",
-            default: KeyCombo::ctrl(KeyCode::Char('e')),
+            default: KeyCombo::primary(KeyCode::Char('e')),
         },
         CenterOnPlaying {
             display: "Center on Playing",
@@ -451,7 +451,7 @@ define_hotkey_actions! {
             category: "Item Actions",
             toml_key: "remove_from_queue",
             settings_key: "hotkey.remove_from_queue",
-            default: KeyCombo::ctrl(KeyCode::Char('d')),
+            default: KeyCombo::primary(KeyCode::Char('d')),
         },
         ClearQueue {
             display: "Clear Queue",
@@ -531,7 +531,7 @@ define_hotkey_actions! {
             category: "Item Actions",
             toml_key: "save_queue_as_playlist",
             settings_key: "hotkey.save_queue_as_playlist",
-            default: KeyCombo::ctrl(KeyCode::Char('s')),
+            default: KeyCombo::primary(KeyCode::Char('s')),
         },
         TrawlSaveAsPlaylist {
             display: "Trawl: Save Mix as Playlist",
@@ -597,7 +597,7 @@ define_hotkey_actions! {
             category: "Sort & View",
             toml_key: "roulette",
             settings_key: "hotkey.roulette",
-            default: KeyCombo::ctrl(KeyCode::Char('r')),
+            default: KeyCombo::primary(KeyCode::Char('r')),
         },
 
         // --- Settings edit ---

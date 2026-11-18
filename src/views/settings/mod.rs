@@ -720,12 +720,22 @@ impl SettingsPage {
                 );
                 // Convert iced key event to our KeyCombo
                 if let Some(keycode) = crate::hotkeys::key_press_to_keycode(key, unnamed) {
-                    let combo = nokkvi_data::types::hotkey_config::KeyCombo {
-                        key: keycode,
-                        shift: modifiers.shift(),
-                        ctrl: modifiers.control(),
-                        alt: modifiers.alt(),
-                    };
+                    let combo = crate::hotkeys::key_combo(keycode, modifiers);
+                    // A combo the OS owns (⌘Q, ⌘C, ⌘Tab, … on macOS) would
+                    // never fire, or fire on top of the system action. Stay in
+                    // capture with the reason showing, as Blocked does.
+                    if combo.is_os_reserved() {
+                        tracing::info!(" [HOTKEY CAPTURE] {combo:?} is reserved by the system");
+                        self.conflict_label = Some((
+                            format!(
+                                "{} belongs to the system — pick another key",
+                                combo.display()
+                            ),
+                            Instant::now(),
+                        ));
+                        self.capturing_hotkey = Some(action);
+                        return SettingsAction::None;
+                    }
                     // What the capture can actually write — decided in the
                     // data crate so every outcome is pure and tested. The badge
                     // text below describes what was written, never more.
