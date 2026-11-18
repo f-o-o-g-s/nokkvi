@@ -35,6 +35,15 @@ use crate::widgets::{
 /// correctly in split-view where the queue is roughly half the window.
 pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
+/// The glyph that leads the artist line of a row Autoplay added
+/// (`QueueSongUIViewData::autoplay`; the playlist editor's rows never carry
+/// it).
+pub(crate) const AUTOPLAY_ROW_MARK: crate::widgets::slot_list::SubtitleMark =
+    crate::widgets::slot_list::SubtitleMark {
+        icon: "assets/icons/infinity.svg",
+        tooltip: "Added by Autoplay",
+    };
+
 /// Gap between a song row's columns (index, thumbnail, title, …). The queue's
 /// "Playing From" banner reads it too, to line its name up with the titles.
 pub(crate) const SONG_ROW_COLUMN_SPACING: f32 = 6.0;
@@ -197,6 +206,8 @@ where
         let play_count = song.play_count.unwrap_or(0);
         let song_id = song.id.clone();
         let artist_id = song.artist_id.clone();
+        // Rows Autoplay added lead their artist line with its glyph.
+        let autoplay_mark = song.autoplay.then_some(AUTOPLAY_ROW_MARK);
 
         // Match on per-row entry_id — drift-immune and duplicate-aware
         // by construction. The song_id check is kept as a defense-in-
@@ -284,9 +295,9 @@ where
                 ));
             }
             content_row = content_row.push({
-                use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column};
+                use crate::widgets::slot_list::{SlotTextColumn, slot_list_text_column_marked};
                 let title_click = Some(on_event(SongListRowEvent::TitleClick(ctx.item_index)));
-                slot_list_text_column(
+                slot_list_text_column_marked(
                     SlotTextColumn {
                         title,
                         title_on_press: title_click,
@@ -296,6 +307,7 @@ where
                         subtitle_size,
                         is_bold: ctx.is_center || is_current,
                     },
+                    autoplay_mark,
                     style,
                     title_portion,
                 )

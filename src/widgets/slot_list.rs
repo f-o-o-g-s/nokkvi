@@ -1796,6 +1796,39 @@ pub(crate) fn slot_list_text_column_tagged<'a, Message: Clone + 'a + 'static>(
     style: SlotListSlotStyle,
     portion: u16,
 ) -> Element<'a, Message> {
+    text_column(text, tags, None, style, portion)
+}
+
+/// A small glyph that leads a row's subtitle line, in the subtitle's ink,
+/// with a tooltip naming what it marks (the Queue's Autoplay rows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SubtitleMark {
+    /// The glyph's `assets/icons/*.svg` path.
+    pub(crate) icon: &'static str,
+    pub(crate) tooltip: &'static str,
+}
+
+/// [`slot_list_text_column`] whose subtitle line, when `mark` is `Some`,
+/// starts with that glyph. With `None` the column is exactly
+/// [`slot_list_text_column`]'s: no space is reserved.
+pub(crate) fn slot_list_text_column_marked<'a, Message: Clone + 'a + 'static>(
+    text: SlotTextColumn<Message>,
+    mark: Option<SubtitleMark>,
+    style: SlotListSlotStyle,
+    portion: u16,
+) -> Element<'a, Message> {
+    text_column(text, Vec::new(), mark, style, portion)
+}
+
+/// The one body behind the slot text columns: title (with optional tags)
+/// over a subtitle (with an optional leading mark).
+fn text_column<'a, Message: Clone + 'a + 'static>(
+    text: SlotTextColumn<Message>,
+    tags: Vec<TitleTag>,
+    mark: Option<SubtitleMark>,
+    style: SlotListSlotStyle,
+    portion: u16,
+) -> Element<'a, Message> {
     let SlotTextColumn {
         title,
         title_on_press,
@@ -1878,6 +1911,35 @@ pub(crate) fn slot_list_text_column_tagged<'a, Message: Clone + 'a + 'static>(
             .boxed()
     } else {
         slot_list_text(subtitle, subtitle_size, style.subtext_color).boxed()
+    };
+
+    let subtitle_widget = match mark {
+        None => subtitle_widget,
+        Some(mark) => {
+            // Glyph at the subtitle's size, in its ink: the subtitle's own
+            // color already follows the row (dim on a plain row, the forced
+            // ink on the now-playing fill).
+            let ink = style.subtext_color;
+            let glyph = crate::embedded_svg::svg_widget(mark.icon)
+                .width(Length::Fixed(subtitle_size))
+                .height(Length::Fixed(subtitle_size))
+                .style(move |_theme, _status| iced::widget::svg::Style { color: Some(ink) });
+            let glyph = iced::widget::tooltip(
+                glyph,
+                container(
+                    iced::widget::text(mark.tooltip)
+                        .size(11.0)
+                        .font(theme::ui_font()),
+                )
+                .padding(4),
+                iced::widget::tooltip::Position::Top,
+            )
+            .gap(4);
+            iced::widget::row![glyph, subtitle_widget]
+                .spacing((subtitle_size * 0.3).round())
+                .align_y(Alignment::Center)
+                .boxed()
+        }
     };
 
     container(column![title_widget, subtitle_widget].spacing(SLOT_LIST_COL_SPACING))

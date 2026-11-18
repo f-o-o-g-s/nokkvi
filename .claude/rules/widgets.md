@@ -133,7 +133,7 @@ Single source of truth: `chrome_height_with_header(collapsed_header: bool)` (= `
 
 ## Slot Rendering
 
-`SlotListRowContext` bundles per-slot args. `SlotListRowMetrics` derives sizes from active `slot_row_height()`. Center slot gets `flash_at`. Clickable stars (`slot_list_star_rating()`) and hearts (`slot_list_favorite_icon()`). Top-packing when items < slot_count.
+`SlotListRowContext` bundles per-slot args. `SlotListRowMetrics` derives sizes from active `slot_row_height()`. Center slot gets `flash_at`. Clickable stars (`slot_list_star_rating()`) and hearts (`slot_list_favorite_icon()`). Top-packing when items < slot_count. The slot text columns share one body (`text_column`): `slot_list_text_column`, `_tagged` (title tags) and `_marked` (a `SubtitleMark` glyph leading the subtitle in its own ink, with a tooltip; `None` builds the plain column, no reserved space). The Queue's Autoplay rows use the last (`song_list_pane::AUTOPLAY_ROW_MARK`).
 
 **Selection is border-only** (theme-modal style): multi-selected rows (via `selected_indices`, always shown) and the lone click/keyboard cursor keep the normal row background + theme text and are marked solely by a 2 px accent ring — `theme::selection_ring_on(bg)`, contrast-floored to ≥ 3:1 against the row bg (`SELECTION_RING_MIN_CONTRAST`, all-themes gauntlet-pinned) and immune to the opacity gradient. The loud `selected_fill_resolved()` fill + forced-legible ink belongs ONLY to the now-playing row (breathing glow), expanded-parent headers (calmer `playing_fill()`), and `SlotListSlotStyle::drag_preview()` (the floating drag ghost). The fallback *center* ring is what's suppressed during an active Ctrl/Shift modifier hold or while a multi-selection exists.
 

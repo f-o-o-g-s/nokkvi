@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Instant Mix leaves out tracks under a minute and songs rated one star.
 - Autoplay, a new playback mode, adds 10 songs like your last few when at most one song is left after the playing one.
 - Autoplay toggles from its infinity button in the player bar, the modes menu, the `a` key, `nokkvi autoplay` or Settings → Playback.
+- Songs Autoplay added show a small infinity sign before their artist in the Queue.
 - Songs you add to the queue go ahead of the Autoplay songs that have not played yet, while shuffle is off.
 - Turning Autoplay off removes the songs it added that have not played yet.
 - When it finds no similar, same-genre or same-artist songs, Autoplay adds random songs from your library instead.
