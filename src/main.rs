@@ -277,6 +277,9 @@ pub struct Nokkvi {
     /// The Waveform seek bar's envelopes: the one on screen, the one ready
     /// for the next song, the job in flight (see `update/waveform.rs`).
     pub waveform: crate::state::WaveformState,
+    /// Autoplay's fill in flight, retry gate and pending resume (see
+    /// `state/autoplay.rs`). Transient, never persisted.
+    pub autoplay: crate::state::AutoplayState,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -564,6 +567,7 @@ impl Default for Nokkvi {
             milkdrop: crate::state::MilkdropState::default(),
             dynamic_accent: crate::state::DynamicAccentState::default(),
             waveform: crate::state::WaveformState::default(),
+            autoplay: crate::state::AutoplayState::default(),
             // Misc state
             queue_current: crate::state::QueueCurrent::default(),
             playlist_editor: None,

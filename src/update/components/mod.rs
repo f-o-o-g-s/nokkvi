@@ -216,6 +216,9 @@ impl Nokkvi {
         // Every call is a new play attempt: a failure of an older one must
         // not hand radio mode back over it.
         self.playback.play_attempt.bump();
+        // A play the user started wins over a resume waiting for an Autoplay
+        // batch.
+        self.forget_autoplay_resume();
         // Never blocks: blocking would prevent ever resuming queue playback
         // while a radio stream is active. The engine stop is handled by the
         // play action that follows, which is why the station is remembered:
@@ -1869,6 +1872,9 @@ impl Nokkvi {
             dynamic_accent: _,
             // Envelopes on screen and the job in flight (a scan is stopped).
             waveform: _,
+            // The fill in flight, the retry gate, the pending resume and the
+            // ran-out count, which the backend restarts at 0 with each login.
+            autoplay: _,
             // The root modals, through `ActiveModal::STACK`.
             text_input_dialog: _,
             info_modal: _,
@@ -1952,6 +1958,9 @@ impl Nokkvi {
         self.dynamic_accent_reset();
         // The waveform on screen and any scan belong to the session.
         self.waveform.reset();
+        // Autoplay's fill, retries, pending resume and ran-out count belong to
+        // the session (its fill result is dropped with the session).
+        self.autoplay = crate::state::AutoplayState::default();
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /

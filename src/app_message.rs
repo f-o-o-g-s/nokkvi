@@ -206,6 +206,13 @@ pub struct PlaybackStateUpdate {
     /// since the last tick (`CustomAudioEngine::take_stream_lost`): its song
     /// ended early. Shown once as a warning.
     pub stream_lost: bool,
+    /// Songs after the current one in play order (`QueueManager::runway`),
+    /// read under the same queue lock as `current_index`; `None` with no
+    /// current row. Autoplay's fill trigger reads it.
+    pub autoplay_runway: Option<usize>,
+    /// How many times the queue ran out (`AppService::queue_ran_out_epoch`;
+    /// starts at 0 with every login). Autoplay resumes when it moves.
+    pub queue_ran_out_epoch: u64,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.
@@ -281,6 +288,22 @@ pub enum PlaybackMessage {
     RepeatToggled(bool, bool),
     ToggleConsume,
     ConsumeToggled(bool),
+    /// Turn Autoplay on or off (player bar, kebab, hotkey, CLI).
+    ToggleAutoplay,
+    /// An Autoplay fill (`AppService::autoplay_top_up`) answered.
+    AutoplayFilled {
+        after_run_out: bool,
+        fill: crate::state::AutoplayFill,
+    },
+    /// Autoplay went off and its unplayed rows were cleared: how many.
+    AutoplayCleared {
+        removed: usize,
+    },
+    /// The resume into an Autoplay batch after the queue ran out answered:
+    /// whether it played (`AppService::resume_into_autoplay`).
+    AutoplayResumed {
+        played: bool,
+    },
     ToggleSoundEffects,
     SfxVolumeChanged(f32),
     CycleVisualization,

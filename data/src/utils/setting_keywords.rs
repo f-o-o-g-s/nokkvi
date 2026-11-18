@@ -117,6 +117,7 @@ keyword_table! {
         "hotkey.toggle_random" => &["shuffle", "randomize", "mix"],
         "hotkey.toggle_repeat" => &["loop", "again", "replay"],
         "hotkey.toggle_consume" => &["remove after play", "burn", "pop"],
+        "hotkey.toggle_autoplay" => &["infinite", "endless", "continuous", "similar songs", "auto dj"],
         "hotkey.toggle_sfx" => &["sound effects", "clicks", "audio feedback", "beeps"],
         "hotkey.cycle_vis" => &["spectrum", "bars", "lines", "scope", "waveform", "milkdrop"],
         "hotkey.next_preset" => &["milkdrop", "preset", "skip", "visualizer"],

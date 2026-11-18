@@ -19,6 +19,7 @@ mod artwork;
 mod artwork_064;
 mod artwork_drag;
 mod autohide_toolbar;
+mod autoplay;
 mod background_reload;
 mod boat;
 mod components;

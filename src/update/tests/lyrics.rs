@@ -76,6 +76,8 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
         next_track_epoch: 0,
         seek_failure: None,
         stream_lost: false,
+        autoplay_runway: None,
+        queue_ran_out_epoch: 0,
         stream_status: crate::state::StreamStatus::default(),
         station_id: None,
     }

@@ -28,6 +28,16 @@ impl ToastState {
         self.toasts.push_back(toast);
     }
 
+    /// Push `toast` in place of the most recent toast reading `message`
+    /// (dropped when there is one), so a follow-up that says more replaces
+    /// the first word instead of stacking a second toast under it.
+    pub fn supersede(&mut self, message: &str, toast: nokkvi_data::types::toast::Toast) {
+        if let Some(at) = self.toasts.iter().rposition(|t| t.message == message) {
+            self.toasts.remove(at);
+        }
+        self.push(toast);
+    }
+
     /// Remove a keyed toast by its key.
     pub fn dismiss_key(&mut self, key: &str) {
         self.toasts.retain(|t| t.key.as_deref() != Some(key));

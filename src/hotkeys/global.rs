@@ -163,6 +163,7 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::ToggleRandom => Message::Playback(PlaybackMessage::ToggleRandom),
         HotkeyAction::ToggleRepeat => Message::Playback(PlaybackMessage::ToggleRepeat),
         HotkeyAction::ToggleConsume => Message::Playback(PlaybackMessage::ToggleConsume),
+        HotkeyAction::ToggleAutoplay => Message::Playback(PlaybackMessage::ToggleAutoplay),
         HotkeyAction::ToggleSoundEffects => Message::Playback(PlaybackMessage::ToggleSoundEffects),
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
         HotkeyAction::NextVisualizerPreset => Message::Milkdrop(

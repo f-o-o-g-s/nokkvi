@@ -38,6 +38,9 @@ impl Nokkvi {
             PlayerBarMessage::ToggleConsume => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleConsume))
             }
+            PlayerBarMessage::ToggleAutoplay => {
+                Task::done(Message::Playback(PlaybackMessage::ToggleAutoplay))
+            }
             PlayerBarMessage::ToggleEq => {
                 Task::done(Message::EqModal(crate::widgets::EqModalMessage::Toggle))
             }

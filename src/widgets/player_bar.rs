@@ -255,6 +255,7 @@ pub(crate) enum ModeId {
     BitPerfect,
     Sfx,
     Eq,
+    Autoplay,
     Consume,
     Shuffle,
     Repeat,
@@ -283,7 +284,7 @@ struct ModeDescriptor {
     /// Whether the mode is on: accent fill inline, checked in the kebab.
     active: bool,
     /// Whether presses act. The queue-flow modes (Repeat / Shuffle /
-    /// Consume) and Lyrics go inert during radio, in the row and the kebab
+    /// Consume / Autoplay) and Lyrics go inert during radio, in the row and the kebab
     /// alike: there is no queue for them to act on, so a press would only
     /// mutate the dormant library queue.
     enabled: bool,
@@ -362,6 +363,27 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
             },
             message: PlayerBarMessage::ToggleConsume,
             active: data.is_consume_mode,
+            enabled: queue_modes_enabled,
+            shown_inline: true,
+        },
+        ModeId::Autoplay => ModeDescriptor {
+            face: ModeFace::Icon("assets/icons/infinity.svg"),
+            // Autoplay never adds while Repeat (track or queue) is on: the
+            // queue never runs low then. Say so rather than look broken.
+            tooltip: if !data.autoplay_enabled {
+                "Autoplay: Off"
+            } else if data.is_repeat_mode || data.is_repeat_queue_mode {
+                "Autoplay: On, waiting while Repeat is on"
+            } else {
+                "Autoplay: Adds similar songs when the queue runs low"
+            },
+            kebab_label: if data.autoplay_enabled {
+                "Autoplay: On"
+            } else {
+                "Autoplay: Off"
+            },
+            message: PlayerBarMessage::ToggleAutoplay,
+            active: data.autoplay_enabled,
             enabled: queue_modes_enabled,
             shown_inline: true,
         },
@@ -499,7 +521,12 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
 /// (Lyrics trails it). A separator sits between the groups only when both
 /// hold folded-in modes, so it doesn't dangle while the kebab fills up.
 const KEBAB_GROUPS: [&[ModeId]; 2] = [
-    &[ModeId::Shuffle, ModeId::Repeat, ModeId::Consume],
+    &[
+        ModeId::Shuffle,
+        ModeId::Repeat,
+        ModeId::Consume,
+        ModeId::Autoplay,
+    ],
     &[
         ModeId::Crossfade,
         ModeId::BitPerfect,
@@ -561,13 +588,14 @@ fn inline_mode_button(d: ModeDescriptor) -> Element<'static, PlayerBarMessage> {
 /// Cull priority — index `i` is the i-th mode to fold into the kebab as the
 /// window narrows. Ordered to match the inline row's right-to-left disappear
 /// (rightmost-first) so gaps close cleanly from the right edge.
-pub(crate) const CULL_ORDER: [ModeId; 9] = [
+pub(crate) const CULL_ORDER: [ModeId; 10] = [
     ModeId::Lyrics,
     ModeId::Visualizer,
     ModeId::Crossfade,
     ModeId::BitPerfect,
     ModeId::Sfx,
     ModeId::Eq,
+    ModeId::Autoplay,
     ModeId::Consume,
     ModeId::Shuffle,
     ModeId::Repeat,
@@ -577,13 +605,23 @@ pub(crate) const CULL_ORDER: [ModeId; 9] = [
 /// Hysteresis on the way back out: a culled mode pops back inline only once
 /// width ≥ this threshold + `CULL_HYSTERESIS_PX`, preventing drag-resize
 /// flicker at the boundary.
-pub(crate) const CULL_ENTER_WIDTHS: [f32; 9] = [
-    1130.0, // Lyrics
-    1070.0, // Visualizer
-    1010.0, // Crossfade
-    980.0,  // Bit-Perfect
-    950.0,  // SFX
-    890.0,  // EQ
+///
+/// Hand-tuned per stage (the steps are not uniform). A mode added to the row
+/// shifts every mode that folds BEFORE it up by one button slot (44 px: a
+/// rounded-mode 40 px button plus the 4 px [`SECTION_BUTTON_GAP`]; flat
+/// buttons are 2 px narrower), because one more button rides inline at each
+/// of those stages, and leaves the modes that fold after it alone; the new
+/// mode folds one slot above the next mode's threshold. So each stage keeps
+/// the room it left the seek bar before. Autoplay arrived that way: Lyrics
+/// through EQ moved up 44 px, Autoplay folds at Consume's 830 + 44.
+pub(crate) const CULL_ENTER_WIDTHS: [f32; 10] = [
+    1174.0, // Lyrics
+    1114.0, // Visualizer
+    1054.0, // Crossfade
+    1024.0, // Bit-Perfect
+    994.0,  // SFX
+    934.0,  // EQ
+    874.0,  // Autoplay
     830.0,  // Consume
     750.0,  // Shuffle
     670.0,  // Repeat
@@ -605,7 +643,7 @@ pub(crate) const CULL_HYSTERESIS_PX: f32 = 40.0;
 /// falls back to the compact single-cluster row (every mode in one permanent
 /// kebab — the original MiniPlayer look) only when the window is genuinely tight.
 ///
-/// The band sits BELOW the mode-cull range (`CULL_ENTER_WIDTHS`, 670..1070) on
+/// The band sits BELOW the mode-cull range (`CULL_ENTER_WIDTHS`, 670..1174) on
 /// purpose: that way the whole one-mode-at-a-time cull sequence happens WHILE the
 /// transports stay centered, instead of the regime only existing above the cull
 /// band (which would defeat the point of expanding the modes). The compact flip
@@ -753,6 +791,8 @@ pub(crate) struct PlayerBarViewData {
     pub is_repeat_mode: bool,
     pub is_repeat_queue_mode: bool,
     pub is_consume_mode: bool,
+    /// The Autoplay setting (`general.autoplay_enabled`).
+    pub autoplay_enabled: bool,
     pub eq_enabled: bool,
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
@@ -825,6 +865,7 @@ pub enum PlayerBarMessage {
     ToggleRandom,
     ToggleRepeat,
     ToggleConsume,
+    ToggleAutoplay,
     ToggleEq,
     ToggleSoundEffects,
     SfxVolumeChanged(f32),
@@ -2177,18 +2218,19 @@ mod section_width_tests {
         let chrome_w = crate::widgets::sizes::TOOLBAR_BUTTON_SIZE;
         let total_modes = CULL_ORDER.len() as f32;
 
-        // All inline (kebab_count=0): 9 buttons + 8 gaps, no kebab.
+        // All inline (kebab_count=0): every button + one gap fewer, no kebab.
         let all_inline = mode_section_width(layout(0), false);
         assert_eq!(
             all_inline,
             total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
         );
 
-        // Some culled (kebab_count=5): with 9 modes, 4 inline + kebab + 4 gaps.
+        // Some culled (kebab_count=5): the rest inline + kebab, one gap each.
+        let inline = total_modes - 5.0;
         let some_culled = mode_section_width(layout(5), false);
         assert_eq!(
             some_culled,
-            4.0 * mode_btn_w + chrome_w + 4.0 * SECTION_BUTTON_GAP
+            inline * mode_btn_w + chrome_w + inline * SECTION_BUTTON_GAP
         );
 
         // Hamburger adds one more button + gap.
@@ -2247,8 +2289,8 @@ mod layout_tests {
 
     #[test]
     fn wide_width_keeps_all_modes_inline() {
-        // Far above any threshold — no culling.
-        let result = compute_layout(1200.0, empty());
+        // Above every threshold: no culling.
+        let result = compute_layout(CULL_ENTER_WIDTHS[0] + 1.0, empty());
         assert_eq!(result.kebab_mode_count, 0);
     }
 
@@ -2269,10 +2311,11 @@ mod layout_tests {
     /// or reordering a mode.
     #[test]
     fn inline_row_order_reversed_matches_cull_order() {
-        const INLINE_ORDER: [ModeId; 9] = [
+        const INLINE_ORDER: [ModeId; 10] = [
             ModeId::Repeat,
             ModeId::Shuffle,
             ModeId::Consume,
+            ModeId::Autoplay,
             ModeId::Eq,
             ModeId::Sfx,
             ModeId::BitPerfect,
@@ -2376,7 +2419,9 @@ mod layout_tests {
     #[test]
     fn jump_from_narrow_to_wide_pops_all_modes_back_inline() {
         let prev = layout(7);
-        let result = compute_layout(1200.0, prev);
+        // Past the first mode's exit threshold (its enter width plus the
+        // hysteresis), so every mode comes back.
+        let result = compute_layout(CULL_ENTER_WIDTHS[0] + CULL_HYSTERESIS_PX, prev);
         assert_eq!(result.kebab_mode_count, 0);
     }
 
@@ -2461,6 +2506,7 @@ mod layout_tests {
             ModeId::BitPerfect,
             ModeId::Sfx,
             ModeId::Eq,
+            ModeId::Autoplay,
             ModeId::Consume,
             ModeId::Shuffle,
             ModeId::Repeat,
@@ -2518,7 +2564,7 @@ mod layout_tests {
 
     #[test]
     fn is_in_kebab_all_modes_at_full_count() {
-        let l = layout(9);
+        let l = layout(10);
         for mode in [
             ModeId::Lyrics,
             ModeId::Visualizer,
@@ -2526,6 +2572,7 @@ mod layout_tests {
             ModeId::BitPerfect,
             ModeId::Sfx,
             ModeId::Eq,
+            ModeId::Autoplay,
             ModeId::Consume,
             ModeId::Shuffle,
             ModeId::Repeat,
@@ -2562,6 +2609,7 @@ mod mode_descriptor_tests {
             is_repeat_mode: false,
             is_repeat_queue_mode: false,
             is_consume_mode: false,
+            autoplay_enabled: false,
             eq_enabled: false,
             sound_effects_enabled: false,
             sfx_volume: 1.0,
@@ -2712,6 +2760,66 @@ mod mode_descriptor_tests {
         assert_eq!(d.kebab_label, "Repeat: Off");
     }
 
+    /// Autoplay's tooltip names the one state where it is on and idle on
+    /// purpose (Repeat, track or queue, is on); the kebab label is a plain
+    /// On / Off. Active is the setting.
+    #[test]
+    fn autoplay_descriptor_strings_track_setting_and_repeat() {
+        let off = mode_descriptor(ModeId::Autoplay, &sample_data());
+        assert_eq!(off.face, ModeFace::Icon("assets/icons/infinity.svg"));
+        assert_eq!(off.tooltip, "Autoplay: Off");
+        assert_eq!(off.kebab_label, "Autoplay: Off");
+        assert!(!off.active);
+        assert!(matches!(off.message, PlayerBarMessage::ToggleAutoplay));
+
+        let mut data = sample_data();
+        data.autoplay_enabled = true;
+        let on = mode_descriptor(ModeId::Autoplay, &data);
+        assert_eq!(
+            on.tooltip,
+            "Autoplay: Adds similar songs when the queue runs low"
+        );
+        assert_eq!(on.kebab_label, "Autoplay: On");
+        assert!(on.active);
+
+        for (track, queue) in [(true, false), (false, true)] {
+            let mut data = sample_data();
+            data.autoplay_enabled = true;
+            data.is_repeat_mode = track;
+            data.is_repeat_queue_mode = queue;
+            let waiting = mode_descriptor(ModeId::Autoplay, &data);
+            assert_eq!(waiting.tooltip, "Autoplay: On, waiting while Repeat is on");
+            assert_eq!(waiting.kebab_label, "Autoplay: On");
+            assert!(waiting.active);
+        }
+
+        // Repeat alone never lights it.
+        let mut data = sample_data();
+        data.is_repeat_queue_mode = true;
+        assert_eq!(
+            mode_descriptor(ModeId::Autoplay, &data).tooltip,
+            "Autoplay: Off"
+        );
+    }
+
+    /// Autoplay folds in the queue-flow group right after Consume in the
+    /// kebab, and sits right after Consume in the inline row, so it folds
+    /// just before Consume does.
+    #[test]
+    fn autoplay_sits_after_consume_inline_and_in_the_kebab() {
+        assert_eq!(
+            KEBAB_GROUPS[0],
+            &[
+                ModeId::Shuffle,
+                ModeId::Repeat,
+                ModeId::Consume,
+                ModeId::Autoplay
+            ]
+        );
+        let at = |m: ModeId| CULL_ORDER.iter().position(|&x| x == m);
+        assert_eq!(at(ModeId::Autoplay).map(|i| i + 1), at(ModeId::Consume));
+    }
+
     /// Visualizer couples a dynamic icon to a five-way mode. Pins the
     /// icon + dual-label pair for every `VisualizationMode`.
     #[test]
@@ -2801,6 +2909,7 @@ mod mode_descriptor_tests {
                 ModeId::Repeat => matches!(d.message, PlayerBarMessage::ToggleRepeat),
                 ModeId::Shuffle => matches!(d.message, PlayerBarMessage::ToggleRandom),
                 ModeId::Consume => matches!(d.message, PlayerBarMessage::ToggleConsume),
+                ModeId::Autoplay => matches!(d.message, PlayerBarMessage::ToggleAutoplay),
                 ModeId::Eq => matches!(d.message, PlayerBarMessage::ToggleEq),
                 ModeId::Sfx => matches!(d.message, PlayerBarMessage::ToggleSoundEffects),
                 ModeId::Crossfade => matches!(d.message, PlayerBarMessage::ToggleCrossfade),
@@ -2940,7 +3049,11 @@ mod mode_descriptor_tests {
         let queue_only = |mode: ModeId| {
             matches!(
                 mode,
-                ModeId::Repeat | ModeId::Shuffle | ModeId::Consume | ModeId::Lyrics
+                ModeId::Repeat
+                    | ModeId::Shuffle
+                    | ModeId::Consume
+                    | ModeId::Autoplay
+                    | ModeId::Lyrics
             )
         };
         let mut data = sample_data();
@@ -2960,6 +3073,7 @@ mod mode_descriptor_tests {
                     PlayerBarMessage::ToggleRepeat
                         | PlayerBarMessage::ToggleRandom
                         | PlayerBarMessage::ToggleConsume
+                        | PlayerBarMessage::ToggleAutoplay
                         | PlayerBarMessage::ToggleLyrics
                 )
             );
@@ -2977,6 +3091,7 @@ mod mode_descriptor_tests {
         assert_eq!(enabled_of("Shuffle: On"), Some(false));
         assert_eq!(enabled_of("Repeat: Off"), Some(false));
         assert_eq!(enabled_of("Consume: Off"), Some(false));
+        assert_eq!(enabled_of("Autoplay: Off"), Some(false));
         assert_eq!(enabled_of("Lyrics: Off"), Some(false));
         assert_eq!(enabled_of("Crossfade: Off"), Some(true));
         assert_eq!(enabled_of("Equalizer: Off"), Some(true));

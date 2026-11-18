@@ -100,6 +100,7 @@ const NAME_MAP: &[(&str, &str)] = &[
     ("hard-drive", "assets/icons-phosphor/hard-drive-regular.svg"),
     ("heart", "assets/icons-phosphor/heart-regular.svg"),
     ("heart-filled", "assets/icons-phosphor/heart-fill.svg"),
+    ("infinity", "assets/icons-phosphor/infinity-regular.svg"),
     ("info", "assets/icons-phosphor/info-regular.svg"),
     ("keyboard", "assets/icons-phosphor/keyboard-regular.svg"),
     ("layout-grid", "assets/icons-phosphor/grid-four-regular.svg"),

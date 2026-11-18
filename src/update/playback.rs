@@ -523,6 +523,8 @@ impl Nokkvi {
                 let song = qm.get_current_song();
                 let current_index = qm.current_index();
                 let current_entry_id = current_index.and_then(|i| qm.entry_id_at(i));
+                let autoplay_runway = qm.runway();
+                let queue_ran_out_epoch = shell.queue_ran_out_epoch();
                 let (
                     title,
                     artist,
@@ -662,6 +664,8 @@ impl Nokkvi {
                     seek_failure,
                     stream_lost,
                     stream_status,
+                    autoplay_runway,
+                    queue_ran_out_epoch,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -705,6 +709,8 @@ impl Nokkvi {
             seek_failure,
             stream_lost,
             stream_status,
+            autoplay_runway,
+            queue_ran_out_epoch,
         } = update;
 
         // A seek that reopened the stream failed (a busy server, the
@@ -1206,6 +1212,17 @@ impl Nokkvi {
             }
         }
 
+        // Autoplay: the run-out edge, the pending resume, and the fill trigger.
+        // After the mode reconcile above, so Repeat is this tick's.
+        if let Some(task) = self.autoplay_tick(
+            autoplay_runway,
+            queue_ran_out_epoch,
+            song_changed,
+            std::time::Instant::now(),
+        ) {
+            tasks.push(task);
+        }
+
         // Radio scrobbling (direct to ListenBrainz; bypasses Navidrome). Runs
         // unconditionally and self-gates: clears tracking off-radio, otherwise
         // drives now-playing + the wall-clock listen-time scrobble gate.
@@ -1533,6 +1550,7 @@ pub(crate) fn tray_title(title: &str, artist: &str) -> String {
 
 impl Nokkvi {
     pub(crate) fn handle_toggle_play(&mut self) -> Task<Message> {
+        self.forget_autoplay_resume();
         // Nothing loaded and nothing in the queue — toast instead of silently failing.
         if !self.playback.playing && !self.playback.paused && self.library.queue_songs.is_empty() {
             self.toast_info("Queue is empty");
@@ -1609,6 +1627,7 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_play(&mut self) -> Task<Message> {
+        self.forget_autoplay_resume();
         // If a track is already loaded (playing or paused), just resume via play().
         // This covers the pause→play case.
         if self.playback.has_track() {
@@ -1692,6 +1711,7 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_stop(&mut self) -> Task<Message> {
+        self.forget_autoplay_resume();
         // Optimistic UI update: show "stopped" immediately
         self.playback.playing = false;
         self.playback.paused = false;
@@ -1956,6 +1976,272 @@ impl Nokkvi {
         // Allow gapless prep to re-trigger with the new consume setting
         self.engine.gapless_preparing = false;
         Task::none()
+    }
+
+    /// Toggle Autoplay from the player-bar mode, its kebab row, the hotkey
+    /// and the `autoplay` CLI verb: optimistic flip, toast, persist, settings
+    /// refresh. Inert during radio like the other queue-flow modes. Turning
+    /// it on needs nothing more (the tick's level trigger asks for a batch
+    /// on its next pass); turning it off runs [`Self::autoplay_went_off`].
+    pub(crate) fn handle_toggle_autoplay(&mut self) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        let enabled = !self.settings.autoplay_enabled;
+        self.settings.autoplay_enabled = enabled;
+        self.toast_info(if enabled {
+            "Autoplay: On"
+        } else {
+            "Autoplay: Off"
+        });
+        debug!("Autoplay: turned {}", if enabled { "on" } else { "off" });
+        let task = if enabled {
+            self.shell_spawn("persist_autoplay_toggle", |shell| async move {
+                shell.settings().set_autoplay_enabled(true).await
+            });
+            Task::none()
+        } else {
+            self.autoplay_went_off(true)
+        };
+        // The Playback tab's Autoplay row reads the setting, and the kebab
+        // reaches this while Settings is open.
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        task
+    }
+
+    /// Everything Autoplay going off does, whichever surface turned it off
+    /// (the toggle, its hotkey and CLI verb, the Settings row): the UI state
+    /// starts over and the Autoplay rows that have not played yet leave the
+    /// queue (`AppService::clear_pending_autoplay`), whose count lands as
+    /// [`PlaybackMessage::AutoplayCleared`]. `persist` writes the setting
+    /// first (the Settings row's setter already did), so a fill resolving
+    /// meanwhile reads it off before it appends. A config.toml hand edit
+    /// does not come through here.
+    pub(crate) fn autoplay_went_off(&mut self, persist: bool) -> Task<Message> {
+        self.autoplay.reset_for_mode_off();
+        self.shell_task(
+            move |shell| async move {
+                if persist && let Err(e) = shell.settings().set_autoplay_enabled(false).await {
+                    warn!(" Saving Autoplay off failed: {e:#}");
+                }
+                shell.clear_pending_autoplay().await.len()
+            },
+            |removed| Message::Playback(PlaybackMessage::AutoplayCleared { removed }),
+        )
+    }
+
+    /// The unplayed Autoplay rows are gone: reload the queue and say how
+    /// many, in place of the toggle's "Autoplay: Off" (one toast). Nothing
+    /// is said when Autoplay is on again by now.
+    pub(crate) fn handle_autoplay_cleared(&mut self, removed: usize) -> Task<Message> {
+        debug!("Autoplay: off, removed {removed} queued Autoplay songs");
+        if removed == 0 {
+            return Task::none();
+        }
+        if !self.settings.autoplay_enabled {
+            let noun = if removed == 1 { "song" } else { "songs" };
+            self.toast.supersede(
+                "Autoplay: Off",
+                nokkvi_data::types::toast::Toast::new(
+                    format!("Autoplay: Off, removed {removed} queued {noun}"),
+                    nokkvi_data::types::toast::ToastLevel::Info,
+                ),
+            );
+        }
+        Task::done(Message::LoadQueue)
+    }
+
+    /// Autoplay's part of a playback tick, after the tick's state is applied:
+    /// note the ran-out count (a move is the queue ending; the first value
+    /// of a session is only adopted), drop a pending resume once playback
+    /// runs, reset the retry state on a song change, then ask for a batch
+    /// when [`crate::state::AutoplayState::ask`] says so. Level-triggered:
+    /// every way the queue can get short reaches it on the next tick.
+    fn autoplay_tick(
+        &mut self,
+        runway: Option<usize>,
+        ran_out_epoch: u64,
+        song_changed: bool,
+        now: std::time::Instant,
+    ) -> Option<Task<Message>> {
+        let transport_active = self.playback.playing || self.playback.paused;
+        if song_changed {
+            self.autoplay.song_changed();
+        }
+        // Playback running means the resume is moot (the user started
+        // something, or the resume played). Checked before this tick's own
+        // run-out, whose engine read can predate the queue's end.
+        if self.autoplay.resume_pending && transport_active {
+            debug!("Autoplay: playback runs again, the pending resume is dropped");
+            self.autoplay.resume_pending = false;
+        }
+        let gate = crate::state::AutoplayGate {
+            enabled: self.settings.autoplay_enabled,
+            queue_mode: self.active_playback.is_queue(),
+            repeat_off: !self.modes.repeat && !self.modes.repeat_queue,
+            runway,
+            transport_active,
+            progressive_load: self.library.queue_loading_total().is_some(),
+        };
+        if self.autoplay.observe_ran_out_epoch(ran_out_epoch) {
+            debug!("Autoplay: the queue ran out (epoch {ran_out_epoch})");
+            if gate.enabled && gate.queue_mode && gate.repeat_off {
+                self.autoplay.resume_pending = true;
+                if self.autoplay.in_flight {
+                    debug!("Autoplay: resume pending, the fill in flight carries it");
+                    return None;
+                }
+                debug!("Autoplay: resume pending, asking for a batch now");
+                return Some(self.autoplay_fill_task(crate::state::AutoplayAsk::AfterRunOut));
+            }
+        }
+        self.autoplay
+            .ask(&gate, now)
+            .map(|ask| self.autoplay_fill_task(ask))
+    }
+
+    /// Ask the backend for one Autoplay batch; its answer lands as
+    /// [`PlaybackMessage::AutoplayFilled`].
+    fn autoplay_fill_task(&mut self, ask: crate::state::AutoplayAsk) -> Task<Message> {
+        let after_run_out = ask.after_run_out();
+        self.autoplay.in_flight = true;
+        debug!(
+            "Autoplay: fill asked (after_run_out={after_run_out}, failures={})",
+            self.autoplay.failures
+        );
+        self.shell_task(
+            move |shell| async move { shell.autoplay_top_up(after_run_out).await },
+            move |result| {
+                Message::Playback(PlaybackMessage::AutoplayFilled {
+                    after_run_out,
+                    fill: crate::state::AutoplayFill::from_result(result),
+                })
+            },
+        )
+    }
+
+    /// A fill answered. `Added` reloads the queue (the rows carry the
+    /// mark, no toast) and plays the batch's first row when a resume is
+    /// pending; `NothingFound` and a failure count toward the retry limit
+    /// and wait [`crate::state::AUTOPLAY_RETRY_WAIT`] (only `NothingFound`
+    /// toasts, once per song); `NotNeeded` waits briefly and counts nothing,
+    /// and after a run-out drops the resume (the backend saw no batch to
+    /// wait for). A rejected session drops to login. `now` is a parameter
+    /// so tests pass explicit instants.
+    pub(crate) fn handle_autoplay_filled(
+        &mut self,
+        after_run_out: bool,
+        fill: crate::state::AutoplayFill,
+        now: std::time::Instant,
+    ) -> Task<Message> {
+        use nokkvi_data::types::autoplay::AutoplayOutcome;
+
+        use crate::state::AutoplayFill;
+
+        self.autoplay.in_flight = false;
+        match fill {
+            AutoplayFill::Outcome(AutoplayOutcome::Added {
+                count,
+                first_entry_id,
+            }) => {
+                debug!(
+                    "Autoplay: added {count} songs (after_run_out={after_run_out}, first entry {first_entry_id})"
+                );
+                self.autoplay.clear_retries();
+                if !self.settings.autoplay_enabled {
+                    // Turned off while this batch resolved, and it landed
+                    // after the off's clear: clear again.
+                    debug!("Autoplay: the batch landed after Autoplay went off, clearing it");
+                    return self.autoplay_went_off(false);
+                }
+                let mut tasks = vec![Task::done(Message::LoadQueue)];
+                if std::mem::take(&mut self.autoplay.resume_pending) {
+                    if self.active_playback.is_queue() {
+                        tasks.push(self.autoplay_resume_task(first_entry_id));
+                    } else {
+                        debug!("Autoplay: a station plays now, the resume is dropped");
+                    }
+                }
+                Task::batch(tasks)
+            }
+            AutoplayFill::Outcome(AutoplayOutcome::NothingFound) => {
+                self.autoplay.count_failure(now);
+                debug!(
+                    "Autoplay: nothing found (after_run_out={after_run_out}), failure {} of {}, next ask in {}s",
+                    self.autoplay.failures,
+                    nokkvi_data::types::autoplay::AUTOPLAY_MAX_RETRIES + 1,
+                    crate::state::AUTOPLAY_RETRY_WAIT.as_secs()
+                );
+                if !self.autoplay.nothing_toasted {
+                    self.autoplay.nothing_toasted = true;
+                    self.toast_info("Autoplay found nothing new to add");
+                }
+                Task::none()
+            }
+            AutoplayFill::Outcome(AutoplayOutcome::NotNeeded) => {
+                self.autoplay.wait_briefly(now);
+                if after_run_out && std::mem::take(&mut self.autoplay.resume_pending) {
+                    debug!("Autoplay: not needed after the run-out, the resume is dropped");
+                } else {
+                    debug!("Autoplay: not needed (after_run_out={after_run_out})");
+                }
+                Task::none()
+            }
+            AutoplayFill::Failed(error) => {
+                self.autoplay.count_failure(now);
+                warn!(
+                    " Autoplay fill failed (after_run_out={after_run_out}), failure {}, next ask in {}s: {error}",
+                    self.autoplay.failures,
+                    crate::state::AUTOPLAY_RETRY_WAIT.as_secs()
+                );
+                Task::none()
+            }
+            AutoplayFill::SessionRejected => Task::done(Message::SessionExpired),
+        }
+    }
+
+    /// After the queue ran out, play the first row of the batch that just
+    /// landed (`AppService::resume_into_autoplay`, which plays only while no
+    /// row is current and the engine is stopped, so a song or station the
+    /// user started meanwhile wins). Runs only in queue mode, so there is no
+    /// station for `guard_play_action` to leave: it would only bump the play
+    /// attempt, and the resume is no queue replace.
+    fn autoplay_resume_task(&self, entry_id: u64) -> Task<Message> {
+        debug!("Autoplay: resume asked (entry {entry_id})");
+        self.shell_task(
+            move |shell| async move { shell.resume_into_autoplay(entry_id).await },
+            |result| match result {
+                Ok(played) => Message::Playback(PlaybackMessage::AutoplayResumed { played }),
+                Err(e) => {
+                    crate::update::components::session_expired_message(&e).unwrap_or_else(|| {
+                        warn!(" Autoplay resume failed to play: {e:#}");
+                        play_failed_message(&e)
+                    })
+                }
+            },
+        )
+    }
+
+    /// The resume answered: a play shows on the next tick.
+    pub(crate) fn handle_autoplay_resumed(played: bool) -> Task<Message> {
+        if played {
+            debug!("Autoplay: resume played the batch's first song");
+            Task::done(Message::Playback(PlaybackMessage::Tick))
+        } else {
+            debug!("Autoplay: resume did nothing (something else plays or the row is gone)");
+            Task::none()
+        }
+    }
+
+    /// Drop a resume waiting for an Autoplay batch: the user started or
+    /// stopped playback themselves.
+    pub(crate) fn forget_autoplay_resume(&mut self) {
+        if std::mem::take(&mut self.autoplay.resume_pending) {
+            debug!(
+                "Autoplay: the pending resume is dropped (the user started or stopped playback)"
+            );
+        }
     }
 
     pub(crate) fn handle_toggle_sound_effects(&mut self) -> Task<Message> {
@@ -3084,6 +3370,13 @@ impl Nokkvi {
             }
             PlaybackMessage::ToggleConsume => self.handle_toggle_consume(),
             PlaybackMessage::ConsumeToggled(consume) => self.handle_consume_toggled(consume),
+            PlaybackMessage::ToggleAutoplay => self.handle_toggle_autoplay(),
+            PlaybackMessage::AutoplayFilled {
+                after_run_out,
+                fill,
+            } => self.handle_autoplay_filled(after_run_out, fill, std::time::Instant::now()),
+            PlaybackMessage::AutoplayCleared { removed } => self.handle_autoplay_cleared(removed),
+            PlaybackMessage::AutoplayResumed { played } => Self::handle_autoplay_resumed(played),
             PlaybackMessage::ToggleSoundEffects => self.handle_toggle_sound_effects(),
             PlaybackMessage::SfxVolumeChanged(vol) => self.handle_sfx_volume_changed(vol),
             PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),

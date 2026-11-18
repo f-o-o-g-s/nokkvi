@@ -10,6 +10,13 @@ All notable changes to this project will be documented in this file.
 - With nothing playing, Instant Mix plays songs like up to five songs Harbour picks from your recent, most played or random tracks.
 - Shift+A on the Instant Mix row adds the mix to the queue and skips songs already in it.
 - Instant Mix leaves out tracks under a minute and songs rated one star.
+- Autoplay, a new playback mode, adds 10 songs like your last few when at most one song is left after the playing one.
+- Autoplay toggles from its infinity button in the player bar, the modes menu, the `a` key, `nokkvi autoplay` or Settings → Playback.
+- Songs you add to the queue go ahead of the Autoplay songs that have not played yet, while shuffle is off.
+- Turning Autoplay off removes the songs it added that have not played yet.
+- When it finds no similar, same-genre or same-artist songs, Autoplay adds random songs from your library instead.
+- Autoplay waits while Repeat is on, and its button's tooltip says so.
+- If the queue runs out before a batch arrives, Autoplay plays the batch's first song when it lands.
 
 ### Changed
 

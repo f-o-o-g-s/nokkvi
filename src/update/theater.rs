@@ -150,6 +150,7 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::ToggleRandom
         | A::ToggleRepeat
         | A::ToggleConsume
+        | A::ToggleAutoplay
         | A::ToggleSoundEffects
         | A::CycleVisualization
         | A::NextVisualizerPreset

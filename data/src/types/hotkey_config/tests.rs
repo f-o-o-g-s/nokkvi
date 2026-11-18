@@ -109,6 +109,34 @@ fn lookup_matches_default() {
     assert_eq!(config.lookup(&KeyCode::F12, false, false, false), None);
 }
 
+/// Autoplay sits on bare `a`, beside Shift+A (Add to Queue), which keeps
+/// its own combo.
+#[test]
+fn bare_a_toggles_autoplay_and_shift_a_still_adds_to_queue() {
+    let config = HotkeyConfig::default();
+    assert_eq!(
+        config.lookup(&KeyCode::Char('a'), false, false, false),
+        Some(HotkeyAction::ToggleAutoplay)
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::Char('a'), true, false, false),
+        Some(HotkeyAction::AddToQueue)
+    );
+    assert_eq!(HotkeyAction::ToggleAutoplay.category(), "Playback");
+    assert_eq!(
+        HotkeyAction::ToggleAutoplay.display_name(),
+        "Toggle Autoplay"
+    );
+    assert_eq!(
+        HotkeyAction::ToggleAutoplay.to_toml_key(),
+        "toggle_autoplay"
+    );
+    assert_eq!(
+        HotkeyAction::from_toml_key("toggle_autoplay"),
+        Some(HotkeyAction::ToggleAutoplay)
+    );
+}
+
 #[test]
 fn ctrl_enter_maps_to_shuffle_play_without_shadowing_enter_or_shift_enter() {
     let config = HotkeyConfig::default();

@@ -95,7 +95,8 @@
 //! |---------------|-----------|------------------------------------------------|
 //! | `ping`        | respond   | `"pong"` (bare string).                        |
 //! | `status`      | act       | `{state,title,artist,album,position,duration,` |
-//! |               |           | `volume,random,repeat,consume,theater,`        |
+//! |               |           | `volume,random,repeat,consume,autoplay,`       |
+//! |               |           | `theater,`                                     |
 //! |               |           | `visualizer,preset,codec,bitrate,sample_rate,` |
 //! |               |           | `delivery,origin,seekable,seek_kind}` — pure   |
 //! |               |           | read. The last seven describe the stream that  |
@@ -124,6 +125,7 @@
 //! | `shuffle`     | act       | `{"random":bool}`; calls `handle_toggle_random`.|
 //! | `repeat`      | act       | `{"repeat":"off"\|"one"\|"queue"}`; cycles.     |
 //! | `consume`     | act       | `{"consume":bool}`; calls `handle_toggle_consume`.|
+//! | `autoplay`    | act       | `{"autoplay":bool}`; calls `handle_toggle_autoplay`.|
 //! | `clear-queue` | act       | `{"ok":true}`; `clear_queue_action()` (gate-free).|
 //! |               |           | Acts in Theater Mode too (whole queue, no row). |
 //! | `add-to-queue`| act       | `{"added":name\|null}`; enqueue the focused item|
@@ -531,6 +533,10 @@ define_commands! {
         let task = app.handle_toggle_consume();
         Ok((task, json!({ "consume": app.modes.consume })))
     }), help ("", "Toggle consume mode (drop played tracks)");
+    "autoplay"    => act      (|app: &mut Nokkvi| {
+        let task = app.handle_toggle_autoplay();
+        Ok((task, json!({ "autoplay": app.settings.autoplay_enabled })))
+    }), help ("", "Toggle Autoplay (add similar songs when the queue runs low)");
     // IPC bypasses handle_clear_queue's "not in queue view" gate — external
     // callers expect `nokkvi clear-queue` to clear from any view. The shared
     // clear_queue_action() lives in src/update/hotkeys/queue.rs.
@@ -868,6 +874,7 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "random": app.modes.random,
         "repeat": crate::state::repeat_token(app.modes.repeat_mode()),
         "consume": app.modes.consume,
+        "autoplay": app.settings.autoplay_enabled,
         "theater": app.theater.active,
         "visualizer": app.settings.visualization_mode.to_string(),
         "preset": app.milkdrop.on_screen,

@@ -195,6 +195,7 @@ fn policy_table_is_pinned() {
         A::ToggleRandom,
         A::ToggleRepeat,
         A::ToggleConsume,
+        A::ToggleAutoplay,
         A::ToggleSoundEffects,
         A::CycleVisualization,
         A::NextVisualizerPreset,

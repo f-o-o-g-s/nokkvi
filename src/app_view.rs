@@ -693,6 +693,7 @@ impl Nokkvi {
             is_repeat_mode: self.modes.repeat,
             is_repeat_queue_mode: self.modes.repeat_queue,
             is_consume_mode: self.modes.consume,
+            autoplay_enabled: self.settings.autoplay_enabled,
             eq_enabled: self.playback.eq_state.is_enabled(),
             sound_effects_enabled: self.settings.sound_effects_enabled,
             sfx_volume: self.settings.sfx_volume,

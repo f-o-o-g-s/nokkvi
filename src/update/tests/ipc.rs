@@ -94,6 +94,7 @@ fn every_verb_carries_a_data_payload_so_success_is_never_silent() {
         "shuffle",
         "repeat",
         "consume",
+        "autoplay",
         "clear-queue",
         "show",
     ] {
@@ -127,6 +128,15 @@ fn consume_echoes_resulting_state() {
     // the toggle flips it on and the response echoes the post-flip value.
     let resp = drive("consume");
     assert_eq!(resp.data, Some(json!({ "consume": true })));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn autoplay_echoes_resulting_state() {
+    // test_app() starts with Autoplay off in queue mode, so the toggle turns
+    // it on and the response echoes the post-flip value.
+    let resp = drive("autoplay");
+    assert_eq!(resp.data, Some(json!({ "autoplay": true })));
     assert!(resp.error.is_none());
 }
 
@@ -447,6 +457,7 @@ fn status_returns_a_full_state_snapshot() {
         "random",
         "repeat",
         "consume",
+        "autoplay",
         "theater",
         "visualizer",
         "preset",
@@ -465,6 +476,7 @@ fn status_returns_a_full_state_snapshot() {
     }
     // status is a pure read — it must NOT mutate modes (consume stays off).
     assert_eq!(data.get("consume"), Some(&json!(false)));
+    assert_eq!(data.get("autoplay"), Some(&json!(false)));
     assert_eq!(data.get("theater"), Some(&json!(false)));
     assert_eq!(data.get("visualizer"), Some(&json!("bars")));
     assert_eq!(data.get("preset"), Some(&serde_json::Value::Null));
@@ -904,6 +916,7 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "repeat",
         // Phase 2
         "consume",
+        "autoplay",
         "clear-queue",
         "add-to-queue",
         "remove-from-queue",

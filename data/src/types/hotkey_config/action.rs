@@ -239,6 +239,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_consume",
             default: KeyCombo::key(KeyCode::Char('c')),
         },
+        ToggleAutoplay {
+            display: "Toggle Autoplay",
+            description: "Toggle Autoplay (add similar songs when the queue runs low)",
+            category: "Playback",
+            toml_key: "toggle_autoplay",
+            settings_key: "hotkey.toggle_autoplay",
+            default: KeyCombo::key(KeyCode::Char('a')),
+        },
         ToggleSoundEffects {
             display: "Toggle SFX",
             description: "Enable or disable sound effects",
