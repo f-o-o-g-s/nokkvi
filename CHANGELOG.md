@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Harbour's new Instant Mix row keeps the playing song and replaces the rest of the queue with songs like it.
 - With nothing playing, Instant Mix plays songs like up to five songs Harbour picks from your recent, most played or random tracks.
+- Shift+A on the Instant Mix row adds the mix to the queue and skips songs already in it.
+- Instant Mix leaves out tracks under a minute and songs rated one star.
 
 ### Changed
 
