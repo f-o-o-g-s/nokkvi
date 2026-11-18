@@ -2497,6 +2497,17 @@ impl AppService {
         removed
     }
 
+    /// After the queue ran out and a batch landed, play its first row
+    /// (`first_entry_id` of [`crate::types::autoplay::AutoplayOutcome::Added`])
+    /// and continue into the rest of the batch, shuffle or not: no shuffle
+    /// re-anchor, so the played rows stay played. Plays only while no row is
+    /// current and the engine is stopped; `Ok(false)` when it did nothing
+    /// (the user started or cued something since, a station included, or
+    /// the row is gone). Not a queue replace.
+    pub async fn resume_into_autoplay(&self, entry_id: u64) -> Result<bool> {
+        self.playback.resume_into_autoplay(entry_id).await
+    }
+
     /// How many times playback ended because the queue had no next song
     /// ([`PlaybackController::queue_ran_out_epoch`]). The UI's tick carries
     /// it; Autoplay resumes playback when it moves.

@@ -165,6 +165,14 @@ impl QueueManager {
             .extend_rows(new_indices, shuffled_after, &mut rand::rng());
     }
 
+    /// [`Self::extend_order`] that ignores shuffle: the new rows go at the
+    /// end of the play order in their own sequence.
+    pub(crate) fn extend_order_in_sequence(&mut self, new_indices: std::ops::Range<usize>) {
+        self.queue
+            .order
+            .extend_rows(new_indices, None, &mut rand::rng());
+    }
+
     /// Remove a row index from the order array and adjust all
     /// indices that are > removed to account for the shift.
     pub(crate) fn remove_from_order(&mut self, removed_song_idx: usize) {

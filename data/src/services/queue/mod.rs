@@ -408,7 +408,19 @@ impl QueueManager {
     //  Queue Mutations
     // ══════════════════════════════════════════════════════════════════════
 
-    pub fn add_songs(&mut self, mut songs: Vec<Song>) -> NextTrackResetEffect {
+    pub fn add_songs(&mut self, songs: Vec<Song>) -> NextTrackResetEffect {
+        self.append_rows(songs, false)
+    }
+
+    /// [`Self::add_songs`]'s body. `tail_in_sequence` puts the new rows at
+    /// the end of the play order in their own sequence even under shuffle
+    /// (Autoplay's batch after the queue ran out); otherwise shuffle
+    /// scatters them after the cursor.
+    fn append_rows(
+        &mut self,
+        mut songs: Vec<Song>,
+        tail_in_sequence: bool,
+    ) -> NextTrackResetEffect {
         // Without shuffle the rows land at the end of the play order, so
         // when the cursor has a row after it the next song stays the same
         // and the prepared next track stays valid (a large play appends a
@@ -436,7 +448,11 @@ impl QueueManager {
         tx.pool.insert_many(songs);
 
         // Extend order array with new indices
-        tx.extend_order(start_idx..start_idx + count);
+        if tail_in_sequence {
+            tx.extend_order_in_sequence(start_idx..start_idx + count);
+        } else {
+            tx.extend_order(start_idx..start_idx + count);
+        }
         tx.commit_save_all().only_if(changes_next_track)
     }
 
@@ -730,11 +746,16 @@ impl QueueManager {
 
     /// Append songs as Autoplay rows: the [`Self::add_songs`] row, pool and
     /// order work, then the new rows are marked. Never goes ahead of
-    /// anything (that is [`Self::enqueue_songs`], for user appends).
+    /// anything (that is [`Self::enqueue_songs`], for user appends). With no
+    /// current row (the queue ran out) the rows go at the END of the play
+    /// order in their own sequence, shuffle or not, so playing the first one
+    /// without a re-anchor (`AppService::resume_into_autoplay`) continues
+    /// into exactly the batch and the played rows stay behind.
     pub fn append_autoplay_songs(&mut self, songs: Vec<Song>) -> AutoplayAppend {
         let first = self.next_entry_id;
         let count = songs.len() as u64;
-        let effect = self.add_songs(songs);
+        let after_run_out = self.queue.current_order.is_none();
+        let effect = self.append_rows(songs, after_run_out);
         let entry_ids: Vec<u64> = (first..first + count).collect();
         self.autoplay_entries.extend(entry_ids.iter().copied());
         AutoplayAppend { entry_ids, effect }
@@ -4584,5 +4605,39 @@ pub(crate) mod tests {
         assert_eq!(trail, vec![("h", false), ("x", true)], "history alone");
         let heard = qm.queued_or_heard_song_ids();
         assert!(heard.contains("h") && heard.contains("a") && heard.contains("x"));
+    }
+
+    /// After the queue ran out (no current row), a batch goes at the end of
+    /// the play order in its own sequence, shuffle or not; with a current
+    /// row under shuffle it still lands at random slots after the cursor.
+    #[test]
+    fn a_batch_after_a_run_out_sits_at_the_tail_of_the_play_order_in_sequence() {
+        for shuffle in [false, true] {
+            let songs: Vec<Song> = (0..8).map(|i| make_test_song(&format!("p{i}"))).collect();
+            let (mut qm, _t) = make_test_manager(songs, Some(0));
+            if shuffle {
+                let _ = qm.toggle_shuffle();
+            }
+            let _ = qm.reposition_to_index(None);
+            let played_order: Vec<usize> = qm.get_queue().order.to_vec();
+
+            let marked = autoplay(&mut qm, &["x", "y", "z"]);
+
+            let order = qm.get_queue().order.to_vec();
+            assert_eq!(
+                &order[..8],
+                &played_order[..],
+                "the played order is untouched"
+            );
+            let tail: Vec<u64> = order[8..]
+                .iter()
+                .filter_map(|&row| qm.entry_id_at(row))
+                .collect();
+            assert_eq!(
+                tail, marked,
+                "the batch, in its own sequence (shuffle {shuffle})"
+            );
+            assert_queue_invariants(&qm, "after a batch with no current row");
+        }
     }
 }
