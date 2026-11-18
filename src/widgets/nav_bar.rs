@@ -667,10 +667,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // the matching tray bg), flat mode shrinks to the bar's actual
     // content height so the open-state accent_bright pill doesn't escape
     // past the bar's top/bottom edges (flat mode has zero tray padding).
+    let flat_top_inset: f32 = if cfg!(target_os = "macos") { 2.0 } else { 0.0 };
     let cluster_pill_h = if theme::is_rounded_mode() {
         NAV_PILL_HEIGHT
     } else {
-        theme::nav_bar_height() - 1.0
+        theme::nav_bar_height() - 1.0 - flat_top_inset
     };
     let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
         HamburgerMenu::new(
@@ -1208,7 +1209,33 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // honest. Content fills `nav_bar_height() - 1`.
     let total_height = theme::nav_bar_height();
 
-    container(column![nav_content, bottom_separator])
+    // On macOS, AppKit's `_NSTitlebarDecorationView` composites a 1 pt
+    // translucent separator line over row y=0 of `contentView`. In flat mode
+    // (where `tray_padding.top == 0`), an active tab's `accent_fill()` at y=0
+    // bleeds underneath that titlebar separator and visually overlaps the
+    // system titlebar. Keeping 1 px of `bg0_hard()` at y=0 plus a 1 px
+    // `theme::border()` top separator cleanly divides the system titlebar from
+    // the flat nav bar without changing `total_height`.
+    let bar_column = if cfg!(target_os = "macos") && !theme::is_rounded_mode() {
+        let titlebar_guard: Element<'static, NavBarMessage> = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(theme::container_bg0_hard)
+            .boxed();
+        let top_separator: Element<'static, NavBarMessage> = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(move |_| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            })
+            .boxed();
+        column![titlebar_guard, top_separator, nav_content, bottom_separator]
+    } else {
+        column![nav_content, bottom_separator]
+    };
+
+    container(bar_column)
         .height(Length::Fixed(total_height))
         .boxed()
 }
