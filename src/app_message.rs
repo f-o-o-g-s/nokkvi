@@ -1464,14 +1464,11 @@ pub struct HarbourShelvesData {
     pub random_playlist: Option<nokkvi_data::backend::playlists::PlaylistUIViewData>,
 }
 
-/// Backend results for the Harbour home view. Each variant carries the
+/// Backend results for the Harbour home view. Each load carries the
 /// `generation` captured when its fetch was dispatched; the handler drops any
 /// result whose generation no longer matches `HarbourState::shelves_generation`
-/// (stale-load rejection, Similar-view precedent).
-#[expect(
-    clippy::enum_variant_names,
-    reason = "every variant is a loader result, so the shared Loaded postfix reads as intent"
-)]
+/// (stale-load rejection, Similar-view precedent). `InstantMixSettled` is the
+/// one ungated variant (its doc says why).
 #[derive(Debug, Clone)]
 pub enum HarbourLoaderMessage {
     /// The joined shelf fetch completed.
@@ -1504,6 +1501,12 @@ pub enum HarbourLoaderMessage {
         target: CollageTarget,
         results: Vec<(String, Vec<String>)>,
     },
+    /// An Instant Mix build ended, whatever its outcome (the play's or the
+    /// add's own message: a view switch, a toast, `SessionExpired`). Clears
+    /// the row's busy flag (`HarbourState::instant_mix_building`), then
+    /// handles the outcome. Not generation-gated: one build runs at a time
+    /// and `shell_task` already drops a settle from an ended session.
+    InstantMixSettled(Box<Message>),
 }
 
 /// Identifies the single overlay menu that may be open across the app.

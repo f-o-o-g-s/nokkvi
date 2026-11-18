@@ -1343,7 +1343,10 @@ impl AppService {
         qm.next_in_play_order().map(|song| song.id)
     }
 
-    async fn queue_song(&self, song_id: &str) -> Option<crate::types::song::Song> {
+    /// The queued `Song` for `song_id`, from the queue's song pool (the UI
+    /// holds only the projected rows). Harbour's Instant Mix seeds from the
+    /// playing song through it.
+    pub async fn queue_song(&self, song_id: &str) -> Option<crate::types::song::Song> {
         let qm = self.queue_service.queue_manager();
         let qm = qm.lock().await;
         qm.get_song(song_id).cloned()

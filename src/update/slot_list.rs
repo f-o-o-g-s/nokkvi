@@ -389,6 +389,17 @@ impl Nokkvi {
                             audio::SfxType::Escape
                         }
                     }
+                    // The Instant Mix row activates only with something to
+                    // mix from and no build running; otherwise the press
+                    // toasts or does nothing. Its handlers gate on this same
+                    // predicate.
+                    Some(crate::views::harbour::HarbourRow::InstantMix { from, .. }) => {
+                        if crate::views::harbour::instant_mix_runs(&self.harbour, from) {
+                            audio::SfxType::Enter
+                        } else {
+                            audio::SfxType::Escape
+                        }
+                    }
                     // A Hint row (keep-typing / searching / no matches)
                     // activates nothing — same escape cue as an empty list.
                     Some(crate::views::harbour::HarbourRow::Hint(_)) | None => {

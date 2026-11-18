@@ -6,7 +6,8 @@
 //!   artwork warm-up (shelf covers, genre quad tiles).
 //! - M4: card / genre play actions.
 //! - M5: the whole-library search fan-out + grouped results.
-//! - Later: the Random block's one-press draws (`play_random_kind`).
+//! - Later: the Random block's one-press draws (`play_random_kind`), and the
+//!   Instant Mix row (`play_instant_mix_row`, `add_instant_mix_row_to_queue`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -395,6 +396,70 @@ pub(super) fn random_kind_batch_payload(
     }
 }
 
+/// Wrap an Instant Mix build's outcome so its arrival clears the row's busy
+/// flag first (`HarbourLoaderMessage::InstantMixSettled`). A fn item, so it
+/// passes as the `settle` hook of `queue_play_task_settled` as is.
+fn instant_mix_settled(then: Message) -> Message {
+    Message::HarbourLoader(HarbourLoaderMessage::InstantMixSettled(Box::new(then)))
+}
+
+/// The message an Instant Mix add (Shift+A on the row) ends on: the count
+/// toast with a queue reload, as the entity adds do; a rejected session
+/// drops to login; "every song is already queued" is a warn (nothing went
+/// wrong, there was just nothing new to add); anything else is an error.
+pub(crate) fn instant_mix_added_message(result: anyhow::Result<usize>) -> Message {
+    use nokkvi_data::types::toast::{Toast, ToastLevel};
+
+    use crate::app_message::ToastMessage;
+
+    match result {
+        Ok(count) => Message::Toast(ToastMessage::PushThen(
+            Toast::new(
+                crate::update::components::songs_added_text(count),
+                ToastLevel::Success,
+            ),
+            Box::new(Message::LoadQueue),
+        )),
+        Err(e) => {
+            if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                return msg;
+            }
+            if e.root_cause().to_string() == nokkvi_data::backend::instant_mix::ALL_QUEUED_ERROR {
+                return Message::Toast(ToastMessage::Push(Toast::new(
+                    nokkvi_data::backend::instant_mix::ALL_QUEUED_ERROR,
+                    ToastLevel::Warning,
+                )));
+            }
+            tracing::error!(" Failed to add Instant Mix to queue: {e:#}");
+            Message::Toast(ToastMessage::Push(Toast::new(
+                format!("Failed to add Instant Mix to queue: {e}"),
+                ToastLevel::Error,
+            )))
+        }
+    }
+}
+
+/// The playing song's full `Song` for an Instant Mix seed, from the queue's
+/// song pool (the UI holds only projected rows). A song that left the queue
+/// since the row was drawn leaves nothing to mix from.
+async fn queued_mix_seed(
+    shell: &AppService,
+    song_id: &str,
+) -> anyhow::Result<nokkvi_data::types::song::Song> {
+    shell
+        .queue_song(song_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!(nokkvi_data::backend::instant_mix::NO_SEEDS_ERROR))
+}
+
+/// What an Instant Mix add seeds from, captured when Shift+A is pressed.
+enum MixSeeds {
+    /// The playing queue song, by id.
+    Playing(String),
+    /// The pre-drawn picks.
+    Picks(Vec<nokkvi_data::types::song::Song>),
+}
+
 impl Nokkvi {
     /// Dispatch a Harbour view message. Runs the shared chrome prologue first
     /// (SetOpenMenu / artwork-drag intercepts), then routes page actions.
@@ -469,6 +534,14 @@ impl Nokkvi {
                     return self
                         .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
                 }
+                // The Instant Mix row mixes from what its subtitle names.
+                // Ctrl+Enter's shuffle is ignored: the mix is already a
+                // blend, as the Random draws ignore it.
+                if let Some(HarbourRow::InstantMix { from, .. }) = center.and_then(|i| rows.get(i))
+                {
+                    let from = from.clone();
+                    return self.play_instant_mix_row(from);
+                }
                 // A RandomPlay row plays its pre-drawn pick — the one the row
                 // previews; only a shelves reload re-rolls it.
                 if let Some(HarbourRow::RandomPlay { kind }) = center.and_then(|i| rows.get(i)) {
@@ -508,6 +581,12 @@ impl Nokkvi {
                     Some(HarbourRow::ShelfPlay { id, .. }) => {
                         let id = *id;
                         self.add_harbour_shelf_to_queue(id)
+                    }
+                    // Shift+A appends the mix Enter would play, from the
+                    // same seeds.
+                    Some(HarbourRow::InstantMix { from, .. }) => {
+                        let from = from.clone();
+                        self.add_instant_mix_row_to_queue(from)
                     }
                     Some(
                         HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_),
@@ -562,7 +641,33 @@ impl Nokkvi {
             &self.harbour_page.collapsed,
             &self.trawl.mix,
             self.harbour_shelf_style(),
+            self.instant_mix_playing(),
         )
+    }
+
+    /// The queue song playing now, for the Instant Mix row: only while the
+    /// engine plays (not paused, not stopped) in queue mode (not internet
+    /// radio), resolved from the queue row under the play cursor
+    /// (`queue_current.entry_id`). Both the view and [`Self::harbour_rows`]
+    /// read it, so the row Enter resolves is the row on screen.
+    pub(crate) fn instant_mix_playing(&self) -> Option<crate::views::harbour::MixPlaying> {
+        if !self.playback.playing || self.playback.paused || !self.active_playback.is_queue() {
+            return None;
+        }
+        let entry_id = self.queue_current.entry_id?;
+        let row = self
+            .library
+            .queue_songs
+            .iter()
+            .find(|s| s.entry_id == entry_id)?;
+        Some(crate::views::harbour::MixPlaying {
+            song_id: row.id.clone(),
+            title: row.title.clone(),
+            artist: row.artist.clone(),
+            cover: row
+                .cover_key(self.settings.track_artwork)
+                .map(str::to_owned),
+        })
     }
 
     /// The freshly-built flattened Harbour rows plus the center index into them
@@ -679,6 +784,12 @@ impl Nokkvi {
                     None,
                 ),
             },
+            // The Instant Mix row previews the playing song's cover or the
+            // first seed's (`instant_mix_cover`, shared with the panel).
+            Some(HarbourRow::InstantMix { from, .. }) => (
+                crate::views::harbour::instant_mix_cover(&self.harbour, from),
+                None,
+            ),
             _ => (None, None),
         };
         let collage = self.harbour_center_collage_target(center);
@@ -770,8 +881,9 @@ impl Nokkvi {
                     },
                 )
             }
-            // The Trawl action row and hints preview no collection.
-            HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
+            // The Trawl and Instant Mix action rows and hints preview no
+            // collection.
+            HarbourRow::Trawl { .. } | HarbourRow::InstantMix { .. } | HarbourRow::Hint(_) => None,
         }
     }
 
@@ -880,6 +992,112 @@ impl Nokkvi {
             }
             _ => false,
         }
+    }
+
+    /// Enter on the Instant Mix row. A playing queue song keeps playing and
+    /// a mix of songs like it replaces the rest of the queue
+    /// (`continue_with_instant_mix`); otherwise the pre-drawn seeds' mix
+    /// replaces the queue (`play_instant_mix`). Both are queue-replacing
+    /// plays through the shared prologue: the continue drops every queued
+    /// row but the playing one, so the old Playing From header and a
+    /// still-running progressive load go as for any play, and the backend
+    /// falls back to a fresh play when nothing is current by the time the
+    /// server answers. Both land on the Queue view (whose entry reloads the
+    /// queue). The row stays busy until the outcome settles, whatever it
+    /// is; a press while busy does nothing.
+    fn play_instant_mix_row(&mut self, from: crate::views::harbour::MixFrom) -> Task<Message> {
+        use crate::views::harbour::MixFrom;
+
+        if let Some(task) = self.instant_mix_gate(&from) {
+            return task;
+        }
+        let to_queue = || Message::Navigation(NavigationMessage::SwitchView(View::Queue));
+        match from {
+            // Stopped by the gate above; kept as the defensive answer.
+            MixFrom::Nothing => self.instant_mix_nothing_toast(),
+            MixFrom::Playing(playing) => {
+                self.harbour.instant_mix_building = true;
+                let song_id = playing.song_id;
+                self.queue_play_task_settled(
+                    move |shell| async move {
+                        let seed = queued_mix_seed(&shell, &song_id).await?;
+                        shell.continue_with_instant_mix(seed).await.map(|_added| ())
+                    },
+                    to_queue,
+                    "Failed to play Instant Mix".into(),
+                    instant_mix_settled,
+                )
+            }
+            MixFrom::Seeds => {
+                self.harbour.instant_mix_building = true;
+                let seeds = self.harbour.instant_mix_seeds.clone();
+                self.queue_play_task_settled(
+                    move |shell| async move { shell.play_instant_mix(seeds).await },
+                    to_queue,
+                    "Failed to play Instant Mix".into(),
+                    instant_mix_settled,
+                )
+            }
+        }
+    }
+
+    /// Shift+A on the Instant Mix row: append the mix Enter would play, from
+    /// the same seeds (the playing song, or the picks), leaving out what is
+    /// already queued. Only adds, so no play prologue runs. Busy until it
+    /// settles, like Enter.
+    fn add_instant_mix_row_to_queue(
+        &mut self,
+        from: crate::views::harbour::MixFrom,
+    ) -> Task<Message> {
+        use crate::views::harbour::MixFrom;
+
+        if let Some(task) = self.instant_mix_gate(&from) {
+            return task;
+        }
+        let seeds = match from {
+            // Stopped by the gate above; kept as the defensive answer.
+            MixFrom::Nothing => return self.instant_mix_nothing_toast(),
+            MixFrom::Playing(playing) => MixSeeds::Playing(playing.song_id),
+            MixFrom::Seeds => MixSeeds::Picks(self.harbour.instant_mix_seeds.clone()),
+        };
+        self.harbour.instant_mix_building = true;
+        self.shell_task(
+            move |shell| async move {
+                let seeds = match seeds {
+                    MixSeeds::Playing(song_id) => vec![queued_mix_seed(&shell, &song_id).await?],
+                    MixSeeds::Picks(seeds) => seeds,
+                };
+                shell.add_instant_mix_to_queue(seeds).await
+            },
+            |result| instant_mix_settled(instant_mix_added_message(result)),
+        )
+    }
+
+    /// The gate both Instant Mix presses pass first, on the same predicate
+    /// the activate-SFX classifier reads (`instant_mix_runs`): a build
+    /// running ignores the press, nothing to mix from toasts. `None` lets
+    /// the press through.
+    fn instant_mix_gate(&mut self, from: &crate::views::harbour::MixFrom) -> Option<Task<Message>> {
+        if crate::views::harbour::instant_mix_runs(&self.harbour, from) {
+            return None;
+        }
+        if self.harbour.instant_mix_building {
+            Some(Task::none())
+        } else {
+            Some(self.instant_mix_nothing_toast())
+        }
+    }
+
+    /// The toast Enter or Shift+A on the Instant Mix row shows with nothing
+    /// to mix from, worded like the Random rows' no-pick toast: while the
+    /// shelves load that is the wait, afterwards the way out.
+    fn instant_mix_nothing_toast(&mut self) -> Task<Message> {
+        if self.harbour.shelves_loading {
+            self.toast_info("Still picking songs for the mix — try again in a moment");
+        } else {
+            self.toast_info("Nothing to mix from yet — play something or Refresh");
+        }
+        Task::none()
     }
 
     /// Play a resolved Harbour item target (guard radio-to-queue, reset context,
@@ -1445,6 +1663,9 @@ impl Nokkvi {
                         self.harbour.random_songs = data.random_songs;
                         self.harbour.random_genre = data.random_genre;
                         self.harbour.random_playlist = data.random_playlist;
+                        // Every shelves load re-rolls the Instant Mix seeds,
+                        // as it does the Random picks.
+                        self.harbour.draw_instant_mix_seeds();
                         // A fresh shelf load never moves the center, so no
                         // navigation event warms the centered row — without the
                         // explicit center warm the large column stays stuck on
@@ -1564,6 +1785,13 @@ impl Nokkvi {
                 }
                 // Warm the quad tiles now resolvable for these rows.
                 self.warm_harbour_search_artwork()
+            }
+            // Not generation-gated: one build runs at a time (a second press
+            // is ignored), `shell_task` drops a settle from an ended
+            // session, and logout clears the flag itself.
+            HarbourLoaderMessage::InstantMixSettled(then) => {
+                self.harbour.instant_mix_building = false;
+                self.update(*then)
             }
         }
     }

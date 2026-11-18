@@ -378,6 +378,44 @@ impl Nokkvi {
         F: FnOnce(nokkvi_data::backend::app_service::AppService, P) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
     {
+        self.queue_play_task_inner(prepare, play, on_ok, failure, std::convert::identity)
+    }
+
+    /// [`Self::queue_play_task`] for a caller that must hear back however
+    /// the play ends: every outcome (`on_ok`'s message, the failure toast,
+    /// the radio hand-back, a session expiry) reaches the root through
+    /// `settle`, which wraps it in the caller's own completion message.
+    /// Harbour's Instant Mix clears its busy flag that way; through the
+    /// plain builder a failed mix would leave the row on "Building…".
+    pub(crate) fn queue_play_task_settled<F, Fut>(
+        &mut self,
+        play: F,
+        on_ok: impl FnOnce() -> Message + Send + 'static,
+        failure: String,
+        settle: impl FnOnce(Message) -> Message + Send + 'static,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
+    {
+        self.queue_play_task_inner(|_| (), move |shell, ()| play(shell), on_ok, failure, settle)
+    }
+
+    /// The one body of the queue-replacing play builders: the prologue, the
+    /// play, and the outcome message handed through `settle`.
+    fn queue_play_task_inner<P, F, Fut>(
+        &mut self,
+        prepare: impl FnOnce(&mut Self) -> P,
+        play: F,
+        on_ok: impl FnOnce() -> Message + Send + 'static,
+        failure: String,
+        settle: impl FnOnce(Message) -> Message + Send + 'static,
+    ) -> Task<Message>
+    where
+        P: Send + 'static,
+        F: FnOnce(nokkvi_data::backend::app_service::AppService, P) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
+    {
         self.guard_play_action();
         self.enter_new_playback_context();
         let prepared = prepare(self);
@@ -400,13 +438,15 @@ impl Nokkvi {
                 };
                 (result, station_still_on)
             },
-            move |(result, station_still_on)| match result {
-                Ok(()) => on_ok(),
-                Err(e) => Self::queue_play_failure_message(
-                    &e,
-                    &failure,
-                    station_still_on.then_some(attempt),
-                ),
+            move |(result, station_still_on)| {
+                settle(match result {
+                    Ok(()) => on_ok(),
+                    Err(e) => Self::queue_play_failure_message(
+                        &e,
+                        &failure,
+                        station_still_on.then_some(attempt),
+                    ),
+                })
             },
         )
     }

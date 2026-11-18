@@ -283,6 +283,12 @@ impl Nokkvi {
             // So does an empty one-press shelf.
             HarbourRow::ShelfPlay { id, .. } => has_shelf_pick(&self.harbour, id)
                 .then(|| shelf_title(id, ShelfStyle::OnePress).to_string()),
+            // So does the Instant Mix row with nothing to mix from or a build
+            // running.
+            HarbourRow::InstantMix { from, .. } => {
+                crate::views::harbour::instant_mix_runs(&self.harbour, &from)
+                    .then(|| crate::views::harbour::INSTANT_MIX_TITLE.to_string())
+            }
             HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_) => None,
         }
     }
@@ -339,6 +345,7 @@ impl Nokkvi {
             | HarbourRow::ShelfPlay { .. }
             | HarbourRow::Section { .. }
             | HarbourRow::Trawl { .. }
+            | HarbourRow::InstantMix { .. }
             | HarbourRow::Hint(_) => None,
         }
     }

@@ -2637,6 +2637,7 @@ impl Nokkvi {
                         harbour: &self.harbour,
                         shelf_style: self.harbour_shelf_style(),
                         trawl_crate: &self.trawl.mix,
+                        instant_mix_playing: self.instant_mix_playing(),
                         album_art: &self.artwork.album_art.snapshot,
                         placeholders: &self.artwork.placeholders.snapshot,
                         large_artwork: &self.artwork.large_artwork.snapshot,

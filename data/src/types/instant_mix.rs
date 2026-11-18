@@ -164,6 +164,12 @@ pub fn pick_instant_mix_seeds<R: rand::Rng + ?Sized>(
     picked.into_iter().cloned().collect()
 }
 
+/// [`pick_instant_mix_seeds`] drawn with a fresh thread rng, for a caller
+/// with no rng of its own (the UI crate does not link `rand`).
+pub fn draw_instant_mix_seeds(pool: &[Song], count: usize) -> Vec<Song> {
+    pick_instant_mix_seeds(pool, count, &mut rand::rng())
+}
+
 #[cfg(test)]
 mod tests {
     use rand::{SeedableRng, rngs::StdRng};

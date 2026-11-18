@@ -809,9 +809,13 @@ fn activate_center_on_section_row_toggles_it() {
     let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
 
-    let total = app.harbour_rows().len();
-    // Row 0 is the RecentlyPlayed section header — focus it.
-    app.harbour_page.common.slot_list.set_selected(1, total);
+    // Focus the RecentlyPlayed section header (below the Trawl and Instant
+    // Mix action rows).
+    let (header, total) = section_row_index(&app, HarbourSectionId::RecentlyPlayed);
+    app.harbour_page
+        .common
+        .slot_list
+        .set_selected(header, total);
 
     let _ = app.handle_harbour(HarbourMessage::SlotList(
         SlotListPageMessage::ActivateCenter(false),
@@ -830,14 +834,21 @@ fn activate_center_on_item_row_transitions_radio_to_queue() {
     let mut app = expandable_app();
     app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
     seed_radio_playback(&mut app);
-    // Expand RecentlyPlayed so its item row exists at row 1.
+    // Expand RecentlyPlayed so its item row exists right under its header.
     app.harbour_page
         .collapsed
         .remove(&HarbourSectionId::RecentlyPlayed);
 
-    let total = app.harbour_rows().len();
-    // Row 1 is the album item under the expanded RecentlyPlayed section.
-    app.harbour_page.common.slot_list.set_selected(2, total);
+    let (header, total) = section_row_index(&app, HarbourSectionId::RecentlyPlayed);
+    // The song item under the expanded RecentlyPlayed section.
+    assert!(matches!(
+        app.harbour_rows().get(header + 1),
+        Some(HarbourRow::Item { .. })
+    ));
+    app.harbour_page
+        .common
+        .slot_list
+        .set_selected(header + 1, total);
 
     let _ = app.handle_harbour(HarbourMessage::SlotList(
         SlotListPageMessage::ActivateCenter(false),
@@ -1331,8 +1342,9 @@ fn expand_center_roundtrip_via_keyboard_center_toggles_both_ways() {
             .contains(&HarbourSectionId::RecentlyPlayed)
     );
 
-    // Keyboard-center the header (row 1: Trawl, then the header).
-    app.harbour_page.common.slot_list.viewport_offset = 1;
+    // Keyboard-center the header (below the Trawl and Instant Mix rows).
+    let (header, _) = section_row_index(&app, HarbourSectionId::RecentlyPlayed);
+    app.harbour_page.common.slot_list.viewport_offset = header;
 
     let _ = app.handle_harbour(HarbourMessage::ExpandCenter);
     assert!(
@@ -3550,5 +3562,601 @@ fn a_library_with_no_plays_has_nothing_recently_played() {
         ),
         None,
         "and the panel shows no never-played cover"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instant Mix row — the second slot in shelves mode, under the Trawl door
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The Instant Mix row's `(index, from, subtitle)` in a fresh row build.
+fn instant_mix_row(app: &crate::Nokkvi) -> Option<(usize, crate::views::harbour::MixFrom, String)> {
+    app.harbour_rows()
+        .into_iter()
+        .enumerate()
+        .find_map(|(i, r)| match r {
+            HarbourRow::InstantMix { from, subtitle } => Some((i, from, subtitle)),
+            _ => None,
+        })
+}
+
+fn instant_mix_subtitle_of(app: &crate::Nokkvi) -> String {
+    instant_mix_row(app)
+        .expect("the Instant Mix row is present")
+        .2
+}
+
+/// Play a queue song: a row under the play cursor, the engine playing, in
+/// queue mode. Returns its song id.
+fn play_queue_song(app: &mut crate::Nokkvi, title: &str, artist: &str) -> String {
+    let row = make_queue_song("q1", title, artist, "Album");
+    app.queue_current.entry_id = Some(row.entry_id);
+    app.library.queue_songs = vec![row];
+    app.playback.playing = true;
+    app.playback.paused = false;
+    app.active_playback = crate::state::ActivePlayback::Queue;
+    "q1".to_string()
+}
+
+/// `n` seed songs titled Alpha, Beta, Gamma, Delta, Epsilon.
+fn mix_seeds(n: usize) -> Vec<nokkvi_data::types::song::Song> {
+    ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]
+        .iter()
+        .take(n)
+        .enumerate()
+        .map(|(i, t)| make_recent_song(&format!("seed{i}"), t, "Seed Artist", &format!("sal{i}")))
+        .collect()
+}
+
+fn center_instant_mix(app: &mut crate::Nokkvi) {
+    let (idx, ..) = instant_mix_row(app).expect("the Instant Mix row is present");
+    let total = app.harbour_rows().len();
+    app.harbour_page.common.slot_list.set_selected(idx, total);
+}
+
+fn press_enter(app: &mut crate::Nokkvi) {
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::ActivateCenter(false),
+    ));
+}
+
+fn press_shift_a(app: &mut crate::Nokkvi) {
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::AddCenterToQueue,
+    ));
+}
+
+fn some_playlist_context() -> crate::state::ActivePlaylistContext {
+    crate::state::ActivePlaylistContext::from_playlist(&make_playlist("p1", "Old Playlist"))
+}
+
+#[test]
+fn instant_mix_row_is_second_in_shelves_mode() {
+    for mut app in [test_app(), expandable_app()] {
+        app.harbour.recently_played = vec![make_recent_song("s1", "Recent", "Artist", "al1")];
+        let rows = app.harbour_rows();
+        assert!(matches!(rows.first(), Some(HarbourRow::Trawl { .. })));
+        assert!(
+            matches!(rows.get(1), Some(HarbourRow::InstantMix { .. })),
+            "the Instant Mix row sits right under the Trawl door"
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|r| matches!(r, HarbourRow::InstantMix { .. }))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn instant_mix_row_absent_in_search_mode() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(2);
+    app.harbour.search_query = "night".into();
+    app.harbour.search_results =
+        Some(nokkvi_data::types::library_search::LibrarySearchResults::default());
+    assert!(
+        instant_mix_row(&app).is_none(),
+        "search mode shows results only"
+    );
+}
+
+#[test]
+fn instant_mix_subtitle_names_the_playing_song() {
+    use crate::views::harbour::MixFrom;
+    let mut app = test_app();
+    // Seeds are drawn too: a playing song wins over them.
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    let id = play_queue_song(&mut app, "Night Drive", "Kavinsky");
+
+    let (_, from, subtitle) = instant_mix_row(&app).expect("row");
+    assert_eq!(subtitle, "Songs like Night Drive • Kavinsky");
+    match from {
+        MixFrom::Playing(p) => {
+            assert_eq!(p.song_id, id);
+            assert_eq!(p.cover.as_deref(), Some("album_q1"));
+        }
+        other => panic!("a playing queue song is the source, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_paused_stopped_or_radio_song_is_not_the_mix_source() {
+    use crate::views::harbour::MixFrom;
+    let paused = |app: &mut crate::Nokkvi| {
+        app.playback.playing = false;
+        app.playback.paused = true;
+    };
+    let stopped = |app: &mut crate::Nokkvi| {
+        app.playback.playing = false;
+        app.playback.paused = false;
+    };
+    let radio = |app: &mut crate::Nokkvi| seed_radio_playback(app);
+    let no_row = |app: &mut crate::Nokkvi| app.queue_current.entry_id = None;
+    for (what, change) in [
+        ("paused", &paused as &dyn Fn(&mut crate::Nokkvi)),
+        ("stopped", &stopped),
+        ("radio", &radio),
+        ("no current row", &no_row),
+    ] {
+        let mut app = test_app();
+        app.harbour.instant_mix_seeds = mix_seeds(2);
+        play_queue_song(&mut app, "Night Drive", "Kavinsky");
+        change(&mut app);
+        let (_, from, subtitle) = instant_mix_row(&app).expect("row");
+        assert_eq!(from, MixFrom::Seeds, "{what}: the seeds are the source");
+        assert_eq!(subtitle, "Like Alpha and Beta", "{what}");
+    }
+}
+
+#[test]
+fn instant_mix_subtitle_names_the_seeds_for_one_two_and_five() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(1);
+    assert_eq!(instant_mix_subtitle_of(&app), "Like Alpha • Seed Artist");
+    app.harbour.instant_mix_seeds = mix_seeds(2);
+    assert_eq!(instant_mix_subtitle_of(&app), "Like Alpha and Beta");
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    assert_eq!(instant_mix_subtitle_of(&app), "Like Alpha, Beta and 1 more");
+    app.harbour.instant_mix_seeds = mix_seeds(5);
+    assert_eq!(instant_mix_subtitle_of(&app), "Like Alpha, Beta and 3 more");
+}
+
+#[test]
+fn instant_mix_subtitle_without_seeds_says_so() {
+    use crate::views::harbour::MixFrom;
+    let mut app = test_app();
+    app.harbour.shelves_loading = true;
+    let (_, from, subtitle) = instant_mix_row(&app).expect("row");
+    assert_eq!(from, MixFrom::Nothing);
+    assert_eq!(subtitle, "Picking songs to mix from…");
+
+    app.harbour.shelves_loading = false;
+    assert_eq!(
+        instant_mix_subtitle_of(&app),
+        "Nothing to mix from yet — play something or Refresh"
+    );
+}
+
+#[test]
+fn instant_mix_subtitle_reads_building_in_both_cases() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(2);
+    app.harbour.instant_mix_building = true;
+    assert_eq!(instant_mix_subtitle_of(&app), "Building…");
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    assert_eq!(instant_mix_subtitle_of(&app), "Building…");
+}
+
+#[test]
+fn enter_on_the_seeds_case_starts_a_queue_replacing_play() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    seed_radio_playback(&mut app);
+    app.active_playlist_info = Some(some_playlist_context());
+    center_instant_mix(&mut app);
+
+    press_enter(&mut app);
+
+    assert!(app.harbour.instant_mix_building, "the row is busy");
+    assert!(
+        matches!(app.active_playback, crate::state::ActivePlayback::Queue),
+        "the play prologue ran: radio hands over to the queue"
+    );
+    assert!(
+        app.active_playlist_info.is_none(),
+        "the old Playing From header goes with the queue it named"
+    );
+    assert!(app.toast.toasts.is_empty(), "no toast until it settles");
+}
+
+#[test]
+fn enter_on_the_playing_case_starts_a_continue_and_drops_the_playlist_header() {
+    let mut app = test_app();
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    app.active_playlist_info = Some(some_playlist_context());
+    center_instant_mix(&mut app);
+
+    press_enter(&mut app);
+
+    assert!(app.harbour.instant_mix_building, "the row is busy");
+    assert!(
+        app.active_playlist_info.is_none(),
+        "everything after the playing song is replaced, so the playlist \
+         label no longer names the queue"
+    );
+}
+
+#[test]
+fn ctrl_enter_on_instant_mix_is_the_same_press() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(2);
+    center_instant_mix(&mut app);
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::ActivateCenter(true),
+    ));
+    assert!(app.harbour.instant_mix_building);
+}
+
+#[test]
+fn shift_a_on_instant_mix_starts_an_add_in_both_cases() {
+    // Seeds: an add, not a play, so radio keeps streaming.
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    seed_radio_playback(&mut app);
+    app.active_playlist_info = Some(some_playlist_context());
+    center_instant_mix(&mut app);
+    press_shift_a(&mut app);
+    assert!(app.harbour.instant_mix_building, "the row is busy");
+    assert!(
+        matches!(app.active_playback, crate::state::ActivePlayback::Radio(_)),
+        "an add runs no play prologue"
+    );
+    assert!(app.active_playlist_info.is_some(), "and keeps the header");
+
+    // Playing song.
+    let mut app = test_app();
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    center_instant_mix(&mut app);
+    press_shift_a(&mut app);
+    assert!(app.harbour.instant_mix_building, "the row is busy");
+}
+
+#[test]
+fn a_second_press_while_building_does_nothing() {
+    for playing in [false, true] {
+        let mut app = test_app();
+        app.harbour.instant_mix_seeds = mix_seeds(2);
+        if playing {
+            play_queue_song(&mut app, "Night Drive", "Kavinsky");
+        } else {
+            seed_radio_playback(&mut app);
+        }
+        app.harbour.instant_mix_building = true;
+        app.active_playlist_info = Some(some_playlist_context());
+        center_instant_mix(&mut app);
+
+        press_enter(&mut app);
+        press_shift_a(&mut app);
+
+        assert!(app.harbour.instant_mix_building, "still the first build");
+        assert!(
+            app.active_playlist_info.is_some(),
+            "playing={playing}: no second prologue"
+        );
+        if !playing {
+            assert!(
+                matches!(app.active_playback, crate::state::ActivePlayback::Radio(_)),
+                "no second radio guard"
+            );
+        }
+        assert!(
+            app.toast.toasts.is_empty(),
+            "playing={playing}: and no toast"
+        );
+        assert!(!crate::views::harbour::instant_mix_runs(
+            &app.harbour,
+            &instant_mix_row(&app).expect("row").1
+        ));
+    }
+}
+
+#[test]
+fn enter_with_nothing_to_mix_from_toasts_and_plays_nothing() {
+    use crate::views::harbour::instant_mix_runs;
+    for loading in [true, false] {
+        let mut app = test_app();
+        app.harbour.shelves_loading = loading;
+        seed_radio_playback(&mut app);
+        center_instant_mix(&mut app);
+
+        let (_, from, _) = instant_mix_row(&app).expect("row");
+        assert!(
+            !instant_mix_runs(&app.harbour, &from),
+            "the activate-SFX classifier's predicate: activates nothing"
+        );
+
+        press_enter(&mut app);
+        assert!(!app.harbour.instant_mix_building);
+        assert!(
+            matches!(app.active_playback, crate::state::ActivePlayback::Radio(_)),
+            "no play prologue"
+        );
+        let msg = app
+            .toast
+            .toasts
+            .front()
+            .map(|t| t.message.clone())
+            .expect("the user is told why");
+        if loading {
+            assert!(msg.contains("Still picking"), "{msg}");
+        } else {
+            assert!(msg.contains("Nothing to mix from"), "{msg}");
+        }
+
+        app.toast.toasts.clear();
+        press_shift_a(&mut app);
+        assert!(!app.harbour.instant_mix_building);
+        assert!(!app.toast.toasts.is_empty(), "Shift+A explains itself too");
+    }
+}
+
+#[test]
+fn instant_mix_runs_with_a_source_and_no_build() {
+    use crate::views::harbour::instant_mix_runs;
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(1);
+    let (_, from, _) = instant_mix_row(&app).expect("row");
+    assert!(instant_mix_runs(&app.harbour, &from));
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    let (_, from, _) = instant_mix_row(&app).expect("row");
+    assert!(instant_mix_runs(&app.harbour, &from));
+}
+
+#[test]
+fn every_settle_clears_the_busy_flag() {
+    use nokkvi_data::backend::instant_mix::NOTHING_SIMILAR_ERROR;
+
+    use crate::app_message::{Message, NavigationMessage};
+
+    let outcomes = [
+        // The play's success.
+        Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+        // The add's success.
+        crate::update::harbour::instant_mix_added_message(Ok(12)),
+        // A failed play, as `queue_play_task` maps it.
+        crate::Nokkvi::queue_play_failure_message(
+            &anyhow::anyhow!(NOTHING_SIMILAR_ERROR),
+            "Failed to play Instant Mix",
+            None,
+        ),
+        // A rejected session.
+        Message::SessionExpired,
+    ];
+    for outcome in outcomes {
+        let label = format!("{outcome:?}");
+        let mut app = test_app();
+        app.harbour.instant_mix_building = true;
+        let _ =
+            app.handle_harbour_loader(HarbourLoaderMessage::InstantMixSettled(Box::new(outcome)));
+        assert!(!app.harbour.instant_mix_building, "cleared after {label}");
+    }
+}
+
+#[test]
+fn a_failed_mix_clears_the_flag_and_toasts_the_reason() {
+    use nokkvi_data::backend::instant_mix::NOTHING_SIMILAR_ERROR;
+    let mut app = test_app();
+    app.harbour.instant_mix_building = true;
+    let failed = crate::Nokkvi::queue_play_failure_message(
+        &anyhow::anyhow!(NOTHING_SIMILAR_ERROR),
+        "Failed to play Instant Mix",
+        None,
+    );
+    let _ = app.handle_harbour_loader(HarbourLoaderMessage::InstantMixSettled(Box::new(failed)));
+
+    assert!(!app.harbour.instant_mix_building);
+    let toast = app.toast.toasts.front().expect("the reason is toasted");
+    assert!(
+        toast.message.contains(NOTHING_SIMILAR_ERROR),
+        "{}",
+        toast.message
+    );
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Error);
+}
+
+#[test]
+fn instant_mix_added_message_maps_each_outcome() {
+    use nokkvi_data::{
+        backend::instant_mix::{ALL_QUEUED_ERROR, NOTHING_SIMILAR_ERROR},
+        types::{error::NokkviError, toast::ToastLevel},
+    };
+
+    use crate::{
+        app_message::{Message, ToastMessage},
+        update::harbour::instant_mix_added_message,
+    };
+
+    match instant_mix_added_message(Ok(3)) {
+        Message::Toast(ToastMessage::PushThen(toast, then)) => {
+            assert_eq!(toast.message, "Added 3 songs to queue");
+            assert_eq!(toast.level, ToastLevel::Success);
+            assert!(matches!(*then, Message::LoadQueue), "the queue reloads");
+        }
+        other => panic!("success toasts the count and reloads: {other:?}"),
+    }
+    match instant_mix_added_message(Err(anyhow::anyhow!(ALL_QUEUED_ERROR))) {
+        Message::Toast(ToastMessage::Push(toast)) => {
+            assert_eq!(toast.message, ALL_QUEUED_ERROR);
+            assert_eq!(toast.level, ToastLevel::Warning, "a warn, not an error");
+        }
+        other => panic!("{other:?}"),
+    }
+    match instant_mix_added_message(Err(anyhow::anyhow!(NOTHING_SIMILAR_ERROR))) {
+        Message::Toast(ToastMessage::Push(toast)) => {
+            assert!(toast.message.contains(NOTHING_SIMILAR_ERROR));
+            assert_eq!(toast.level, ToastLevel::Error);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        instant_mix_added_message(Err(anyhow::Error::new(NokkviError::Unauthorized))),
+        Message::SessionExpired
+    ));
+}
+
+#[test]
+fn shelves_load_redraws_the_seeds_from_recently_played_first() {
+    use crate::state::InstantMixPool;
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(5);
+    let generation = app.harbour.shelves_generation.current();
+
+    let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
+        generation,
+        result: Ok(shelves_with_albums()),
+    });
+
+    let ids: Vec<&str> = app
+        .harbour
+        .instant_mix_seeds
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["s1"],
+        "the stale seeds are replaced from Recently Played"
+    );
+    assert_eq!(
+        app.harbour.instant_mix_pool,
+        Some(InstantMixPool::RecentlyPlayed)
+    );
+}
+
+#[test]
+fn seeds_fall_back_to_most_played_then_random_songs() {
+    use crate::state::InstantMixPool;
+
+    let load = |data: Box<HarbourShelvesData>| {
+        let mut app = test_app();
+        let generation = app.harbour.shelves_generation.current();
+        let _ = app.handle_harbour_loader(HarbourLoaderMessage::ShelvesLoaded {
+            generation,
+            result: Ok(data),
+        });
+        let ids: Vec<String> = app
+            .harbour
+            .instant_mix_seeds
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        (ids, app.harbour.instant_mix_pool)
+    };
+
+    let mut played = make_recent_song("mp1", "Played", "Artist", "al2");
+    played.play_count = Some(4);
+    let mut never = make_recent_song("mp2", "Never", "Other", "al3");
+    never.play_count = Some(0);
+
+    let mut data = shelves_with_albums();
+    data.recently_played.clear();
+    data.most_played_songs = vec![played, never.clone()];
+    assert_eq!(
+        load(data),
+        (vec!["mp1".to_string()], Some(InstantMixPool::MostPlayed)),
+        "no recent plays: the played Most Played songs"
+    );
+
+    let mut data = shelves_with_albums();
+    data.recently_played.clear();
+    data.most_played_songs = vec![never];
+    assert_eq!(
+        load(data),
+        (vec!["rs1".to_string()], Some(InstantMixPool::Random)),
+        "no plays at all: the Random Songs draw"
+    );
+
+    let mut data = shelves_with_albums();
+    data.recently_played.clear();
+    data.random_songs.clear();
+    assert_eq!(
+        load(data),
+        (Vec::new(), None),
+        "an empty library draws none"
+    );
+}
+
+#[test]
+fn reset_for_session_clears_the_seeds_and_the_busy_flag() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    app.harbour.instant_mix_pool = Some(crate::state::InstantMixPool::Random);
+    app.harbour.instant_mix_building = true;
+
+    let _ = app.reset_session_state();
+
+    assert!(app.harbour.instant_mix_seeds.is_empty());
+    assert_eq!(app.harbour.instant_mix_pool, None);
+    assert!(!app.harbour.instant_mix_building);
+}
+
+#[test]
+fn invalidate_shelves_drops_the_seeds_but_not_a_running_build() {
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    app.harbour.instant_mix_pool = Some(crate::state::InstantMixPool::Random);
+    app.harbour.instant_mix_building = true;
+
+    app.harbour.invalidate_shelves();
+
+    assert!(
+        app.harbour.instant_mix_seeds.is_empty(),
+        "scope-stale seeds go"
+    );
+    assert_eq!(app.harbour.instant_mix_pool, None);
+    assert!(
+        app.harbour.instant_mix_building,
+        "the running build's settle still clears it"
+    );
+}
+
+#[test]
+fn centering_instant_mix_warms_the_cover_it_previews() {
+    // Seeds: the first seed's cover.
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    warm_center_matching(&mut app, |r| matches!(r, HarbourRow::InstantMix { .. }));
+    assert_eq!(app.artwork.loading_large_artwork.as_deref(), Some("sal0"));
+
+    // Playing: the playing song's cover.
+    let mut app = test_app();
+    app.harbour.instant_mix_seeds = mix_seeds(3);
+    play_queue_song(&mut app, "Night Drive", "Kavinsky");
+    warm_center_matching(&mut app, |r| matches!(r, HarbourRow::InstantMix { .. }));
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("album_q1")
+    );
+}
+
+#[test]
+fn the_focused_row_name_follows_what_shift_a_adds() {
+    let mut app = test_app();
+    app.current_view = View::Harbour;
+    center_instant_mix(&mut app);
+    assert!(
+        app.center_item().is_none(),
+        "nothing to mix from, nothing named"
+    );
+
+    app.harbour.instant_mix_seeds = mix_seeds(2);
+    assert!(
+        matches!(
+            app.center_item(),
+            Some(crate::update::hotkeys::CenterItem::Named(name)) if name == "Instant Mix"
+        ),
+        "the row is named once it has seeds"
     );
 }

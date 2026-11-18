@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Harbour's new Instant Mix row keeps the playing song and replaces the rest of the queue with songs like it.
+- With nothing playing, Instant Mix plays songs like up to five songs Harbour picks from your recent, most played or random tracks.
+
 ### Changed
 
 - Most of the GPU memory the Bars, Lines or Scope visualizer takes in fullscreen Theater Mode is now freed once it is off screen.

@@ -73,6 +73,21 @@ pub struct HarbourState {
     /// checks the CACHE rather than the pick's id.
     pub random_playlist: Option<PlaylistUIViewData>,
 
+    // --- Instant Mix (the row under the Trawl door) ---
+    /// Seed songs the Instant Mix row mixes from when no queue song is
+    /// playing. Pre-drawn on every shelves load ([`Self::draw_instant_mix_seeds`]),
+    /// like the Random picks, so the row previews exactly what Enter mixes
+    /// from and the Refresh hotkey re-rolls them.
+    pub instant_mix_seeds: Vec<Song>,
+    /// The pool [`Self::instant_mix_seeds`] came from (the preview pill
+    /// names it); `None` with no seeds.
+    pub instant_mix_pool: Option<InstantMixPool>,
+    /// A mix is being built: the row reads "Building…" and ignores a second
+    /// Enter or Shift+A. Set when one is dispatched, cleared by its
+    /// `HarbourLoaderMessage::InstantMixSettled` on every outcome and by
+    /// [`Self::reset_for_session`].
+    pub instant_mix_building: bool,
+
     // --- Shelf load lifecycle ---
     /// A shelf load is in flight.
     pub shelves_loading: bool,
@@ -161,6 +176,47 @@ impl HarbourState {
         out
     }
 
+    /// Re-draw the Instant Mix seeds from the shelves just loaded: up to
+    /// [`INSTANT_MIX_SEEDS`] songs (one per artist where it can,
+    /// `pick_instant_mix_seeds`) from the first pool that yields any, in the
+    /// order Recently Played, Most Played Tracks (played songs only: the
+    /// play-count sort tails off into never-played ones), the Random Songs
+    /// draw. A pool of only one-star songs yields none and falls through.
+    ///
+    /// [`INSTANT_MIX_SEEDS`]: nokkvi_data::types::instant_mix::INSTANT_MIX_SEEDS
+    pub fn draw_instant_mix_seeds(&mut self) {
+        use nokkvi_data::types::instant_mix::{INSTANT_MIX_SEEDS, draw_instant_mix_seeds};
+
+        let played: Vec<Song> = self
+            .most_played_songs
+            .iter()
+            .filter(|s| s.play_count.unwrap_or(0) > 0)
+            .cloned()
+            .collect();
+        let pools = [
+            (
+                InstantMixPool::RecentlyPlayed,
+                self.recently_played.as_slice(),
+            ),
+            (InstantMixPool::MostPlayed, played.as_slice()),
+            (InstantMixPool::Random, self.random_songs.as_slice()),
+        ];
+        let drawn = pools.into_iter().find_map(|(pool, songs)| {
+            let seeds = draw_instant_mix_seeds(songs, INSTANT_MIX_SEEDS);
+            (!seeds.is_empty()).then_some((pool, seeds))
+        });
+        match drawn {
+            Some((pool, seeds)) => {
+                self.instant_mix_seeds = seeds;
+                self.instant_mix_pool = Some(pool);
+            }
+            None => {
+                self.instant_mix_seeds.clear();
+                self.instant_mix_pool = None;
+            }
+        }
+    }
+
     /// Drop all shelf data and bump the generations so any in-flight shelf
     /// load or search fan-out is discarded. Used when the library filter
     /// changes — everything must refetch against the new scope.
@@ -181,6 +237,10 @@ impl HarbourState {
         self.random_songs.clear();
         self.random_genre = None;
         self.random_playlist = None;
+        // Drawn from the shelves, so scope-stale with them. A mix already
+        // building keeps its flag: its settle message still clears it.
+        self.instant_mix_seeds.clear();
+        self.instant_mix_pool = None;
         self.shelves_loading = false;
         self.shelves_generation.bump();
         // The active search's results are scope-stale too; a bumped generation
@@ -202,6 +262,17 @@ impl HarbourState {
             ..Self::default()
         };
     }
+}
+
+/// The Harbour pool the Instant Mix seeds were drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstantMixPool {
+    /// The Recently Played shelf's songs.
+    RecentlyPlayed,
+    /// The Most Played Tracks pool's played songs.
+    MostPlayed,
+    /// The Random Songs draw.
+    Random,
 }
 
 /// The Harbour Trawl panel's procedural scene: the trawling longship and the

@@ -10,7 +10,10 @@
 //! playlists, genres, and search results under one list.
 //!
 //! Two modes under a stable root:
-//! - **Shelves** (empty search): the discovery shelves, Recently Played/Added
+//! - **Shelves** (empty search): two action rows lead, the Trawl door and
+//!   [`HarbourRow::InstantMix`] (songs like the playing queue song, or like
+//!   seeds pre-drawn with the shelves; [`MixFrom`]). Then the discovery
+//!   shelves, Recently Played/Added
 //!   and the play-gated Most Played group, in one of two [`ShelfStyle`]s. By
 //!   default each is ONE row that plays what it shows in one press
 //!   ([`HarbourRow::ShelfPlay`], [`shelf_play_target`]); with Expandable
@@ -415,6 +418,145 @@ pub(crate) fn section_header_subtitle(
     }
 }
 
+/// The Instant Mix row's glyph (art square and pill eyebrow), registered in
+/// both icon sets.
+pub(crate) const INSTANT_MIX_ICON: &str = "assets/icons/sparkles.svg";
+
+/// The Instant Mix row's title (also its name in the IPC focused-row reply).
+pub(crate) const INSTANT_MIX_TITLE: &str = "Instant Mix";
+
+/// The queue song playing now, as the Instant Mix row needs it: a mix of
+/// songs like it continues the queue (`AppService::continue_with_instant_mix`).
+/// Built by `Nokkvi::instant_mix_playing` only while a queue song plays
+/// (not paused, not stopped, not internet radio).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MixPlaying {
+    pub song_id: String,
+    pub title: String,
+    pub artist: String,
+    /// The song's cover key (`SongCover::cover_key` under Track Artwork):
+    /// the panel's cover.
+    pub cover: Option<String>,
+}
+
+/// What Enter on the Instant Mix row mixes from. ONE resolution, made by
+/// [`build_harbour_rows`], read by the subtitle, the panel, Enter and
+/// Shift+A, so the row always says what a press runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MixFrom {
+    /// A queue song is playing: it keeps playing and songs like it replace
+    /// the rest of the queue.
+    Playing(MixPlaying),
+    /// The seeds pre-drawn on the last shelves load
+    /// (`HarbourState::instant_mix_seeds`, non-empty): their mix replaces
+    /// the queue.
+    Seeds,
+    /// Nothing to mix from: no song plays and no seeds are drawn (shelves
+    /// still loading, an empty library, or every pool song rated one star).
+    Nothing,
+}
+
+/// Whether Enter or Shift+A on the Instant Mix row starts a build. ONE
+/// predicate, read by the activate-SFX classifier (`update::slot_list`), the
+/// IPC focused-row name and both handlers' gate (`instant_mix_gate`), so the
+/// "activates nothing" cue agrees with what a press does: nothing while a
+/// build runs, a toast with nothing to mix from.
+pub(crate) fn instant_mix_runs(harbour: &crate::state::HarbourState, from: &MixFrom) -> bool {
+    !harbour.instant_mix_building && !matches!(from, MixFrom::Nothing)
+}
+
+/// The Instant Mix row's subtitle: "Building…" while a mix is built,
+/// otherwise what Enter mixes from (the playing song, or the seeds by name).
+pub(crate) fn instant_mix_subtitle(harbour: &crate::state::HarbourState, from: &MixFrom) -> String {
+    if harbour.instant_mix_building {
+        return "Building…".to_string();
+    }
+    match from {
+        MixFrom::Playing(p) => format!(
+            "Songs like {}",
+            join_facts(vec![
+                Some(p.title.clone()),
+                (!p.artist.is_empty()).then(|| p.artist.clone()),
+            ])
+        ),
+        MixFrom::Seeds => seeds_phrase(&harbour.instant_mix_seeds),
+        MixFrom::Nothing if harbour.shelves_loading => "Picking songs to mix from…".to_string(),
+        MixFrom::Nothing => "Nothing to mix from yet — play something or Refresh".to_string(),
+    }
+}
+
+/// The seeds named for the row: one is "Like <Title> • <Artist>", two are
+/// "Like <A> and <B>", more name the first two and count the rest ("Like
+/// <A>, <B> and 3 more"), so the line stays readable at five.
+fn seeds_phrase(seeds: &[Song]) -> String {
+    match seeds {
+        [] => String::new(),
+        [one] => format!(
+            "Like {}",
+            join_facts(vec![
+                Some(one.title.clone()),
+                (!one.artist.is_empty()).then(|| one.artist.clone()),
+            ])
+        ),
+        [a, b] => format!("Like {} and {}", a.title, b.title),
+        [a, b, rest @ ..] => format!("Like {}, {} and {} more", a.title, b.title, rest.len()),
+    }
+}
+
+/// The cover the centred Instant Mix row's panel shows, and the one the
+/// handler warms: the playing song's, or the first seed's. Shared so the
+/// two cannot disagree.
+pub(crate) fn instant_mix_cover(
+    harbour: &crate::state::HarbourState,
+    from: &MixFrom,
+) -> Option<String> {
+    match from {
+        MixFrom::Playing(p) => p.cover.clone(),
+        MixFrom::Seeds => harbour.instant_mix_seeds.first().and_then(song_cover),
+        MixFrom::Nothing => None,
+    }
+}
+
+/// The centred Instant Mix row's pill: (title, meta). The playing case says
+/// that song plays on and the queue after it is replaced; the seeds case
+/// names the pool they came from and every seed.
+fn instant_mix_pill_text(harbour: &crate::state::HarbourState, from: &MixFrom) -> (String, String) {
+    use crate::state::InstantMixPool;
+    match from {
+        MixFrom::Playing(p) => (
+            format!("Songs like {}", p.title),
+            join_facts(vec![
+                (!p.artist.is_empty()).then(|| p.artist.clone()),
+                Some("Keeps playing, the queue after it is replaced".to_string()),
+            ]),
+        ),
+        MixFrom::Seeds => {
+            let n = harbour.instant_mix_seeds.len();
+            let title = match harbour.instant_mix_pool {
+                Some(InstantMixPool::RecentlyPlayed) | None => {
+                    format!("Songs like {n} of your recent plays")
+                }
+                Some(InstantMixPool::MostPlayed) => format!("Songs like {n} of your most played"),
+                Some(InstantMixPool::Random) => format!(
+                    "Songs like {n} random {}",
+                    if n == 1 { "pick" } else { "picks" }
+                ),
+            };
+            let names = harbour
+                .instant_mix_seeds
+                .iter()
+                .map(|s| s.title.clone())
+                .collect::<Vec<_>>()
+                .join(" • ");
+            (title, names)
+        }
+        MixFrom::Nothing => (
+            INSTANT_MIX_TITLE.to_string(),
+            instant_mix_subtitle(harbour, from),
+        ),
+    }
+}
+
 /// One flattened Harbour row. The single source of row order is
 /// [`build_harbour_rows`], consumed by both the view (render) and the update
 /// handler (which resolves the centered row into an action).
@@ -429,6 +571,14 @@ pub(crate) enum HarbourRow {
         seeds: usize,
         /// Active blend, the subtitle's second fact.
         blend: nokkvi_data::types::trawl::TrawlBlend,
+    },
+    /// The Instant Mix action row (second slot in shelves mode, right under
+    /// the Trawl door; absent during search). Enter mixes songs like what
+    /// `from` names, Shift+A appends that mix; deliberately NOT a Section.
+    InstantMix {
+        from: MixFrom,
+        /// [`instant_mix_subtitle`], resolved once with the row.
+        subtitle: String,
     },
     /// A collapsible section header. `see_all` is `Some` for search groups
     /// (routes to the full library view) and `None` for shelves.
@@ -495,6 +645,7 @@ pub(crate) fn harbour_item_count(rows: &[HarbourRow]) -> usize {
         .map(|r| match r {
             HarbourRow::Section { count, .. } | HarbourRow::ShelfPlay { count, .. } => *count,
             HarbourRow::Trawl { .. }
+            | HarbourRow::InstantMix { .. }
             | HarbourRow::Item { .. }
             | HarbourRow::RandomPlay { .. }
             | HarbourRow::Hint(_) => 0,
@@ -524,6 +675,7 @@ pub(crate) fn build_harbour_rows(
     collapsed: &HashSet<HarbourSectionId>,
     trawl: &nokkvi_data::types::trawl::TrawlCrate,
     style: ShelfStyle,
+    now_playing: Option<MixPlaying>,
 ) -> Vec<HarbourRow> {
     let mut rows = Vec::new();
     let query = harbour.search_query.trim();
@@ -536,6 +688,15 @@ pub(crate) fn build_harbour_rows(
             seeds: trawl.len(),
             blend: trawl.blend,
         });
+        // The Instant Mix row right under it: the playing queue song wins,
+        // else the seeds pre-drawn with the shelves.
+        let from = match now_playing {
+            Some(playing) => MixFrom::Playing(playing),
+            None if !harbour.instant_mix_seeds.is_empty() => MixFrom::Seeds,
+            None => MixFrom::Nothing,
+        };
+        let subtitle = instant_mix_subtitle(harbour, &from);
+        rows.push(HarbourRow::InstantMix { from, subtitle });
         push_song_section(
             &mut rows,
             HarbourSectionId::RecentlyPlayed,
@@ -1359,6 +1520,9 @@ pub(crate) struct HarbourViewData<'a> {
     pub shelf_style: ShelfStyle,
     /// The Trawl crate — seed count + blend feed the Trawl row's subtitle.
     pub trawl_crate: &'a nokkvi_data::types::trawl::TrawlCrate,
+    /// The queue song playing now, for the Instant Mix row
+    /// (`Nokkvi::instant_mix_playing`).
+    pub instant_mix_playing: Option<MixPlaying>,
     /// 80px album-cover cache (row thumbnails).
     pub album_art: &'a HashMap<String, image::Handle>,
     /// Blurred stand-ins for covers on their way (`ArtworkState::placeholders`).
@@ -1410,6 +1574,7 @@ impl HarbourPage {
             &self.collapsed,
             data.trawl_crate,
             data.shelf_style,
+            data.instant_mix_playing.clone(),
         );
         let item_count = harbour_item_count(&rows);
 
@@ -1677,6 +1842,31 @@ impl HarbourPage {
                     )
                 }
             }
+            // The centred Instant Mix row previews what Enter mixes from:
+            // the playing song's cover, or the first seed's, under a quiet
+            // pill naming the source. One panel shape in every case (cover
+            // or blank, building or not), so the tree never swaps.
+            Some(HarbourRow::InstantMix { from, .. }) => {
+                use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
+                let (title, meta) = instant_mix_pill_text(data.harbour, from);
+                let pill = Some(section_pill(INSTANT_MIX_ICON, "INSTANT MIX", title, meta));
+                let cover = instant_mix_cover(data.harbour, from).and_then(|id| {
+                    crate::views::panel_cover(
+                        data.large_artwork,
+                        data.album_art,
+                        data.placeholders,
+                        &id,
+                    )
+                });
+                single_artwork_panel_with_pill::<HarbourMessage>(
+                    cover,
+                    pill,
+                    Vec::new(),
+                    false,
+                    None,
+                    |_| HarbourMessage::NoOp,
+                )
+            }
             _ => blank_panel(),
         });
 
@@ -1866,6 +2056,51 @@ fn render_row<'a>(
                         title_on_press: None,
                         title_size: m.title_size_lg,
                         subtitle: trawl_row_subtitle(*seeds, *blend),
+                        subtitle_on_press: None,
+                        subtitle_size: m.subtitle_size,
+                        is_bold: ctx.is_center,
+                    },
+                    style,
+                    100,
+                ));
+
+            child_slot_button(
+                content_row,
+                &ctx,
+                style,
+                data.stable_viewport,
+                HarbourMessage::SlotList,
+            )
+        }
+        HarbourRow::InstantMix { subtitle, .. } => {
+            // The Instant Mix action row, drawn like the Trawl door: the
+            // sparkles glyph in the shared chassis on the quiet fg2 channel
+            // (accent stays exclusive to the Trawl CTA and See-all), the
+            // live subtitle naming what Enter mixes from, standard
+            // slot-button plumbing. The same widgets in every case.
+            let m = ctx.metrics;
+            let style = ctx.slot_style(false, false, 0);
+            let glyph = glyph_art_square(
+                INSTANT_MIX_ICON,
+                m.artwork_size,
+                style,
+                ctx.opacity,
+                theme::fg2(),
+            );
+
+            let content_row = iced::widget::Row::new()
+                .spacing(6.0)
+                .align_y(Alignment::Center)
+                .height(Length::Fill)
+                // This row's ONE padding call — see HARBOUR_ROW_INSET.
+                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
+                .push(glyph)
+                .push(slot_list_text_column(
+                    SlotTextColumn {
+                        title: INSTANT_MIX_TITLE.to_string(),
+                        title_on_press: None,
+                        title_size: m.title_size_lg,
+                        subtitle: subtitle.clone(),
                         subtitle_on_press: None,
                         subtitle_size: m.subtitle_size,
                         is_bold: ctx.is_center,
