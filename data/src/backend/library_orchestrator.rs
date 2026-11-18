@@ -86,6 +86,11 @@ impl<'a> LibraryOrchestrator<'a> {
         }
     }
 
+    /// The session gateway, for on-demand API construction.
+    pub(crate) fn auth(&self) -> &'a AuthGateway {
+        self.auth
+    }
+
     /// Single dispatch entry point. Variants delegate to per-entity helpers below.
     pub async fn resolve(&self, source: SongSource) -> Result<Vec<Song>> {
         match source {

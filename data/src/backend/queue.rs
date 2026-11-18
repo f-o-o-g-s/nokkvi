@@ -434,6 +434,25 @@ impl QueueService {
         (dropped, effect)
     }
 
+    /// Keep the playing row, drop the rest and append `songs` behind it, all
+    /// under one hold of the queue lock
+    /// ([`QueueManager::keep_current_and_append`]). The caller applies the
+    /// outcome's [`NextTrackResetEffect`].
+    pub async fn keep_current_and_append(
+        &self,
+        songs: Vec<Song>,
+    ) -> crate::services::queue::KeepCurrentAppend {
+        let mut qm = self.queue_manager.lock().await;
+        let outcome = qm.keep_current_and_append(songs);
+        if matches!(
+            outcome,
+            crate::services::queue::KeepCurrentAppend::Appended { added, .. } if added > 0
+        ) {
+            self.refresh_from_locked_manager(&qm).await;
+        }
+        outcome
+    }
+
     /// Insert songs at a specific position in the queue (cross-pane drag drop).
     /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
     pub async fn insert_songs_at(&self, index: usize, songs: Vec<Song>) -> NextTrackResetEffect {

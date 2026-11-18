@@ -17,6 +17,7 @@ pub mod genre;
 pub mod hotkey_config;
 pub mod image_info;
 pub mod info_modal;
+pub mod instant_mix;
 pub mod item_kind;
 pub mod labeled_enum;
 pub mod library;

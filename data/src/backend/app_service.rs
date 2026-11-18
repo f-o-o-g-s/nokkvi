@@ -2244,6 +2244,110 @@ impl AppService {
         .await
     }
 
+    // =========================================================================
+    // Instant Mix Methods
+    //
+    // An instant mix is songs LIKE a few seed songs, never the seeds
+    // themselves: `backend::instant_mix::resolve_instant_mix` walks each
+    // seed's similar-songs ladder, merges one per seed around and cuts to
+    // `INSTANT_MIX_TRACKS`. The UI picks the seeds
+    // (`types::instant_mix::pick_instant_mix_seeds`).
+    // =========================================================================
+
+    /// Resolve an instant mix for `seeds` against the active libraries,
+    /// leaving out the ids in `exclude`.
+    async fn resolve_seed_mix(
+        &self,
+        seeds: Vec<crate::types::song::Song>,
+        exclude: &HashSet<String>,
+    ) -> Result<Vec<crate::types::song::Song>> {
+        use crate::{
+            backend::instant_mix::{ServerMixSource, mix_rng, resolve_instant_mix},
+            types::batch::BatchItem,
+        };
+        let seeds: Vec<BatchItem> = seeds
+            .into_iter()
+            .map(|song| BatchItem::Song(Box::new(song)))
+            .collect();
+        let library_ids = self.active_library_ids_vec();
+        let orch = self.library_orchestrator();
+        let source = ServerMixSource {
+            orch: &orch,
+            library_ids: &library_ids,
+        };
+        resolve_instant_mix(&source, &seeds, exclude, mix_rng()).await
+    }
+
+    /// Replace the queue with an instant mix for `seeds` and play it from
+    /// the first song (the dispatch [`Self::play_trawl`] uses). A
+    /// queue-replacing play: the UI runs its play prologue around it.
+    pub async fn play_instant_mix(&self, seeds: Vec<crate::types::song::Song>) -> Result<()> {
+        let songs = self.resolve_seed_mix(seeds, &HashSet::new()).await?;
+        self.dispatch_shuffled(
+            SongSource::Preloaded(songs),
+            QueueVerb::Play(StartPosition::First),
+            OneShotShuffle::None,
+        )
+        .await
+    }
+
+    /// Keep the playing song playing and make an instant mix for `seed` the
+    /// rest of the queue: once the mix is resolved, the queue's current row
+    /// (whatever plays by then; the track can change while the server
+    /// answers) stays, every other row goes and the mix lands behind it,
+    /// without the current row's song. Decided under one queue lock from the
+    /// live cursor, so the playing row is never removed and the engine is
+    /// left alone (only the gapless prep is reset). With no current row by
+    /// then, the mix replaces the queue and plays from its first song.
+    /// Returns how many songs were added.
+    pub async fn continue_with_instant_mix(&self, seed: crate::types::song::Song) -> Result<usize> {
+        use crate::{
+            backend::instant_mix::NOTHING_SIMILAR_ERROR, services::queue::KeepCurrentAppend,
+        };
+        let songs = self.resolve_seed_mix(vec![seed], &HashSet::new()).await?;
+        match self.queue_service.keep_current_and_append(songs).await {
+            KeepCurrentAppend::Appended { added, effect } => {
+                effect.apply_to(&self.audio_engine()).await;
+                if added == 0 {
+                    // The mix held only the song that plays now.
+                    return Err(anyhow::anyhow!(NOTHING_SIMILAR_ERROR));
+                }
+                Ok(added)
+            }
+            KeepCurrentAppend::NoCurrentRow(songs) => {
+                let added = songs.len();
+                self.dispatch_shuffled(
+                    SongSource::Preloaded(songs),
+                    QueueVerb::Play(StartPosition::First),
+                    OneShotShuffle::None,
+                )
+                .await?;
+                Ok(added)
+            }
+        }
+    }
+
+    /// Append an instant mix for `seeds` to the queue, leaving out the songs
+    /// the queue holds when the resolve starts (the ladder tops up past
+    /// them). Only adds. Returns how many songs were added.
+    pub async fn add_instant_mix_to_queue(
+        &self,
+        seeds: Vec<crate::types::song::Song>,
+    ) -> Result<usize> {
+        let queued: HashSet<String> = {
+            let qm = self.queue_service.queue_manager();
+            let ids = qm.lock().await.song_ids_snapshot();
+            ids.into_iter().collect()
+        };
+        let songs = self.resolve_seed_mix(seeds, &queued).await?;
+        self.dispatch_counted(
+            SongSource::Preloaded(songs),
+            QueueVerb::Enqueue,
+            OneShotShuffle::None,
+        )
+        .await
+    }
+
     /// Remove queue rows by per-row `entry_id` and keep the audio engine in
     /// sync. Targets specific rows rather than every row matching a song_id,
     /// so right-click "Remove from queue" on one of several duplicate rows
@@ -3610,6 +3714,156 @@ mod tests {
         let found = found.expect("an override");
         assert_eq!(found.summary(), "MP3 at 96 kbps");
         assert!(server.requests().iter().all(|r| r.method == "GET"));
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    // ---- Instant mix ---------------------------------------------------
+
+    use crate::types::{instant_mix::INSTANT_MIX_TRACKS, song::Song};
+
+    /// A `getSimilarSongs2` answer holding `ids`, three minutes each.
+    fn similar_answer(ids: &[String]) -> String {
+        let songs: Vec<String> = ids
+            .iter()
+            .map(|id| format!(r#"{{"id":"{id}","title":"{id}","duration":180,"starred":false}}"#))
+            .collect();
+        crate::services::api::test_server::subsonic_ok(&format!(
+            r#""similarSongs2":{{"song":[{}]}}"#,
+            songs.join(",")
+        ))
+    }
+
+    /// A logged-in app whose server answers `getSimilarSongs2` for the seed
+    /// `seed` with `m0..m59` (a full answer, so no fallback rung runs).
+    async fn instant_mix_app(
+        seed: &'static str,
+    ) -> (
+        crate::services::api::test_server::ScriptedServer,
+        AppService,
+        std::path::PathBuf,
+    ) {
+        use crate::services::api::test_server::ScriptedServer;
+        let answer = similar_answer(&(0..60).map(|i| format!("m{i}")).collect::<Vec<_>>());
+        let server = ScriptedServer::start(move |r| {
+            if r.is("POST", "/rest/getSimilarSongs2") && r.param("id").as_deref() == Some(seed) {
+                return (200, answer.clone());
+            }
+            (404, r#"{"error":"not found"}"#.to_owned())
+        })
+        .await;
+        let (app, db_path) = test_app().await;
+        resume_as(&app, &server.base_url, "alice").await;
+        (server, app, db_path)
+    }
+
+    async fn queue_song_ids(app: &AppService) -> Vec<String> {
+        app.queue().queue_manager().lock().await.song_ids_snapshot()
+    }
+
+    /// The UI runs these verbs through `shell_task`, which needs a `Send +
+    /// 'static` future; a closure over borrowed seeds inside a stream once
+    /// broke that for the Trawl verbs (rust-lang/rust#102211). Spawning them
+    /// pins it, and no seeds is the documented error.
+    #[tokio::test]
+    async fn instant_mix_verbs_spawn_and_refuse_an_empty_seed_list() {
+        use crate::backend::instant_mix::NO_SEEDS_ERROR;
+        let (app, db_path) = test_app().await;
+        let play = tokio::spawn({
+            let app = app.clone();
+            async move { app.play_instant_mix(Vec::new()).await }
+        });
+        let add = tokio::spawn({
+            let app = app.clone();
+            async move { app.add_instant_mix_to_queue(Vec::new()).await }
+        });
+        let cont = tokio::spawn({
+            let app = app.clone();
+            async move {
+                app.continue_with_instant_mix(Song::test_default("s", "S"))
+                    .await
+            }
+        });
+        let play = play.await.expect("join").expect_err("no seeds");
+        assert_eq!(play.to_string(), NO_SEEDS_ERROR);
+        let add = add.await.expect("join").expect_err("no seeds");
+        assert_eq!(add.to_string(), NO_SEEDS_ERROR);
+        // One seed but no session: every rung fails, so nothing is found.
+        assert!(cont.await.expect("join").is_err());
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Continue with an instant mix keeps the playing row (the very entry)
+    /// and makes the mix the rest of the queue, without the seed.
+    #[tokio::test]
+    async fn continue_with_instant_mix_keeps_the_playing_row() {
+        let (_server, app, db_path) = instant_mix_app("b").await;
+        let queue: Vec<Song> = ["a", "b", "c"]
+            .iter()
+            .map(|id| Song::test_default(id, id))
+            .collect();
+        let effect = app.queue().set_queue(queue, Some(1)).await;
+        effect.apply_to(&app.audio_engine()).await;
+        let playing_entry = app.queue().queue_manager().lock().await.entry_id_at(1);
+
+        let added = app
+            .continue_with_instant_mix(Song::test_default("b", "b"))
+            .await
+            .expect("mix");
+
+        assert_eq!(added, INSTANT_MIX_TRACKS);
+        let ids = queue_song_ids(&app).await;
+        assert_eq!(ids.len(), 1 + INSTANT_MIX_TRACKS);
+        assert_eq!(ids[0], "b", "the playing song stays, first");
+        assert_eq!(ids[1], "m0");
+        assert!(!ids[1..].contains(&"b".to_owned()), "never the seed");
+        let qm = app.queue().queue_manager();
+        let qm = qm.lock().await;
+        assert_eq!(qm.entry_id_at(0), playing_entry, "the same row");
+        assert_eq!(qm.current_index(), Some(0));
+        drop(qm);
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Add to Queue leaves out what the queue already holds, and says so
+    /// when that is everything.
+    #[tokio::test]
+    async fn add_instant_mix_to_queue_skips_queued_songs() {
+        use crate::backend::instant_mix::ALL_QUEUED_ERROR;
+        let (_server, app, db_path) = instant_mix_app("seed").await;
+        let queue: Vec<Song> = ["m0", "m1", "x"]
+            .iter()
+            .map(|id| Song::test_default(id, id))
+            .collect();
+        let effect = app.queue().set_queue(queue, Some(0)).await;
+        effect.apply_to(&app.audio_engine()).await;
+
+        let added = app
+            .add_instant_mix_to_queue(vec![Song::test_default("seed", "seed")])
+            .await
+            .expect("mix");
+        assert_eq!(
+            added, INSTANT_MIX_TRACKS,
+            "m2..m51: topped up past the queued"
+        );
+        let ids = queue_song_ids(&app).await;
+        assert_eq!(&ids[..4], ["m0", "m1", "x", "m2"]);
+        assert_eq!(ids.iter().filter(|id| *id == "m0").count(), 1);
+
+        // The server knows m0..m59; with m0..m51 queued, a second add finds
+        // the last eight and a third finds nothing new.
+        let added = app
+            .add_instant_mix_to_queue(vec![Song::test_default("seed", "seed")])
+            .await
+            .expect("the rest");
+        assert_eq!(added, 8, "m52..m59");
+        let err = app
+            .add_instant_mix_to_queue(vec![Song::test_default("seed", "seed")])
+            .await
+            .expect_err("all queued");
+        assert_eq!(err.to_string(), ALL_QUEUED_ERROR);
         drop(app);
         let _ = std::fs::remove_file(&db_path);
     }

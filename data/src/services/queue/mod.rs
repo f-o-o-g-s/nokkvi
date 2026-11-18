@@ -59,6 +59,20 @@ pub(crate) struct HistoryEntry {
     pub(crate) song: Song,
 }
 
+/// Outcome of [`QueueManager::keep_current_and_append`].
+#[must_use = "an Appended outcome carries a NextTrackResetEffect to apply"]
+pub enum KeepCurrentAppend {
+    /// The cursor row stayed, every other row went, `added` songs were
+    /// appended behind it. `effect` resets the gapless prep.
+    Appended {
+        added: usize,
+        effect: NextTrackResetEffect,
+    },
+    /// No row is under the cursor; the queue is untouched and the songs
+    /// come back for the caller to play instead.
+    NoCurrentRow(Vec<Song>),
+}
+
 pub struct QueueManager {
     pub(crate) queue: Queue,
     pub(crate) pool: SongPool,
@@ -572,6 +586,49 @@ impl QueueManager {
         );
         let effect = self.remove_entries_by_ids(&dropped);
         (dropped, effect)
+    }
+
+    /// Keep the row under the play cursor, drop every other row, then append
+    /// `songs` behind it, leaving out the kept row's song. Decided here,
+    /// under the caller's queue lock, from the AUTHORITATIVE cursor (the
+    /// [`Self::remove_duplicates`] rule): the track can change while a caller
+    /// waits on the server, so the row kept is whatever plays NOW, and since
+    /// it is never among the dropped rows, playback has nothing to follow.
+    ///
+    /// With no cursor row (an empty queue, or nothing current) nothing is
+    /// written and the songs come back in [`KeepCurrentAppend::NoCurrentRow`].
+    /// With nothing left to append after the kept song is left out, nothing
+    /// is written either (`added == 0`).
+    pub fn keep_current_and_append(&mut self, mut songs: Vec<Song>) -> KeepCurrentAppend {
+        let Some((current_entry, current_song)) = self.queue.current_index().and_then(|idx| {
+            self.queue
+                .rows
+                .get(idx)
+                .map(|row| (row.entry_id, row.song_id.clone()))
+        }) else {
+            return KeepCurrentAppend::NoCurrentRow(songs);
+        };
+        songs.retain(|s| s.id != current_song);
+        if songs.is_empty() {
+            return KeepCurrentAppend::Appended {
+                added: 0,
+                effect: NextTrackResetEffect::new().only_if(false),
+            };
+        }
+        let others: Vec<u64> = self
+            .queue
+            .rows
+            .iter()
+            .map(|row| row.entry_id)
+            .filter(|&entry_id| entry_id != current_entry)
+            .collect();
+        let removed = self.remove_entries_by_ids(&others);
+        let added = songs.len();
+        let appended = self.add_songs(songs);
+        KeepCurrentAppend::Appended {
+            added,
+            effect: removed.and(appended),
+        }
     }
 
     pub fn toggle_shuffle(&mut self) -> NextTrackResetEffect {
@@ -3520,6 +3577,78 @@ pub(crate) mod tests {
         // Pool drops "dup" only because no row references it anymore.
         assert!(qm.get_song("dup").is_none());
         assert!(qm.get_song("uniq").is_some());
+    }
+
+    fn appended(outcome: KeepCurrentAppend) -> usize {
+        match outcome {
+            KeepCurrentAppend::Appended { added, .. } => added,
+            KeepCurrentAppend::NoCurrentRow(_) => panic!("expected a kept row"),
+        }
+    }
+
+    #[test]
+    fn keep_current_and_append_keeps_the_cursor_row_and_replaces_the_rest() {
+        let songs: Vec<Song> = ["a", "b", "c", "d"].map(make_test_song).into();
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
+        let cursor_entry = qm.entry_ids()[2];
+
+        let mix: Vec<Song> = ["x", "c", "a", "y"].map(make_test_song).into();
+        let added = appended(qm.keep_current_and_append(mix));
+
+        assert_eq!(added, 3, "the playing song is left out of the mix");
+        assert_eq!(qm.song_ids_snapshot(), vec!["c", "x", "a", "y"]);
+        assert_eq!(qm.entry_ids()[0], cursor_entry, "the very row, not a copy");
+        assert_eq!(qm.current_index(), Some(0), "the cursor stays on it");
+        assert!(qm.get_song("b").is_none(), "dropped rows leave the pool");
+    }
+
+    #[test]
+    fn keep_current_and_append_without_a_cursor_hands_the_songs_back() {
+        let (mut qm, _temp) = make_test_manager(vec![make_test_song("a")], None);
+        let mix: Vec<Song> = ["x", "y"].map(make_test_song).into();
+        match qm.keep_current_and_append(mix) {
+            KeepCurrentAppend::NoCurrentRow(back) => {
+                assert_eq!(back.len(), 2);
+            }
+            KeepCurrentAppend::Appended { .. } => panic!("nothing is current"),
+        }
+        assert_eq!(qm.song_ids_snapshot(), vec!["a"], "queue untouched");
+
+        let (mut empty, _temp) = make_test_manager(Vec::new(), None);
+        assert!(matches!(
+            empty.keep_current_and_append(vec![make_test_song("x")]),
+            KeepCurrentAppend::NoCurrentRow(_)
+        ));
+    }
+
+    #[test]
+    fn keep_current_and_append_with_only_the_playing_song_writes_nothing() {
+        let songs: Vec<Song> = ["a", "b"].map(make_test_song).into();
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let added = appended(qm.keep_current_and_append(vec![make_test_song("a")]));
+        assert_eq!(added, 0);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b"], "queue untouched");
+    }
+
+    #[test]
+    fn keep_current_and_append_keeps_the_cursor_row_under_shuffle() {
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e"].map(make_test_song).into();
+        let (mut qm, _temp) = make_test_manager(songs, Some(3));
+        let _ = qm.toggle_shuffle();
+        let playing = qm
+            .current_index()
+            .and_then(|i| qm.song_id_at(i).map(str::to_owned));
+        assert_eq!(playing.as_deref(), Some("d"));
+
+        let mix: Vec<Song> = ["x", "y", "z"].map(make_test_song).into();
+        assert_eq!(appended(qm.keep_current_and_append(mix)), 3);
+        let now = qm
+            .current_index()
+            .and_then(|i| qm.song_id_at(i).map(str::to_owned));
+        assert_eq!(now.as_deref(), Some("d"), "still on the playing song");
+        let mut rest = qm.song_ids_snapshot();
+        rest.sort_unstable();
+        assert_eq!(rest, vec!["d", "x", "y", "z"]);
     }
 
     /// The one-row-at-a-time loop `remove_entries_by_ids` ran before the
