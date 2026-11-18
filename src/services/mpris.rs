@@ -9,6 +9,11 @@
 //! dedicated thread with its own tokio runtime. Communication happens via
 //! thread-safe channels.
 
+#![cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the D-Bus subscription is only spawned on Linux")
+)]
+
 use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};
@@ -213,6 +218,12 @@ impl MprisConnection {
     pub(crate) fn test_pair() -> (Self, std_mpsc::Receiver<MprisCommand>) {
         let (sender, receiver) = std_mpsc::channel();
         (Self { sender }, receiver)
+    }
+
+    /// A connection over `sender`, for the macOS backend's worker thread.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn from_sender(sender: std_mpsc::Sender<MprisCommand>) -> Self {
+        Self { sender }
     }
 
     /// Queue a command for the MPRIS thread. A closed channel means that

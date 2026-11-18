@@ -19,6 +19,14 @@
 //! best-effort — a missing notification daemon (headless / minimal WM) is
 //! logged at `warn` and the service idles, never crashing.
 
+#![cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        dead_code,
+        reason = "freedesktop D-Bus notifications are only spawned on Linux"
+    )
+)]
+
 use std::collections::HashMap;
 
 use iced::task::{Never, Sipper, sipper};

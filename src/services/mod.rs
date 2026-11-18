@@ -5,6 +5,8 @@ pub(crate) mod ipc;
 pub(crate) mod loop_subscription;
 pub(crate) mod mpris;
 pub(crate) mod mpris_art_writer;
+#[cfg(target_os = "macos")]
+pub(crate) mod mpris_macos;
 pub(crate) mod navidrome_sse;
 pub(crate) mod notifications;
 pub(crate) mod queue_changed_subscription;

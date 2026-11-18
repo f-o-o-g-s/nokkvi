@@ -22,6 +22,14 @@
 //!    removes the icon. It must not wait for the command channel instead:
 //!    the app keeps its `TrayConnection` after the toggle goes off.
 
+#![cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        dead_code,
+        reason = "StatusNotifierItem D-Bus tray is only spawned on Linux"
+    )
+)]
+
 use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};

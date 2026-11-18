@@ -157,6 +157,11 @@ rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] 
 particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
 particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
 
+# Now Playing / media keys on macOS (MPNowPlayingInfoCenter + MPRemoteCommandCenter).
+# macOS only: Linux keeps its tuned mpris-server backend.
+[target.'cfg(target_os = "macos")'.dependencies]
+souvlaki = { version = "0.9.3", default-features = false }
+
 [dev-dependencies]
 # `test-util` adds tokio's paused test clock (`#[tokio::test(start_paused = true)]`).
 # Test builds only: `cargo build --release` never enables it. The extra feature
