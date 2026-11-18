@@ -2100,7 +2100,7 @@ impl Nokkvi {
                     std::process::id(),
                     live_draft_id.as_deref(),
                     now,
-                    |pid| std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                    crate::process_liveness::pid_is_alive,
                 );
                 for id in ids {
                     match api.delete_playlist(&id).await {
