@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - When it finds no similar, same-genre or same-artist songs, Autoplay adds random songs from your library instead.
 - Autoplay waits while Repeat is on, and its button's tooltip says so.
 - If the queue runs out before a batch arrives, Autoplay plays the batch's first song when it lands.
+- nokkvi now builds and runs on macOS; `scripts/bundle-macos.sh --install` builds `Nokkvi.app` into `~/Applications`.
+- On macOS, the playing song shows in Control Center's Now Playing, and the media keys control playback.
 - On macOS, hotkeys can use Cmd, and Settings → Hotkeys shows modifiers as ⌃⌥⇧⌘ symbols.
 - On macOS, Settings refuses system shortcuts such as ⌘Q, ⌘C or ⌘Tab as hotkeys.
 
