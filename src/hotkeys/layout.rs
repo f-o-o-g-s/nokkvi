@@ -49,6 +49,13 @@ use iced::keyboard::{
 /// press. Written only from the keyboard subscription.
 static LATIN_LAYOUT: AtomicBool = AtomicBool::new(true);
 
+/// Crate-wide serialization guard for tests that call
+/// [`layout_independent_key`] (and therefore read or mutate [`LATIN_LAYOUT`]).
+/// Every such test holds this lock so parallel tests cannot race on the
+/// process-global flag. Pure [`normalize`] tests do not need it.
+#[cfg(test)]
+pub(crate) static LATIN_LAYOUT_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// The key a press stands for in binding terms: see the module docs.
 /// Updates [`LATIN_LAYOUT`] on a letter-key press.
 pub(crate) fn layout_independent_key(key: Key, physical: &Physical) -> Key {

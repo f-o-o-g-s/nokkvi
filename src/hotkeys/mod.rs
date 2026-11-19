@@ -8,5 +8,7 @@ mod layout;
 mod remote;
 
 pub(crate) use global::{action_to_message, key_combo, key_press_to_keycode, resolve_action};
+#[cfg(test)]
+pub(crate) use layout::LATIN_LAYOUT_LOCK;
 pub(crate) use layout::layout_independent_key;
 pub(crate) use remote::{acts_once_per_press, is_remote_back, remote_key_alias, unnamed_key_code};

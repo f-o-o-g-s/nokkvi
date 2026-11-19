@@ -724,6 +724,7 @@ mod tests {
     #[test]
     fn a_letter_typed_on_a_cyrillic_layout_fires_its_binding() {
         use keyboard::key::{Code, Physical};
+        let _guard = crate::hotkeys::LATIN_LAYOUT_LOCK.lock();
         let config = HotkeyConfig::default();
         // Russian layout: the X key types "ч", Shift+L types "Д" (iced drops
         // Shift from the key), the "/" key types ".".
