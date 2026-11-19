@@ -252,6 +252,9 @@ pub(crate) fn get_app_dir() -> Result<PathBuf> {
 
 /// Get the state directory (`~/.local/state/nokkvi`).
 ///
+/// A platform with no state dir (`directories` has one only on Linux) falls
+/// back to the local data dir.
+///
 /// Holds runtime state and logs that aren't user-editable configuration:
 /// `app.redb`, `nokkvi.log`. Per the XDG Base Directory Specification,
 /// `$XDG_STATE_HOME` is the right home for this kind of persisted-but-not-
@@ -262,7 +265,7 @@ pub(crate) fn get_state_dir() -> Result<PathBuf> {
 
     let state_dir = base_dirs
         .state_dir()
-        .context("$XDG_STATE_HOME unavailable on this platform")?
+        .unwrap_or_else(|| base_dirs.data_local_dir())
         .join(APP_NAME);
 
     if !state_dir.exists() {
@@ -427,7 +430,18 @@ pub fn migrate_to_state_dir() {
     let Ok(state_dir) = get_state_dir() else {
         return;
     };
+    migrate_between(&config_dir, &state_dir);
+}
 
+/// The body of [`migrate_to_state_dir`], on explicit dirs so a test can run it
+/// on scratch ones.
+fn migrate_between(config_dir: &Path, state_dir: &Path) {
+    // One dir for both (XDG_CONFIG_HOME and XDG_STATE_HOME pointed at the same
+    // folder, or a platform with no state dir): nothing to move, and the "old"
+    // log is the one this launch already opened.
+    if config_dir == state_dir {
+        return;
+    }
     let old_db = config_dir.join("app.redb");
     let new_db = state_dir.join("app.redb");
     if old_db.exists() {
@@ -495,6 +509,33 @@ pub fn migrate_to_state_dir() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_migration_keeps_everything_when_config_and_state_share_a_dir() {
+        // XDG_CONFIG_HOME and XDG_STATE_HOME pointed at one folder: the "old"
+        // log is the live one, opened before the migration runs.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.redb"), b"db").unwrap();
+        std::fs::write(dir.path().join("nokkvi.log"), b"log").unwrap();
+        migrate_between(dir.path(), dir.path());
+        assert!(
+            dir.path().join("nokkvi.log").exists(),
+            "the live log was deleted"
+        );
+        assert!(dir.path().join("app.redb").exists());
+    }
+
+    #[test]
+    fn the_migration_moves_the_db_and_drops_the_old_log() {
+        let config = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        std::fs::write(config.path().join("app.redb"), b"db").unwrap();
+        std::fs::write(config.path().join("nokkvi.log"), b"log").unwrap();
+        migrate_between(config.path(), state.path());
+        assert!(!config.path().join("app.redb").exists());
+        assert!(state.path().join("app.redb").exists());
+        assert!(!config.path().join("nokkvi.log").exists());
+    }
 
     #[test]
     fn test_config_paths_under_config_dir() {

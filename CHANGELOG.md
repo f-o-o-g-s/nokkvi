@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - nokkvi builds again on Rust 1.95, its oldest supported version.
 - With Accent From Album Art on, a black, white or grey cover keeps the active lyric line on the theme's accent in every shipped theme.
 - With the visualizer off, seeking while paused moves the lyrics to the new line instead of waiting until playback resumes.
+- With `XDG_CONFIG_HOME` and `XDG_STATE_HOME` set to the same folder, nokkvi keeps its log file instead of deleting it at every launch.
 
 ### Removed
 
