@@ -49,7 +49,9 @@ mod widgets;
 use std::time::Duration;
 
 pub use app_message::Message;
-use iced::{Event, Task, Theme, event, keyboard, time, window::settings::PlatformSpecific};
+#[cfg(target_os = "linux")]
+use iced::window::settings::PlatformSpecific;
+use iced::{Event, Task, Theme, event, keyboard, time};
 use nokkvi_data::{backend::app_service::AppService, types::hotkey_config::HotkeyConfig};
 use tracing::debug;
 
@@ -777,18 +779,24 @@ impl Nokkvi {
         };
 
         // MPRIS D-Bus server for Linux desktop integration
+        #[cfg(target_os = "linux")]
         let mpris = iced::Subscription::run(services::mpris::run).map(Message::Mpris);
+        #[cfg(not(target_os = "linux"))]
+        let mpris = iced::Subscription::none();
 
         // System tray (StatusNotifierItem). Conditionally spawned: when the
         // user toggles `show_tray_icon` off, the subscription disappears
         // from the batch and iced cancels it, which drops its event
         // receiver; the tray thread sees that and tears down the ksni
         // service (see `services::tray::pump_commands`).
+        #[cfg(target_os = "linux")]
         let tray = if self.settings.show_tray_icon {
             iced::Subscription::run(services::tray::run).map(Message::Tray)
         } else {
             iced::Subscription::none()
         };
+        #[cfg(not(target_os = "linux"))]
+        let tray = iced::Subscription::none();
 
         // Rating desktop notifications (the rate-reminder AND the rate-change
         // confirmation share one service). Conditionally spawned like the tray:
@@ -797,6 +805,7 @@ impl Nokkvi {
         // connection. So we never hold a session-bus connection unless at least
         // one feature is on. Each feature still gates its own sends, so the
         // shared connection only carries the commands the user opted into.
+        #[cfg(target_os = "linux")]
         let notifications = if self.settings.rating_reminder_enabled
             || self.settings.rating_change_notification_enabled
             || self.settings.love_change_notification_enabled
@@ -805,6 +814,8 @@ impl Nokkvi {
         } else {
             iced::Subscription::none()
         };
+        #[cfg(not(target_os = "linux"))]
+        let notifications = iced::Subscription::none();
 
         // Window lifecycle: capture the main window's id on first open and
         // intercept close-button presses so we can branch on the
@@ -1915,6 +1926,7 @@ fn boot() -> (Nokkvi, Task<Message>) {
 /// fresh one.
 pub(crate) fn main_window_settings() -> iced::window::Settings {
     iced::window::Settings {
+        #[cfg(target_os = "linux")]
         platform_specific: PlatformSpecific {
             application_id: "org.nokkvi.nokkvi".to_string(),
             ..Default::default()

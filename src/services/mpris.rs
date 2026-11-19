@@ -9,6 +9,11 @@
 //! dedicated thread with its own tokio runtime. Communication happens via
 //! thread-safe channels.
 
+#![cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the D-Bus subscription is only spawned on Linux")
+)]
+
 use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};

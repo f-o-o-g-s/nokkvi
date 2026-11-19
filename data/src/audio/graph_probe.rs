@@ -15,6 +15,7 @@
 //! verified live against a real graph.
 
 /// A node in the PipeWire graph snapshot — only the props the resolver needs.
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphNode {
     pub id: u32,
@@ -24,6 +25,7 @@ pub(crate) struct GraphNode {
 }
 
 /// A link (output node → input node) in the graph snapshot.
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphLink {
     pub output_node: u32,
@@ -34,6 +36,7 @@ pub(crate) struct GraphLink {
 /// feeds: another `Stream/Output/Audio` node linked to the same `Audio/Sink`.
 /// Returns its application name (falling back to its node name). Pure — the
 /// testable core of the Tier-B diagnostic.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn resolve_sink_holder(
     nodes: &[GraphNode],
     links: &[GraphLink],

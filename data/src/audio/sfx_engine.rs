@@ -424,8 +424,20 @@ impl Default for SfxEngine {
 /// used by the bit-perfect music sink so PipeWire switches the DAC to the
 /// track's native rate.
 pub(crate) fn open_preferred_sink(
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(unused_variables, reason = "PipeWire-only parameters on Linux")
+    )]
     node_name: &str,
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(unused_variables, reason = "PipeWire-only parameters on Linux")
+    )]
     rate: u32,
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(unused_variables, reason = "PipeWire-only parameters on Linux")
+    )]
     request_native_rate: bool,
 ) -> Result<ActiveSink> {
     #[cfg(target_os = "linux")]
@@ -524,8 +536,10 @@ impl ActiveSink {
     }
 
     pub fn log_on_drop(&mut self, enabled: bool) {
-        if let Self::Cpal(c) = self {
-            c.log_on_drop(enabled);
+        match self {
+            Self::Cpal(c) => c.log_on_drop(enabled),
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(_) => {}
         }
     }
 
