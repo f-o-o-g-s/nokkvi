@@ -23,7 +23,10 @@
 //!   character at that position. A non-Latin layout puts ASCII punctuation
 //!   on other keys (Russian types `.` on the US `/` key), so taking its
 //!   ASCII literally would fire the wrong binding — and leave `/` (Focus
-//!   Search) unreachable.
+//!   Search) unreachable. **Dead keys**: iced maps a winit dead key to
+//!   `Key::Unidentified`; on a punctuation position it falls back to the US
+//!   character (so `` ` `` stays reachable on German, Swiss and
+//!   US-International, where `Backquote` is a dead key).
 //!
 //! "The layout is Latin" is learned from letter presses on letter keys
 //! ([`LATIN_LAYOUT`]): ASCII letters and non-ASCII Latin letters (such as
@@ -129,14 +132,25 @@ fn is_latin_letter(c: char) -> bool {
 /// The pure rule behind [`layout_independent_key`]: the key to bind against,
 /// and whether the layout reads as Latin afterwards.
 fn normalize(key: Key, physical: &Physical, latin: bool) -> (Key, bool) {
-    let Key::Character(typed) = &key else {
-        return (key, latin);
-    };
+    let us_key = |c: char| Key::Character(c.to_string().into());
     let Some(us) = (match physical {
         Physical::Code(code) => us_qwerty(*code),
         Physical::Unidentified(_) => None,
     }) else {
         return (key, latin);
+    };
+    let typed = match &key {
+        Key::Character(typed) => typed,
+        // iced maps winit dead keys to Key::Unidentified; on a punctuation
+        // position (e.g. Backquote on German, Swiss, US-International), fall
+        // back to the US punctuation character.
+        Key::Unidentified => {
+            return match us {
+                UsKey::Punctuation(c) => (us_key(c), latin),
+                UsKey::Letter(_) | UsKey::Digit(_) => (key, latin),
+            };
+        }
+        Key::Named(_) => return (key, latin),
     };
     // One ASCII character is something a binding can name; anything else (a
     // Cyrillic letter, a dead key's composed text, an empty string) is not.
@@ -146,7 +160,6 @@ fn normalize(key: Key, physical: &Physical, latin: bool) -> (Key, bool) {
         _ => None,
     };
     let ascii = single.is_some_and(|c| c.is_ascii());
-    let us_key = |c: char| Key::Character(c.to_string().into());
     match us {
         UsKey::Letter(c) => match single {
             Some(ch) if ch.is_ascii_alphabetic() => (key, true),
@@ -247,6 +260,25 @@ mod tests {
         // German QWERTZ types "-" on the US "/" key.
         assert_eq!(press("-", Code::Slash, true), (ch("-"), true));
         assert_eq!(press("/", Code::Slash, true), (ch("/"), true));
+    }
+
+    #[test]
+    fn dead_key_on_a_punctuation_position_maps_to_its_us_character() {
+        // German, Swiss, US-International: Backquote is a dead key, which iced
+        // delivers as Key::Unidentified.
+        assert_eq!(
+            normalize(Key::Unidentified, &Physical::Code(Code::Backquote), true),
+            (ch("`"), true)
+        );
+        assert_eq!(
+            normalize(Key::Unidentified, &Physical::Code(Code::Backquote), false),
+            (ch("`"), false)
+        );
+        // Unidentified on a letter key still passes through unchanged.
+        assert_eq!(
+            normalize(Key::Unidentified, &Physical::Code(Code::KeyA), true),
+            (Key::Unidentified, true)
+        );
     }
 
     #[test]
