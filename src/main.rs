@@ -698,7 +698,10 @@ impl Nokkvi {
         //
         // A TV remote's OK and consumer Menu become Enter and Menu here, before
         // any handler reads the key (`hotkeys::remote_key_alias`); its Back
-        // becomes Escape at the top of the raw-key handler.
+        // becomes Escape at the top of the raw-key handler. A character key is
+        // rewritten to the US-QWERTY character bindings are stored in when the
+        // active layout can't name it (`hotkeys::layout_independent_key`: a
+        // Cyrillic `ы` is the S key), so letter hotkeys work on any layout.
         let keyboard = event::listen_with(|event, status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -707,7 +710,10 @@ impl Nokkvi {
                 repeat,
                 ..
             }) => {
-                let key = hotkeys::remote_key_alias(key, &physical_key);
+                let key = hotkeys::layout_independent_key(
+                    hotkeys::remote_key_alias(key, &physical_key),
+                    &physical_key,
+                );
                 let unnamed = hotkeys::unnamed_key_code(&key, &physical_key);
                 Some(Message::RawKeyEvent(
                     key, unnamed, modifiers, status, repeat,
