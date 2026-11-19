@@ -198,18 +198,22 @@ pub(crate) fn run() -> impl Sipper<Never, NotificationEvent> {
             Ok(c) => c,
             Err(e) => {
                 warn!(" [NOTIFY] No session bus; rating reminders unavailable: {e}");
-                loop {
-                    std::future::pending::<Never>().await;
-                }
+                // An empty match on the uninhabited `Never` is `!`, so this
+                // arm type-checks on the 1.95 floor (which can't coerce a
+                // bare `Never` to the other arm's type) without clippy's
+                // `never_loop`.
+                match std::future::pending::<Never>().await {}
             }
         };
         let proxy = match NotificationsProxy::new(&conn).await {
             Ok(p) => p,
             Err(e) => {
                 warn!(" [NOTIFY] Could not bind notification proxy: {e}");
-                loop {
-                    std::future::pending::<Never>().await;
-                }
+                // An empty match on the uninhabited `Never` is `!`, so this
+                // arm type-checks on the 1.95 floor (which can't coerce a
+                // bare `Never` to the other arm's type) without clippy's
+                // `never_loop`.
+                match std::future::pending::<Never>().await {}
             }
         };
 
