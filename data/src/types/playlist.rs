@@ -175,11 +175,6 @@ impl Playlist {
         DraftMarker::parse(&self.comment).is_some()
     }
 
-    /// Get song count
-    pub fn get_song_count(&self) -> u32 {
-        self.song_count
-    }
-
     /// The user-uploaded custom cover reference, or `None` when this playlist
     /// has no uploaded image. Collapses the `absent → None` and
     /// `present-but-empty → Some("")` cases Navidrome emits (see

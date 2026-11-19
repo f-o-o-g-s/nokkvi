@@ -20,7 +20,7 @@ pub mod settings;
 pub mod songs;
 
 pub use library_orchestrator::LibraryOrchestrator;
-pub use queue_orchestrator::{QueueOrchestrator, QueueVerb, StartPosition};
+pub use queue_orchestrator::QueueOrchestrator;
 
 /// Trait for entities whose starred status can be updated.
 /// Abstracts over field name differences (`starred` vs `is_starred`).

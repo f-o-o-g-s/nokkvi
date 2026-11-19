@@ -9,9 +9,13 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+# md-5 is imported as `md5` (waveform cache keys, Last.fm request signing),
+# a crate rename cargo-machete can't see.
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [dependencies]
 anyhow = "1.0.102"
-bytemuck = { version = "1.25", features = ["derive"] }
 chrono = "0.4.44"
 directories = "6.0.0"
 # Last.fm scrobbling requires an MD5 `api_sig` signature on every authenticated

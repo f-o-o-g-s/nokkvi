@@ -180,11 +180,6 @@ impl ArtistsService {
         self.total_count.get()
     }
 
-    /// Get server configuration for artwork URLs
-    pub async fn get_server_config(&self) -> (String, String) {
-        self.inner.server_config().await
-    }
-
     /// Load albums for a specific artist
     pub async fn load_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
         let service = self.get_service().await?;

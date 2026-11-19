@@ -383,15 +383,6 @@ impl SfxEngine {
         let v = volume.clamp(0.0, 1.0);
         self.bridge.set_volume(v * v * v);
     }
-
-    /// Whether the live music sink supports native PipeWire volume control.
-    ///
-    /// When `true`, the renderer keeps software volume at 1.0 (unity) and lets
-    /// PipeWire handle the user's volume via `channelVolumes`. False until the
-    /// renderer publishes its first sink.
-    pub fn has_native_volume(&self) -> bool {
-        self.bridge.has_native_volume()
-    }
 }
 
 impl Default for SfxEngine {

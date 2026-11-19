@@ -1057,8 +1057,9 @@ impl VisualizerConfig {
 
 /// Full config file structure (only the `[visualizer]` section is modeled;
 /// other sections are ignored — credentials/settings are handled separately).
-/// Public so the UI crate's disk loader can parse through it until the
-/// unified reload path fully owns the read.
+/// Tests parse whole config files through it; the app reads the section
+/// through `toml_settings_io`.
+#[cfg(test)]
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct ConfigFile {
     #[serde(default)]

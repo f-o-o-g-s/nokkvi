@@ -42,12 +42,6 @@ impl NokkviError {
         matches!(e.downcast_ref::<Self>(), Some(Self::NotFound(_)))
     }
 
-    /// Whether an `anyhow` chain's typed cause is [`NokkviError::Forbidden`]
-    /// (a native-API 403, possibly wrapped in context).
-    pub fn is_forbidden(e: &anyhow::Error) -> bool {
-        matches!(e.downcast_ref::<Self>(), Some(Self::Forbidden(_)))
-    }
-
     /// Returns true when a stringified error chain carries the
     /// [`NokkviError::Unauthorized`] Display marker. Used by the 5 loader
     /// handlers whose results are flattened to `Result<_, String>` at the

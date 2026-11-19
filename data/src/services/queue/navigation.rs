@@ -119,9 +119,6 @@ impl<'a> PeekedQueue<'a> {
     pub fn reason(&self) -> TransitionReason {
         self.info.reason
     }
-    pub fn info(&self) -> &NextSongResult {
-        &self.info
-    }
 
     /// Consume the peek and advance current_index/current_order.
     pub fn transition(mut self) -> TransitionResult {

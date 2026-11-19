@@ -61,7 +61,7 @@ pub mod visualizer_config;
 pub mod waveform;
 pub mod wire_enum;
 
-pub use accessors::{HasId, Named};
+pub use accessors::Named;
 pub use item_kind::ItemKind;
 pub use next_track_reset::NextTrackResetEffect;
 pub use one_shot_shuffle::OneShotShuffle;

@@ -23,16 +23,6 @@ impl Genre {
     pub fn display_name(&self) -> &str {
         &self.name
     }
-
-    /// Get album count
-    pub fn get_album_count(&self) -> u32 {
-        self.album_count
-    }
-
-    /// Get song count
-    pub fn get_song_count(&self) -> u32 {
-        self.song_count
-    }
 }
 
 impl std::fmt::Display for Genre {

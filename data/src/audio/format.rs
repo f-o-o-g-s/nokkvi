@@ -47,11 +47,6 @@ impl AudioFormat {
             && self.channel_count > 0
     }
 
-    /// Get sample format
-    pub fn sample_format(&self) -> SampleFormat {
-        self.sample_format
-    }
-
     /// Get channel count
     pub fn channel_count(&self) -> u32 {
         self.channel_count
@@ -80,27 +75,9 @@ impl AudioFormat {
         self.bytes_for_frames(frames)
     }
 
-    /// Calculate duration in milliseconds for a given byte count
-    pub fn duration_for_bytes(&self, byte_count: usize) -> u64 {
-        if !self.is_valid() {
-            return 0;
-        }
-        let frames = self.frames_for_bytes(byte_count);
-        self.duration_for_frames(frames)
-    }
-
     /// Calculate bytes needed for a given frame count
     pub(crate) fn bytes_for_frames(&self, frame_count: usize) -> usize {
         frame_count * self.bytes_per_frame()
-    }
-
-    /// Calculate frame count for a given byte count
-    pub fn frames_for_bytes(&self, byte_count: usize) -> usize {
-        let bytes_per_frame = self.bytes_per_frame();
-        if bytes_per_frame == 0 {
-            return 0;
-        }
-        byte_count / bytes_per_frame
     }
 
     /// Calculate frame count for a given duration in milliseconds
@@ -109,14 +86,6 @@ impl AudioFormat {
             return 0;
         }
         ((ms as f64 / 1000.0) * self.sample_rate as f64) as usize
-    }
-
-    /// Calculate duration in milliseconds for a given frame count
-    pub(crate) fn duration_for_frames(&self, frame_count: usize) -> u64 {
-        if !self.is_valid() {
-            return 0;
-        }
-        ((frame_count as f64 / self.sample_rate as f64) * 1000.0) as u64
     }
 
     /// Get bytes per frame

@@ -3132,7 +3132,6 @@ dependencies = [
  "anyhow",
  "bincode-next",
  "biquad",
- "bytemuck",
  "chrono",
  "directories",
  "font-kit",

@@ -17,7 +17,7 @@
 //! swappable slots — both are touched rarely (publish on rebuild; SFX/volume on
 //! user action), so the lock is uncontended.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::Mutex;
 use rodio::mixer::Mixer;
@@ -43,8 +43,6 @@ pub struct MusicOutputBridge {
     /// Forwards title/volume to the live sink's PipeWire node. `None` on the
     /// cpal fallback (no node volume) or before the first sink is built.
     command: Mutex<Option<MusicCommandFn>>,
-    /// Whether the live music sink supports native PipeWire volume control.
-    native_volume: AtomicBool,
     /// Last title pushed by the UI. Re-applied to the node on every `publish`
     /// so a per-track sink rebuild keeps the now-playing name. `None` until set.
     last_title: Mutex<Option<String>>,
@@ -60,7 +58,6 @@ impl Default for MusicOutputBridge {
         Self {
             mixer: Mutex::new(None),
             command: Mutex::new(None),
-            native_volume: AtomicBool::new(false),
             last_title: Mutex::new(None),
             last_volume: AtomicU32::new(1.0_f32.to_bits()),
         }
@@ -72,9 +69,9 @@ impl MusicOutputBridge {
         Self::default()
     }
 
-    /// Publish a freshly (re)built music sink: its mixer, an IPC forwarder
-    /// (`None` for cpal), and whether it has native PipeWire volume. Called by
-    /// the renderer on every sink build / per-rate rebuild.
+    /// Publish a freshly (re)built music sink: its mixer and an IPC forwarder
+    /// (`None` for cpal). Called by the renderer on every sink build / per-rate
+    /// rebuild.
     ///
     /// A freshly built PipeWire node starts at its defaults (full volume, blank
     /// title), so after swapping in the new forwarder we immediately re-apply
@@ -91,9 +88,8 @@ impl MusicOutputBridge {
     /// held, in that order — `set_title` uses the same order, so there is no
     /// lock-cycle. `mixer` is published before `command`; nothing takes `command`
     /// before `mixer`.
-    pub fn publish(&self, mixer: Mixer, command: Option<MusicCommandFn>, native_volume: bool) {
+    pub fn publish(&self, mixer: Mixer, command: Option<MusicCommandFn>) {
         *self.mixer.lock() = Some(mixer);
-        self.native_volume.store(native_volume, Ordering::Release);
         let mut command_slot = self.command.lock();
         *command_slot = command;
         if let Some(cmd) = command_slot.as_ref() {
@@ -114,7 +110,6 @@ impl MusicOutputBridge {
     /// kept so that publish re-applies them to the rebuilt node.
     pub fn clear(&self) {
         *self.mixer.lock() = None;
-        self.native_volume.store(false, Ordering::Release);
         *self.command.lock() = None;
     }
 
@@ -122,11 +117,6 @@ impl MusicOutputBridge {
     /// before the first sink is built.
     pub fn mixer(&self) -> Option<Mixer> {
         self.mixer.lock().clone()
-    }
-
-    /// Whether the live music sink supports native PipeWire volume control.
-    pub fn has_native_volume(&self) -> bool {
-        self.native_volume.load(Ordering::Acquire)
     }
 
     /// Mirror the now-playing title to the music node (no-op on cpal). Stored so
@@ -190,7 +180,7 @@ mod tests {
         let log: Arc<Mutex<Vec<MusicCommand>>> = Arc::new(Mutex::new(Vec::new()));
         let log_for_cmd = Arc::clone(&log);
         let cmd: MusicCommandFn = Box::new(move |c| log_for_cmd.lock().push(c));
-        bridge.publish(dummy_mixer(), Some(cmd), true);
+        bridge.publish(dummy_mixer(), Some(cmd));
 
         let recorded = log.lock();
         assert!(
@@ -215,7 +205,7 @@ mod tests {
         let log: Arc<Mutex<Vec<MusicCommand>>> = Arc::new(Mutex::new(Vec::new()));
         let log_for_cmd = Arc::clone(&log);
         let cmd: MusicCommandFn = Box::new(move |c| log_for_cmd.lock().push(c));
-        bridge.publish(dummy_mixer(), Some(cmd), true);
+        bridge.publish(dummy_mixer(), Some(cmd));
 
         let recorded = log.lock();
         assert!(
@@ -239,7 +229,7 @@ mod tests {
         let log: Arc<Mutex<Vec<MusicCommand>>> = Arc::new(Mutex::new(Vec::new()));
         let log_for_cmd = Arc::clone(&log);
         let cmd: MusicCommandFn = Box::new(move |c| log_for_cmd.lock().push(c));
-        bridge.publish(dummy_mixer(), Some(cmd), true);
+        bridge.publish(dummy_mixer(), Some(cmd));
 
         let recorded = log.lock();
         let last_volume = recorded
@@ -264,22 +254,17 @@ mod tests {
         let bridge = MusicOutputBridge::new();
         bridge.set_title("Song A".to_owned());
         bridge.set_volume(0.3);
-        bridge.publish(dummy_mixer(), None, true);
+        bridge.publish(dummy_mixer(), None);
         assert!(bridge.mixer().is_some());
-        assert!(bridge.has_native_volume());
 
         bridge.clear();
         assert!(bridge.mixer().is_none(), "clear drops the mixer");
-        assert!(
-            !bridge.has_native_volume(),
-            "clear reports no native volume (no live sink)"
-        );
 
         // The stored title/volume survive: the next publish re-applies them.
         let log: Arc<Mutex<Vec<MusicCommand>>> = Arc::new(Mutex::new(Vec::new()));
         let log_for_cmd = Arc::clone(&log);
         let cmd: MusicCommandFn = Box::new(move |c| log_for_cmd.lock().push(c));
-        bridge.publish(dummy_mixer(), Some(cmd), true);
+        bridge.publish(dummy_mixer(), Some(cmd));
         let recorded = log.lock();
         assert!(
             recorded

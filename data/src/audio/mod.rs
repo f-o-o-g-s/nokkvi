@@ -35,18 +35,16 @@ pub mod symphonia_registry;
 pub use buffer::AudioBuffer;
 pub(crate) use crossfade_liveness::IncomingLiveness;
 pub use decoder::{
-    AudioDecoder, NoAnswer, ReopenHints, ServerBusy, SourceKind, StreamDelivery, StreamFacts,
-    StreamPastEnd, error_is,
+    AudioDecoder, NoAnswer, ServerBusy, SourceKind, StreamDelivery, StreamFacts, error_is,
 };
-pub use eq::{EqProcessor, EqState};
+pub use eq::EqState;
 pub use format::{AudioFormat, SampleFormat};
 pub(crate) use generation::{DecodeLoopHandle, SourceGeneration};
-pub use music_bridge::{MusicCommand, MusicOutputBridge};
 pub use normalization::{NormalizationConfig, NormalizationContext, resolve_normalization};
 pub use renderer::AudioRenderer;
-pub use rodio_output::{ActiveStream, RING_BUFFER_CAPACITY, RodioOutput};
+pub use rodio_output::{ActiveStream, RING_BUFFER_CAPACITY};
 pub use sfx_engine::{SfxEngine, SfxType};
-pub use spectrum::{SpectrumEngine, SpectrumError};
+pub use spectrum::SpectrumEngine;
 pub use streaming_source::VisualizerCallback;
 
 /// Peak-amplitude threshold below which decoded source content counts as

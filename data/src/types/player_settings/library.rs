@@ -34,15 +34,6 @@ impl LibraryPageSize {
             Self::Massive => 5000,
         }
     }
-
-    /// Calculate dynamic fetch threshold based on this page size variant.
-    ///
-    /// Delegates to [`pagination_fetch_threshold`] — both the page-size enum
-    /// and the `PagedBuffer<T>::needs_fetch` path call the same formula so
-    /// they cannot drift.
-    pub fn fetch_threshold(self) -> usize {
-        pagination_fetch_threshold(self.to_usize())
-    }
 }
 
 /// Dynamic page-fetch trigger threshold for a paginated buffer.
@@ -54,7 +45,7 @@ impl LibraryPageSize {
 /// very large ones don't pre-fetch megabytes off-screen.
 ///
 /// Free fn so `PagedBuffer<T>` (a generic data type) doesn't have to depend
-/// on the `LibraryPageSize` enum — they share the formula via this one site.
+/// on the `LibraryPageSize` enum: it passes the page size as a number.
 pub fn pagination_fetch_threshold(page_size: usize) -> usize {
     (page_size / 5).clamp(20, 500)
 }
@@ -63,10 +54,8 @@ pub fn pagination_fetch_threshold(page_size: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// Pins the exact `(page_size / 5).clamp(20, 500)` formula. Both
-    /// `LibraryPageSize::fetch_threshold` and
-    /// `PagedBuffer::<T>::needs_fetch` route through `pagination_fetch_threshold`,
-    /// so changing this formula moves both sites in lockstep.
+    /// Pins the exact `(page_size / 5).clamp(20, 500)` formula that
+    /// `PagedBuffer::<T>::needs_fetch` fetches by.
     #[test]
     fn fetch_threshold_formula() {
         // Below the 20-item floor: page_size/5 = 20 → 20 (boundary)
@@ -80,10 +69,11 @@ mod tests {
         // Above the 500-item ceiling: 5000/5 = 1000 → clamps down to 500
         assert_eq!(pagination_fetch_threshold(5000), 500);
 
-        // LibraryPageSize variants map to the same answers via to_usize().
-        assert_eq!(LibraryPageSize::Small.fetch_threshold(), 20);
-        assert_eq!(LibraryPageSize::Default.fetch_threshold(), 100);
-        assert_eq!(LibraryPageSize::Large.fetch_threshold(), 200);
-        assert_eq!(LibraryPageSize::Massive.fetch_threshold(), 500);
+        // Each LibraryPageSize variant's page size, through to_usize().
+        let threshold = |size: LibraryPageSize| pagination_fetch_threshold(size.to_usize());
+        assert_eq!(threshold(LibraryPageSize::Small), 20);
+        assert_eq!(threshold(LibraryPageSize::Default), 100);
+        assert_eq!(threshold(LibraryPageSize::Large), 200);
+        assert_eq!(threshold(LibraryPageSize::Massive), 500);
     }
 }

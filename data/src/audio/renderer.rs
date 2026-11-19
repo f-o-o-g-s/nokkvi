@@ -1059,21 +1059,6 @@ impl AudioRenderer {
         }
     }
 
-    /// Check how many samples can be written to the primary stream.
-    pub fn available_space(&self) -> usize {
-        self.primary_stream
-            .as_ref()
-            .map_or(0, |s| s.available_space())
-    }
-
-    /// Reset position tracking for a new track.
-    pub fn reset_position(&mut self) {
-        self.position_offset = 0;
-        if let Some(ref stream) = self.primary_stream {
-            stream.reset_position();
-        }
-    }
-
     /// Reset position tracking for a track joined gaplessly on the live
     /// stream: its first sample is the next one written, behind whatever the
     /// ring still holds of the outgoing, so its position starts when that
@@ -1500,11 +1485,7 @@ impl AudioRenderer {
     /// already-running sink).
     fn republish_to_bridge(&self) {
         if let (Some(bridge), Some(sink)) = (&self.music_bridge, &self.music_sink) {
-            bridge.publish(
-                sink.mixer(),
-                sink.command_forwarder(),
-                sink.has_native_volume(),
-            );
+            bridge.publish(sink.mixer(), sink.command_forwarder());
         }
     }
 
@@ -1628,7 +1609,7 @@ impl AudioRenderer {
         )?);
 
         if let Some(bridge) = &self.music_bridge {
-            bridge.publish(mixer, sink.command_forwarder(), sink.has_native_volume());
+            bridge.publish(mixer, sink.command_forwarder());
         }
         tracing::info!(
             "🔊 Renderer: music sink built at {}Hz (native-rate request: {})",

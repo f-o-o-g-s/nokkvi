@@ -15,10 +15,7 @@ mod write_guard;
 use std::collections::HashSet;
 
 use anyhow::Result;
-pub use navigation::{
-    NextSongResult, PeekedQueue, PreviousOutcome, PreviousSongResult, TransitionReason,
-    TransitionResult,
-};
+pub use navigation::{PreviousOutcome, PreviousSongResult, TransitionReason};
 use rand::seq::SliceRandom;
 use tracing::{debug, warn};
 

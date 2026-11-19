@@ -70,11 +70,6 @@ where
         *self.items.write() = new_items;
     }
 
-    /// Get the length without cloning the entire vec (read lock)
-    pub fn len(&self) -> usize {
-        self.items.read().len()
-    }
-
     /// Check if empty without cloning (read lock)
     pub fn is_empty(&self) -> bool {
         self.items.read().is_empty()
