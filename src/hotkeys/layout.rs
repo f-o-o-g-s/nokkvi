@@ -15,25 +15,32 @@
 //!   layout (Greek `Q` types `;`, Hebrew `Q` types `/` and `W` types `'`,
 //!   Bulgarian `Q` types `,`); non-ASCII characters (Cyrillic, Greek, Turkish
 //!   `ı`, etc.) become the US letter at that position.
-//! - **The digit row** (`Digit0`..`Digit9`): always the digit. AZERTY's
-//!   unshifted row types `&é"'(`, Czech types `+ěščř`, and the number-key
-//!   bindings (view switching) must still work there.
+//! - **The digit row** (`Digit0`..`Digit9`): the digit, whatever character
+//!   the layout types there. AZERTY's unshifted row types `&é"'(`, Czech types
+//!   `+ěščř`, and the number-key bindings (view switching) must still work
+//!   there.
 //! - **Punctuation keys** (`` ` - = [ ] \ ; ' , . / ``): the layout's
-//!   character when it is ASCII and the layout is Latin, else the US
-//!   character at that position. A non-Latin layout puts ASCII punctuation
-//!   on other keys (Russian types `.` on the US `/` key), so taking its
-//!   ASCII literally would fire the wrong binding — and leave `/` (Focus
-//!   Search) unreachable. **Dead keys**: iced maps a winit dead key to
-//!   `Key::Unidentified`; on a punctuation position it falls back to the US
-//!   character (so `` ` `` stays reachable on German, Swiss and
-//!   US-International, where `Backquote` is a dead key).
+//!   character when it is ASCII and the layout is Latin (Dvorak's `s` on the
+//!   US `;` key, German `-` on the US `/` key), else the US character at that
+//!   position. A non-Latin layout puts ASCII punctuation on other keys
+//!   (Russian types `.` on the US `/` key), so taking its ASCII literally would
+//!   fire the wrong binding and leave `/` (Focus Search) unreachable.
 //!
-//! "The layout is Latin" is learned from letter presses on letter keys
-//! ([`LATIN_LAYOUT`]): ASCII letters and non-ASCII Latin letters (such as
-//! Turkish `ı`) mark it Latin, non-Latin letters (Cyrillic, Greek, Hebrew, …)
-//! mark it non-Latin, and punctuation on a letter key leaves it unchanged. It
-//! starts Latin, and after a layout switch the first letter typed (in a search
-//! field or as a hotkey) brings it up to date.
+//! **Dead keys stay unbound** (iced reports them as `Key::Unidentified`, and
+//! they pass through unchanged on every position). A dead key types nothing by
+//! itself, so a focused text field doesn't claim it: bound, German `´` (on the
+//! US `=` key) would raise a rating in the middle of typing "Café", and the
+//! accent would land on the next letter typed. They bind nothing on the digit
+//! row either (Vietnamese (France) has dead keys on 2, 4 and 7).
+//!
+//! "The layout is Latin" ([`LATIN_LAYOUT`]) is learned from every letter typed
+//! on any of these keys, before the rule above runs: a Latin-script letter
+//! (ASCII, Turkish `ı`, German `ö` on the US `;` key, Spanish `º`) marks it
+//! Latin, any other letter (Cyrillic, Greek, Hebrew, Arabic, Thai) non-Latin,
+//! and punctuation leaves it as it was. It starts Latin. Right after a layout
+//! switch, ASCII punctuation reads the old way until the first letter: from
+//! Russian to German, `-` on the US `/` key fires Focus Search until then. A
+//! Settings capture made in that window stores that reading.
 //!
 //! Keys with no US-QWERTY character (named keys, the numpad, ISO's extra
 //! key) and presses without a physical code pass through unchanged.
@@ -44,9 +51,10 @@ use iced::keyboard::{
     Key,
     key::{Code, Physical},
 };
+use tracing::debug;
 
-/// Whether the active layout types Latin letters, as of the last letter-key
-/// press. Written only from the keyboard subscription.
+/// Whether the active layout types Latin letters, as of the last letter
+/// typed. Written only from the keyboard subscription.
 static LATIN_LAYOUT: AtomicBool = AtomicBool::new(true);
 
 /// Crate-wide serialization guard for tests that call
@@ -57,12 +65,18 @@ static LATIN_LAYOUT: AtomicBool = AtomicBool::new(true);
 pub(crate) static LATIN_LAYOUT_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// The key a press stands for in binding terms: see the module docs.
-/// Updates [`LATIN_LAYOUT`] on a letter-key press.
+/// Updates [`LATIN_LAYOUT`] when the press types a letter.
 pub(crate) fn layout_independent_key(key: Key, physical: &Physical) -> Key {
     let latin = LATIN_LAYOUT.load(Ordering::Relaxed);
     let (key, latin_now) = normalize(key, physical, latin);
     if latin_now != latin {
         LATIN_LAYOUT.store(latin_now, Ordering::Relaxed);
+        // Logged on a flip only: whether punctuation binds as typed or by
+        // position hangs on it ("`/` stopped working after a layout switch").
+        debug!(
+            " [HOTKEY] Keyboard layout now reads as {}",
+            if latin_now { "Latin" } else { "non-Latin" }
+        );
     }
     key
 }
@@ -130,73 +144,65 @@ fn us_qwerty(code: Code) -> Option<UsKey> {
     })
 }
 
-/// Whether `c` is a non-ASCII Latin-script letter (Latin-1 Supplement, Latin
-/// Extended-A/B, and Latin Extended Additional — e.g. Turkish `ı`, `ş`).
-fn is_latin_letter(c: char) -> bool {
-    c.is_alphabetic() && matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
+/// Whether a letter is Latin script: everything below U+0370 (ASCII, the
+/// Latin-1 letters such as `ö` and `º`, Latin Extended-A/B such as Turkish
+/// `ı`, and the IPA letters Ghanaian layouts type) plus Latin Extended
+/// Additional (Vietnamese). The cutoff is iced's `Key::to_latin`.
+fn is_latin_script(letter: char) -> bool {
+    letter < '\u{0370}' || ('\u{1E00}'..='\u{1EFF}').contains(&letter)
 }
 
 /// The pure rule behind [`layout_independent_key`]: the key to bind against,
 /// and whether the layout reads as Latin afterwards.
 fn normalize(key: Key, physical: &Physical, latin: bool) -> (Key, bool) {
-    let us_key = |c: char| Key::Character(c.to_string().into());
     let Some(us) = (match physical {
         Physical::Code(code) => us_qwerty(*code),
         Physical::Unidentified(_) => None,
     }) else {
         return (key, latin);
     };
-    let typed = match &key {
-        Key::Character(typed) => typed,
-        // iced maps winit dead keys to Key::Unidentified; on a punctuation
-        // position (e.g. Backquote on German, Swiss, US-International), fall
-        // back to the US punctuation character.
-        Key::Unidentified => {
-            return match us {
-                UsKey::Punctuation(c) => (us_key(c), latin),
-                UsKey::Letter(_) | UsKey::Digit(_) => (key, latin),
-            };
-        }
-        Key::Named(_) => return (key, latin),
+    // A dead key (`Key::Unidentified`) or a named key keeps its key: see the
+    // module docs for why a dead key never binds.
+    let Key::Character(typed) = &key else {
+        return (key, latin);
     };
-    // One ASCII character is something a binding can name; anything else (a
-    // Cyrillic letter, a dead key's composed text, an empty string) is not.
     let mut chars = typed.chars();
     let single = match (chars.next(), chars.next()) {
         (Some(c), None) => Some(c),
         _ => None,
     };
-    let ascii = single.is_some_and(|c| c.is_ascii());
-    match us {
-        UsKey::Letter(c) => match single {
-            Some(ch) if ch.is_ascii_alphabetic() => (key, true),
-            Some(ch) if ch.is_ascii() => {
-                if latin {
-                    (key, latin)
-                } else {
-                    (us_key(c), latin)
-                }
-            }
-            Some(ch) if is_latin_letter(ch) => (us_key(c), true),
-            Some(ch) if ch.is_alphabetic() => (us_key(c), false),
-            _ => (us_key(c), latin),
-        },
-        UsKey::Digit(c) => (us_key(c), latin),
-        UsKey::Punctuation(c) => {
-            if ascii && latin {
-                (key, latin)
-            } else {
-                (us_key(c), latin)
-            }
-        }
-    }
+    // A letter says which script the layout types, wherever it sits; a
+    // multi-character string, punctuation or a symbol leaves that as it was.
+    let latin = match single {
+        Some(c) if c.is_alphabetic() => is_latin_script(c),
+        Some(_) | None => latin,
+    };
+    let us_key = |c: char| Key::Character(c.to_string().into());
+    // One ASCII character on a Latin layout is what the key is labelled;
+    // anything else (a Cyrillic letter, ASCII on a non-Latin layout, an empty
+    // string) binds by position.
+    let as_typed = latin && single.is_some_and(|c| c.is_ascii());
+    let key = match us {
+        UsKey::Letter(_) | UsKey::Punctuation(_) if as_typed => key,
+        // The digit row is always the digit (AZERTY's `&` is 1),
+        UsKey::Digit(c)
+        // and every other key not kept as typed binds by its US position.
+        | UsKey::Letter(c)
+        | UsKey::Punctuation(c) => us_key(c),
+    };
+    (key, latin)
 }
 
 #[cfg(test)]
+mod xkb_tests;
+
+#[cfg(test)]
 mod tests {
-    use iced::keyboard::key::{NativeCode, Physical};
+    use iced::keyboard::{Modifiers, key::NativeCode};
+    use nokkvi_data::types::hotkey_config::HotkeyConfig;
 
     use super::*;
+    use crate::hotkeys::{resolve_action, unnamed_key_code};
 
     fn press(typed: &str, code: Code, latin: bool) -> (Key, bool) {
         normalize(Key::Character(typed.into()), &Physical::Code(code), latin)
@@ -257,9 +263,6 @@ mod tests {
         assert_eq!(press(".", Code::Slash, false), (ch("/"), false));
         assert_eq!(press("ю", Code::Period, false), (ch("."), false));
         assert_eq!(press("ё", Code::Backquote, false), (ch("`"), false));
-        // Before any letter told us otherwise, a non-ASCII character still
-        // maps by position.
-        assert_eq!(press("ж", Code::Semicolon, true), (ch(";"), true));
     }
 
     #[test]
@@ -270,22 +273,77 @@ mod tests {
     }
 
     #[test]
-    fn dead_key_on_a_punctuation_position_maps_to_its_us_character() {
-        // German, Swiss, US-International: Backquote is a dead key, which iced
-        // delivers as Key::Unidentified.
-        assert_eq!(
-            normalize(Key::Unidentified, &Physical::Code(Code::Backquote), true),
-            (ch("`"), true)
-        );
-        assert_eq!(
-            normalize(Key::Unidentified, &Physical::Code(Code::Backquote), false),
-            (ch("`"), false)
-        );
-        // Unidentified on a letter key still passes through unchanged.
-        assert_eq!(
-            normalize(Key::Unidentified, &Physical::Code(Code::KeyA), true),
-            (Key::Unidentified, true)
-        );
+    fn a_letter_on_a_punctuation_key_keeps_its_letter_and_marks_the_layout_latin() {
+        // Dvorak: the US ";" key types "s" and the US "/" key "z". They stay
+        // letters even right after a Cyrillic stretch, and say Latin.
+        assert_eq!(press("s", Code::Semicolon, true), (ch("s"), true));
+        assert_eq!(press("z", Code::Slash, false), (ch("z"), true));
+        // German "ö" on the US ";" key binds as ";" and says Latin; Russian
+        // "ж" on the same key says non-Latin.
+        assert_eq!(press("ö", Code::Semicolon, false), (ch(";"), true));
+        assert_eq!(press("ж", Code::Semicolon, true), (ch(";"), false));
+        // Spanish "º" sits below U+00C0 and is Latin all the same.
+        assert_eq!(press("º", Code::Backquote, false), (ch("`"), true));
+        // AZERTY's digit row says Latin too ("é" on the 2 key).
+        assert_eq!(press("é", Code::Digit2, false), (ch("2"), true));
+    }
+
+    #[test]
+    fn dead_keys_stay_unbound() {
+        // A dead key types nothing by itself, so a focused text field doesn't
+        // claim it. Bound, German "´" (on the US "=" key) would raise the
+        // selected row's rating in the middle of typing "Café".
+        for code in [Code::Equal, Code::Backquote, Code::Digit2, Code::KeyQ] {
+            let physical = Physical::Code(code);
+            assert_eq!(
+                normalize(Key::Unidentified, &physical, true),
+                (Key::Unidentified, true)
+            );
+            assert_eq!(
+                resolve_action(
+                    &Key::Unidentified,
+                    unnamed_key_code(&Key::Unidentified, &physical),
+                    Modifiers::empty(),
+                    &HotkeyConfig::default()
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn odd_text_on_a_letter_key_binds_by_position() {
+        assert_eq!(press("", Code::KeyA, false), (ch("a"), false));
+        assert_eq!(press("ab", Code::KeyA, true), (ch("a"), true));
+    }
+
+    #[test]
+    fn right_after_a_layout_switch_ascii_reads_the_old_way_until_a_letter() {
+        // A known limit, pinned so a change to it is deliberate. From a Latin
+        // layout to Hebrew, the Q key's "/" stays "/" (Focus Search)...
+        assert_eq!(press("/", Code::KeyQ, true), (ch("/"), true));
+        // ...and from Russian to German, "-" on the US "/" key reads as "/".
+        assert_eq!(press("-", Code::Slash, false), (ch("/"), false));
+    }
+
+    #[test]
+    fn any_letter_brings_the_flag_up_to_date_after_a_layout_switch() {
+        let _guard = LATIN_LAYOUT_LOCK.lock();
+        let live =
+            |typed: &str, code: Code| layout_independent_key(ch(typed), &Physical::Code(code));
+        // Russian, then Dvorak: the "s" on the US ";" key is a letter, so the
+        // "z" on the US "/" key after it stays "z" instead of Focus Search.
+        assert_eq!(live("ы", Code::KeyS), ch("s"));
+        assert_eq!(live("s", Code::Semicolon), ch("s"));
+        assert_eq!(live("z", Code::Slash), ch("z"));
+        // Russian, then German: "ö" says Latin, so "-" on the US "/" key is "-".
+        assert_eq!(live("ы", Code::KeyS), ch("s"));
+        assert_eq!(live("ö", Code::Semicolon), ch(";"));
+        assert_eq!(live("-", Code::Slash), ch("-"));
+        // Back to Russian: "ж" on the US ";" key says non-Latin, so "." on
+        // the US "/" key is "/" again.
+        assert_eq!(live("ж", Code::Semicolon), ch(";"));
+        assert_eq!(live(".", Code::Slash), ch("/"));
     }
 
     #[test]
@@ -297,6 +355,8 @@ mod tests {
             (enter, false)
         );
         assert_eq!(press("1", Code::Numpad1, true), (ch("1"), true));
+        // ISO's extra key (Greek types "«" there).
+        assert_eq!(press("«", Code::IntlBackslash, false), (ch("«"), false));
         assert_eq!(
             normalize(
                 ch("ы"),

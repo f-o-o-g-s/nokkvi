@@ -21,10 +21,12 @@ use crate::{
 /// AZERTY digit-row symbol) to the US-QWERTY character at that position
 /// (`super::layout_independent_key`), so bindings work on every layout.
 ///
-/// Also normalises shifted characters back to their base key (e.g. `$` →
-/// `4`) so that bindings stored as `Shift + 4` match. iced already reports
-/// the key without modifiers, so this is a fallback for an event that still
-/// carries the shifted symbol; the table is the US shift map.
+/// Also maps a US shifted symbol to its base key (`$` → `4`, the US shift
+/// map). iced reports the key without modifiers, so a US layout never gets
+/// here with one: the table only sees a symbol another Latin layout types
+/// unshifted, and there it maps by US positions, so AZERTY's `$` key fires
+/// the `4` binding (Songs). Those keys are `KNOWN_MISFIRES` in
+/// `layout::xkb_tests`.
 pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
     use keyboard::key;
     match key {
@@ -750,15 +752,16 @@ mod tests {
             ),
             Some(Message::Hotkey(HotkeyMessage::FocusSearch))
         ));
-        // Back on a Latin layout, "/" is "/" again.
+        // Switched to German: a letter says Latin again, so the "-" German
+        // types on the US "/" key is "-" (Decrease Rating), not Focus Search.
         let _ = ru("s", Code::KeyS);
         assert!(matches!(
             handle_hotkey(
-                ru("/", Code::Slash),
+                ru("-", Code::Slash),
                 keyboard::Modifiers::default(),
                 &config
             ),
-            Some(Message::Hotkey(HotkeyMessage::FocusSearch))
+            Some(Message::Hotkey(HotkeyMessage::DecreaseRating))
         ));
     }
 }

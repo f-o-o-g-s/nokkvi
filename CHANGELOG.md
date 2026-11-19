@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- On French AZERTY, the 6 key switches to Playlists instead of lowering the rating; numpad minus still lowers it.
+- Hotkeys you rebound on AZERTY, Czech or a non-Latin layout may sit on a different key: check them in Settings → Hotkeys.
+
 ### Fixed
 
 - nokkvi builds on Rust 1.95, the oldest version it supports.
@@ -17,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - With the visualizer off, seeking while paused moves the lyrics to the new line instead of waiting until playback resumes.
 - When its config and state folders are the same folder, nokkvi keeps its log file instead of deleting it at every launch.
 - A Super chord no hotkey uses no longer fires the plain key's hotkey: Super+X used to toggle Random.
+- Letter hotkeys work on non-Latin keyboard layouts such as Russian, Greek, Hebrew, Arabic or Thai: each key fires its US position's hotkey.
+- On French AZERTY, Czech and other layouts whose number row types symbols, the number keys switch views.
 
 ### Removed
 
