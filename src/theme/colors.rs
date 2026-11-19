@@ -484,20 +484,29 @@ pub(crate) fn lyrics_accent() -> Color {
     })
 }
 
-/// Least hue separation ([`hue_separation`]) the active lyric line keeps from
-/// the lyric ink, `fg0`. Every shipped theme marks that line by hue, not by
-/// lightness: its accent sits at or below the lightness of the dimmed lines
-/// around it. The weakest of the 46 variants is Svalbard's muted teal (0.033
-/// light, 0.035 dark). The accent from a black, white or grey cover separates
-/// by under 0.01, and its active line reads as a dimmed one.
+/// Least [`lyric_line_hue`] the active lyric line keeps. Every shipped theme
+/// marks that line by hue, not by lightness: its accent sits at or below the
+/// lightness of the dimmed lines around it. The weakest of the 46 variants is
+/// Svalbard's muted teal (0.033 light, 0.035 dark, from `fg0`; every shipped
+/// accent carries at least 0.041 chroma). The accent from a black, white or
+/// grey cover has no chroma, and its active line reads as a dimmed one.
 pub(super) const LYRICS_HUE_SEPARATION: f32 = 0.03;
 
+/// How well `line` marks the active lyric line by hue: the smaller of its
+/// [`hue_separation`] from the lyric ink `fg0` and its own chroma (its
+/// separation from grey). Both count because a grey line on a tinted `fg0`
+/// (Everforest's cream, Gruvbox, Catppuccin) still sits fg0's whole chroma
+/// away from it in the a/b plane, 0.04 to 0.08, and drew as a dimmed line.
+pub(super) fn lyric_line_hue(line: Color, fg0: Color) -> f32 {
+    hue_separation(line, fg0).min(line.into_oklch().c)
+}
+
 /// The active lyric line's ink while the accent follows the cover: the
-/// cover's own `cover_bright` when it keeps [`LYRICS_HUE_SEPARATION`] from
-/// `fg0`, else the theme's own `theme_bright`, so a cover with no hue to give
-/// (black, white, grey, a faint tint) leaves the line marked. A custom theme
-/// whose accent separates even less keeps the cover's. Both go through
-/// [`resolve_lyrics_accent`] first.
+/// cover's own `cover_bright` while its [`lyric_line_hue`] clears
+/// [`LYRICS_HUE_SEPARATION`], else the theme's own `theme_bright`, so a cover
+/// with no hue to give (black, white, grey, a faint tint) leaves the line
+/// marked. A custom theme whose accent marks it even less keeps the cover's.
+/// Both go through [`resolve_lyrics_accent`] first.
 pub(super) fn resolve_cover_lyrics_accent(
     cover_bright: Color,
     theme_bright: Color,
@@ -505,12 +514,12 @@ pub(super) fn resolve_cover_lyrics_accent(
     bg0_hard: Color,
 ) -> Color {
     let cover = resolve_lyrics_accent(cover_bright, bg0_hard);
-    let cover_separation = hue_separation(cover, fg0);
-    if cover_separation >= LYRICS_HUE_SEPARATION {
+    let cover_hue = lyric_line_hue(cover, fg0);
+    if cover_hue >= LYRICS_HUE_SEPARATION {
         return cover;
     }
     let theme = resolve_lyrics_accent(theme_bright, bg0_hard);
-    if hue_separation(theme, fg0) > cover_separation {
+    if lyric_line_hue(theme, fg0) > cover_hue {
         theme
     } else {
         cover

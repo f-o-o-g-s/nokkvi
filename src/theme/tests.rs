@@ -275,10 +275,10 @@ fn lyric_halo_ink_contrasts_bg0_hard_on_every_theme() {
 fn every_theme_marks_the_lyric_line_by_hue() {
     for (name, mode, t) in all_builtin_palettes() {
         let ink = resolve_lyrics_accent(t.accent_bright, t.bg0_hard);
-        let separation = hue_separation(ink, t.fg0);
+        let hue = lyric_line_hue(ink, t.fg0);
         assert!(
-            separation >= LYRICS_HUE_SEPARATION,
-            "{name}/{mode} lyric accent sits only {separation:.3} from fg0 in hue \
+            hue >= LYRICS_HUE_SEPARATION,
+            "{name}/{mode} lyric accent marks the line by only {hue:.3} of hue \
              (floor {LYRICS_HUE_SEPARATION})"
         );
     }

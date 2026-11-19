@@ -667,8 +667,8 @@ pub(crate) fn palette_from_encoded(bytes: &[u8]) -> Option<CoverPalette> {
 mod tests {
     use super::*;
     use crate::theme::{
-        LYRICS_HUE_SEPARATION, hue_separation, relative_luminance, resolve_highlight_fills,
-        resolve_lyrics_accent, tests::all_builtin_palettes,
+        LYRICS_HUE_SEPARATION, hue_separation, lyric_line_hue, relative_luminance,
+        resolve_highlight_fills, resolve_lyrics_accent, tests::all_builtin_palettes,
     };
 
     fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -1099,12 +1099,26 @@ mod tests {
                     separation >= LYRICS_HUE_SEPARATION,
                     "{name}/{mode} {seed:?}: lyric line only {separation:.3} from fg0 in hue"
                 );
+                // A grey line on a tinted fg0 (Everforest's cream) clears the
+                // separation on fg0's chroma alone, with no hue of its own.
+                let chroma = lyrics.into_oklch().c;
+                assert!(
+                    chroma >= LYRICS_HUE_SEPARATION,
+                    "{name}/{mode} {seed:?}: lyric line has only {chroma:.3} chroma"
+                );
+                if seed.chroma == 0.0 {
+                    assert_eq!(
+                        lyrics,
+                        resolve_lyrics_accent(palette.accent_bright, palette.bg0_hard),
+                        "{name}/{mode} {seed:?}: a grey cover hands it to the theme"
+                    );
+                }
                 assert!(
                     contrast_ratio(lyrics, after.bg0_hard) >= SELECTION_RING_MIN_CONTRAST - 1e-3,
                     "{name}/{mode} {seed:?}: lyric line under the halo floor"
                 );
                 let cover = resolve_lyrics_accent(after.accent_bright, after.bg0_hard);
-                if hue_separation(cover, after.fg0) >= LYRICS_HUE_SEPARATION {
+                if lyric_line_hue(cover, after.fg0) >= LYRICS_HUE_SEPARATION {
                     assert_eq!(
                         lyrics, cover,
                         "{name}/{mode} {seed:?}: a hued cover keeps it"
