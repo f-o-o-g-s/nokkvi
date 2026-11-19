@@ -433,13 +433,24 @@ pub fn migrate_to_state_dir() {
     migrate_between(&config_dir, &state_dir);
 }
 
+/// Whether two paths name one folder: equal as written, or equal once
+/// symlinks are resolved. A path that can't be resolved counts as its own
+/// folder.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
 /// The body of [`migrate_to_state_dir`], on explicit dirs so a test can run it
 /// on scratch ones.
 fn migrate_between(config_dir: &Path, state_dir: &Path) {
     // One dir for both (XDG_CONFIG_HOME and XDG_STATE_HOME pointed at the same
-    // folder, or a platform with no state dir): nothing to move, and the "old"
-    // log is the one this launch already opened.
-    if config_dir == state_dir {
+    // folder, one symlinked to the other, or a platform with no state dir):
+    // nothing to move, and the "old" log is the one this launch already opened.
+    if same_dir(config_dir, state_dir) {
         return;
     }
     let old_db = config_dir.join("app.redb");
@@ -523,6 +534,25 @@ mod tests {
             "the live log was deleted"
         );
         assert!(dir.path().join("app.redb").exists());
+    }
+
+    #[test]
+    fn the_migration_keeps_the_log_when_the_state_dir_links_to_the_config_dir() {
+        // `~/.local/state/nokkvi` symlinked to `~/.config/nokkvi`: two paths,
+        // one folder, so the "old" log is again the live one.
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        let state = root.path().join("state");
+        std::os::unix::fs::symlink(&config, &state).unwrap();
+        std::fs::write(config.join("app.redb"), b"db").unwrap();
+        std::fs::write(config.join("nokkvi.log"), b"log").unwrap();
+        migrate_between(&config, &state);
+        assert!(
+            config.join("nokkvi.log").exists(),
+            "the live log was deleted"
+        );
+        assert!(config.join("app.redb").exists());
     }
 
     #[test]
