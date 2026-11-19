@@ -499,9 +499,9 @@ pub(crate) async fn clear() {
 ///
 /// Live PIDs (current process, other running nokkvi instances) are preserved.
 /// Files for unrelated processes that happen to be alive at the same PID are
-/// also preserved — PID reuse is rare enough on Linux (32-bit PID space) that
-/// the false-negative is acceptable; the alternative would require parsing
-/// `/proc/<pid>/comm` and risks tearing down a sibling nokkvi instance's
+/// also preserved (`process_liveness::pid_is_alive`) — PID reuse is rare
+/// enough that the false-negative is acceptable; the alternative would require
+/// matching the process name and risks tearing down a sibling nokkvi instance's
 /// cache if the comm check ever misclassifies.
 pub(crate) async fn sweep_dead_pid_files() {
     let Some(dir) = cache_dir_path() else { return };
@@ -512,7 +512,7 @@ pub(crate) async fn sweep_dead_pid_files() {
 /// without touching the real `$XDG_CACHE_HOME`.
 async fn sweep_dead_pid_files_in(dir: &Path) {
     sweep_dir_where(dir, "dead-pid-sweep", |name| {
-        parse_pid_from_filename(name).is_some_and(|pid| !pid_is_alive(pid))
+        parse_pid_from_filename(name).is_some_and(|pid| !crate::process_liveness::pid_is_alive(pid))
     })
     .await;
 }
@@ -535,13 +535,6 @@ fn parse_pid_from_filename(name: &str) -> Option<u32> {
         .split_once('-')
         .map_or(stripped, |(pid, _rest)| pid);
     pid_str.parse::<u32>().ok()
-}
-
-/// Linux-only liveness probe: `/proc/<pid>` exists iff the kernel knows the
-/// pid. nokkvi is Linux-only (PipeWire / ksni / CLAUDE.md), so we lean on
-/// procfs directly rather than pulling `nix` or `libc` into the UI crate.
-fn pid_is_alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 /// Shared directory-sweep skeleton for the two cache cleanups
@@ -1381,21 +1374,6 @@ mod tests {
         assert_eq!(parse_pid_from_filename("mpris-art-12345"), None);
     }
 
-    #[test]
-    fn pid_is_alive_true_for_self_and_pid_1() {
-        // The test binary is alive by definition; init (pid 1) always exists
-        // on Linux. nokkvi is Linux-only so both invariants hold in CI.
-        assert!(pid_is_alive(std::process::id()));
-        assert!(pid_is_alive(1));
-    }
-
-    #[test]
-    fn pid_is_alive_false_for_definitely_dead_pid() {
-        // Linux kernel.pid_max is at most 2^22 (4_194_304); u32::MAX is far
-        // above any reachable PID, so /proc/4294967295 can never exist.
-        assert!(!pid_is_alive(u32::MAX));
-    }
-
     #[tokio::test]
     async fn sweep_removes_only_dead_pid_art_files() {
         let dir = ScratchDir::new();
@@ -1434,7 +1412,7 @@ mod tests {
         );
         assert!(
             dir.path().join(&alive_other).exists(),
-            "alive other-pid file (pid 1 = init) must be preserved"
+            "alive other-pid file (pid 1 = init / launchd) must be preserved"
         );
         assert!(
             dir.path().join(&current_self).exists(),

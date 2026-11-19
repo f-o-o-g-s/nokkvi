@@ -33,6 +33,7 @@ mod atomic_u8_enum;
 mod config_writer;
 mod embedded_svg;
 mod hotkeys;
+mod process_liveness;
 mod services;
 mod state;
 #[cfg(test)]
