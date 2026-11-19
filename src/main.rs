@@ -1284,6 +1284,22 @@ pub fn main() -> iced::Result {
         unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
     }
 
+    // A binary linked against the test build of the data crate keeps its
+    // config, database and cache in a per-process temp dir
+    // (`paths::TEST_DIRS`): it would start logged out and forget everything
+    // at exit. Only a test harness runs that way, and none reaches this
+    // `main`; `cargo build` and `cargo run` link the real dirs.
+    if nokkvi_data::utils::paths::TEST_DIRS {
+        #[expect(clippy::print_stderr, reason = "command-line error output")]
+        {
+            eprintln!(
+                "nokkvi: this binary was linked for tests and keeps nothing in your real \
+                 config. Rebuild it with `cargo build`."
+            );
+        }
+        std::process::exit(2);
+    }
+
     // Handle --version / --help / ping / single-instance probe before tracing
     // init so these short-lived invocations don't truncate
     // ~/.local/state/nokkvi/nokkvi.log and so the IPC client path never

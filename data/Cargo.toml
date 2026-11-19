@@ -89,6 +89,14 @@ biquad = "0.6"
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = { version = "0.10.0", features = ["v0_3_77"] }
 
+[features]
+# Test builds only: the root crate's dev-dependency turns it on, and this
+# crate's own tests get the same through `cfg(test)`. Every app dir (config,
+# state, data, cache) then resolves under a per-process temp root instead of the
+# user's real XDG dirs (`utils::paths::TEST_DIRS`). It does nothing in a release
+# build, and `main` refuses to start a binary that has it.
+hermetic-test-dirs = []
+
 [dev-dependencies]
 tempfile = "3"
 proptest = "1.11"

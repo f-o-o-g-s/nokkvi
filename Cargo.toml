@@ -158,6 +158,10 @@ particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e
 particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "7787e441cf2152c170335c04bf660290957a85cb", default-features = false }
 
 [dev-dependencies]
+# Test builds keep every app dir (config, state, data, cache) under a per-process
+# temp root, so `cargo test` never reads or rewrites the config, database or
+# cache of whoever runs it. Test builds only: `cargo build` never enables it.
+nokkvi-data = { path = "data", features = ["hermetic-test-dirs"] }
 # `test-util` adds tokio's paused test clock (`#[tokio::test(start_paused = true)]`).
 # Test builds only: `cargo build --release` never enables it. The extra feature
 # means test builds compile tokio and its dependents apart from `cargo build`.
