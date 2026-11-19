@@ -8,10 +8,13 @@
 //! [`super::remote_key_alias`]), and rewrites the character from the key's
 //! physical position when the layout's own character can't be a binding:
 //!
-//! - **Letter keys** (`KeyA`..`KeyZ`): the layout's character when it is
-//!   ASCII, so AZERTY / Dvorak / QWERTZ users keep the letters printed on
-//!   their keys; otherwise (Cyrillic and other non-Latin scripts) the US
-//!   letter at that position.
+//! - **Letter keys** (`KeyA`..`KeyZ`): the layout's character when it is an
+//!   ASCII letter, so AZERTY / Dvorak / QWERTZ users keep the letters printed
+//!   on their keys; ASCII punctuation on a letter key is kept on a Latin layout
+//!   (AZERTY's `M` key types `,`) and becomes the US letter on a non-Latin
+//!   layout (Greek `Q` types `;`, Hebrew `Q` types `/` and `W` types `'`,
+//!   Bulgarian `Q` types `,`); non-ASCII characters (Cyrillic, Greek, Turkish
+//!   `ı`, etc.) become the US letter at that position.
 //! - **The digit row** (`Digit0`..`Digit9`): always the digit. AZERTY's
 //!   unshifted row types `&é"'(`, Czech types `+ěščř`, and the number-key
 //!   bindings (view switching) must still work there.
@@ -22,10 +25,12 @@
 //!   ASCII literally would fire the wrong binding — and leave `/` (Focus
 //!   Search) unreachable.
 //!
-//! "The layout is Latin" is learned from the letter keys: the last letter
-//! press decides it ([`LATIN_LAYOUT`]). It starts Latin, and after a layout
-//! switch the first letter typed (in a search field or as a hotkey) brings it
-//! up to date.
+//! "The layout is Latin" is learned from letter presses on letter keys
+//! ([`LATIN_LAYOUT`]): ASCII letters and non-ASCII Latin letters (such as
+//! Turkish `ı`) mark it Latin, non-Latin letters (Cyrillic, Greek, Hebrew, …)
+//! mark it non-Latin, and punctuation on a letter key leaves it unchanged. It
+//! starts Latin, and after a layout switch the first letter typed (in a search
+//! field or as a hotkey) brings it up to date.
 //!
 //! Keys with no US-QWERTY character (named keys, the numpad, ISO's extra
 //! key) and presses without a physical code pass through unchanged.
@@ -115,6 +120,12 @@ fn us_qwerty(code: Code) -> Option<UsKey> {
     })
 }
 
+/// Whether `c` is a non-ASCII Latin-script letter (Latin-1 Supplement, Latin
+/// Extended-A/B, and Latin Extended Additional — e.g. Turkish `ı`, `ş`).
+fn is_latin_letter(c: char) -> bool {
+    c.is_alphabetic() && matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
+}
+
 /// The pure rule behind [`layout_independent_key`]: the key to bind against,
 /// and whether the layout reads as Latin afterwards.
 fn normalize(key: Key, physical: &Physical, latin: bool) -> (Key, bool) {
@@ -130,16 +141,26 @@ fn normalize(key: Key, physical: &Physical, latin: bool) -> (Key, bool) {
     // One ASCII character is something a binding can name; anything else (a
     // Cyrillic letter, a dead key's composed text, an empty string) is not.
     let mut chars = typed.chars();
-    let ascii = matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii());
+    let single = match (chars.next(), chars.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    };
+    let ascii = single.is_some_and(|c| c.is_ascii());
     let us_key = |c: char| Key::Character(c.to_string().into());
     match us {
-        UsKey::Letter(c) => {
-            if ascii {
-                (key, true)
-            } else {
-                (us_key(c), false)
+        UsKey::Letter(c) => match single {
+            Some(ch) if ch.is_ascii_alphabetic() => (key, true),
+            Some(ch) if ch.is_ascii() => {
+                if latin {
+                    (key, latin)
+                } else {
+                    (us_key(c), latin)
+                }
             }
-        }
+            Some(ch) if is_latin_letter(ch) => (us_key(c), true),
+            Some(ch) if ch.is_alphabetic() => (us_key(c), false),
+            _ => (us_key(c), latin),
+        },
         UsKey::Digit(c) => (us_key(c), latin),
         UsKey::Punctuation(c) => {
             if ascii && latin {
@@ -181,6 +202,23 @@ mod tests {
         assert_eq!(press("s", Code::KeyS, false), (ch("s"), true));
         // AZERTY's M key types ",": still a Latin layout, kept as typed.
         assert_eq!(press(",", Code::KeyM, true), (ch(","), true));
+    }
+
+    #[test]
+    fn punctuation_on_a_letter_key_binds_by_position_on_a_non_latin_layout() {
+        // Greek Q types ";"; Hebrew Q types "/" and W types "'".
+        assert_eq!(press(";", Code::KeyQ, false), (ch("q"), false));
+        assert_eq!(press("/", Code::KeyQ, false), (ch("q"), false));
+        assert_eq!(press("'", Code::KeyW, false), (ch("w"), false));
+        // Greek letter flips the flag to non-Latin.
+        assert_eq!(press("σ", Code::KeyS, true), (ch("s"), false));
+    }
+
+    #[test]
+    fn non_ascii_latin_letters_keep_the_layout_latin() {
+        // Turkish dotless "ı" on KeyI maps to "i" and marks the layout Latin.
+        assert_eq!(press("ı", Code::KeyI, true), (ch("i"), true));
+        assert_eq!(press("ı", Code::KeyI, false), (ch("i"), true));
     }
 
     #[test]
