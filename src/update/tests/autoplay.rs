@@ -127,6 +127,12 @@ fn the_settings_row_going_off_runs_the_same_cleanup_as_the_toggle() {
 
     use crate::views::settings::items::SettingValue;
 
+    // `finish_general_setting` applies the settings through
+    // `handle_player_settings_loaded`, which mirrors the process-global theme
+    // atomics (auto-hide included); unlocked, it flipped auto-hide off under
+    // `window_unfocus_drops_search_focus_so_refocus_doesnt_reveal`.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+
     assert!(crate::update::settings::settings_row_turns_autoplay_off(
         "general.autoplay_enabled",
         &SettingValue::Bool(false)

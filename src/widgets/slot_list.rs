@@ -2777,15 +2777,20 @@ mod tests {
             hl.text_color
         );
         // ...but a normal row AND a border-only selection keep the muted
-        // fallback rather than the row text color.
+        // fallback rather than the row text color. Compared against the
+        // fallback itself, so a palette whose fg4 equals fg0 (moonfly) still
+        // tells the two paths apart.
         assert!(!style.forces_legible_text);
+        let muted = Color {
+            a: 0.5,
+            ..crate::theme::fg4()
+        };
+        assert_eq!(slot_list_static_icon_color(style, muted, 0.5), muted);
+        assert_eq!(slot_list_static_icon_color(sel, muted, 0.5), muted);
         assert_ne!(
-            slot_list_static_icon_color(style, crate::theme::fg4(), 1.0),
-            style.text_color
-        );
-        assert_ne!(
-            slot_list_static_icon_color(sel, crate::theme::fg4(), 1.0),
-            sel.text_color
+            slot_list_static_icon_color(hl, muted, 0.5),
+            muted,
+            "the forced-ink path ignores the fallback"
         );
     }
 

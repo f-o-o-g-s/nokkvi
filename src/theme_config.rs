@@ -210,9 +210,23 @@ impl ResolvedDualTheme {
 // ============================================================================
 
 /// Load the active `ThemeFile` via theme_loader.
+#[cfg(not(test))]
 pub(crate) fn load_active_theme_file() -> ThemeFile {
     let name = nokkvi_data::services::theme_loader::read_theme_name_from_config();
     nokkvi_data::services::theme_loader::load_theme(&name)
+}
+
+/// Tests always read the shipped default theme, never the one the machine
+/// running them has picked: a test that compares palette colors otherwise
+/// passes or fails with the user's theme (moonfly's five identical
+/// foreground levels failed `highlight_slots_force_legible_ink`). A test that
+/// needs every palette sweeps `theme::tests::all_builtin_palettes`.
+#[cfg(test)]
+pub(crate) fn load_active_theme_file() -> ThemeFile {
+    nokkvi_data::services::theme_loader::load_builtin_theme(
+        nokkvi_data::services::theme_loader::DEFAULT_THEME,
+    )
+    .unwrap_or_default()
 }
 
 /// Load light_mode from [settings] in config.toml (for hot-reload).

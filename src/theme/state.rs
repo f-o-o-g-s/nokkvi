@@ -130,6 +130,9 @@ impl ActiveTheme {
 /// reader lock or cloning the whole 22-field struct.
 static DUAL_THEME: LazyLock<ArcSwap<ActiveTheme>> = LazyLock::new(|| {
     // Seed any missing built-in themes to ~/.config/nokkvi/themes/ on first access
+    // (not from tests, which read the embedded default and leave the user's
+    // config dir alone: `load_active_theme_file`)
+    #[cfg(not(test))]
     if let Err(e) = nokkvi_data::services::theme_loader::seed_builtin_themes() {
         tracing::warn!("Failed to seed built-in themes: {e}");
     }
