@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Nokkvi is a native Rust/Iced desktop client for Navidrome music servers. **Linux-only** (built/tested on Arch + Wayland/Hyprland with PipeWire). The codebase is AI-generated and AI-maintained — the human owner directs and tests but does not write code.
 
+A community macOS fork ([snusxd/nokkvi-macos](https://github.com/snusxd/nokkvi-macos)) builds on this tree. The `cfg(target_os = ...)` gates and the non-Linux branches behind them (the MPRIS, tray and notification startup in `src/main.rs`, `opener_command`, the state-dir fallback in `data/src/utils/paths.rs`, `src/process_liveness.rs`, the PipeWire-only sink parameters) are there to keep its diff small (PR #16). Nothing here builds or tests them: keep them through cleanups and refactors, and send macOS-only features to the fork.
+
 ## Common commands
 
 ```bash
