@@ -751,7 +751,7 @@ fn a_settings_load_that_keeps_lyrics_on_keeps_the_sheet() {
 // tests are flaky by construction (the THEME_MODE_LOCK precedent).
 // ---------------------------------------------------------------------------
 
-static LYRICS_MOTION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static LYRICS_MOTION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn motion_setup(app: &mut crate::Nokkvi, times_ms: &[u32]) {
     seed_matched(app, "song_1", timed_doc(times_ms));
@@ -813,6 +813,63 @@ fn seek_sized_jump_snaps_first_tick() {
     assert_eq!(app.lyrics.anim_duration_ms, 0, "seek-sized jump must snap");
     let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
     assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 7.0);
+}
+
+/// The tests above call the frame tick by hand, but while paused with the
+/// visualizer off the frame loop runs only while `frames_wanted` says so. A
+/// paused seek snaps the glide (no motion to wait for), so the snap must still
+/// ask for the one frame that lands it, or the sheet stays on the old line
+/// until playback resumes (found live: seek 10 -> 40 -> 25 -> 60, paused, all
+/// drew the 10 s line).
+#[test]
+fn a_paused_seek_asks_for_the_frame_that_lands_it() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.settings.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Off;
+    motion_setup(
+        &mut app,
+        &[1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000],
+    );
+    let paused_at = |position_ms| PlaybackStateUpdate {
+        paused: true,
+        ..update_for("song_1", position_ms)
+    };
+
+    let _ = app.handle_playback_state_updated(paused_at(1_000));
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
+    assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 0.0);
+    assert!(!app.frames_wanted(), "paused on a settled line: idle");
+
+    let _ = app.handle_playback_state_updated(paused_at(8_000));
+    assert!(
+        app.frames_wanted(),
+        "a paused seek's snap still needs the frame that publishes it"
+    );
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
+    assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 7.0);
+    assert!(!app.frames_wanted(), "landed: idle again");
+}
+
+/// A wheel notch on a paused plain sheet moves its drift center, which only
+/// the frame tick publishes: it needs a frame too.
+#[test]
+fn a_paused_plain_sheet_wheel_notch_asks_for_a_frame() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.settings.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Off;
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let _ = app.handle_playback_state_updated(PlaybackStateUpdate {
+        paused: true,
+        ..update_for("song_1", 10_000)
+    });
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
+    assert!(!app.frames_wanted(), "paused, published: idle");
+
+    let _ = app.handle_queue(crate::views::QueueMessage::LyricsWheel(2.0));
+    assert!(app.frames_wanted(), "the notch moved the drift center");
+    let _ = crate::update::frame::handle_frame_tick(&mut app, std::time::Instant::now());
+    assert!(!app.frames_wanted(), "landed: idle again");
 }
 
 #[test]

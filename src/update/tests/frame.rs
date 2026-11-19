@@ -79,6 +79,12 @@ fn the_visualizer_theater_and_harbour_want_frames_while_paused() {
 
 #[test]
 fn a_lyrics_glide_or_dissolve_in_flight_wants_frames_until_it_settles() {
+    // `frames_wanted` compares the target with the published center, a
+    // process-global the lyrics motion tests write.
+    let _guard = super::lyrics::LYRICS_MOTION_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
     let mut app = idle_app();
     app.playback.playing = true;
     app.playback.paused = true;
@@ -93,7 +99,17 @@ fn a_lyrics_glide_or_dissolve_in_flight_wants_frames_until_it_settles() {
     assert!(!app.frames_wanted(), "a settled glide needs nothing");
     app.lyrics.anim_start = Some(Instant::now());
     app.lyrics.anim_duration_ms = 0;
-    assert!(!app.frames_wanted(), "a snap has no motion");
+    assert!(
+        !app.frames_wanted(),
+        "a snap already published has no motion"
+    );
+    app.lyrics.scroll_to = 3.0;
+    assert!(
+        app.frames_wanted(),
+        "a snap still to publish needs its frame"
+    );
+    crate::widgets::lyrics_viewport::set_lyrics_center(3.0);
+    assert!(!app.frames_wanted(), "published: nothing left to move");
     app.lyrics.anim_duration_ms = 500;
     app.settings.lyrics_mode = LyricsMode::Off;
     assert!(!app.frames_wanted(), "with lyrics off nothing is drawn");
