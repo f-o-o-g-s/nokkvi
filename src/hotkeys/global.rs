@@ -16,20 +16,15 @@ use crate::{
 /// Convert an iced keyboard key to our `KeyCode` enum.
 /// Returns `None` for keys we don't support binding to.
 ///
-/// Normalises shifted characters back to their base key (e.g. `$` → `4`)
-/// so that bindings stored as `Shift + 4` match the actual key event
-/// that Iced reports as `Key::Character("$")` with `modifiers.shift()`.
+/// By the time a live press gets here, the keyboard subscription has already
+/// rewritten a character the active layout can't bind (a Cyrillic letter, an
+/// AZERTY digit-row symbol) to the US-QWERTY character at that position
+/// (`super::layout_independent_key`), so bindings work on every layout.
 ///
-/// # Keyboard layout assumption
-///
-/// Assumes a **US QWERTY** layout. The shifted-symbol → base-key table
-/// below (`!` → `1`, `@` → `2`, `#` → `3`, etc.) is the US-shift map;
-/// other layouts (AZERTY, Dvorak, German QWERTZ, etc.) produce different
-/// shifted characters for the same physical keys, and bindings registered
-/// against US base keys will not normalise correctly. This is a known
-/// limitation — Iced does not currently expose hardware scancodes that
-/// would let us key off the physical position rather than the produced
-/// character.
+/// Also normalises shifted characters back to their base key (e.g. `$` →
+/// `4`) so that bindings stored as `Shift + 4` match. iced already reports
+/// the key without modifiers, so this is a fallback for an event that still
+/// carries the shifted symbol; the table is the US shift map.
 pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
     use keyboard::key;
     match key {
@@ -724,5 +719,45 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_letter_typed_on_a_cyrillic_layout_fires_its_binding() {
+        use keyboard::key::{Code, Physical};
+        let config = HotkeyConfig::default();
+        // Russian layout: the X key types "ч", Shift+L types "Д" (iced drops
+        // Shift from the key), the "/" key types ".".
+        let ru = |typed: &str, code: Code| {
+            crate::hotkeys::layout_independent_key(
+                keyboard::Key::Character(typed.into()),
+                &Physical::Code(code),
+            )
+        };
+        assert!(matches!(
+            handle_hotkey(ru("ч", Code::KeyX), keyboard::Modifiers::default(), &config),
+            Some(Message::Playback(PlaybackMessage::ToggleRandom))
+        ));
+        assert!(matches!(
+            handle_hotkey(ru("д", Code::KeyL), keyboard::Modifiers::SHIFT, &config),
+            Some(Message::Hotkey(HotkeyMessage::ToggleStar))
+        ));
+        assert!(matches!(
+            handle_hotkey(
+                ru(".", Code::Slash),
+                keyboard::Modifiers::default(),
+                &config
+            ),
+            Some(Message::Hotkey(HotkeyMessage::FocusSearch))
+        ));
+        // Back on a Latin layout, "/" is "/" again.
+        let _ = ru("s", Code::KeyS);
+        assert!(matches!(
+            handle_hotkey(
+                ru("/", Code::Slash),
+                keyboard::Modifiers::default(),
+                &config
+            ),
+            Some(Message::Hotkey(HotkeyMessage::FocusSearch))
+        ));
     }
 }
