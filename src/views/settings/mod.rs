@@ -720,12 +720,7 @@ impl SettingsPage {
                 );
                 // Convert iced key event to our KeyCombo
                 if let Some(keycode) = crate::hotkeys::key_press_to_keycode(key, unnamed) {
-                    let combo = nokkvi_data::types::hotkey_config::KeyCombo {
-                        key: keycode,
-                        shift: modifiers.shift(),
-                        ctrl: modifiers.control(),
-                        alt: modifiers.alt(),
-                    };
+                    let combo = crate::hotkeys::key_combo(keycode, modifiers);
                     // What the capture can actually write — decided in the
                     // data crate so every outcome is pure and tested. The badge
                     // text below describes what was written, never more.

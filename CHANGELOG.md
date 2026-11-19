@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Hotkeys can use Super: press it while rebinding in Settings → Hotkeys, or write `Super + J` in config.toml.
+
 ### Changed
 
 ### Fixed
@@ -14,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - With Accent From Album Art on, a black, white or grey cover keeps the active lyric line on the theme's accent in every shipped theme.
 - With the visualizer off, seeking while paused moves the lyrics to the new line instead of waiting until playback resumes.
 - With `XDG_CONFIG_HOME` and `XDG_STATE_HOME` set to the same folder, nokkvi keeps its log file instead of deleting it at every launch.
+- A Super chord no hotkey uses no longer fires the plain key's hotkey: Super+X used to toggle Random.
 
 ### Removed
 

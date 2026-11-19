@@ -4,7 +4,7 @@
 //! Uses `HotkeyConfig` for configurable bindings instead of hardcoded match arms.
 
 use iced::keyboard;
-use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig, KeyCode};
+use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig, KeyCode, KeyCombo};
 
 use crate::{
     Message, View,
@@ -282,19 +282,26 @@ pub(crate) fn resolve_action(
     modifiers: keyboard::Modifiers,
     config: &HotkeyConfig,
 ) -> Option<HotkeyAction> {
-    let keycode = key_press_to_keycode(key, unnamed)?;
-    config.lookup(
-        &keycode,
-        modifiers.shift(),
-        modifiers.control(),
-        modifiers.alt(),
-    )
+    let combo = key_combo(key_press_to_keycode(key, unnamed)?, modifiers);
+    config.lookup_combo(&combo)
+}
+
+/// The binding a key press is: its `KeyCode` plus the four modifiers. Super is
+/// part of it, so Super+X never fires a bare `x` binding. Shared by
+/// dispatch ([`resolve_action`]) and the Settings capture, so a captured
+/// combo is exactly what the key later looks up.
+pub(crate) fn key_combo(key: KeyCode, modifiers: keyboard::Modifiers) -> KeyCombo {
+    KeyCombo {
+        shift: modifiers.shift(),
+        ctrl: modifiers.control(),
+        alt: modifiers.alt(),
+        logo: modifiers.logo(),
+        key,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use nokkvi_data::types::hotkey_config::KeyCombo;
-
     use super::*;
 
     #[test]
@@ -677,6 +684,45 @@ mod tests {
         assert!(
             matches!(msg, Some(Message::Hotkey(HotkeyMessage::ToggleStar))),
             "Custom F5 binding should dispatch ToggleStar"
+        );
+    }
+
+    #[test]
+    fn a_super_chord_never_fires_the_bare_keys_hotkey() {
+        let config = HotkeyConfig::default();
+        assert!(
+            config
+                .lookup(&KeyCode::Char('x'), false, false, false)
+                .is_some(),
+            "bare x is bound by default"
+        );
+        let super_x = handle_hotkey(
+            keyboard::Key::Character("x".into()),
+            keyboard::Modifiers::LOGO,
+            &config,
+        );
+        assert!(super_x.is_none(), "Super+X must not fire bare x's hotkey");
+    }
+
+    #[test]
+    fn a_super_binding_fires_on_super_only() {
+        let mut config = HotkeyConfig::default();
+        config.set_binding(HotkeyAction::ToggleStar, KeyCombo::logo(KeyCode::Char('j')));
+        assert!(matches!(
+            handle_hotkey(
+                keyboard::Key::Character("j".into()),
+                keyboard::Modifiers::LOGO,
+                &config,
+            ),
+            Some(Message::Hotkey(HotkeyMessage::ToggleStar))
+        ));
+        assert!(
+            handle_hotkey(
+                keyboard::Key::Character("j".into()),
+                keyboard::Modifiers::empty(),
+                &config,
+            )
+            .is_none()
         );
     }
 }

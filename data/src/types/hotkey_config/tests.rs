@@ -52,7 +52,8 @@ fn keycombo_display() {
             key: KeyCode::Char('a'),
             shift: true,
             ctrl: true,
-            alt: false
+            alt: false,
+            logo: false,
         }
         .display(),
         "Ctrl + Shift + A"
@@ -348,6 +349,7 @@ fn keycombo_parse_multi_modifier() {
             shift: true,
             ctrl: true,
             alt: false,
+            logo: false,
         }
     );
 }
@@ -362,6 +364,7 @@ fn keycombo_parse_alt_modifier() {
             shift: false,
             ctrl: false,
             alt: true,
+            logo: false,
         }
     );
 }
@@ -387,7 +390,7 @@ fn keycombo_parse_rejects_empty() {
 
 #[test]
 fn keycombo_parse_rejects_unknown_modifier() {
-    let result = "Super + A".parse::<KeyCombo>();
+    let result = "Hyper + A".parse::<KeyCombo>();
     assert!(result.is_err());
 }
 
@@ -408,6 +411,7 @@ fn keycombo_display_roundtrip() {
             shift: true,
             ctrl: true,
             alt: false,
+            logo: false,
         },
     ];
 
@@ -1254,5 +1258,56 @@ fn an_unnamed_key_binding_survives_the_toml_round_trip() {
     assert_eq!(
         reloaded.lookup(&KeyCode::Native(582), false, false, false),
         Some(HotkeyAction::TogglePlay)
+    );
+}
+
+// ============================================================================
+// The logo modifier (Super)
+// ============================================================================
+
+#[test]
+fn every_logo_spelling_parses() {
+    for text in [
+        "Super + L",
+        "Win + L",
+        "Meta + L",
+        "Cmd + L",
+        "Command + L",
+        "Logo + L",
+    ] {
+        let combo: KeyCombo = text.parse().unwrap();
+        assert_eq!(combo, KeyCombo::logo(KeyCode::Char('l')), "{text}");
+    }
+}
+
+#[test]
+fn a_super_combo_round_trips_through_config_text() {
+    let combo = KeyCombo {
+        shift: true,
+        alt: true,
+        ..KeyCombo::logo(KeyCode::ArrowUp)
+    };
+    let text = combo.to_string();
+    assert_eq!(text, format!("Shift + Alt + Super + {}", KeyCode::ArrowUp));
+    assert_eq!(text.parse::<KeyCombo>().unwrap(), combo);
+}
+
+#[test]
+fn a_super_binding_is_distinct_from_the_bare_key() {
+    let mut config = HotkeyConfig::default();
+    config.set_binding(HotkeyAction::ToggleStar, KeyCombo::logo(KeyCode::Char('j')));
+    assert_eq!(
+        config.lookup_combo(&KeyCombo::logo(KeyCode::Char('j'))),
+        Some(HotkeyAction::ToggleStar)
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::Char('j'), false, false, false),
+        None
+    );
+    let refresh = config.lookup(&KeyCode::Char('r'), false, false, false);
+    assert_eq!(refresh, Some(HotkeyAction::RefreshView));
+    assert_eq!(
+        config.lookup_combo(&KeyCombo::logo(KeyCode::Char('r'))),
+        None
     );
 }

@@ -118,13 +118,8 @@ impl HotkeyConfig {
         *self = Self::default();
     }
 
-    /// Look up which action a key+modifiers combination is bound to.
-    /// Returns `None` if no action matches.
-    ///
-    /// Two actions CAN share one combo — a user rebinding onto an occupied
-    /// key, or a new default landing on a combo a user already claimed. The
-    /// winner is picked by [`Self::resolve`], never by map order, so the same
-    /// key fires the same action on every launch.
+    /// Look up which action a key + Shift/Ctrl/Alt combination (no Super) is
+    /// bound to: [`Self::lookup_combo`] for a combo with every modifier.
     pub fn lookup(
         &self,
         key: &KeyCode,
@@ -133,12 +128,23 @@ impl HotkeyConfig {
         alt: bool,
     ) -> Option<HotkeyAction> {
         let combo = KeyCombo {
-            key: key.clone(),
             shift,
             ctrl,
             alt,
+            ..KeyCombo::key(key.clone())
         };
-        self.resolve(&combo, None)
+        self.lookup_combo(&combo)
+    }
+
+    /// Look up which action a key combination is bound to.
+    /// Returns `None` if no action matches.
+    ///
+    /// Two actions CAN share one combo — a user rebinding onto an occupied
+    /// key, or a new default landing on a combo a user already claimed. The
+    /// winner is picked by [`Self::resolve`], never by map order, so the same
+    /// key fires the same action on every launch.
+    pub fn lookup_combo(&self, combo: &KeyCombo) -> Option<HotkeyAction> {
+        self.resolve(combo, None)
     }
 
     /// Decide which action owns `combo`, in a fixed order that does not depend

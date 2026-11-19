@@ -16,6 +16,9 @@ pub struct KeyCombo {
     pub ctrl: bool,
     #[serde(default)]
     pub alt: bool,
+    /// The logo modifier: Super (the Windows key).
+    #[serde(default)]
+    pub logo: bool,
 }
 
 impl KeyCombo {
@@ -26,30 +29,35 @@ impl KeyCombo {
             shift: false,
             ctrl: false,
             alt: false,
+            logo: false,
         }
     }
 
     /// Create a Shift+key combo.
     pub const fn shift(key: KeyCode) -> Self {
         Self {
-            key,
             shift: true,
-            ctrl: false,
-            alt: false,
+            ..Self::key(key)
         }
     }
 
     /// Create a Ctrl+key combo.
     pub const fn ctrl(key: KeyCode) -> Self {
         Self {
-            key,
-            shift: false,
             ctrl: true,
-            alt: false,
+            ..Self::key(key)
         }
     }
 
-    /// Human-readable display (e.g. "Shift + L", "Ctrl + D", "Space")
+    /// Create a Super+key combo.
+    pub const fn logo(key: KeyCode) -> Self {
+        Self {
+            logo: true,
+            ..Self::key(key)
+        }
+    }
+
+    /// Human-readable display (e.g. "Shift + L", "Ctrl + D", "Super + J", "Space")
     pub fn display(&self) -> String {
         let mut parts = Vec::new();
         if self.ctrl {
@@ -60,6 +68,9 @@ impl KeyCombo {
         }
         if self.alt {
             parts.push("Alt".to_string());
+        }
+        if self.logo {
+            parts.push("Super".to_string());
         }
         parts.push(self.key.to_string());
         parts.join(" + ")
@@ -78,7 +89,8 @@ impl FromStr for KeyCombo {
     /// Parse a human-readable key combo string back to a `KeyCombo`.
     ///
     /// Accepts the format produced by `KeyCombo::display()`: `"Shift + L"`,
-    /// `"Ctrl + E"`, `"Space"`, `"Shift + ↑"`, etc.
+    /// `"Ctrl + E"`, `"Super + J"`, `"Space"`, `"Shift + ↑"`, etc. Super also
+    /// reads as `Win`, `Meta`, `Logo`, `Cmd` or `Command`.
     fn from_str(s: &str) -> Result<Self, String> {
         let parts: Vec<&str> = s.split('+').map(str::trim).collect();
         if parts.is_empty() {
@@ -88,6 +100,7 @@ impl FromStr for KeyCombo {
         let mut shift = false;
         let mut ctrl = false;
         let mut alt = false;
+        let mut logo = false;
 
         // All parts except the last are modifiers
         for &part in &parts[..parts.len() - 1] {
@@ -95,6 +108,9 @@ impl FromStr for KeyCombo {
                 "shift" => shift = true,
                 "ctrl" | "control" => ctrl = true,
                 "alt" => alt = true,
+                // Every OS's name for the logo key, so a config file copied
+                // from another machine (or written from habit) still reads.
+                "super" | "win" | "windows" | "meta" | "logo" | "cmd" | "command" => logo = true,
                 _ => return Err(format!("unknown modifier: {part}")),
             }
         }
@@ -107,6 +123,7 @@ impl FromStr for KeyCombo {
             shift,
             ctrl,
             alt,
+            logo,
         })
     }
 }
