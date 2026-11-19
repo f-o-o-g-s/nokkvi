@@ -491,7 +491,7 @@ impl Nokkvi {
                 // it on the happy path (the browser already has it). Only emit it
                 // when xdg-open fails and the user must open it manually; the log
                 // is created 0600 so it stays owner-readable.
-                if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                if let Err(e) = super::components::spawn_desktop_open(&url) {
                     warn!(" [SCROBBLE] Failed to open Last.fm authorize URL: {e}");
                     tracing::info!(" [SCROBBLE] Open this URL to authorize Last.fm: {url}");
                     self.toast_error("Could not open browser — copy the URL from the log");

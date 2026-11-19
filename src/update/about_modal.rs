@@ -39,7 +39,7 @@ impl Nokkvi {
             }
             AboutModalMessage::OpenKofi => {
                 let url = "https://ko-fi.com/foogsnokkvi";
-                if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+                if let Err(e) = super::components::spawn_desktop_open(url) {
                     tracing::warn!("Failed to open Ko-fi URL: {}", e);
                     self.toast_warn(format!("Could not open browser: {e}"));
                 }
