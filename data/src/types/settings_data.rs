@@ -294,7 +294,9 @@ pub struct PlaybackSettingsData {
     pub radio_scrobble_threshold_secs: i64,
     /// Whether radio now-playing updates are sent.
     pub radio_now_playing_enabled: bool,
-    /// Discord application id (empty = Rich Presence off).
+    /// Whether Discord Rich Presence is on.
+    pub discord_presence: bool,
+    /// Discord application id override (empty = nokkvi's own application).
     pub discord_app_id: Cow<'static, str>,
     /// Which layer supplies each radio-scrobble credential (env / config.toml /
     /// redb / unset), so the settings rows show "Saved" vs "Set in config.toml"
@@ -365,6 +367,7 @@ impl Default for PlaybackSettingsData {
             radio_scrobbling_enabled: false,
             radio_scrobble_threshold_secs: 0,
             radio_now_playing_enabled: false,
+            discord_presence: false,
             discord_app_id: Cow::Borrowed(""),
             listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,

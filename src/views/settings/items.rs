@@ -746,6 +746,7 @@ mod tests {
                 "general.quick_add_to_playlist",
                 "general.default_playlist_name",
                 "general.queue_show_default_playlist",
+                "general.discord_presence",
                 "general.discord_app_id",
             ],
             "Playback tab Off-mode item keys diverge (order matters)",

@@ -378,6 +378,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             label: "Discord",
             icon: DISCORD,
         },
+        macro_rows.take("general.discord_presence"),
         // Opens the free-text input dialog, like the Local Music Path row.
         macro_rows
             .take("general.discord_app_id")

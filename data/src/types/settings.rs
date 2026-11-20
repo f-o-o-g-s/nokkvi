@@ -486,8 +486,11 @@ crate::player_settings_schema! {
     /// (default 75; `RATING_REMINDER_PERCENT_MIN`..=`_MAX`).
     #[serde(default = "default_rating_reminder_percent")]
     same rating_reminder_percent: u32 = default_rating_reminder_percent(),
-    /// Discord application id for Rich Presence (default: empty = presence off).
-    /// The user creates the application in Discord's developer portal.
+    /// Whether nokkvi shows what plays as a Discord Rich Presence (default off).
+    #[serde(default)]
+    same discord_presence: bool = false,
+    /// Discord application id override for Rich Presence (default: empty =
+    /// nokkvi's own application, `discord_rpc::NOKKVI_APP_ID`).
     #[serde(default)]
     same discord_app_id: String = String::new(),
     /// Visualizer behavior config — sourced from the in-memory

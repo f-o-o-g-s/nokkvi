@@ -32,18 +32,42 @@ fn a_cover_with_no_usable_link_is_still_marked_asked() {
 }
 
 #[test]
-fn with_no_app_id_a_tick_starts_no_worker_and_asks_for_no_cover() {
+fn with_presence_off_a_tick_starts_no_worker_and_asks_for_no_cover() {
     let mut app = test_app();
-    app.settings.discord_app_id.clear();
+    app.settings.discord_presence = false;
+    app.settings.discord_app_id = "123".to_string();
     let request = app.sync_discord_presence(Some("s1"), "Album", 200, Some(10), true, false);
     assert!(request.is_none());
     assert!(!app.discord.is_running());
 }
 
 #[test]
+fn presence_on_with_no_override_runs_under_nokkvis_app() {
+    let mut app = test_app();
+    app.settings.discord_presence = true;
+    app.settings.discord_app_id.clear();
+    let _ = app.sync_discord_presence(Some("s1"), "Album", 200, Some(10), true, false);
+    assert!(
+        app.discord.is_running(),
+        "an empty override must not keep presence off"
+    );
+}
+
+#[test]
+fn turning_presence_off_stops_the_worker() {
+    let mut app = test_app();
+    app.settings.discord_presence = true;
+    let _ = app.sync_discord_presence(Some("s1"), "Album", 200, Some(10), true, false);
+    assert!(app.discord.is_running());
+    app.settings.discord_presence = false;
+    let _ = app.sync_discord_presence(Some("s1"), "Album", 200, Some(11), true, false);
+    assert!(!app.discord.is_running());
+}
+
+#[test]
 fn a_stale_tick_waits_for_the_next_one() {
     let mut app = test_app();
-    app.settings.discord_app_id = "123".to_string();
+    app.settings.discord_presence = true;
     let request = app.sync_discord_presence(Some("s1"), "Album", 200, None, true, false);
     assert!(request.is_none());
     assert!(

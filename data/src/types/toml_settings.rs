@@ -38,7 +38,9 @@ pub struct TomlSettings {
     /// press.
     pub harbour_expandable_shelves: bool,
     pub local_music_path: String,
-    /// Discord application id for Rich Presence; empty keeps presence off.
+    /// Whether Discord Rich Presence is on.
+    pub discord_presence: bool,
+    /// Discord application id override; empty uses nokkvi's own application.
     pub discord_app_id: String,
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool values load via the compat shim (`true` → On, `false` → Off).
@@ -361,6 +363,7 @@ impl Default for TomlSettings {
             enter_shuffle: false,
             harbour_expandable_shelves: false,
             local_music_path: String::new(),
+            discord_presence: false,
             discord_app_id: String::new(),
             verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),

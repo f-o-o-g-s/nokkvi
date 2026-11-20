@@ -189,5 +189,6 @@
   "love_change_notification_enabled": false,
   "rating_reminder_trigger": "on_scrobble",
   "rating_reminder_percent": 75,
+  "discord_presence": false,
   "discord_app_id": ""
 }

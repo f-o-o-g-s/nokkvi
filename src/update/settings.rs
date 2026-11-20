@@ -161,6 +161,7 @@ impl Nokkvi {
             radio_scrobbling_enabled: self.settings.radio_scrobbling_enabled,
             radio_scrobble_threshold_secs: i64::from(self.settings.radio_scrobble_threshold_secs),
             radio_now_playing_enabled: self.settings.radio_now_playing_enabled,
+            discord_presence: self.settings.discord_presence,
             discord_app_id: self.settings.discord_app_id.clone().into(),
             listenbrainz_source,
             lastfm_credentials_source,
