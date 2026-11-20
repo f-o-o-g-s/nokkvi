@@ -1743,10 +1743,12 @@ pub enum Message {
     /// mass re-downloads.
     LibraryChanged(crate::services::navidrome_sse::LibraryChange),
     /// The public cover link the server gave for an album, for the Discord
-    /// presence (`None`: no usable link).
+    /// presence (`None`: no usable link; `link_private`: the server gave one
+    /// Discord can't reach).
     DiscordCover {
         album_id: String,
         url: Option<String>,
+        link_private: bool,
     },
     LoadAlbums,
     LoadQueue,
