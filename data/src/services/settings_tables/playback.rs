@@ -653,9 +653,30 @@ define_settings! {
         },
 
         // -- Discord ----------------------------------------------------------
+        // The presence worker follows both rows from the playback tick.
+        DiscordPresence {
+            key: "general.discord_presence",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_discord_presence(v),
+            toml_apply: |ts, p| p.discord_presence = ts.discord_presence,
+            read: |src, out| out.discord_presence = src.discord_presence,
+            write: |ps, ts| ts.discord_presence = ps.discord_presence,
+            ui_meta: {
+                label: "Discord Status",
+                category: "Discord",
+                subtitle: Some(
+                    "Show the playing track on your Discord profile, through the Discord \
+                     desktop app or Vesktop / Equibop. Anyone who can see your profile sees \
+                     it. The album cover shows when your server is reachable from the \
+                     internet, else nokkvi's icon. Off shows nothing.",
+                ),
+                default: false,
+                read_field: |d| d.discord_presence,
+            },
+        },
         // Free text through the text-input dialog (like `local_music_path`);
         // the UI mirror on `Nokkvi.settings` is repopulated by
-        // `handle_player_settings_loaded`, and the presence worker follows it.
+        // `handle_player_settings_loaded`.
         DiscordAppId {
             key: "general.discord_app_id",
             value_type: Text,
@@ -667,10 +688,9 @@ define_settings! {
                 label: "Discord App ID",
                 category: "Discord",
                 subtitle: Some(
-                    "Show what you're listening to on your Discord profile. Create an \
-                     application at discord.com/developers and paste its Application ID \
-                     here · the cover shows when your server is reachable from the \
-                     internet · empty turns it off · press Enter to edit",
+                    "Empty shows the status as \"Listening to nokkvi\". The Application ID \
+                     of your own app from discord.com/developers shows its name and icon \
+                     instead · press Enter to edit",
                 ),
                 default: "",
                 read_field: |d| d.discord_app_id.as_ref(),
@@ -1103,6 +1123,7 @@ mod tests {
             radio_scrobbling_enabled: false,
             radio_scrobble_threshold_secs: 60,
             radio_now_playing_enabled: true,
+            discord_presence: false,
             discord_app_id: "".into(),
             listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
             lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
@@ -1143,7 +1164,7 @@ mod tests {
     fn build_playback_tab_settings_items_emits_the_pinned_row_count() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 40);
+        assert_eq!(entries.len(), 41);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -2121,6 +2142,7 @@ mod tests {
             radio_scrobbling_enabled: live.radio_scrobbling_enabled,
             radio_scrobble_threshold_secs: i64::from(live.radio_scrobble_threshold_secs),
             radio_now_playing_enabled: live.radio_now_playing_enabled,
+            discord_presence: live.discord_presence,
             discord_app_id: live.discord_app_id.clone().into(),
             // Connection status is sourced from redb in build_settings_view_data,
             // not from LivePlayerSettings — not part of this macro round-trip.

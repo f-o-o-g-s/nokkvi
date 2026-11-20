@@ -26,6 +26,25 @@ use std::{
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
+/// nokkvi's own Discord application, so the status reads "Listening to
+/// nokkvi" with its icon and nobody has to register an app. An application
+/// id is public by design: it names the app, it grants nothing.
+pub const NOKKVI_APP_ID: &str = "1573133205307924603";
+
+/// The application presence is published under: the user's override when
+/// set, else [`NOKKVI_APP_ID`].
+pub fn effective_app_id(override_id: &str) -> &str {
+    match override_id.trim() {
+        "" => NOKKVI_APP_ID,
+        id => id,
+    }
+}
+
+/// `status_display_type`: which activity field the member list shows after
+/// "Listening to".
+const STATUS_DISPLAY_NAME: u8 = 0;
+const STATUS_DISPLAY_STATE: u8 = 1;
+
 /// Handshake / activity frame opcodes of the IPC protocol.
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
@@ -186,6 +205,15 @@ pub fn activity_json(presence: &Presence, now_unix: i64) -> Value {
     if !artist.trim().is_empty() {
         activity["state"] = json!(fit_text(&artist));
     }
+    // The member list reads "Listening to <artist>" while a track plays. A
+    // paused state line ("Paused · …") would read oddly there, so a pause, or
+    // a track with no artist, falls back to the application name.
+    let show_artist = presence.playing && !presence.artist.trim().is_empty();
+    activity["status_display_type"] = json!(if show_artist {
+        STATUS_DISPLAY_STATE
+    } else {
+        STATUS_DISPLAY_NAME
+    });
     let mut assets = serde_json::Map::new();
     if !presence.album.trim().is_empty() {
         assets.insert("large_text".into(), json!(fit_text(&presence.album)));
@@ -264,7 +292,10 @@ mod conn {
 
     impl Connection {
         /// Open the first live `discord-ipc-N` socket and complete the handshake.
-        pub fn open(app_id: &str) -> Option<Self> {
+        /// A refusal is a `warn!` the first time (`refusal_reported` false) and
+        /// a `debug!` on every retry after, so a wrong id logs once, not every
+        /// [`RECONNECT_INTERVAL`].
+        pub fn open(app_id: &str, refusal_reported: &mut bool) -> Option<Self> {
             for dir in socket_dirs() {
                 for n in 0..10 {
                     let path = dir.join(format!("discord-ipc-{n}"));
@@ -288,7 +319,12 @@ mod conn {
                         }
                         Ok(reply) => {
                             // An unknown application id answers with an error event.
-                            warn!("Discord RPC handshake refused: {reply}");
+                            if *refusal_reported {
+                                debug!("Discord RPC handshake refused again: {reply}");
+                            } else {
+                                warn!("Discord RPC handshake refused: {reply}");
+                                *refusal_reported = true;
+                            }
                         }
                         Err(e) => trace!("Discord RPC handshake read failed: {e}"),
                     }
@@ -323,7 +359,7 @@ mod conn {
     pub struct Connection;
 
     impl Connection {
-        pub fn open(_app_id: &str) -> Option<Self> {
+        pub fn open(_app_id: &str, _refusal_reported: &mut bool) -> Option<Self> {
             None
         }
 
@@ -381,6 +417,8 @@ struct Worker<'a> {
     nonce: u64,
     last_send: Option<Instant>,
     last_connect_try: Option<Instant>,
+    /// The handshake refusal for this `app_id` has been logged at `warn!`.
+    refusal_reported: bool,
 }
 
 impl Worker<'_> {
@@ -402,7 +440,7 @@ impl Worker<'_> {
                 return;
             }
             self.last_connect_try = Some(Instant::now());
-            self.conn = Connection::open(self.app_id);
+            self.conn = Connection::open(self.app_id, &mut self.refusal_reported);
         }
         let Some(conn) = self.conn.as_mut() else {
             return;
@@ -433,6 +471,7 @@ fn run_worker(app_id: &str, rx: &mpsc::Receiver<Option<Presence>>) {
         nonce: 0,
         last_send: None,
         last_connect_try: None,
+        refusal_reported: false,
     };
     loop {
         match rx.recv_timeout(Duration::from_secs(1)) {
@@ -506,6 +545,35 @@ mod tests {
         let a = activity_json(&p, 1_000);
         assert!(a.get("timestamps").is_none());
         assert_eq!(a["state"], "Paused · Artist");
+    }
+
+    #[test]
+    fn the_member_list_shows_the_artist_while_playing_and_the_app_otherwise() {
+        let mut p = presence();
+        assert_eq!(activity_json(&p, 1_000)["status_display_type"], 1);
+        p.playing = false;
+        assert_eq!(activity_json(&p, 1_000)["status_display_type"], 0);
+        p.playing = true;
+        p.artist.clear();
+        assert_eq!(activity_json(&p, 1_000)["status_display_type"], 0);
+    }
+
+    #[test]
+    fn an_empty_override_publishes_as_nokkvi() {
+        assert_eq!(effective_app_id(""), NOKKVI_APP_ID);
+        assert_eq!(effective_app_id("  "), NOKKVI_APP_ID);
+        assert_eq!(effective_app_id(" 123 "), "123");
+    }
+
+    #[test]
+    fn nokkvi_app_id_is_a_discord_snowflake() {
+        // Discord ids are 17-20 digit snowflakes; anything else is refused at
+        // the handshake and the status never shows.
+        assert!(
+            (17..=20).contains(&NOKKVI_APP_ID.len())
+                && NOKKVI_APP_ID.bytes().all(|b| b.is_ascii_digit()),
+            "NOKKVI_APP_ID is not an application id: {NOKKVI_APP_ID}"
+        );
     }
 
     #[test]

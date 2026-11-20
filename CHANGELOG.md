@@ -7,8 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Hotkeys can use Super: press it while rebinding in Settings → Hotkeys, or write `Super + J` in config.toml.
-- Settings → Playback → Discord → Discord App ID shows what you're listening to on your Discord profile.
-- The Discord status shows the album cover when your Navidrome is reachable from the internet, else the app's icon.
+- Settings → Playback → Discord Status shows what you're listening to on your Discord profile, in the Discord app or Vesktop / Equibop.
+- The Discord status shows the album cover when your Navidrome is reachable from the internet, else nokkvi's icon.
 
 ### Changed
 

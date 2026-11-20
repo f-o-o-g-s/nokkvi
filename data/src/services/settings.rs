@@ -447,6 +447,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_discord_presence(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.discord_presence = enabled;
+        self.save()
+    }
+
     pub fn set_discord_app_id(&mut self, id: String) -> Result<()> {
         self.settings.player.discord_app_id = id;
         self.save()
@@ -1802,6 +1807,7 @@ mod sentinel_roundtrip_tests {
             love_change_notification_enabled: true,   // default false
             rating_reminder_trigger: RatingReminderTrigger::PercentagePlayed, // default OnScrobble
             rating_reminder_percent: 85,              // default 75
+            discord_presence: true,                   // default false
             discord_app_id: "1234567890".to_string(), // default ""
         }
     }
@@ -1937,6 +1943,7 @@ mod sentinel_roundtrip_tests {
             ui_ps1.rating_reminder_percent,
             ui_ps2.rating_reminder_percent
         );
+        assert_eq!(ui_ps1.discord_presence, ui_ps2.discord_presence);
         assert_eq!(ui_ps1.discord_app_id, ui_ps2.discord_app_id);
 
         // Playlists
@@ -2621,6 +2628,7 @@ name = "sentinel preset"
         assert_eq!(lhs.show_tray_icon, rhs.show_tray_icon);
         assert_eq!(lhs.rating_reminder_trigger, rhs.rating_reminder_trigger);
         assert_eq!(lhs.rating_reminder_percent, rhs.rating_reminder_percent);
+        assert_eq!(lhs.discord_presence, rhs.discord_presence);
         assert_eq!(lhs.discord_app_id, rhs.discord_app_id);
     }
 

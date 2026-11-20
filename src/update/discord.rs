@@ -102,8 +102,12 @@ impl Nokkvi {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
-        self.discord
-            .sync(&self.settings.discord_app_id, presence, now);
+        self.discord.sync(
+            self.settings.discord_presence,
+            &self.settings.discord_app_id,
+            presence,
+            now,
+        );
         cover_request.map(|album_id| self.discord_cover_task(album_id))
     }
 

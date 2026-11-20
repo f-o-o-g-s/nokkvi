@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use nokkvi_data::services::discord_rpc::{DiscordRpc, Presence, PresenceKey, presence_changed};
+use nokkvi_data::services::discord_rpc::{
+    DiscordRpc, Presence, PresenceKey, effective_app_id, presence_changed,
+};
 
 /// Albums whose cover link is remembered before the cache starts over.
 const MAX_COVERS: usize = 256;
@@ -58,16 +60,23 @@ impl DiscordState {
         self.covers.insert(album_id, url);
     }
 
-    /// Bring Discord in line with `presence`. An empty `app_id` stops the
-    /// worker (which clears the activity as it ends); a changed one restarts
-    /// it. Work only reaches the worker when what Discord shows would change.
-    pub(crate) fn sync(&mut self, app_id: &str, presence: Option<Presence>, now_unix: i64) {
-        let app_id = app_id.trim();
-        if app_id.is_empty() {
+    /// Bring Discord in line with `presence`. Turning presence off stops the
+    /// worker (which clears the activity as it ends); a changed application
+    /// (`override_id`, empty for nokkvi's own) restarts it. Work only reaches
+    /// the worker when what Discord shows would change.
+    pub(crate) fn sync(
+        &mut self,
+        enabled: bool,
+        override_id: &str,
+        presence: Option<Presence>,
+        now_unix: i64,
+    ) {
+        if !enabled {
             self.worker = None;
             self.sent = None;
             return;
         }
+        let app_id = effective_app_id(override_id);
         if self.worker.as_ref().is_none_or(|(id, _)| id != app_id) {
             self.worker = Some((app_id.to_owned(), DiscordRpc::start(app_id.to_owned())));
             self.sent = None;
@@ -82,7 +91,7 @@ impl DiscordState {
         self.sent = Some(key);
     }
 
-    /// Whether a worker is running (the app id is set).
+    /// Whether a worker is running (presence is on).
     pub(crate) fn is_running(&self) -> bool {
         self.worker.is_some()
     }

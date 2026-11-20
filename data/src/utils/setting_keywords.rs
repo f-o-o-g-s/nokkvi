@@ -457,13 +457,21 @@ keyword_table! {
         "general.replay_gain_prevent_clipping" => &["replaygain", "rg", "limiter", "distortion"],
 
         // ── Playback · Discord ───────────────────────────────────────────────
-        "general.discord_app_id" => &[
+        "general.discord_presence" => &[
             "rich presence",
             "rpc",
             "now playing",
             "status",
             "activity",
+            "vesktop",
+            "equibop",
+        ],
+        "general.discord_app_id" => &[
+            "rich presence",
+            "rpc",
             "application id",
+            "client id",
+            "developer portal",
         ],
 
         // ── Playback · Scrobbling / Rating ───────────────────────────────────

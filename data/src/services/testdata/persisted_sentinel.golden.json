@@ -205,5 +205,6 @@
   "love_change_notification_enabled": true,
   "rating_reminder_trigger": "percentage_played",
   "rating_reminder_percent": 85,
+  "discord_presence": true,
   "discord_app_id": "1234567890"
 }
