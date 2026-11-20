@@ -21,7 +21,11 @@
 //! constraints (which control / which buffer / which lifecycle) without
 //! re-deriving the file-wide invariants above.
 
-use std::thread::{self, JoinHandle};
+use std::{
+    cell::Cell,
+    rc::Rc,
+    thread::{self, JoinHandle},
+};
 
 use anyhow::{Result, anyhow};
 use pipewire as pw;
@@ -46,6 +50,67 @@ pub struct NativePipeWireSink {
 
 pub(crate) struct UserData {
     mixer_source: Box<dyn Source<Item = f32> + Send>,
+}
+
+/// Set the stream's per-channel volume (already curved to linear, 0.0–1.0).
+fn set_channel_volumes(stream: &pw::stream::Stream, vol: f32) {
+    tracing::trace!("🔊 PipeWire IPC: Setting channelVolumes to [{vol:.3}, {vol:.3}]");
+    let volumes = [vol, vol];
+    // SAFETY: see the module-level safety doc. Runs on the mainloop thread
+    // (the volume receiver and the stream listener), and `pw_stream_set_control`
+    // reads `volumes`, a stack array, synchronously.
+    let result = unsafe {
+        pw::sys::pw_stream_set_control(
+            stream.as_raw_ptr(),
+            SPA_PROP_CHANNEL_VOLUMES,
+            volumes.len() as u32,
+            volumes.as_ptr() as *mut f32,
+        )
+    };
+    if result < 0 {
+        tracing::warn!(
+            "🔊 PipeWire: set_control(channelVolumes) failed: {}",
+            result
+        );
+    }
+}
+
+/// WirePlumber stream property that opts a node out of its stream-restore
+/// (`state-stream.lua`): no restoring saved volumes onto it, no saving them.
+const STATE_RESTORE_PROPS: &str = "state.restore-props";
+
+/// Node properties for the output stream.
+///
+/// `state.restore-props = false` keeps WirePlumber's hands off the node's
+/// volume. Nokkvi owns it: the music bridge re-sends the user's level to every
+/// freshly built node (`MusicOutputBridge::publish`). WirePlumber restores
+/// asynchronously AFTER the node appears, so it lands on top of that re-send.
+/// Its key is this node's `MEDIA_NAME` (the per-track title; the app name sits
+/// on the context, not the node), so a key it has never seen restored the
+/// 100% default: a bit-perfect sample-rate rebuild played the next track at
+/// full volume under a slider showing the user's level, until the slider
+/// moved. The saving side also left one state entry per track title.
+fn stream_properties(
+    node_name: &str,
+    rate: u32,
+    request_native_rate: bool,
+) -> pw::properties::PropertiesBox {
+    let mut stream_props = properties! {
+        *pw::keys::MEDIA_TYPE => "Audio",
+        *pw::keys::MEDIA_CATEGORY => "Playback",
+        *pw::keys::MEDIA_ROLE => "Music",
+        *pw::keys::MEDIA_NAME => node_name,
+        STATE_RESTORE_PROPS => "false",
+    };
+    if request_native_rate {
+        // Ask PipeWire to run the graph clock at the source rate.
+        // It switches the device when the device is idle AND the rate
+        // is in `default.clock.allowed-rates`; otherwise it resamples.
+        // A polite request (NODE_RATE), not a forced graph rate.
+        let node_rate = format!("1/{rate}");
+        stream_props.insert(*pw::keys::NODE_RATE, node_rate);
+    }
+    stream_props
 }
 
 impl NativePipeWireSink {
@@ -104,20 +169,7 @@ impl NativePipeWireSink {
 
                 let data = UserData { mixer_source };
 
-                let mut stream_props = properties! {
-                    *pw::keys::MEDIA_TYPE => "Audio",
-                    *pw::keys::MEDIA_CATEGORY => "Playback",
-                    *pw::keys::MEDIA_ROLE => "Music",
-                    *pw::keys::MEDIA_NAME => node_name.as_str(),
-                };
-                if request_native_rate {
-                    // Ask PipeWire to run the graph clock at the source rate.
-                    // It switches the device when the device is idle AND the rate
-                    // is in `default.clock.allowed-rates`; otherwise it resamples.
-                    // A polite request (NODE_RATE), not a forced graph rate.
-                    let node_rate = format!("1/{rate}");
-                    stream_props.insert(*pw::keys::NODE_RATE, node_rate);
-                }
+                let stream_props = stream_properties(&node_name, rate, request_native_rate);
                 let stream = match pw::stream::StreamRc::new(core, "Nokkvi-Playback", stream_props)
                 {
                     Ok(s) => s,
@@ -146,33 +198,23 @@ impl NativePipeWireSink {
                     }
                 });
 
+                // The last volume asked for. PipeWire drops a `set_control`
+                // sent before the stream has negotiated its format (it does not
+                // know the control yet, and still returns success), and the
+                // bridge re-sends the user's level the moment a sink is built,
+                // which is before that. So the level is kept here and applied
+                // again once the format lands and once the stream runs (the
+                // listener below); without that, every rebuilt node played at
+                // its 100% default under the user's slider.
+                let wanted_volume: Rc<Cell<Option<f32>>> = Rc::new(Cell::new(None));
+
                 let stream_vol_clone = stream.clone();
+                let wanted_for_receiver = Rc::clone(&wanted_volume);
                 let _volume_receiver =
                     volume_rx.attach(mainloop.loop_(), move |linear_vol: f32| {
                         let vol = linear_vol.clamp(0.0, 1.0);
-                        tracing::trace!(
-                            "🔊 PipeWire IPC: Setting channelVolumes to [{:.3}, {:.3}]",
-                            vol,
-                            vol
-                        );
-                        let volumes = [vol, vol];
-                        // SAFETY: volume_receiver path — see module-level safety
-                        // doc. Calls `pw_stream_set_control` synchronously on the
-                        // mainloop thread; `volumes` is a stack array.
-                        let result = unsafe {
-                            pw::sys::pw_stream_set_control(
-                                stream_vol_clone.as_raw_ptr(),
-                                SPA_PROP_CHANNEL_VOLUMES,
-                                volumes.len() as u32,
-                                volumes.as_ptr() as *mut f32,
-                            )
-                        };
-                        if result < 0 {
-                            tracing::warn!(
-                                "🔊 PipeWire: set_control(channelVolumes) failed: {}",
-                                result
-                            );
-                        }
+                        wanted_for_receiver.set(Some(vol));
+                        set_channel_volumes(&stream_vol_clone, vol);
                     });
 
                 // Quit via a pw::channel (like title/volume) so it wakes the
@@ -185,10 +227,26 @@ impl NativePipeWireSink {
                     loop_clone.quit();
                 });
 
+                let wanted_on_state = Rc::clone(&wanted_volume);
                 let listener = stream
                     .add_local_listener_with_user_data(data)
-                    .state_changed(|_, _, old, new| {
+                    .state_changed(move |stream, _, old, new| {
                         tracing::trace!("PipeWire Stream State: {:?} -> {:?}", old, new);
+                        if matches!(
+                            new,
+                            pw::stream::StreamState::Paused | pw::stream::StreamState::Streaming
+                        ) && let Some(vol) = wanted_on_state.get()
+                        {
+                            set_channel_volumes(stream, vol);
+                        }
+                    })
+                    .param_changed(move |stream, _, id, param| {
+                        if id == pw::spa::param::ParamType::Format.as_raw()
+                            && param.is_some()
+                            && let Some(vol) = wanted_volume.get()
+                        {
+                            set_channel_volumes(stream, vol);
+                        }
                     })
                     .process(move |stream, user_data| {
                         match stream.dequeue_buffer() {
@@ -336,5 +394,82 @@ impl Drop for NativePipeWireSink {
         {
             tracing::warn!("🔊 PipeWire thread panicked before it stopped");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WirePlumber must not restore (or save) the node's volume: its
+    /// asynchronous restore overwrote the level nokkvi re-sends to each rebuilt
+    /// node, so a rate-switching rebuild played at 100%.
+    #[test]
+    fn stream_opts_out_of_wireplumber_volume_restore() {
+        for native in [false, true] {
+            let props = stream_properties("Nokkvi", 96_000, native);
+            assert_eq!(props.get(STATE_RESTORE_PROPS), Some("false"));
+            assert_eq!(props.get(*pw::keys::MEDIA_NAME), Some("Nokkvi"));
+        }
+        let native = stream_properties("Nokkvi", 96_000, true);
+        assert_eq!(native.get(*pw::keys::NODE_RATE), Some("1/96000"));
+        let shared = stream_properties("Nokkvi", 96_000, false);
+        assert_eq!(shared.get(*pw::keys::NODE_RATE), None);
+    }
+}
+
+/// Live check against the running PipeWire daemon: `cargo test -p nokkvi-data
+/// a_volume_sent_as_the_stream_connects -- --ignored`. Opens a silent stream.
+#[cfg(test)]
+mod live_pipewire {
+    use super::*;
+
+    /// The `channelVolumes` PipeWire reports for the node named `name`.
+    fn node_channel_volumes(name: &str) -> Option<Vec<f64>> {
+        let out = std::process::Command::new("pw-dump").output().ok()?;
+        let dump: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+        dump.as_array()?.iter().find_map(|o| {
+            let info = o.get("info")?;
+            if info.get("props")?.get("media.name")?.as_str()? != name {
+                return None;
+            }
+            let props = info.get("params")?.get("Props")?.as_array()?;
+            props.iter().find_map(|p| {
+                let vols = p.get("channelVolumes")?.as_array()?;
+                Some(vols.iter().filter_map(serde_json::Value::as_f64).collect())
+            })
+        })
+    }
+
+    /// A volume sent the moment the stream connects (what the bridge does to
+    /// every rebuilt sink) reaches the node. PipeWire dropped it, the node
+    /// played at 100%, until the level was applied again on format/state.
+    #[test]
+    #[ignore = "needs a live PipeWire session"]
+    fn a_volume_sent_as_the_stream_connects_reaches_the_node() {
+        let name = "nokkvi-volume-probe";
+        let (mixer, source) = rodio::mixer::mixer(
+            std::num::NonZeroU16::new(2).expect("2 is nonzero"),
+            std::num::NonZeroU32::new(48_000).expect("48000 is nonzero"),
+        );
+        let sink = NativePipeWireSink::new(mixer, Box::new(source), name.to_owned(), 48_000, false)
+            .expect("open a PipeWire stream");
+        let (_title, volume) = sink.controls();
+        volume.send(0.001).expect("send the volume");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut seen = None;
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            seen = node_channel_volumes(name);
+            if seen.as_ref().is_some_and(|v| !v.is_empty()) {
+                break;
+            }
+        }
+        let vols = seen.expect("the probe node shows up in pw-dump");
+        assert!(
+            !vols.is_empty() && vols.iter().all(|v| (v - 0.001).abs() < 1e-6),
+            "the node took the volume sent as it connected, got {vols:?}"
+        );
     }
 }

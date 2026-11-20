@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - A Super chord no hotkey uses no longer fires the plain key's hotkey: Super+X used to toggle Random.
 - Letter hotkeys work on non-Latin keyboard layouts such as Russian, Greek, Hebrew, Arabic or Thai: each key fires its US position's hotkey.
 - On French AZERTY, Czech and other layouts whose number row types symbols, the number keys switch views.
+- With Bit-Perfect Output on, a song at a different sample rate plays at your volume instead of full volume.
 
 ### Removed
 
