@@ -161,8 +161,12 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::Navigation(nav) => self.handle_navigation(nav),
             Message::LibraryChanged(change) => self.handle_library_changed(change),
-            Message::DiscordCover { album_id, url } => {
-                self.discord.set_cover(album_id, url);
+            Message::DiscordCover {
+                album_id,
+                url,
+                link_private,
+            } => {
+                self.discord.set_cover(album_id, url, link_private);
                 Task::none()
             }
             Message::StripClicked => {

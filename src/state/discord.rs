@@ -17,11 +17,17 @@ pub(crate) struct DiscordState {
     worker: Option<(String, DiscordRpc)>,
     sent: Option<Option<PresenceKey>>,
     /// The queue song the last tick described and its album, so the queue is
-    /// searched once per song and not every tick.
-    song: Option<(String, Option<String>)>,
+    /// searched once per song and not every tick. Only a hit is kept: right
+    /// after a new play the tick can run before the queue list reloads.
+    song: Option<(String, String)>,
     /// Album id -> the vetted public cover link (`None`: the server has none,
     /// or the request is still on its way). Present means asked.
     covers: HashMap<String, Option<String>>,
+    /// The server answered with a link Discord can't reach (a LAN or tailnet
+    /// address). Every album's link is built the same way, so asking again
+    /// only costs the server work (a first `getAlbumInfo2` makes Navidrome
+    /// broadcast a refresh to every client): no more asks this session.
+    links_private: bool,
 }
 
 impl DiscordState {
@@ -33,9 +39,9 @@ impl DiscordState {
         find: impl FnOnce() -> Option<String>,
     ) -> Option<&str> {
         if self.song.as_ref().is_none_or(|(id, _)| id != song_id) {
-            self.song = Some((song_id.to_owned(), find()));
+            self.song = Some((song_id.to_owned(), find()?));
         }
-        self.song.as_ref().and_then(|(_, album)| album.as_deref())
+        self.song.as_ref().map(|(_, album)| album.as_str())
     }
 
     /// The cover link known for `album_id`.
@@ -45,7 +51,7 @@ impl DiscordState {
 
     /// Mark `album_id` as asked; `true` when the caller should send the request.
     pub(crate) fn claim_cover(&mut self, album_id: &str) -> bool {
-        if self.covers.contains_key(album_id) {
+        if self.links_private || self.covers.contains_key(album_id) {
             return false;
         }
         if self.covers.len() >= MAX_COVERS {
@@ -55,9 +61,11 @@ impl DiscordState {
         true
     }
 
-    /// Record the answer for `album_id`.
-    pub(crate) fn set_cover(&mut self, album_id: String, url: Option<String>) {
+    /// Record the answer for `album_id`. `link_private`: the server gave a
+    /// link Discord can't reach, so stop asking ([`Self::links_private`]).
+    pub(crate) fn set_cover(&mut self, album_id: String, url: Option<String>, link_private: bool) {
         self.covers.insert(album_id, url);
+        self.links_private |= link_private;
     }
 
     /// Bring Discord in line with `presence`. Turning presence off stops the
@@ -86,7 +94,7 @@ impl DiscordState {
             return;
         }
         if let Some((_, worker)) = self.worker.as_ref() {
-            worker.set(presence);
+            worker.set(presence, now_unix);
         }
         self.sent = Some(key);
     }
@@ -103,6 +111,7 @@ impl DiscordState {
         self.sent = None;
         self.song = None;
         self.covers.clear();
+        self.links_private = false;
     }
 }
 
@@ -128,6 +137,29 @@ mod tests {
     }
 
     #[test]
+    fn a_song_not_in_the_queue_yet_is_looked_up_again() {
+        let mut state = DiscordState::default();
+        assert_eq!(state.album_of("s1", || None), None);
+        assert_eq!(state.album_of("s1", || Some("al1".into())), Some("al1"));
+    }
+
+    #[test]
+    fn a_private_link_stops_the_asking_until_the_session_ends() {
+        let mut state = DiscordState::default();
+        assert!(state.claim_cover("al1"));
+        state.set_cover("al1".into(), None, true);
+        assert!(
+            !state.claim_cover("al2"),
+            "every album's link is just as private"
+        );
+        state.stop();
+        assert!(
+            state.claim_cover("al2"),
+            "a new session may have another server"
+        );
+    }
+
+    #[test]
     fn a_cover_is_asked_for_once_and_remembered() {
         let mut state = DiscordState::default();
         assert!(state.claim_cover("al1"));
@@ -136,7 +168,11 @@ mod tests {
             "a request on its way is not repeated"
         );
         assert_eq!(state.cover_of("al1"), None);
-        state.set_cover("al1".into(), Some("https://m.example/share/img/t".into()));
+        state.set_cover(
+            "al1".into(),
+            Some("https://m.example/share/img/t".into()),
+            false,
+        );
         assert_eq!(state.cover_of("al1"), Some("https://m.example/share/img/t"));
         assert!(!state.claim_cover("al1"));
     }

@@ -1263,6 +1263,7 @@ impl Nokkvi {
             &album,
             dur,
             position_is_current.then_some(pos),
+            tick_matches_active_item(station_id.as_deref(), &self.active_playback),
             playing,
             paused,
         ) {

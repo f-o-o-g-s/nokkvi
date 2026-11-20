@@ -20,7 +20,7 @@ use std::{
     path::PathBuf,
     sync::mpsc::{self, RecvTimeoutError},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
@@ -142,30 +142,61 @@ const CREDENTIAL_QUERY_KEYS: [&str; 10] = [
     "u", "t", "s", "p", "apikey", "api_key", "token", "jwt", "password", "salt",
 ];
 
+/// Name suffixes that resolve only inside a home network or a tailnet.
+const PRIVATE_NAME_SUFFIXES: [&str; 6] = [
+    ".local",
+    ".localhost",
+    ".lan",
+    ".home.arpa",
+    ".internal",
+    ".ts.net",
+];
+
+fn ipv4_is_public(ip: std::net::Ipv4Addr) -> bool {
+    !(ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        // Carrier-grade NAT / Tailscale (100.64.0.0/10).
+        || (ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1])))
+}
+
+/// Whether Discord's servers can reach `host`. Navidrome builds its share
+/// links from the host the client used, so a LAN or tailnet address lands
+/// here and would show viewers a broken image instead of the app's icon.
+fn host_is_public(host: url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(name) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            // A single-label name (`localhost`, a Docker service, a bare
+            // tailnet machine name) only resolves locally.
+            name.contains('.') && !PRIVATE_NAME_SUFFIXES.iter().any(|s| name.ends_with(s))
+        }
+        url::Host::Ipv4(ip) => ipv4_is_public(ip),
+        url::Host::Ipv6(ip) => match ip.to_ipv4_mapped() {
+            Some(v4) => ipv4_is_public(v4),
+            None => {
+                let first = ip.segments()[0];
+                !(ip.is_loopback()
+                    || ip.is_unspecified()
+                    // Unique local fc00::/7 (Tailscale's fd7a:115c:a1e0::/48 among them).
+                    || (first & 0xfe00) == 0xfc00
+                    // Link-local fe80::/10.
+                    || (first & 0xffc0) == 0xfe80)
+            }
+        },
+    }
+}
+
 /// `url` when Discord can fetch it and showing it leaks nothing: http(s), a
-/// public host (not localhost, `.local` or a private / loopback address that
-/// Discord's servers cannot reach), and none of [`CREDENTIAL_QUERY_KEYS`] in
+/// public host ([`host_is_public`]), and none of [`CREDENTIAL_QUERY_KEYS`] in
 /// the query.
 pub fn usable_cover_url(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url.trim()).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
-    let reachable = match parsed.host()? {
-        url::Host::Domain(name) => {
-            let name = name.to_ascii_lowercase();
-            name != "localhost" && !name.ends_with(".local") && !name.ends_with(".localhost")
-        }
-        url::Host::Ipv4(ip) => {
-            !(ip.is_loopback()
-                || ip.is_private()
-                || ip.is_link_local()
-                || ip.is_unspecified()
-                // Carrier-grade NAT / Tailscale (100.64.0.0/10).
-                || (ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1])))
-        }
-        url::Host::Ipv6(ip) => !(ip.is_loopback() || ip.is_unspecified()),
-    };
+    let reachable = host_is_public(parsed.host()?);
     let carries_credential = parsed
         .query_pairs()
         .any(|(key, _)| CREDENTIAL_QUERY_KEYS.contains(&key.to_ascii_lowercase().as_str()));
@@ -257,6 +288,12 @@ fn set_activity_payload(activity: Option<Value>, pid: u32, nonce: u64) -> Value 
 
 /// Directories Discord may put its socket in, most specific first.
 fn socket_dirs() -> Vec<PathBuf> {
+    // A test build never reaches the runner's Discord: it would publish the
+    // test's track on their real profile (code-standards "Tests run on empty
+    // app dirs").
+    if crate::utils::paths::TEST_DIRS {
+        return Vec::new();
+    }
     let mut dirs = Vec::new();
     for var in ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"] {
         if let Some(value) = std::env::var_os(var).filter(|v| !v.is_empty()) {
@@ -272,6 +309,8 @@ fn socket_dirs() -> Vec<PathBuf> {
                 d.join("app/com.discordapp.Discord"),
                 d.join("app/com.discordapp.DiscordCanary"),
                 d.join("snap.discord"),
+                // Vesktop's Flatpak, whose arRPC stands in for Discord.
+                d.join(".flatpak/dev.vencord.Vesktop/xdg-run"),
             ]
         })
         .collect();
@@ -291,6 +330,11 @@ mod conn {
     }
 
     impl Connection {
+        #[cfg(test)]
+        pub fn from_stream(stream: UnixStream) -> Self {
+            Self { stream }
+        }
+
         /// Open the first live `discord-ipc-N` socket and complete the handshake.
         /// A refusal is a `warn!` the first time (`refusal_reported` false) and
         /// a `debug!` on every retry after, so a wrong id logs once, not every
@@ -337,6 +381,23 @@ mod conn {
             self.stream.write_all(&encode_frame(opcode, payload))
         }
 
+        /// Whether the connection is no longer usable: Discord hung up (it
+        /// quit or restarted), or sent something unasked. Discord only writes
+        /// in answer to a frame, and every answer is read at once, so an idle
+        /// socket that would block on a read is open and in step; end-of-file,
+        /// an error or stray bytes mean reconnect. (`UnixStream::peek` is
+        /// still unstable, hence a non-blocking read.)
+        pub fn is_closed(&mut self) -> bool {
+            if self.stream.set_nonblocking(true).is_err() {
+                return true;
+            }
+            let open = matches!(
+                self.stream.read(&mut [0u8; 1]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+            );
+            !open || self.stream.set_nonblocking(false).is_err()
+        }
+
         /// Read one reply frame (and discard what is past the size bound).
         pub fn read_reply(&mut self) -> std::io::Result<Value> {
             let mut header = [0u8; 8];
@@ -367,6 +428,10 @@ mod conn {
             Ok(())
         }
 
+        pub fn is_closed(&mut self) -> bool {
+            false
+        }
+
         pub fn read_reply(&mut self) -> std::io::Result<Value> {
             Ok(Value::Null)
         }
@@ -375,15 +440,9 @@ mod conn {
 
 use conn::Connection;
 
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
-}
-
 /// Handle to the worker thread; the thread ends when this is dropped.
 pub struct DiscordRpc {
-    tx: mpsc::Sender<Option<Presence>>,
+    tx: mpsc::Sender<(Option<Presence>, i64)>,
 }
 
 impl DiscordRpc {
@@ -398,10 +457,12 @@ impl DiscordRpc {
         Self { tx }
     }
 
-    /// Show `presence`, or clear the activity with `None`.
-    pub fn set(&self, presence: Option<Presence>) {
+    /// Show `presence`, or clear the activity with `None`. `sampled_unix` is
+    /// the unix second its position was read, so a frame the rate limit or a
+    /// late Discord holds back still carries the right start time.
+    pub fn set(&self, presence: Option<Presence>, sampled_unix: i64) {
         // A closed channel means the worker is gone; there is nothing to do about it.
-        if self.tx.send(presence).is_err() {
+        if self.tx.send((presence, sampled_unix)).is_err() {
             debug!("Discord RPC worker is gone; presence dropped");
         }
     }
@@ -412,6 +473,8 @@ struct Worker<'a> {
     app_id: &'a str,
     conn: Option<Connection>,
     wanted: Option<Presence>,
+    /// Unix second `wanted`'s position was read.
+    wanted_at: i64,
     /// `true` once `wanted` is what Discord shows.
     delivered: bool,
     nonce: u64,
@@ -419,9 +482,47 @@ struct Worker<'a> {
     last_connect_try: Option<Instant>,
     /// The handshake refusal for this `app_id` has been logged at `warn!`.
     refusal_reported: bool,
+    /// An error answer to an activity has been logged at `warn!`.
+    error_reported: bool,
 }
 
-impl Worker<'_> {
+impl<'a> Worker<'a> {
+    fn new(app_id: &'a str) -> Self {
+        Self {
+            app_id,
+            conn: None,
+            wanted: None,
+            wanted_at: 0,
+            delivered: true,
+            nonce: 0,
+            last_send: None,
+            last_connect_try: None,
+            refusal_reported: false,
+            error_reported: false,
+        }
+    }
+
+    /// The `SET_ACTIVITY` frame for `wanted`, timed from when it was sampled.
+    fn payload(&self) -> Value {
+        let activity = self
+            .wanted
+            .as_ref()
+            .map(|p| activity_json(p, self.wanted_at));
+        set_activity_payload(activity, std::process::id(), self.nonce)
+    }
+
+    /// Drop a connection Discord hung up on, and have the activity sent again
+    /// once it is back: a restarted Discord shows nothing until told.
+    fn notice_hangup(&mut self) {
+        if self.conn.as_mut().is_some_and(Connection::is_closed) {
+            debug!("Discord RPC connection closed; will reconnect");
+            self.conn = None;
+            if self.wanted.is_some() {
+                self.delivered = false;
+            }
+        }
+    }
+
     fn flush(&mut self) {
         if self.delivered {
             return;
@@ -442,18 +543,32 @@ impl Worker<'_> {
             self.last_connect_try = Some(Instant::now());
             self.conn = Connection::open(self.app_id, &mut self.refusal_reported);
         }
+        if self.conn.is_none() {
+            return;
+        }
+        self.nonce += 1;
+        let payload = self.payload();
         let Some(conn) = self.conn.as_mut() else {
             return;
         };
-        self.nonce += 1;
-        let activity = self.wanted.as_ref().map(|p| activity_json(p, unix_now()));
-        let payload = set_activity_payload(activity, std::process::id(), self.nonce);
         let sent = conn
             .write(OP_FRAME, &payload)
             .and_then(|()| conn.read_reply());
         self.last_send = Some(Instant::now());
         match sent {
-            Ok(_) => self.delivered = true,
+            Ok(reply) => {
+                // Discord answers a refused activity with an ERROR event; it
+                // shows nothing, and sending the same frame again won't help.
+                if reply.get("evt").and_then(Value::as_str) == Some("ERROR") {
+                    if self.error_reported {
+                        debug!("Discord RPC refused the activity again: {reply}");
+                    } else {
+                        warn!("Discord RPC refused the activity: {reply}");
+                        self.error_reported = true;
+                    }
+                }
+                self.delivered = true;
+            }
             Err(e) => {
                 debug!("Discord RPC send failed, will reconnect: {e}");
                 self.conn = None;
@@ -462,26 +577,19 @@ impl Worker<'_> {
     }
 }
 
-fn run_worker(app_id: &str, rx: &mpsc::Receiver<Option<Presence>>) {
-    let mut worker = Worker {
-        app_id,
-        conn: None,
-        wanted: None,
-        delivered: true,
-        nonce: 0,
-        last_send: None,
-        last_connect_try: None,
-        refusal_reported: false,
-    };
+fn run_worker(app_id: &str, rx: &mpsc::Receiver<(Option<Presence>, i64)>) {
+    let mut worker = Worker::new(app_id);
     loop {
         match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(presence) => {
+            Ok((presence, sampled_unix)) => {
                 worker.wanted = presence;
+                worker.wanted_at = sampled_unix;
                 worker.delivered = false;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        worker.notice_hangup();
         worker.flush();
     }
     // Leave no stale activity behind.
@@ -496,6 +604,65 @@ fn run_worker(app_id: &str, rx: &mpsc::Receiver<Option<Presence>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_hosts_are_refused_and_public_ones_kept() {
+        for url in [
+            "http://[fd7a:115c:a1e0::1]:4533/share/img/t",
+            "http://[fe80::1]/share/img/t",
+            "http://[::ffff:192.168.1.5]/share/img/t",
+            "http://navidrome:4533/share/img/t",
+            "http://localhost/share/img/t",
+            "http://music.lan/share/img/t",
+            "http://music.home.arpa/share/img/t",
+            "http://music.internal/share/img/t",
+            "https://noatun.tail1234.ts.net/share/img/t",
+            "http://100.64.78.27:4533/share/img/t",
+        ] {
+            assert_eq!(usable_cover_url(url), None, "{url} should be refused");
+        }
+        for url in [
+            "https://music.example.com/share/img/t",
+            "http://[2606:4700::1]/share/img/t",
+            "https://music.example.com./share/img/t",
+        ] {
+            assert!(usable_cover_url(url).is_some(), "{url} should be kept");
+        }
+    }
+
+    #[test]
+    fn a_test_build_finds_no_discord() {
+        assert!(socket_dirs().is_empty());
+    }
+
+    #[test]
+    fn a_held_frame_keeps_the_start_from_when_it_was_sampled() {
+        let mut worker = Worker::new("1");
+        worker.wanted = Some(presence());
+        worker.wanted_at = 1_000;
+        let start = worker.payload()["args"]["activity"]["timestamps"]["start"].clone();
+        // presence() is 50 s in, read at unix 1000.
+        assert_eq!(start, (1_000 - 50) * 1_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hangup_is_noticed_and_the_activity_goes_out_again() {
+        let (ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut worker = Worker::new("1");
+        worker.conn = Some(Connection::from_stream(ours));
+        worker.wanted = Some(presence());
+        worker.notice_hangup();
+        assert!(worker.conn.is_some(), "an open, quiet socket stays");
+        assert!(worker.delivered);
+        drop(theirs);
+        worker.notice_hangup();
+        assert!(worker.conn.is_none());
+        assert!(
+            !worker.delivered,
+            "the activity must be sent to the new Discord"
+        );
+    }
 
     fn presence() -> Presence {
         Presence {
