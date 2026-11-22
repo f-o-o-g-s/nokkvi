@@ -6,13 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.32.0 — 2026-11-22
+
+### Added
+
 - Hotkeys can use Super: press it while rebinding in Settings → Hotkeys, or write `Super + J` in config.toml.
 - Settings → Playback → Discord Status shows what you're listening to on your Discord profile, in the Discord app or Vesktop / Equibop.
 - The Discord status shows the album cover when your Navidrome is reachable from the internet, else nokkvi's icon.
+- With a server reachable from the internet, the cover's link shows your server's address to anyone who can see your Discord status.
+- Discord App ID, in the same section, shows the status under your own Discord application's name and icon instead of nokkvi's.
 
 ### Changed
 
-- On French AZERTY, the 6 key switches to Playlists instead of lowering the rating; numpad minus still lowers it.
+- On French AZERTY, the 6 key switches to Playlists instead of lowering the rating.
+- On French AZERTY, numpad minus still lowers the rating.
 - Hotkeys you rebound on AZERTY, Czech or a non-Latin layout may sit on a different key: check them in Settings → Hotkeys.
 
 ### Fixed
@@ -29,34 +42,9 @@ All notable changes to this project will be documented in this file.
 - While a radio station plays, desktop media controls and `nokkvi status` no longer report the length of the queue's current song.
 - Opening a link or folder no longer leaves a defunct `xdg-open` process behind until nokkvi quits.
 
-### Removed
-
-## v0.31.0 — 2026-11-18
-
-### Added
-
-- Harbour's new Instant Mix row keeps the playing song and replaces the rest of the queue with songs like it.
-- With nothing playing, Instant Mix plays songs like up to five songs Harbour picks from your recent, most played or random tracks.
-- Shift+A on the Instant Mix row adds the mix to the queue and skips songs already in it.
-- Instant Mix leaves out tracks under a minute and songs rated one star.
-- Autoplay, a new playback mode, adds 10 songs like your last few when at most one song is left after the playing one.
-- Autoplay toggles from its infinity button in the player bar, the modes menu, the `a` key, `nokkvi autoplay` or Settings → Playback.
-- Songs Autoplay added show a small infinity sign before their artist in the Queue.
-- Songs you add to the queue go ahead of the Autoplay songs that have not played yet, while shuffle is off.
-- Turning Autoplay off removes the songs it added that have not played yet.
-- When it finds no similar, same-genre or same-artist songs, Autoplay adds random songs from your library instead.
-- Autoplay waits while Repeat is on, and its button's tooltip says so.
-- If the queue runs out before a batch arrives, Autoplay plays the batch's first song when it lands.
-
-### Changed
-
-- Most of the GPU memory the Bars, Lines or Scope visualizer takes in fullscreen Theater Mode is now freed once it is off screen.
-- The Albums view now uses about half the CPU while a song plays.
-- The Artists, Genres and Playlists views now use less CPU while a song plays.
-- The night Trawl scene's anchor is now outlined and shaded like the boat instead of a flat shape.
-
 ## Older releases
 
+- **v0.31.x** (2026-11-18, v0.31.0): [CHANGELOG-0.31.md](./changelog-archive/CHANGELOG-0.31.md)
 - **v0.30.x** (2026-11-12 → 2026-11-13, v0.30.0–v0.30.1): [CHANGELOG-0.30.md](./changelog-archive/CHANGELOG-0.30.md)
 - **v0.29.x** (2026-11-10, v0.29.0): [CHANGELOG-0.29.md](./changelog-archive/CHANGELOG-0.29.md)
 - **v0.28.x** (2026-10-22 → 2026-11-03, v0.28.0–v0.28.2): [CHANGELOG-0.28.md](./changelog-archive/CHANGELOG-0.28.md)
