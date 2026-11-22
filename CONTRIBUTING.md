@@ -39,7 +39,7 @@ cargo +nightly fmt --all                               # Format (nightly require
 
 All of these checks need to pass before submitting a PR.
 
-The tests never touch your own nokkvi config, database or cache. They run on a throwaway folder in your temp dir (`nokkvi-test-<pid>`), so they start from the defaults on every machine.
+The tests never touch your own nokkvi config, database or cache. They run on a throwaway folder in your temp dir (`nokkvi-test-<pid>`), so they start from the defaults on every machine. That only holds for a normal test run: `cargo test --release` reads and writes your real ones, so leave `--release` off.
 
 Formatting uses **nightly rustfmt** with a custom `rustfmt.toml` (100-char lines, crate-level import merging). Install nightly with `rustup toolchain install nightly` if you don't have it.
 
