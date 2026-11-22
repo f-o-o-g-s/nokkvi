@@ -1,6 +1,6 @@
 //! Tests for the Discord Rich Presence handlers.
 
-use crate::{app_message::Message, test_helpers::*};
+use crate::{app_message::Message, state::CoverAnswer, test_helpers::*};
 
 #[test]
 fn a_tick_built_for_the_item_before_a_switch_is_skipped() {
@@ -48,8 +48,7 @@ fn a_private_cover_link_ends_the_asking() {
     );
     let _ = app.update(Message::DiscordCover {
         album_id: "album_s1".to_string(),
-        url: None,
-        link_private: true,
+        answer: CoverAnswer::PrivateLink,
     });
     assert!(
         app.sync_discord_presence(Some("s2"), "Al2", 180, Some(5), true, true, false)
@@ -61,11 +60,10 @@ fn a_private_cover_link_ends_the_asking() {
 #[test]
 fn a_resolved_cover_is_remembered_for_its_album() {
     let mut app = test_app();
-    assert!(app.discord.claim_cover("al1"));
+    assert!(app.discord.claim_cover("al1", 0));
     let _ = app.update(Message::DiscordCover {
         album_id: "al1".to_string(),
-        url: Some("https://m.example/share/img/t?size=1200".to_string()),
-        link_private: false,
+        answer: CoverAnswer::Link("https://m.example/share/img/t?size=1200".to_string()),
     });
     assert_eq!(
         app.discord.cover_of("al1"),
@@ -76,16 +74,43 @@ fn a_resolved_cover_is_remembered_for_its_album() {
 #[test]
 fn a_cover_with_no_usable_link_is_still_marked_asked() {
     let mut app = test_app();
-    assert!(app.discord.claim_cover("al1"));
+    assert!(app.discord.claim_cover("al1", 0));
     let _ = app.update(Message::DiscordCover {
         album_id: "al1".to_string(),
-        url: None,
-        link_private: false,
+        answer: CoverAnswer::NoLink,
     });
     assert_eq!(app.discord.cover_of("al1"), None);
     assert!(
-        !app.discord.claim_cover("al1"),
+        !app.discord.claim_cover("al1", i64::MAX),
         "an album the server has no link for is not asked again every tick"
+    );
+}
+
+/// A failed lookup (a timeout, a server error) is not the album's answer: the
+/// song still playing asks again once the wait is over. It used to count as
+/// "no link", and the album showed nokkvi's icon until logout.
+#[test]
+fn a_failed_cover_lookup_is_not_remembered_as_no_cover() {
+    let mut app = test_app();
+    app.settings.discord_presence = true;
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
+    let _ = app.sync_discord_presence(Some("s1"), "Al", 180, Some(4), true, true, false);
+    assert!(
+        app.sync_discord_presence(Some("s1"), "Al", 180, Some(5), true, true, false)
+            .is_some()
+    );
+    let _ = app.update(Message::DiscordCover {
+        album_id: "album_s1".to_string(),
+        answer: CoverAnswer::Failed,
+    });
+    assert!(
+        app.sync_discord_presence(Some("s1"), "Al", 180, Some(6), true, true, false)
+            .is_none(),
+        "the failing server is not asked again on the very next tick"
+    );
+    assert!(
+        app.discord.claim_cover("album_s1", i64::MAX),
+        "but the album is still to be asked about"
     );
 }
 

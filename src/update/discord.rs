@@ -6,11 +6,20 @@ use iced::Task;
 use nokkvi_data::services::discord_rpc::{Presence, usable_cover_url};
 use tracing::debug;
 
-use crate::{Nokkvi, app_message::Message, update::components::session_expired_message};
+use crate::{
+    Nokkvi, app_message::Message, state::CoverAnswer, update::components::session_expired_message,
+};
 
 /// A song plays this long before its album's cover is asked for, so skipping
 /// through a queue asks the server about none of the albums passed.
 const COVER_ASK_AFTER_SECS: u32 = 3;
+
+/// The current unix second, as the presence worker and the cover asks count time.
+pub(crate) fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
 
 /// What Discord should show for a tick, or `None` when nothing plays (which
 /// clears the activity). `duration_secs` is `None` for a radio stream, which
@@ -91,6 +100,7 @@ impl Nokkvi {
             paused,
         );
 
+        let now = unix_now();
         // The cover is the server's public link for the song's album; a
         // station has none.
         let mut cover_request = None;
@@ -110,15 +120,12 @@ impl Nokkvi {
                 .map(str::to_owned);
             if let Some(album_id) = album_id {
                 presence.cover_url = self.discord.cover_of(&album_id).map(str::to_owned);
-                if position >= COVER_ASK_AFTER_SECS && self.discord.claim_cover(&album_id) {
+                if position >= COVER_ASK_AFTER_SECS && self.discord.claim_cover(&album_id, now) {
                     cover_request = Some(album_id);
                 }
             }
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs() as i64);
         self.discord.sync(
             self.settings.discord_presence,
             &self.settings.discord_app_id,
@@ -145,26 +152,24 @@ impl Nokkvi {
             },
             move |result| match result {
                 Ok(url) => {
-                    let usable = url.as_deref().and_then(usable_cover_url);
-                    let link_private = url.is_some() && usable.is_none();
-                    if link_private {
-                        debug!(
-                            "Discord cover for {album_id} is not shareable; using the icon and \
-                             asking about no more covers this session"
-                        );
-                    }
-                    Message::DiscordCover {
-                        album_id,
-                        url: usable,
-                        link_private,
-                    }
+                    let answer = match (url.as_deref().and_then(usable_cover_url), url) {
+                        (Some(usable), _) => CoverAnswer::Link(usable),
+                        (None, Some(_)) => {
+                            debug!(
+                                "Discord cover for {album_id} is not shareable; using the icon \
+                                 and asking about no more covers this session"
+                            );
+                            CoverAnswer::PrivateLink
+                        }
+                        (None, None) => CoverAnswer::NoLink,
+                    };
+                    Message::DiscordCover { album_id, answer }
                 }
                 Err(e) => session_expired_message(&e).unwrap_or_else(|| {
                     debug!("Discord cover lookup for {album_id} failed: {e}");
                     Message::DiscordCover {
                         album_id,
-                        url: None,
-                        link_private: false,
+                        answer: CoverAnswer::Failed,
                     }
                 }),
             },
