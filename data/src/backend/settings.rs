@@ -187,7 +187,6 @@ impl SettingsService {
     delegate_setter!(set_sound_effects_enabled, bool);
     delegate_setter!(set_visualization_mode, VisualizationMode);
     delegate_setter!(set_local_music_path, String);
-    delegate_setter!(set_discord_presence, bool);
     delegate_setter!(set_discord_app_id, String);
     delegate_setter!(set_eq_enabled, bool);
     delegate_setter!(set_eq_gains, [f32; 10]);
