@@ -667,8 +667,9 @@ define_settings! {
                 subtitle: Some(
                     "Show the playing track on your Discord profile, through the Discord \
                      desktop app or Vesktop / Equibop. Anyone who can see your profile sees \
-                     it. The album cover shows when your server is reachable from the \
-                     internet, else nokkvi's icon. Off shows nothing.",
+                     it. With a server reachable from the internet the album cover shows \
+                     too, and its link shows them your server's address; otherwise nokkvi's \
+                     icon shows. Off shows nothing.",
                 ),
                 default: false,
                 read_field: |d| d.discord_presence,
