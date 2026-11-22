@@ -2190,10 +2190,30 @@ pub(crate) fn opener_command() -> &'static str {
 /// Spawn the desktop opener (`open` on macOS, `xdg-open` elsewhere) for
 /// `target` (a URL or local path).
 pub(crate) fn spawn_desktop_open(target: &str) -> std::io::Result<()> {
-    std::process::Command::new(opener_command())
-        .arg(target)
-        .spawn()
-        .map(|_| ())
+    let mut command = std::process::Command::new(opener_command());
+    command.arg(target);
+    spawn_reaped(command).map(|_| ())
+}
+
+/// Start `command`, wait for it on a thread of its own, and return its
+/// process id. An opener exits as soon as it has handed its target over, and
+/// a child nobody waits for stays in the process table, defunct, until nokkvi
+/// quits: one per link or folder opened.
+fn spawn_reaped(mut command: std::process::Command) -> std::io::Result<u32> {
+    let mut child = command.spawn()?;
+    let pid = child.id();
+    let waiter = std::thread::Builder::new()
+        .name("opener-wait".into())
+        .spawn(move || {
+            if let Err(e) = child.wait() {
+                tracing::debug!("Waiting for the desktop opener (pid {pid}) failed: {e}");
+            }
+        });
+    if let Err(e) = waiter {
+        // The opener still runs; only its exit goes uncollected.
+        tracing::debug!("No thread to wait for the desktop opener (pid {pid}): {e}");
+    }
+    Ok(pid)
 }
 
 /// Hand `url` to the desktop's opener (`open` on macOS, `xdg-open` elsewhere).
@@ -2214,6 +2234,24 @@ pub(crate) fn open_external_url(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::opener_command;
+
+    /// An opener exits as soon as it has handed its target over. Nobody
+    /// waited for it, so each link or folder opened left a defunct process
+    /// behind until nokkvi quit. (A zombie keeps its `/proc` entry.)
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_spawned_opener_is_collected_once_it_exits() {
+        let pid = super::spawn_reaped(std::process::Command::new("true")).expect("`true` starts");
+        let entry = std::path::PathBuf::from(format!("/proc/{pid}"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while entry.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !entry.exists(),
+            "the opener's exit was never collected: pid {pid} is still in the process table"
+        );
+    }
 
     #[test]
     fn opener_command_matches_target_os() {

@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - With Bit-Perfect Output on, a song at a different sample rate plays at your volume instead of full volume.
 - When a radio station sends an empty track title, desktop media controls show the station's name instead of a blank title.
 - While a radio station plays, desktop media controls and `nokkvi status` no longer report the length of the queue's current song.
+- Opening a link or folder no longer leaves a defunct `xdg-open` process behind until nokkvi quits.
 
 ### Removed
 
