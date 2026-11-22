@@ -155,6 +155,8 @@ pub struct StationLeftForPlay {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadioPlaybackState {
     pub station: nokkvi_data::types::radio_station::RadioStation,
+    /// The stream's current artist and title: `None` or text, never blank
+    /// (`Nokkvi::set_radio_metadata`), so a `None` means "show the station".
     pub icy_artist: Option<String>,
     pub icy_title: Option<String>,
     pub icy_url: Option<String>,

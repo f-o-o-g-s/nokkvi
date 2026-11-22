@@ -157,6 +157,59 @@ fn radio_icy_applied_when_station_matches_tick() {
     );
 }
 
+/// The ICY artist and title station "B" holds after ticks carrying `payloads`
+/// in turn.
+fn radio_icy_after(payloads: &[&str]) -> (Option<String>, Option<String>) {
+    let mut app = test_app();
+    app.active_playback = radio_playing("B");
+    for payload in payloads {
+        let mut update = make_playback_update();
+        update.song_id = Some("B".into());
+        update.live_icy_metadata = Some((*payload).to_string());
+        let _ = app.handle_playback_state_updated(update);
+    }
+    let crate::state::ActivePlayback::Radio(state) = &app.active_playback else {
+        panic!("expected radio playback");
+    };
+    (state.icy_artist.clone(), state.icy_title.clone())
+}
+
+/// A station that sends an empty title (talk, an ad break, one that never
+/// names its tracks) has no title: MPRIS and the Discord status read a `None`
+/// as "show the station's name". Stored as `Some("")`, MPRIS published a blank
+/// title and the Discord status went away while the stream played.
+#[test]
+fn an_empty_radio_stream_title_is_no_title() {
+    assert_eq!(radio_icy_after(&["StreamTitle='';"]), (None, None));
+    assert_eq!(
+        radio_icy_after(&["StreamTitle='';StreamUrl='http://now/art.jpg';"]),
+        (None, None)
+    );
+    assert_eq!(radio_icy_after(&["StreamTitle='   ';"]), (None, None));
+}
+
+/// The title a station named before it went quiet does not linger.
+#[test]
+fn a_radio_stream_title_that_goes_empty_drops_the_last_one() {
+    assert_eq!(
+        radio_icy_after(&["StreamTitle='Now Artist - Now Song';", "StreamTitle='';"]),
+        (None, None)
+    );
+}
+
+/// Half a title keeps the half the station sent.
+#[test]
+fn a_radio_stream_title_missing_one_side_keeps_the_other() {
+    assert_eq!(
+        radio_icy_after(&["StreamTitle='Now Artist - ';"]),
+        (Some("Now Artist".to_string()), None)
+    );
+    assert_eq!(
+        radio_icy_after(&["StreamTitle=' - Now Song';"]),
+        (None, Some("Now Song".to_string()))
+    );
+}
+
 #[test]
 fn playback_state_updated_maps_fields() {
     let mut app = test_app();

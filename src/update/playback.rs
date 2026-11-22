@@ -3279,16 +3279,22 @@ impl Nokkvi {
         );
     }
 
-    /// Store a playing station's ICY metadata (no-op off radio).
+    /// Store a playing station's ICY metadata (no-op off radio). A blank
+    /// artist or title is stored as `None`: stations send `StreamTitle='';`
+    /// (talk, an ad break, one that never names its tracks) and half titles
+    /// (`Artist - `), and a reader falls back to the station's name only on a
+    /// `None`. Kept as `Some("")`, MPRIS published a blank title and the
+    /// Discord status went away while the stream played.
     pub(crate) fn set_radio_metadata(
         &mut self,
         icy_artist: Option<String>,
         icy_title: Option<String>,
         icy_url: Option<String>,
     ) {
+        let named = |text: Option<String>| text.filter(|t| !t.trim().is_empty());
         if let crate::state::ActivePlayback::Radio(state) = &mut self.active_playback {
-            state.icy_artist = icy_artist;
-            state.icy_title = icy_title;
+            state.icy_artist = named(icy_artist);
+            state.icy_title = named(icy_title);
             state.icy_url = icy_url;
         }
     }
