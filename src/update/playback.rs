@@ -614,11 +614,11 @@ impl Nokkvi {
                     let qm = shell.queue().queue_manager();
                     let qm_guard = qm.lock().await;
                     let current = qm_guard.get_current_song();
-                    let dur = if dur == 0 {
-                        current.as_ref().map_or(0, |s| s.duration)
-                    } else {
-                        (dur / 1000) as u32
-                    };
+                    let dur = tick_duration_secs(
+                        dur,
+                        radio_station.is_some(),
+                        current.as_ref().map(|s| s.duration),
+                    );
                     let song_id_for_log = current.as_ref().map(|s| s.id.clone());
                     let title_for_log = current.as_ref().map(|s| s.title.clone());
                     let bpm = current.and_then(|s| s.bpm);
@@ -3441,6 +3441,53 @@ impl Nokkvi {
                 Task::none()
             }
         }
+    }
+}
+
+/// A tick's duration in whole seconds, from the engine's (`engine_ms`).
+///
+/// The engine reports 0 while it does not describe the queue's track (a
+/// skip's decoder building, a skip blend), and the queue's current song then
+/// supplies its tagged length. A station has no length, and the queue still
+/// rests on a song while one plays: given that song's length, MPRIS and
+/// `nokkvi status` reported a live stream as, say, six minutes long.
+fn tick_duration_secs(engine_ms: u64, on_station: bool, current_song_secs: Option<u32>) -> u32 {
+    if on_station {
+        return 0;
+    }
+    if engine_ms == 0 {
+        current_song_secs.unwrap_or(0)
+    } else {
+        (engine_ms / 1000) as u32
+    }
+}
+
+#[cfg(test)]
+mod tick_duration_tests {
+    use super::tick_duration_secs;
+
+    #[test]
+    fn a_song_takes_the_engines_length_or_its_own_tag() {
+        assert_eq!(tick_duration_secs(215_900, false, Some(216)), 215);
+        assert_eq!(
+            tick_duration_secs(0, false, Some(216)),
+            216,
+            "a skip's build window reports 0: the song's tagged length stands in"
+        );
+        assert_eq!(tick_duration_secs(0, false, None), 0);
+    }
+
+    /// A station has no length. Given the queue's current song's, MPRIS and
+    /// `nokkvi status` reported a live stream as that song's length.
+    #[test]
+    fn a_station_has_no_length_whatever_the_queue_rests_on() {
+        assert_eq!(tick_duration_secs(0, true, Some(360)), 0);
+        assert_eq!(tick_duration_secs(0, true, None), 0);
+        assert_eq!(
+            tick_duration_secs(215_900, true, Some(216)),
+            0,
+            "nor the song the engine still plays for a moment after a switch to radio"
+        );
     }
 }
 

@@ -503,8 +503,13 @@ fn run_mpris_thread(
                         .trackid(track_id)
                         .title(title)
                         .artist([artist])
-                        .album(album)
-                        .length(Time::from_micros(duration_us));
+                        .album(album);
+
+                    // `mpris:length` is left out for an item without one (a
+                    // radio station): a shell reads a published 0 as a length.
+                    if duration_us > 0 {
+                        builder = builder.length(Time::from_micros(duration_us));
+                    }
 
                     if let Some(url) = art_url {
                         builder = builder.art_url(url);
