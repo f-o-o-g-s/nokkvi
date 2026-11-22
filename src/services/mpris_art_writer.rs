@@ -193,32 +193,13 @@ enum PlaceholderSlot {
 
 static STATE: Mutex<ArtCacheState> = Mutex::const_new(ArtCacheState::new());
 
-/// Resolve the MPRIS art cache directory: `$XDG_CACHE_HOME/nokkvi/` (falls
-/// back to `$HOME/.cache/nokkvi/`).
+/// The MPRIS art cache directory, `~/.cache/nokkvi/`: the app's cache dir
+/// from `paths` (`$XDG_CACHE_HOME`, else `$HOME/.cache`), so a test build
+/// keeps it under the per-process test root like every other app dir.
 ///
-/// Returns `None` only if neither `$XDG_CACHE_HOME` nor `$HOME` resolves to
-/// an absolute path — typically only in stripped container/test envs without
-/// `HOME` set.
+/// `None` only when no home directory resolves (a stripped container).
 fn cache_dir_path() -> Option<PathBuf> {
-    Some(resolve_cache_root()?.join("nokkvi"))
-}
-
-/// Resolve the XDG cache root: `$XDG_CACHE_HOME` (if absolute) else
-/// `$HOME/.cache`. Matches `directories::BaseDirs::cache_dir()` on Linux
-/// (nokkvi is Linux-only) without pulling the dep into the UI crate.
-fn resolve_cache_root() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-        let p = PathBuf::from(xdg);
-        if p.is_absolute() {
-            return Some(p);
-        }
-    }
-    let home = std::env::var_os("HOME")?;
-    let p = PathBuf::from(home);
-    if !p.is_absolute() {
-        return None;
-    }
-    Some(p.join(".cache"))
+    nokkvi_data::utils::paths::get_cache_dir().ok()
 }
 
 /// Per-track cache path: `<dir>/mpris-art-<pid>-<cover_id>_<hash>.jpg`, where
