@@ -85,7 +85,7 @@ pub enum SimilarMessage {
     ToggleColumnVisible(SimilarColumn),
 
     /// Context-menu open/close request — bubbled to root
-    /// `Message::SetOpenMenu`. Intercepted in `handle_similar` before the
+    /// `Message::SetOpenMenu`. Intercepted in `handle_similar_message` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
@@ -145,7 +145,7 @@ impl SimilarPage {
 
         match message {
             SimilarMessage::NoOp
-            // Routed up to root in `handle_similar` before this match runs;
+            // Routed up to root in `handle_similar_message` before this match runs;
             // arm exists only for exhaustiveness.
             | SimilarMessage::SetOpenMenu(_)
             | SimilarMessage::ArtworkColumnDrag(_)

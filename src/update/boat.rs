@@ -123,7 +123,7 @@ pub(crate) fn step_boat(app: &mut Nokkvi, now: Instant) {
 
     // Music signals: tagged BPM (when the current song reports one) +
     // smoothed spectral-flux onset envelope (always). The boat physics
-    // composes these on top of the baseline `SAIL_THRUST` so the boat
+    // scales the sail thrust (`MAX_SAIL_THRUST`) by them so the boat
     // surges on hits and pulses to the beat. Both fall back to "no
     // modulation" when their source isn't available — silence /
     // un-tagged tracks behave like the pre-music constant-thrust model.

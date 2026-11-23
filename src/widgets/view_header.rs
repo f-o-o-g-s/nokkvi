@@ -79,8 +79,8 @@ pub(crate) struct ViewHeaderConfig<'a, V, Message> {
     /// that emits this message on selection. The dropdown's persisted sort
     /// is left untouched.
     pub on_roulette: Option<Message>,
-    /// Auto-hide toolbar: when `true`, render only the thin
-    /// [`COLLAPSED_HEADER_HEIGHT`] hairline instead of the full toolbar. The
+    /// Auto-hide toolbar: when `true`, render only the collapsed strip
+    /// (`CollapsedAppearance`) instead of the full toolbar. The
     /// caller flips this from the page's `toolbar_revealed()` state.
     pub collapsed: bool,
     /// Auto-hide toolbar: hover-reveal callbacks. When both are `Some` the

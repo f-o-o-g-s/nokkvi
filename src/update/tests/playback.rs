@@ -974,10 +974,8 @@ fn stale_out_of_order_probe_does_not_clobber_a_fresher_result() {
 // ============================================================================
 //
 // The old description-footer tests assumed a 2-level drill-down +
-// settings-panel footer. The persistent-sidebar redesign retires both:
-// `description_text` continues to live on for one transitional cycle while
-// `view.rs` still renders the old footer, but it's no longer the source of
-// truth for any UX. These tests focus on the surviving behaviours: search
+// settings-panel footer. The persistent-sidebar redesign retired both, and
+// the footer's text is gone. These tests focus on the surviving behaviours: search
 // is ignored from inside a sub-list, and Escape on an active search clears
 // the search without exiting settings.
 

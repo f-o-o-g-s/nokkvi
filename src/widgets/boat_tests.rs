@@ -2136,7 +2136,7 @@ fn step_long_onset_drives_cruise_thrust() {
 
 #[test]
 fn step_cruise_floor_scales_with_music() {
-    // The velocity floor itself scales by `cruise_scale` so the
+    // The velocity floor itself scales with the music intensity so the
     // boat's MINIMUM cruise speed differs by song. Compare two
     // single-tick observations from rest: with no music signals
     // the boat clamps to the baseline floor; with high cruise

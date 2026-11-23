@@ -228,7 +228,7 @@ pub enum ArtistsAction {
     /// viewport is near the loaded edge.
     ///
     /// Emitted from settled-scroll and hotkey navigation paths only.
-    /// `SlotListScrollSeek` (mid-drag) deliberately does NOT emit this —
+    /// `SlotListPageMessage::ScrollSeek` (mid-drag) deliberately does NOT emit this —
     /// rapid scrollbar drag previously hung the app by spawning hundreds
     /// of in-flight 500px fetches per drag.
     LoadLargeArtwork,

@@ -1345,7 +1345,7 @@ impl Nokkvi {
     /// Submits a scrobble when conditions are met mid-playback.
     ///
     /// Repeat-one loop handling is done by the engine-level `TrackLooped` signal
-    /// (via `PlaybackController::looped_callback`), not here.
+    /// (the loop receiver `PlaybackController::new` returns), not here.
     fn track_listening_time(
         &mut self,
         playing: bool,

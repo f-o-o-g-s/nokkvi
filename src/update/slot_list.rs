@@ -175,7 +175,8 @@ impl Nokkvi {
     }
 
     /// Fire a delayed task that will clear the scrollbar after the fade period.
-    /// Uses the same generation-ID guard pattern as `create_percentage_hide_timer`.
+    /// Carries the scroll generation it was fired at: a timer from an earlier
+    /// scroll no longer matches and does nothing.
     pub(crate) fn scrollbar_fade_timer(&self, view: View) -> Task<Message> {
         let gen_id = self
             .view_page(view)

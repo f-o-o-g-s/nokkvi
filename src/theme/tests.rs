@@ -169,7 +169,7 @@ fn forced_text_reads_on_every_highlight_fill() {
 }
 
 /// The two derived highlight fills stay perceptibly distinct on every shipped
-/// theme/mode, so a now-playing row (`selected_fill`) and an expanded-parent
+/// theme/mode, so a now-playing row (`selected_fill_resolved`) and an expanded-parent
 /// header (`playing_fill`) are tellable apart when nested together. (In-list
 /// selection is border-only now and uses neither fill.)
 #[test]
@@ -683,9 +683,8 @@ fn store_then_load_preserves_variant_per_enum() {
 }
 
 // ------------------------------------------------------------------------
-// Modal / nav separator helpers — pin that the consolidated helpers
-// still compile, produce real Elements, and select the right axis
-// dimensions for `nav_separator`. The row-vs-header alpha pair is
+// Modal separator helpers — pin that the consolidated helpers still
+// compile and produce real Elements. The row-vs-header alpha pair is
 // documented in the helper bodies; the consolidation kept those values
 // intact, so the regression risk we guard against here is "future agent
 // accidentally swaps axes or returns the wrong type."

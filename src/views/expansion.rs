@@ -135,7 +135,7 @@ impl<C: Clone> ExpansionState<C> {
 
     /// Count how many child entries appear before `flat_index` in the flattened list.
     ///
-    /// Used by Albums/Playlists `SlotListActivateCenter` to compute the track index
+    /// Used by Albums/Playlists `SlotListPageMessage::ActivateCenter` to compute the track index
     /// within the expanded parent without building the full flattened list.
     /// Returns 0 when nothing is expanded.
     pub fn count_children_before<P>(

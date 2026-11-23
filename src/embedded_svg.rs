@@ -277,7 +277,7 @@ const LOGO_SVG: &str = include_str!("../assets/nokkvi_logo.svg");
 
 /// Sentinel hex per semantic role — the exact (lowercased) fill/stroke literals
 /// the master ships. `str::replace` is case-sensitive, which is why the
-/// generator lowercases every hex; `themed_logo_svg_remaps_roles_on_theme_flip`
+/// generator lowercases every hex; `themed_logo_svg_is_mode_stable_and_maps_roles`
 /// guards that each token is still present and actually gets remapped.
 const LOGO_TOKEN_BODY: &str = "#e7eceb"; // sail + hull (off-white)
 const LOGO_TOKEN_SHIELDS: &str = "#6d9a94"; // 3 shield blocks (teal)

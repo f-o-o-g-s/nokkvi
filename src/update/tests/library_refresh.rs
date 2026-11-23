@@ -710,8 +710,8 @@ fn albums_seek_settled_skipped_when_generation_id_is_stale() {
 // Artists rating-sort carve-out (Phase 3B regression net)
 //
 // The Subsonic API does not expose a "by rating" sort, so the artists handler
-// sorts client-side after each page load. Phase 3B's `load_paginated`
-// consolidation must preserve this behaviour — these tests pin the contract
+// sorts client-side after each page load. The shared `load_paged` path
+// must preserve this behaviour — these tests pin the contract
 // of `Nokkvi::artists_rating_sort`.
 // ============================================================================
 

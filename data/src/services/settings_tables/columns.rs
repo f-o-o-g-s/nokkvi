@@ -23,7 +23,7 @@
 //! Companion to `define_view_columns!` (UI crate, `src/views/mod.rs`), which
 //! owns the per-view column enum + visibility struct + `ColumnPersist` impl.
 //! The UI-side guards (`column_macro_covers_expected_field_count`,
-//! `column_visibility_defaults_agree_with_data_crate_view_columns`) pin the
+//! `column_visibility_defaults_agree_with_live_player_settings_defaults`) pin the
 //! cross-crate field-set parity.
 //!
 //! The `settings:` list is deliberately empty — column visibility renders in

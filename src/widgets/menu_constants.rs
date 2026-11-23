@@ -12,7 +12,7 @@
 //! see those items for the full mechanism.
 //!
 //! Module-level UPPER_SNAKE matches the longstanding flat-literal widget
-//! constant pattern (`NAV_BAR_HEIGHT`, `MAX_BARS`, `TOOLBAR_HEIGHT`, etc.).
+//! constant pattern (`TAB_BAR_HEIGHT`, `MAX_BARS`, `HEADER_HEIGHT`, etc.).
 //! These are intentionally not part of `theme.rs` because they are widget
 //! geometry, not theme palette.
 

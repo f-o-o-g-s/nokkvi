@@ -1224,8 +1224,8 @@ where
     // padding so it fills the row all the way up.
     //
     // `home_view` passes `slot_list::top_chrome_height()`, which reads the
-    // live `theme::nav_bar_height()` (32 flat / 44 rounded), not the legacy
-    // `slot_list::NAV_BAR_HEIGHT` const (pinned at 32) — in rounded mode the
+    // live `theme::nav_bar_height()` (32 flat / 44 rounded), not a fixed
+    // 32 px (the removed `NAV_BAR_HEIGHT` const) — in rounded mode the
     // live nav is 44 px, so a 32 px spacer lets the nav eat the view-header
     // pill's 12 px top margin and pushes the pill flush against the bottom
     // of the nav bar.

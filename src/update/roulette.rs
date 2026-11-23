@@ -372,7 +372,7 @@ impl Nokkvi {
     /// Dispatch the per-view play action for the picked index. For Genres
     /// and Artists the user wants "load all songs, play a random one" —
     /// calls dedicated AppService methods. Other views just route through
-    /// the page's normal `SlotListActivateCenter` play path.
+    /// the page's normal `SlotListPageMessage::ActivateCenter` play path.
     pub(crate) fn roulette_settle_play(
         &mut self,
         view: View,

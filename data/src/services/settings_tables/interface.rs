@@ -5,7 +5,7 @@
 //! a setter runs is handled by `PlayerSettingsLoaded` in the UI crate, so this
 //! table only persists the values via `SettingsManager`.
 //!
-//! `font_family` is intentionally absent — it routes through `Message::ApplyFont`,
+//! `font_family` is intentionally absent — it routes through `SettingsAction::WriteFontFamily`,
 //! not `handle_settings_general`. The pixel-drag-driven `artwork_column_width_pct`
 //! is also absent: it has a setter but no UI dispatch arm.
 
@@ -1014,7 +1014,7 @@ mod tests {
         // handler fills from `live` (held to this by the UI crate's
         // `every_interface_field_is_applied_on_settings_load`).
         // `font_family` has no macro row (it routes through
-        // `Message::ApplyFont`) — its value is never visited by the loop.
+        // `SettingsAction::WriteFontFamily`) — its value is never visited by the loop.
         let data = InterfaceSettingsData::from_live(&live);
 
         for e in build_interface_tab_settings_items(&data) {

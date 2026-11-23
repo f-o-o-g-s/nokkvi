@@ -7,7 +7,7 @@
 //! patterns. Check the codebase before building something new.").
 //!
 //! Module-level UPPER_SNAKE matches the longstanding flat-literal widget
-//! constant pattern (`NAV_BAR_HEIGHT`, `MAX_BARS`, `TOOLBAR_HEIGHT`, etc.).
+//! constant pattern (`TAB_BAR_HEIGHT`, `MAX_BARS`, `HEADER_HEIGHT`, etc.).
 
 /// Standard square icon-button footprint (px) used in view headers, the
 /// default-playlist chip, player-bar transports, the checkbox dropdown

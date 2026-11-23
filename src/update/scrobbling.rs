@@ -295,8 +295,8 @@ impl Nokkvi {
 
     /// Handle a track-looped event from the audio engine (repeat-one mode).
     ///
-    /// Called when the engine fires `PlaybackController::looped_callback` after
-    /// detecting that the same URL was reloaded (i.e., `is_loop = true`). This is
+    /// Called when the loop receiver from `PlaybackController::new` fires, after
+    /// the engine detects that the same URL was reloaded (i.e., `is_loop = true`). This is
     /// the authoritative signal for repeat-one loops — it replaces the old
     /// position-rewind heuristic in `track_listening_time`.
     ///

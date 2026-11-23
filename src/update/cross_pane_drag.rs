@@ -151,8 +151,8 @@ impl Nokkvi {
         // checkbox stay checked while every other selected one disappears.
         //
         // Plain clicks now leave selection untouched here; the row's
-        // button (`SlotListSetOffset` on release) and the checkbox's
-        // `SlotListSelectionToggle` retain full ownership of the
+        // button (`SlotListPageMessage::SetOffset` on release) and the checkbox's
+        // `SlotListPageMessage::SelectionToggle` retain full ownership of the
         // click-to-select behaviour.
 
         debug!(" [DRAG] Press on browser pane: item_index={pressed_index}");

@@ -822,9 +822,9 @@ where
 }
 
 /// `true` when the user toggle is on, OR the active sort matches one of the
-/// `triggers` (so the column auto-shows). Used by the per-view
-/// `*_stars_visible` / `*_plays_visible` / `songs_genre_visible` helpers,
-/// each of which now collapses to a one-line `auto_show_on_sort(...)` call.
+/// `triggers` (so the column auto-shows). Used by the column-visibility
+/// helpers (`playlists_stars_visible`, the song pane's `*_column_visible`)
+/// and by row renderers that call it directly.
 pub(crate) fn auto_show_on_sort<M: PartialEq>(
     sort_mode: M,
     user_visible: bool,

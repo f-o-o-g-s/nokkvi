@@ -983,7 +983,7 @@ impl Nokkvi {
                 // artwork, fetch 500px artwork for the new
                 // center artist, and chain a page-fetch if the viewport is
                 // near the loaded edge. Mid-drag scrolling does NOT enter
-                // here — `SlotListScrollSeek` returns `None` and lets the
+                // here — `SlotListPageMessage::ScrollSeek` returns `None` and lets the
                 // 150 ms `SeekSettled` debounce synthesise a `SetOffset`
                 // that lands in this arm exactly once per drag.
                 let mut batch: Vec<Task<Message>> = vec![cmd.map(Message::Artists)];
