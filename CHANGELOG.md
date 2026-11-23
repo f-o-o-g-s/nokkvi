@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- With Rounded Corners on, list rows are rounded cards with a small gap between them, in the Queue, library views, Harbour and the playlist editor.
+
 ### Fixed
 
 ### Removed

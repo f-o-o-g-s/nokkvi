@@ -210,7 +210,8 @@ pub(crate) fn picker_modal<'a, T, M: Clone + 'a>(
         .center(Length::Fill)
         .boxed()
     } else {
-        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
+        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
+            .without_cards();
         let total = list.filtered.len();
         slot_list::slot_list_view_with_scroll(
             &list.slot_list,

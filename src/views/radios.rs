@@ -475,7 +475,7 @@ impl RadiosPage {
                 // Overlay the breathing glow (pulsing inner glow + travelling
                 // shimmer) on the now-playing station row; a no-op pass-through
                 // otherwise.
-                let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style);
+                let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style, &ctx);
 
                 let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
                 let (cm_open, cm_position) =

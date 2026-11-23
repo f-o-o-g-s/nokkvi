@@ -2034,11 +2034,18 @@ fn render_row<'a>(
             .align_y(Alignment::Center)
             .style(move |_: &iced::Theme| style.to_container_style());
 
+            // The header's card sits inset in its cell like every row's, with
+            // the click target over the whole cell.
             let id = *id;
-            mouse_area(styled)
-                .on_press(HarbourMessage::ToggleSection(id))
-                .interaction(iced::mouse::Interaction::Pointer)
-                .boxed()
+            mouse_area(
+                container(styled)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(ctx.card_padding),
+            )
+            .on_press(HarbourMessage::ToggleSection(id))
+            .interaction(iced::mouse::Interaction::Pointer)
+            .boxed()
         }
         HarbourRow::Trawl { seeds, blend } => {
             // The mix-builder door: anchor glyph (the feature's CTA mark) in

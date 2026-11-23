@@ -465,7 +465,7 @@ where
 
             // Overlay the breathing glow (pulsing inner glow + travelling
             // shimmer) on the now-playing row; a no-op pass-through otherwise.
-            let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style);
+            let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style, &ctx);
 
             // Wrap in caller-provided context menu chrome (per-row owned clone).
             build_context_menu(glowing, ctx.item_index)

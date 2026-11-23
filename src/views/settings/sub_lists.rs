@@ -504,7 +504,8 @@ impl SettingsPage {
         let config = slot_list::SlotListConfig::with_dynamic_slots(
             window_height,
             SETTINGS_CHROME_HEIGHT + BREADCRUMB_HEIGHT,
-        );
+        )
+        .without_cards();
         let colors_owned = sub.colors.clone();
         let label = sub.label.clone();
         let label_for_title = label.clone();

@@ -535,7 +535,8 @@ impl SettingsPage {
                     return picker_empty_state("No fonts match the search query");
                 }
                 let config =
-                    slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
+                    slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
+                        .without_cards();
                 slot_list::slot_list_view_with_scroll(
                     &fsw.slot_list,
                     &fsw.filtered_fonts,
@@ -595,7 +596,8 @@ impl SettingsPage {
                 // accent ring in `render_theme_slot`).
                 let config =
                     slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
-                        .without_hover_wash();
+                        .without_hover_wash()
+                        .without_cards();
                 slot_list::slot_list_view_with_scroll(
                     &tsw.slot_list,
                     &tsw.filtered_rows,

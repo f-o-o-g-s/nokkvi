@@ -430,7 +430,8 @@ pub(crate) fn trawl_modal_overlay<'a>(
         .padding(Padding::new(0.0).left(32.0).right(32.0))
         .boxed()
     } else {
-        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
+        let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
+            .without_cards();
         let total = rows.len();
         slot_list::slot_list_view_with_scroll(
             &state.slot_list,

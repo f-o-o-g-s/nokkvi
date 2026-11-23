@@ -116,8 +116,14 @@ pub(crate) struct SlotListRowContext {
     pub opacity: f32,
     /// Window scale factor
     pub scale_factor: f32,
-    /// Layout row height
+    /// Height the row's content is drawn in: the slot's cell minus
+    /// `card_padding` top and bottom. Size artwork and text from this.
     pub row_height: f32,
+    /// Space between the slot's cell and the row's drawn card (rounded mode's
+    /// row cards; zero in flat mode and in lists built `without_cards`). The
+    /// slot-button helpers put it INSIDE the row's click target, so the gap
+    /// between two cards still belongs to a row. See [`slot_card_padding`].
+    pub card_padding: iced::Padding,
     /// Global keyboard modifiers
     pub modifiers: iced::keyboard::Modifiers,
     /// Pre-computed font and sizing metrics
@@ -279,9 +285,19 @@ fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
 pub(crate) fn glow_overlay<'a, M: 'a>(
     row: Element<'a, M>,
     style: SlotListSlotStyle,
+    ctx: &SlotListRowContext,
 ) -> Element<'a, M> {
     let Some(seed) = style.glow_seed else {
         return row;
+    };
+    // The glow sits on the row's card: inset like it, with its corners.
+    let card_padding = ctx.card_padding;
+    let on_card = move |layer: Element<'a, M>| {
+        container(layer)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(card_padding)
+            .boxed()
     };
     let inner = container(Space::new().width(Length::Fill).height(Length::Fill))
         .width(Length::Fill)
@@ -291,6 +307,10 @@ pub(crate) fn glow_overlay<'a, M: 'a>(
                 seed,
                 now_playing_phase(),
             ))),
+            border: iced::Border {
+                radius: style.border_radius,
+                ..Default::default()
+            },
             ..Default::default()
         });
     let shimmer = container(Space::new().width(Length::Fill).height(Length::Fill))
@@ -301,12 +321,16 @@ pub(crate) fn glow_overlay<'a, M: 'a>(
                 seed,
                 now_playing_phase(),
             ))),
+            border: iced::Border {
+                radius: style.border_radius,
+                ..Default::default()
+            },
             ..Default::default()
         });
     Stack::new()
         .push(row)
-        .push(inner.boxed())
-        .push(shimmer.boxed())
+        .push(on_card(inner.boxed()))
+        .push(on_card(shimmer.boxed()))
         .boxed()
 }
 
@@ -433,14 +457,13 @@ impl SlotListSlotStyle {
                 1 => theme::bg1(),
                 _ => theme::bg2(),
             };
-            // Unselected rows touch (`SLOT_SPACING == 0`) and use the 1 px
-            // `theme::border()` hairline as a shared separator. Iced draws
-            // borders fully inside the rect, so adjacent rows' hairlines overlap
-            // into one clean line. In rounded mode the outer list shell owns the
-            // sealed `theme::border()` perimeter (square corners) — inside the
-            // shell every row is still flush, so the per-row hairline continues
-            // to read as a single separator. A selected row swaps that hairline
-            // for the louder 2 px accent ring.
+            // In flat mode unselected rows touch (`SLOT_SPACING == 0`) and use
+            // the 1 px `theme::border()` hairline as a shared separator. Iced
+            // draws borders fully inside the rect, so adjacent rows' hairlines
+            // overlap into one clean line. In rounded mode each row is an inset
+            // card (`slot_card_padding`), so the same hairline is the card's
+            // own outline. A selected row swaps that hairline for the louder
+            // 2 px accent ring.
             let (border_color, border_width) = if is_selection {
                 // Contrast-floored accent ring (see `theme::selection_ring_on`):
                 // the raw theme accent on most themes, nudged toward `base`'s
@@ -526,15 +549,45 @@ impl SlotListSlotStyle {
 /// Standard padding for slot list slot content
 pub(crate) const SLOT_LIST_SLOT_PADDING: f32 = 8.0;
 
-/// Border radius for slot list slots — always zero.
+/// Border radius for slot list rows: the card radius (`ui_radius_md`) in
+/// rounded mode, square in flat mode.
 ///
-/// Slot rows stay square in both flat and rounded modes. The rounded-mode
-/// list shell (`slot_list_background_container`) draws a square
-/// `theme::border()` perimeter and clips the touching row hairlines at its
-/// edges via `clip(true)`, so the outer perimeter still reads as a sealed
-/// shell even though every individual row inside it has 0 px corners.
+/// Rounded mode draws every [`SlotListSlotStyle`] row as a rounded card with
+/// a gap around it ([`slot_card_padding`]); rounded corners on rows that
+/// touch would leave a notch of the shell at every boundary. The list shell
+/// (`slot_list_background_container`) stays square in every mode.
 pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
-    iced::border::Radius::default()
+    theme::ui_radius_md()
+}
+
+/// Gap between two row cards in rounded mode, in px.
+pub(crate) const SLOT_CARD_GAP: f32 = 3.0;
+
+/// Space between a row card and the list's left and right edges, in px.
+pub(crate) const SLOT_CARD_INSET: f32 = 3.0;
+
+/// Space between a slot's cell and the card drawn in it: half the card gap
+/// above and below, the inset left and right. Zero outside rounded mode.
+///
+/// The gap is carved out of each slot's own cell; `SLOT_SPACING` stays 0. So
+/// the cells still tile the list: the per-slot hover `mouse_area`s (the
+/// cross-pane drop target), `DragColumn`'s press and target bounds, the drop
+/// indicator and the slot count all work on the same grid in both modes. A
+/// real gap between cells would leave the pointer over no row there (a
+/// cancelled cross-pane drop, a press that starts no drag). Rows put this
+/// padding inside their click target ([`primary_slot_button`] and friends),
+/// so a click on the gap lands on the row it belongs to.
+pub(crate) fn slot_card_padding() -> iced::Padding {
+    if theme::is_rounded_mode() {
+        iced::Padding {
+            top: SLOT_CARD_GAP / 2.0,
+            bottom: SLOT_CARD_GAP / 2.0,
+            left: SLOT_CARD_INSET,
+            right: SLOT_CARD_INSET,
+        }
+    } else {
+        iced::Padding::ZERO
+    }
 }
 
 /// Standard vertical spacing between slot list slot elements
@@ -583,11 +636,11 @@ const MAX_SLOT_COUNT: usize = 29;
 
 /// Spacing between slot list slots in the column layout (pixels).
 ///
-/// Flat redesign target: rows touch (0 px gap) so the bottom-only
-/// `theme::border()` separators line up into a single continuous rule
-/// between rows. The constant is kept at `0.0` in both flat and rounded
-/// modes — rounded mode wraps the whole list in an outer shell instead
-/// of separating individual rows.
+/// Zero in both modes: the slots' cells always touch. In flat mode the rows'
+/// 1 px `theme::border()` outlines then line up into a single rule between
+/// rows. Rounded mode separates the rows by drawing each one as a card
+/// inset inside its own cell ([`slot_card_padding`]), never by spacing the
+/// cells apart: hover, drag and drop all hit-test the cells.
 pub(crate) const SLOT_SPACING: f32 = 0.0;
 
 /// Total chrome consumed by the view-header row.
@@ -695,6 +748,11 @@ pub(crate) struct SlotListConfig {
     /// scale-down still fires). Used by the theme-picker swatch list, where the
     /// active-theme accent wash would muddy rows painted in their own palette.
     pub hover_wash: bool,
+    /// When true (the default), rounded mode draws each row as an inset
+    /// rounded card ([`slot_card_padding`]). Lists whose rows carry their own
+    /// chrome instead of [`SlotListSlotStyle`] (settings, the picker modals,
+    /// Trawl) clear it via [`Self::without_cards`] and keep touching rows.
+    pub cards: bool,
 }
 
 impl Default for SlotListConfig {
@@ -707,6 +765,7 @@ impl Default for SlotListConfig {
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
             hover_wash: true,
+            cards: true,
         }
     }
 }
@@ -777,6 +836,7 @@ impl SlotListConfig {
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
             hover_wash: true,
+            cards: true,
         }
     }
 
@@ -790,6 +850,15 @@ impl SlotListConfig {
     /// painted in their own (non-active-theme) colors, where the wash clashes.
     pub(crate) fn without_hover_wash(mut self) -> Self {
         self.hover_wash = false;
+        self
+    }
+
+    /// Keep this list's rows touching in rounded mode too. For lists whose
+    /// rows draw their own chrome rather than [`SlotListSlotStyle`]: an inset
+    /// card around a row that does not round its own corners reads as a
+    /// misaligned box.
+    pub(crate) fn without_cards(mut self) -> Self {
+        self.cards = false;
         self
     }
 
@@ -1003,7 +1072,15 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
         sl.effective_center(total_items, config.slot_count, config.center_slot)
     };
 
-    let metrics = SlotListRowMetrics::from_row(row_height, 1.0);
+    // Rounded mode's row cards: each row draws inset inside its cell, and is
+    // sized from what is left. The cell itself keeps `row_height`.
+    let (card_padding, card_radius) = if config.cards {
+        (slot_card_padding(), slot_list_border_radius())
+    } else {
+        (iced::Padding::ZERO, iced::border::Radius::default())
+    };
+    let card_height = (row_height - card_padding.y()).max(1.0);
+    let metrics = SlotListRowMetrics::from_row(card_height, 1.0);
 
     let mut slots = Vec::with_capacity(config.slot_count);
     for slot_index in 0..config.slot_count {
@@ -1052,7 +1129,8 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
                     is_selected,
                     has_multi_selection: !sl.selected_indices.is_empty(),
                     opacity,
-                    row_height,
+                    row_height: card_height,
+                    card_padding,
                     scale_factor,
                     modifiers: config.modifiers,
                     metrics,
@@ -1061,12 +1139,12 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
             } else if config.cull_empty {
                 continue;
             } else {
-                empty_slot(opacity)
+                empty_slot(opacity, card_padding)
             }
         } else if config.cull_empty {
             continue;
         } else {
-            empty_slot(opacity)
+            empty_slot(opacity, card_padding)
         };
 
         let slot_element = container(slot_content)
@@ -1081,7 +1159,8 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
 
         let hover_target: Element<'a, Message> =
             crate::widgets::hover_overlay::HoverOverlay::new(slot_element)
-                .border_radius(slot_list_border_radius())
+                .border_radius(card_radius)
+                .wash_inset(card_padding)
                 .flash_at(flash)
                 .wash_enabled(config.hover_wash)
                 .boxed();
@@ -2251,12 +2330,12 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
 ///
 /// Uses the same border/background styling as a regular slot at minimum opacity
 /// so empty slots read as "slots" rather than floating text.
-fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
+fn empty_slot<'a, Message: 'a>(opacity: f32, card_padding: iced::Padding) -> Element<'a, Message> {
     use iced::Alignment;
 
     let style = SlotListSlotStyle::for_slot(false, false, false, false, false, opacity, 0);
 
-    container(
+    let card = container(
         iced::widget::text("· · ·")
             .size(14)
             .color(Color {
@@ -2269,8 +2348,13 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     .height(Length::Fill)
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
-    .style(move |_theme| style.to_container_style())
-    .boxed()
+    .style(move |_theme| style.to_container_style());
+
+    container(card)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(card_padding)
+        .boxed()
 }
 
 /// Wrap slot list content with standard dark background container
@@ -2282,7 +2366,7 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 /// edge-to-edge — no L/R padding (rows align with the view header strip
 /// above) and no bottom padding (the last row meets the player bar with
 /// zero gap). Rounded mode adds an outer 1 px `theme::border()` outline
-/// that clips the touching row hairlines into a single sealed perimeter.
+/// around the row cards.
 /// The shell's corners are kept square in every mode — see the inline note
 /// on the `radius:` field for why rounding an edge-to-edge shell under
 /// `clip(true)` bleeds the base theme background at the corners.
@@ -2398,7 +2482,7 @@ pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
         ctx.modifiers,
         stable_viewport,
     );
-    make_slot_button(content, wrap(msg))
+    make_slot_button(content, wrap(msg), ctx.card_padding)
 }
 
 /// Wrap a pre-styled clickable container in the canonical slot-row button
@@ -2410,7 +2494,7 @@ pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
     wrap: impl Fn(SlotListPageMessage) -> M,
 ) -> Element<'a, M> {
     let msg = highlight_only_slot_click_message(ctx.item_index, ctx.modifiers);
-    make_slot_button(content, wrap(msg))
+    make_slot_button(content, wrap(msg), ctx.card_padding)
 }
 
 /// Wrap child-row content in a styled clickable container + slot-row button,
@@ -2440,12 +2524,16 @@ pub(crate) fn child_slot_button<'a, M: Clone + 'a>(
 }
 
 // Shared visual contract for both primary and highlight-only slot buttons:
-// transparent background, no border, zero padding, fills width. Splitting
-// the visual chrome out of the dispatch helpers keeps one source of truth
-// so a future style tweak lands in both ladders.
+// transparent background, no border, fills width. Its padding is the row's
+// card padding (zero in flat mode): the button fills the slot's whole cell
+// and the styled row inside it is the inset card, so the gap around a card
+// still clicks its row. Splitting the visual chrome out of the dispatch
+// helpers keeps one source of truth so a future style tweak lands in both
+// ladders.
 fn make_slot_button<'a, M: Clone + 'a>(
     content: impl iced::Widget<M> + 'a,
     on_press: M,
+    card_padding: iced::Padding,
 ) -> Element<'a, M> {
     button(content)
         .on_press(on_press)
@@ -2454,7 +2542,7 @@ fn make_slot_button<'a, M: Clone + 'a>(
             border: iced::Border::default(),
             ..Default::default()
         })
-        .padding(0)
+        .padding(card_padding)
         .width(Length::Fill)
         .boxed()
 }
@@ -2552,6 +2640,7 @@ mod tests {
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
             hover_wash: true,
+            cards: true,
         };
 
         let row_height = config.row_height();
@@ -2573,6 +2662,7 @@ mod tests {
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
             hover_wash: true,
+            cards: true,
         };
 
         let row_height = config.row_height();
@@ -3305,6 +3395,7 @@ mod tests {
             opacity: 1.0,
             scale_factor: 1.0,
             row_height: 70.0,
+            card_padding: iced::Padding::ZERO,
             modifiers,
             metrics: SlotListRowMetrics::from_row(70.0, 1.0),
         }
@@ -3434,6 +3525,7 @@ mod tests {
             opacity,
             scale_factor: 1.0,
             row_height: 70.0,
+            card_padding: iced::Padding::ZERO,
             modifiers: Modifiers::default(),
             metrics: SlotListRowMetrics::from_row(70.0, 1.0),
         }
@@ -3505,5 +3597,155 @@ mod tests {
             |_msg| (),
             iced::widget::text("row").boxed(),
         );
+    }
+
+    // ========================================================================
+    // Row cards (rounded mode)
+    // ========================================================================
+
+    /// Sets the rounded mode for one test and puts the old one back on drop.
+    /// Hold `THEME_MODE_LOCK` for as long as this lives.
+    struct RoundedModeGuard(nokkvi_data::types::player_settings::RoundedMode);
+
+    impl RoundedModeGuard {
+        fn set(mode: nokkvi_data::types::player_settings::RoundedMode) -> Self {
+            let saved = crate::theme::rounded_mode();
+            crate::theme::set_rounded_mode(mode);
+            Self(saved)
+        }
+    }
+
+    impl Drop for RoundedModeGuard {
+        fn drop(&mut self) {
+            crate::theme::set_rounded_mode(self.0);
+        }
+    }
+
+    /// Render a five-row list through the real builder and hand back the
+    /// context every row was drawn with.
+    fn row_contexts(config: &SlotListConfig) -> Vec<SlotListRowContext> {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let sl = SlotListView::new();
+        let items = [0u8; 5];
+        let _list: Element<'_, ()> = slot_list_view_with_scroll(
+            &sl,
+            &items,
+            config,
+            (),
+            (),
+            |_| (),
+            None,
+            |_, ctx| {
+                seen.borrow_mut().push(ctx);
+                Space::new().boxed()
+            },
+        );
+        seen.into_inner()
+    }
+
+    fn five_slot_config() -> SlotListConfig {
+        SlotListConfig {
+            window_height: 500.0,
+            chrome_height: 100.0,
+            slot_count: 5,
+            center_slot: 2,
+            ..SlotListConfig::default()
+        }
+    }
+
+    /// Rounded mode draws each row as a card with a gap around it: the row is
+    /// told the card's height (so its artwork and text fit inside the card)
+    /// and the padding the click target must swallow. The slot's cell, and so
+    /// the slot count and every drag position, stays `config.row_height()`.
+    #[test]
+    fn rounded_mode_rows_are_drawn_as_inset_cards() {
+        use nokkvi_data::types::player_settings::RoundedMode;
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let _mode = RoundedModeGuard::set(RoundedMode::On);
+
+        let config = five_slot_config();
+        let cell = config.row_height();
+        let rows = row_contexts(&config);
+        assert_eq!(rows.len(), 5);
+        let half_gap = SLOT_CARD_GAP / 2.0;
+        for ctx in rows {
+            assert_eq!(
+                ctx.card_padding,
+                iced::Padding {
+                    top: half_gap,
+                    bottom: half_gap,
+                    left: SLOT_CARD_INSET,
+                    right: SLOT_CARD_INSET,
+                }
+            );
+            assert!((ctx.row_height - (cell - SLOT_CARD_GAP)).abs() < 0.001);
+            assert!(
+                (ctx.metrics.artwork_size - (cell - SLOT_CARD_GAP - 16.0)).abs() < 0.001,
+                "the thumbnail is sized from the card, not the cell"
+            );
+        }
+        assert_eq!(slot_list_border_radius(), crate::theme::ui_radius_md());
+        assert_ne!(slot_list_border_radius(), iced::border::Radius::default());
+        let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
+        assert_eq!(style.border_radius, crate::theme::ui_radius_md());
+    }
+
+    /// Flat mode, and rounded corners on the player only, keep the rows
+    /// square, touching and full height: nothing about them changes.
+    #[test]
+    fn flat_and_player_only_modes_keep_rows_square_and_touching() {
+        use nokkvi_data::types::player_settings::RoundedMode;
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        for mode in [RoundedMode::Off, RoundedMode::PlayerOnly] {
+            let _mode = RoundedModeGuard::set(mode);
+            let config = five_slot_config();
+            let cell = config.row_height();
+            for ctx in row_contexts(&config) {
+                assert_eq!(ctx.card_padding, iced::Padding::ZERO, "{mode:?}");
+                assert!((ctx.row_height - cell).abs() < 0.001, "{mode:?}");
+            }
+            assert_eq!(slot_card_padding(), iced::Padding::ZERO, "{mode:?}");
+            assert_eq!(
+                slot_list_border_radius(),
+                iced::border::Radius::default(),
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// A list whose rows carry their own chrome (settings, the picker modals,
+    /// Trawl) opts out and keeps touching full-height rows in rounded mode.
+    #[test]
+    fn a_list_without_cards_keeps_touching_rows_in_rounded_mode() {
+        use nokkvi_data::types::player_settings::RoundedMode;
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let _mode = RoundedModeGuard::set(RoundedMode::On);
+
+        let config = five_slot_config().without_cards();
+        let cell = config.row_height();
+        for ctx in row_contexts(&config) {
+            assert_eq!(ctx.card_padding, iced::Padding::ZERO);
+            assert!((ctx.row_height - cell).abs() < 0.001);
+        }
+    }
+
+    /// The gap is carved out of each slot's own cell, never added between
+    /// cells: the column spacing stays zero, so hover cells and drag targets
+    /// tile the list with nothing between them, and the slot count is the
+    /// same in both modes.
+    #[test]
+    fn cards_leave_the_slot_grid_alone() {
+        use nokkvi_data::types::player_settings::RoundedMode;
+        const _: () = assert!(SLOT_SPACING == 0.0);
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let counts: Vec<(usize, f32)> = [RoundedMode::Off, RoundedMode::On]
+            .into_iter()
+            .map(|mode| {
+                let _mode = RoundedModeGuard::set(mode);
+                let config = SlotListConfig::with_dynamic_slots_at(900.0, 134.0, 70.0);
+                (config.slot_count, config.row_height())
+            })
+            .collect();
+        assert_eq!(counts[0], counts[1]);
     }
 }
