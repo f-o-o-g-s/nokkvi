@@ -10,7 +10,10 @@ use iced::{
     Alignment, Element, Length, Task, Widget as _,
     widget::{container, image},
 };
-use nokkvi_data::{types::song::Song, utils::formatters};
+use nokkvi_data::{
+    types::song::Song,
+    utils::{formatters, noun::Noun},
+};
 
 use crate::widgets::{
     self, SlotListPageMessage, SlotListPageState,
@@ -332,7 +335,7 @@ impl SimilarPage {
             search_query: "",     // no search query
             filtered_count: data.songs.len(),
             total_count: data.songs.len(),
-            item_type: "songs",
+            item_type: Noun::SONG,
             search_input_id: crate::views::SIMILAR_SEARCH_ID,
             on_view_selected: Box::new(|_| SimilarMessage::NoOp),
             show_search: false, // Hide search

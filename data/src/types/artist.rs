@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::utils::noun::Noun;
+
 /// Artist model from Navidrome API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artist {
@@ -119,10 +121,10 @@ impl std::fmt::Display for Artist {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} ({} albums, {} songs)",
+            "{} ({}, {})",
             self.name,
-            self.get_album_count(),
-            self.get_song_count()
+            Noun::ALBUM.count(self.get_album_count()),
+            Noun::SONG.count(self.get_song_count())
         )
     }
 }

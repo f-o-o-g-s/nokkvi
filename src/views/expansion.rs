@@ -4,6 +4,8 @@
 //! into their children, and `SlotListEntry<P, C>` for the unified flattened list entries.
 //! Used by Albums (→ Tracks), Artists (→ Albums), Playlists (→ Tracks), Genres (→ Tracks).
 
+use nokkvi_data::utils::noun::Noun;
+
 use crate::widgets::SlotListPageState;
 
 /// Generic slot list entry — either a parent item or an expanded child item.
@@ -757,7 +759,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     let year_str = album
         .year
         .map_or_else(|| "-".to_string(), |y| y.to_string());
-    let songs_str = format!("{} songs", album.song_count);
+    let songs_str = Noun::SONG.count(album.song_count);
     let duration_str = album
         .duration
         .map_or_else(|| "-".to_string(), |d| formatters::format_time(d as u32));

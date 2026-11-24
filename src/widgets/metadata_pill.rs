@@ -5,6 +5,7 @@
 //! letting callers chain with `if let Some(row) = ... { col = col.push(row); }`.
 
 use iced::{Element, Widget as _, widget::text};
+use nokkvi_data::utils::noun::Noun;
 
 use crate::theme;
 
@@ -94,7 +95,7 @@ pub(crate) fn play_stats_row<'a, M: 'a>(
 ) -> Option<Element<'a, M>> {
     let mut items = Vec::new();
     if let Some(plays) = play_count {
-        items.push(format!("{plays} plays"));
+        items.push(Noun::PLAY.count(plays));
     }
     if let Some(date) = play_date {
         let ymd = date.split('T').next().unwrap_or(date);

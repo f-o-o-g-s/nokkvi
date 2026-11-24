@@ -11,7 +11,7 @@ use iced::{
 };
 use nokkvi_data::{
     backend::{playlists::PlaylistUIViewData, songs::SongUIViewData},
-    utils::formatters::format_date_concise,
+    utils::{formatters::format_date_concise, noun::Noun},
 };
 
 use super::{
@@ -262,7 +262,7 @@ impl PlaylistsPage {
             search_query: &self.common.search_query,
             filtered_count: data.playlists.len(),
             total_count: data.total_playlist_count,
-            item_type: "playlists",
+            item_type: Noun::PLAYLIST,
             search_input_id: crate::views::PLAYLISTS_SEARCH_ID,
             on_view_selected: Box::new(PlaylistsMessage::SortModeSelected),
             show_search: true,
@@ -557,8 +557,8 @@ impl PlaylistsPage {
 
                 let duration_min = playlist.duration / 60.0;
                 let mut stats = vec![
-                    format!("{} songs", playlist.song_count),
-                    format!("{} mins", duration_min.round()),
+                    Noun::SONG.count(playlist.song_count),
+                    Noun::MIN.count(duration_min.round()),
                 ];
                 let ymd = playlist
                     .updated_at
@@ -733,11 +733,7 @@ impl PlaylistsPage {
         // Song-count text is only consumed by the dedicated column below
         // (when toggled on or auto-shown by sort). The subtitle no longer
         // falls back to it — toggling a column off means hide, full stop.
-        let count_text = if playlist.song_count == 1 {
-            "1 song".to_string()
-        } else {
-            format!("{} songs", playlist.song_count)
-        };
+        let count_text = Noun::SONG.count(playlist.song_count);
         let subtitle = String::new();
 
         // Fixed portions for each toggleable column, out of 100; the name

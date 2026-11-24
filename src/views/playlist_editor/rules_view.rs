@@ -19,11 +19,14 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{Space, column, container, mouse_area, row, text, text_input},
 };
-use nokkvi_data::types::{
-    rules_session::RulesTarget,
-    smart_criteria::{
-        Conjunction, CriteriaNode, DiagnosticLocation, SEED_PRESETS, Severity, ValueShape,
+use nokkvi_data::{
+    types::{
+        rules_session::RulesTarget,
+        smart_criteria::{
+            Conjunction, CriteriaNode, DiagnosticLocation, SEED_PRESETS, Severity, ValueShape,
+        },
     },
+    utils::noun::Noun,
 };
 
 use crate::{
@@ -602,7 +605,7 @@ fn preview_love_cell<'a>(starred: bool) -> Element<'a, Message> {
 /// bare number can't be misread as part of the adjacent genre.
 fn preview_plays_cell<'a>(play_count: Option<u32>) -> Element<'a, Message> {
     container(
-        text(format!("{} plays", play_count.unwrap_or(0)))
+        text(Noun::PLAY.count(play_count.unwrap_or(0)))
             .size(11)
             .font(theme::ui_font())
             .color(theme::fg3())

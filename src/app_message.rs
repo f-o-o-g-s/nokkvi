@@ -11,7 +11,9 @@
 //! - Component Bubbling
 
 use iced::widget::image;
-use nokkvi_data::{backend::app_service::AppService, services::api::scrobble::ScrobbleError};
+use nokkvi_data::{
+    backend::app_service::AppService, services::api::scrobble::ScrobbleError, utils::noun::Noun,
+};
 
 use crate::{View, services, views, widgets};
 
@@ -58,8 +60,7 @@ impl std::fmt::Display for PlaylistMutation {
                     // The confirm's skip found every song there by add time.
                     write!(f, "Nothing added to '{name}'")?;
                 } else {
-                    let plural = if *added == 1 { "" } else { "s" };
-                    write!(f, "Added {added} song{plural} to '{name}'")?;
+                    write!(f, "Added {} to '{name}'", Noun::SONG.count(*added))?;
                 }
                 if *skipped > 0 {
                     write!(f, " ({skipped} already there)")?;

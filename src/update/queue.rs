@@ -6,7 +6,7 @@ use iced::Task;
 use nokkvi_data::{
     backend::queue::QueueSongUIViewData,
     types::{ItemKind, queue::MoveBatchTarget, queue_sort_mode::QueueSortMode, song::SongCover},
-    utils::reorder::move_block_before,
+    utils::{noun::Noun, reorder::move_block_before},
 };
 use tracing::{debug, error, trace};
 
@@ -600,7 +600,7 @@ impl Nokkvi {
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", entry_ids.len())
+                    Noun::SONG.count(entry_ids.len())
                 };
                 // Optimistic: the backend removes exactly these rows.
                 filtered_owned = self.drop_queue_rows(&id_set);
@@ -656,7 +656,7 @@ impl Nokkvi {
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", entry_ids.len())
+                    Noun::SONG.count(entry_ids.len())
                 };
 
                 self.toast_info(format!("{title_text} will play next"));
@@ -1124,7 +1124,7 @@ impl Nokkvi {
             |result| match result {
                 Ok(n) => Message::Toast(crate::app_message::ToastMessage::Push(
                     nokkvi_data::types::toast::Toast::new(
-                        format!("Pushed {n} tracks to server"),
+                        format!("Pushed {} to server", Noun::TRACK.count(n)),
                         nokkvi_data::types::toast::ToastLevel::Success,
                     ),
                 )),
@@ -1171,7 +1171,7 @@ impl Nokkvi {
                 )),
                 Ok(s) => Message::Toast(crate::app_message::ToastMessage::PushThen(
                     nokkvi_data::types::toast::Toast::new(
-                        format!("Pulled {} tracks from server", s.restored),
+                        format!("Pulled {} from server", Noun::TRACK.count(s.restored)),
                         nokkvi_data::types::toast::ToastLevel::Success,
                     ),
                     Box::new(Message::LoadQueue),

@@ -21,7 +21,7 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{Row, column, container},
 };
-use nokkvi_data::backend::queue::QueueSongUIViewData;
+use nokkvi_data::{backend::queue::QueueSongUIViewData, utils::noun::Noun};
 
 use super::queue::{QueueColumnVisibility, QueueSortMode};
 use crate::widgets::{
@@ -397,7 +397,7 @@ where
             if show_plays_column {
                 content_row = content_row.push(
                     container(slot_list_text(
-                        format!("{play_count} plays"),
+                        Noun::PLAY.count(play_count),
                         duration_size,
                         style.subtext_color,
                     ))

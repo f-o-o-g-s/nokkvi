@@ -12,7 +12,7 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{button, checkbox, column, combo_box, container, row, text, text_input},
 };
-use nokkvi_data::utils::dedupe::without_present;
+use nokkvi_data::utils::{dedupe::without_present, noun::Noun};
 
 use crate::theme;
 
@@ -778,8 +778,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 Some(TextInputDialogAction::AppendToPlaylist(_, ids)) => ids.len(),
                 _ => 0,
             };
-            let label = if count == 1 { "song" } else { "songs" };
-            format!("Will add {count} {label} to \"{name}\".")
+            format!("Will add {} to \"{name}\".", Noun::SONG.count(count))
         } else {
             format!("This will replace all tracks in \"{name}\".")
         };

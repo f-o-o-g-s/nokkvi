@@ -9,7 +9,10 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{container, image},
 };
-use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, genres::GenreUIViewData},
+    utils::noun::Noun,
+};
 
 use super::{super::expansion::SlotListEntry, GenresMessage, GenresPage, GenresViewData};
 use crate::widgets::{
@@ -59,7 +62,7 @@ impl GenresPage {
             search_query: &self.common.search_query,
             filtered_count: data.genres.len(),
             total_count: data.total_genre_count,
-            item_type: "genres",
+            item_type: Noun::GENRE,
             search_input_id: crate::views::GENRES_SEARCH_ID,
             on_view_selected: Box::new(GenresMessage::SortModeSelected),
             show_search: true,
@@ -343,11 +346,7 @@ impl GenresPage {
         ));
         if self.column_visibility.albumcount {
             use crate::widgets::slot_list::slot_list_metadata_column;
-            let album_text = if genre.album_count == 1 {
-                "1 album".to_string()
-            } else {
-                format!("{} albums", genre.album_count)
-            };
+            let album_text = Noun::ALBUM.count(genre.album_count);
             let idx = ctx.item_index;
             content = content.push(slot_list_metadata_column(
                 album_text,
@@ -364,7 +363,7 @@ impl GenresPage {
             let scope_msg =
                 GenresMessage::NavigateAndFilter(crate::View::Songs, genre.songs_filter());
             content = content.push(slot_list_metadata_column(
-                format!("{} songs", genre.song_count),
+                Noun::SONG.count(genre.song_count),
                 Some(scope_msg),
                 metadata_size,
                 style,

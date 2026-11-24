@@ -13,10 +13,13 @@
 //! user sees.
 
 use iced::Widget as _;
-use nokkvi_data::types::{
-    genre::GenreRef,
-    library_search::LibrarySearchResults,
-    trawl::{TrawlCrate, TrawlSeed},
+use nokkvi_data::{
+    types::{
+        genre::GenreRef,
+        library_search::LibrarySearchResults,
+        trawl::{TrawlCrate, TrawlSeed},
+    },
+    utils::noun::Noun,
 };
 
 use crate::{views::harbour::SEARCH_MIN_CHARS, widgets::slot_list_view::SlotListView};
@@ -366,8 +369,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
         Space::new().width(Length::Shrink).boxed()
     } else {
         let n = mix.len();
-        let noun = if n == 1 { "seed" } else { "seeds" };
-        text(format!("{n} {noun}"))
+        text(Noun::SEED.count(n))
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg3())

@@ -4,7 +4,7 @@
 //! Activating a station transitions to ActivePlayback::Radio and plays the stream URL.
 
 use iced::{Alignment, Element, Length, Task, Widget as _, widget::container};
-use nokkvi_data::types::radio_station::RadioStation;
+use nokkvi_data::{types::radio_station::RadioStation, utils::noun::Noun};
 
 use crate::{
     app_message::Message,
@@ -278,7 +278,7 @@ impl RadiosPage {
             search_query: &self.common.search_query,
             filtered_count: data.stations.len(),
             total_count: data.total_station_count,
-            item_type: "stations",
+            item_type: Noun::STATION,
             search_input_id: crate::views::RADIOS_SEARCH_ID,
             on_view_selected: Box::new(|m| {
                 RadiosMessage::SlotList(SlotListPageMessage::SortModeSelected(m))

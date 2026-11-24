@@ -21,7 +21,10 @@
 //! - Playback orchestration → `AppService`
 //! - Artwork prefetching → the `artwork_prefetch` submodule (re-exported here)
 use iced::Task;
-use nokkvi_data::types::{ItemKind, OneShotShuffle, error::NokkviError};
+use nokkvi_data::{
+    types::{ItemKind, OneShotShuffle, error::NokkviError},
+    utils::noun::Noun,
+};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -53,20 +56,23 @@ pub(crate) fn unfocus_all<M: Send + 'static>() -> Task<M> {
 /// The Remove Duplicates toast, shared by the playlist editor and the queue:
 /// `Removed 1 duplicate` / `Removed 3 duplicates`.
 pub(super) fn duplicates_removed_text(count: usize) -> String {
-    let plural = if count == 1 { "" } else { "s" };
-    format!("Removed {count} duplicate{plural}")
+    format!("Removed {}", Noun::DUPLICATE.count(count))
 }
 
 /// The queue-add toast, counting the songs the add resolved to (a whole
 /// playlist or album is one batch item): `Added 1 song to queue`.
 pub(crate) fn songs_added_text(count: usize) -> String {
-    format!("Added {} to queue", song_count_text(count))
+    format!("Added {} to queue", Noun::SONG.count(count))
 }
 
 /// The drag-drop insert toast; `at` is the 0-based drop slot, shown 1-based:
 /// `Inserted 3 songs at position 5`.
 pub(crate) fn songs_inserted_text(count: usize, at: usize) -> String {
-    format!("Inserted {} at position {}", song_count_text(count), at + 1)
+    format!(
+        "Inserted {} at position {}",
+        Noun::SONG.count(count),
+        at + 1
+    )
 }
 
 /// An error toast, then `next`: a failed write that also has to undo its
@@ -78,10 +84,6 @@ fn error_toast_then(text: String, next: Message) -> Message {
     ))
 }
 
-fn song_count_text(count: usize) -> String {
-    let plural = if count == 1 { "" } else { "s" };
-    format!("{count} song{plural}")
-}
 // The pure planning half of `prefetch_album_artwork_tasks`, for the handler
 // tests (production calls go through the task builder).
 pub(super) use artwork_prefetch::{
@@ -1404,7 +1406,7 @@ impl Nokkvi {
         self.queue_play_task(
             move |shell| async move { shell.play_batch(payload, OneShotShuffle::None).await },
             move || {
-                let label = format!("Playing batch of {len} items");
+                let label = format!("Playing batch of {}", Noun::ITEM.count(len));
                 info!(" {}", label);
                 Message::Toast(crate::app_message::ToastMessage::PushThen(
                     nokkvi_data::types::toast::Toast::new(
@@ -1465,8 +1467,7 @@ impl Nokkvi {
         if added == 0 {
             self.toast_info("Already in the mix");
         } else {
-            let noun = if added == 1 { "seed" } else { "seeds" };
-            self.toast_success(format!("Added {added} {noun} to the mix"));
+            self.toast_success(format!("Added {} to the mix", Noun::SEED.count(added)));
         }
         Task::none()
     }

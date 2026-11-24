@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::filter::LibraryFilter;
+use crate::{types::filter::LibraryFilter, utils::noun::Noun};
 
 /// Genre model from Navidrome API
 /// Combines data from Native API (/api/genre) and Subsonic API (getGenres)
@@ -29,8 +29,10 @@ impl std::fmt::Display for Genre {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} ({} albums, {} songs)",
-            self.name, self.album_count, self.song_count
+            "{} ({}, {})",
+            self.name,
+            Noun::ALBUM.count(self.album_count),
+            Noun::SONG.count(self.song_count)
         )
     }
 }

@@ -12,6 +12,7 @@
 //! can act on it.
 
 use iced::Task;
+use nokkvi_data::utils::noun::Noun;
 use tracing::error;
 
 use crate::{
@@ -243,7 +244,7 @@ impl Nokkvi {
                     // untouched either way).
                     self.trawl.modal = None;
                     let count = song_ids.len();
-                    let noun = if count == 1 { "song" } else { "songs" };
+                    let noun = Noun::SONG.word(count);
                     self.text_input_dialog.open(
                         "Save Mix as Playlist",
                         "",

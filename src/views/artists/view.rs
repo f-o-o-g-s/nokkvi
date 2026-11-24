@@ -15,6 +15,7 @@ use nokkvi_data::{
         artist_recs::ArtistRec,
         discography::{DiscographyGroup, RowTagKind, row_tags},
     },
+    utils::noun::Noun,
 };
 
 use super::{
@@ -80,7 +81,7 @@ impl ArtistsPage {
             search_query: &self.common.search_query,
             filtered_count: data.artists.len(),
             total_count: data.total_artist_count,
-            item_type: "artists",
+            item_type: Noun::ARTIST,
             search_input_id: crate::views::ARTISTS_SEARCH_ID,
             on_view_selected: Box::new(ArtistsMessage::SortModeSelected),
             show_search: true,
@@ -295,11 +296,11 @@ impl ArtistsPage {
                 use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
 
                 let mut lib_stats = vec![
-                    format!("{} albums", artist.album_count),
-                    format!("{} songs", artist.song_count),
+                    Noun::ALBUM.count(artist.album_count),
+                    Noun::SONG.count(artist.song_count),
                 ];
                 if let Some(plays) = artist.play_count {
-                    lib_stats.push(format!("{plays} plays"));
+                    lib_stats.push(Noun::PLAY.count(plays));
                 }
 
                 if let Some(row) = dot_row::<ArtistsMessage>(lib_stats, 14.0, theme::fg2()) {
@@ -507,11 +508,7 @@ impl ArtistsPage {
         // Album Count column.
         if show_albumcount {
             use crate::widgets::slot_list::slot_list_metadata_column;
-            let album_text = if album_count == 1 {
-                "1 album".to_string()
-            } else {
-                format!("{album_count} albums")
-            };
+            let album_text = Noun::ALBUM.count(album_count);
             let idx = ctx.item_index;
             content_row = content_row.push(slot_list_metadata_column(
                 album_text,
@@ -533,7 +530,7 @@ impl ArtistsPage {
                 },
             );
             content_row = content_row.push(slot_list_metadata_column(
-                format!("{song_count} songs"),
+                Noun::SONG.count(song_count),
                 Some(scope_msg),
                 metadata_size,
                 style,
@@ -545,7 +542,7 @@ impl ArtistsPage {
         if show_plays {
             use crate::widgets::slot_list::slot_list_metadata_column;
             content_row = content_row.push(slot_list_metadata_column(
-                format!("{play_count} plays"),
+                Noun::PLAY.count(play_count),
                 None,
                 metadata_size,
                 style,

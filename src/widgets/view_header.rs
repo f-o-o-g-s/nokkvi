@@ -7,6 +7,7 @@ use iced::{
 };
 // Re-export SortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::sort_mode::SortMode;
+use nokkvi_data::utils::noun::Noun;
 
 use super::hover_overlay::HoverOverlay;
 use crate::theme;
@@ -67,7 +68,7 @@ pub(crate) struct ViewHeaderConfig<'a, V, Message> {
     pub search_query: &'a str,
     pub filtered_count: usize,
     pub total_count: usize,
-    pub item_type: &'a str,
+    pub item_type: Noun,
     /// Unique ID for this view's search input (must be `'static`).
     pub search_input_id: &'static str,
     pub on_view_selected: Box<dyn Fn(V) -> Message + 'a>,
@@ -765,13 +766,13 @@ fn collapsed_separator<'a, Message: 'a>() -> Element<'a, Message> {
 }
 
 /// Item-count label shared by the full header and the CountStrip collapsed
-/// appearance: `"{filtered} of {total} {item_type}"` while a search narrows
-/// the list, plain `"{total} {item_type}"` otherwise.
-pub(crate) fn count_label(filtered: usize, total: usize, item_type: &str) -> String {
+/// appearance: `"{filtered} of {total} {noun}"` while a search narrows
+/// the list, plain `"{total} {noun}"` otherwise. The noun agrees with the total.
+pub(crate) fn count_label(filtered: usize, total: usize, item_type: Noun) -> String {
     if filtered > 0 && filtered < total {
-        format!("{filtered} of {total} {item_type}")
+        format!("{filtered} of {}", item_type.count(total))
     } else {
-        format!("{total} {item_type}")
+        item_type.count(total)
     }
 }
 
@@ -904,11 +905,14 @@ mod tests {
     #[test]
     fn count_label_formats() {
         // No search active: plain total.
-        assert_eq!(count_label(0, 100, "albums"), "100 albums");
+        assert_eq!(count_label(0, 100, Noun::ALBUM), "100 albums");
         // Search matches everything: still the plain total.
-        assert_eq!(count_label(100, 100, "albums"), "100 albums");
+        assert_eq!(count_label(100, 100, Noun::ALBUM), "100 albums");
         // Search narrows the list: "M of N".
-        assert_eq!(count_label(12, 100, "albums"), "12 of 100 albums");
+        assert_eq!(count_label(12, 100, Noun::ALBUM), "12 of 100 albums");
+        // One item reads singular, alone or under a search.
+        assert_eq!(count_label(0, 1, Noun::ALBUM), "1 album");
+        assert_eq!(count_label(1, 3, Noun::SONG), "1 of 3 songs");
     }
 
     #[test]
@@ -952,7 +956,7 @@ mod tests {
             search_query: "a",
             filtered_count: 12,
             total_count: 59,
-            item_type: "songs",
+            item_type: Noun::SONG,
             search_input_id: "view_header_test_search",
             on_view_selected: Box::new(str::to_string),
             show_search: true,

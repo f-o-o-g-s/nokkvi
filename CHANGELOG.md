@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A count of one reads singular, like 1 song, 1 album or 1 play, instead of 1 songs.
+- Harbour's Most Played genres read 1 of your top tracks instead of 1 of your top track.
+
 ### Removed
 
 ## v0.32.1 — 2026-11-23

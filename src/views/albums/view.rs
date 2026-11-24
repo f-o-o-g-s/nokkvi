@@ -12,7 +12,7 @@ use iced::{
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
-    utils::formatters,
+    utils::{formatters, noun::Noun},
 };
 
 use super::{super::expansion::SlotListEntry, AlbumsMessage, AlbumsPage, AlbumsViewData};
@@ -63,7 +63,7 @@ impl AlbumsPage {
             search_query: &self.common.search_query,
             filtered_count: data.albums.len(),
             total_count: data.total_album_count,
-            item_type: "albums",
+            item_type: Noun::ALBUM,
             search_input_id: crate::views::ALBUMS_SEARCH_ID,
             on_view_selected: Box::new(AlbumsMessage::SortModeSelected),
             show_search: true,
@@ -291,7 +291,7 @@ impl AlbumsPage {
 
                 let count = album.song_count;
                 if count > 0 {
-                    info_stats.push(format!("{count} tracks"));
+                    info_stats.push(Noun::TRACK.count(count));
                 }
 
                 if let Some(secs) = album.duration {
@@ -481,7 +481,7 @@ impl AlbumsPage {
             let idx = ctx.item_index;
             use crate::widgets::slot_list::slot_list_metadata_column;
             content_row = content_row.push(slot_list_metadata_column(
-                format!("{song_count} songs"),
+                Noun::SONG.count(song_count),
                 Some(AlbumsMessage::FocusAndExpand(idx)),
                 song_count_size,
                 style,
@@ -505,7 +505,7 @@ impl AlbumsPage {
         if show_plays {
             use crate::widgets::slot_list::slot_list_metadata_column;
             content_row = content_row.push(slot_list_metadata_column(
-                format!("{play_count} plays"),
+                Noun::PLAY.count(play_count),
                 None,
                 song_count_size,
                 style,

@@ -16,7 +16,8 @@ use iced::{
     widget::{Space, column, container, image, mouse_area, row, svg, text},
 };
 use nokkvi_data::{
-    backend::playlists::PlaylistUIViewData, utils::formatters::format_duration_short,
+    backend::playlists::PlaylistUIViewData,
+    utils::{formatters::format_duration_short, noun::Noun},
 };
 
 use crate::{
@@ -254,9 +255,8 @@ fn render_picker_slot<'a>(
             duration_seconds,
             ..
         } => {
-            let song_word = if *song_count == 1 { "song" } else { "songs" };
             let duration = format_duration_short(f64::from(*duration_seconds));
-            format!("{song_count} {song_word} · {duration}")
+            format!("{} · {duration}", Noun::SONG.count(*song_count))
         }
     };
     let subtitle = text(subtitle_str)

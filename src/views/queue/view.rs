@@ -10,6 +10,7 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{Row, Space, column, container, mouse_area, row},
 };
+use nokkvi_data::utils::noun::Noun;
 
 use super::{
     PlaylistStripZone, QueueContextEntry, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
@@ -426,7 +427,7 @@ impl QueuePage {
             search_query: &self.common.search_query,
             filtered_count: data.queue_songs.len(),
             total_count: data.total_queue_count,
-            item_type: "songs",
+            item_type: Noun::SONG,
             search_input_id: crate::views::QUEUE_SEARCH_ID,
             on_view_selected: Box::new(QueueMessage::SortModeSelected),
             show_search: true,
@@ -539,7 +540,7 @@ impl QueuePage {
                     }
                 } else {
                     let count =
-                        count_label(data.queue_songs.len(), data.total_queue_count, "songs");
+                        count_label(data.queue_songs.len(), data.total_queue_count, Noun::SONG);
                     let controls = (SORT_CELL_MIN_WIDTH + 1.0)
                         + (header_cells + actions.len()) as f32 * (ICON_CELL_WIDTH + 1.0)
                         + PLAYLIST_SEARCH_MIN_W;
@@ -684,11 +685,7 @@ impl QueuePage {
                     } else {
                         data.total_queue_count
                     };
-                    let count_label = if count == 1 {
-                        "1 song".to_string()
-                    } else {
-                        format!("{count} songs")
-                    };
+                    let count_label = Noun::SONG.count(count);
 
                     let mut meta_row = Row::new().spacing(14).align_y(Alignment::Center);
                     meta_row = meta_row.push(meta_item("assets/icons/music.svg", count_label));

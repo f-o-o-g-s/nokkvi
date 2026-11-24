@@ -38,7 +38,7 @@ use iced::{
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, genres::GenreUIViewData},
     types::{artist::Artist, batch::BatchItem, song::Song},
-    utils::formatters::format_relative_time,
+    utils::{formatters::format_relative_time, noun::Noun},
 };
 
 use crate::{
@@ -554,10 +554,9 @@ fn instant_mix_pill_text(harbour: &crate::state::HarbourState, from: &MixFrom) -
                     format!("Songs like {n} of your recent plays")
                 }
                 Some(InstantMixPool::MostPlayed) => format!("Songs like {n} of your most played"),
-                Some(InstantMixPool::Random) => format!(
-                    "Songs like {n} random {}",
-                    if n == 1 { "pick" } else { "picks" }
-                ),
+                Some(InstantMixPool::Random) => {
+                    format!("Songs like {n} random {}", Noun::PICK.word(n))
+                }
             };
             let names = harbour
                 .instant_mix_seeds
@@ -679,8 +678,7 @@ pub(crate) fn trawl_row_subtitle(
     if seeds == 0 {
         "Build a mix from anything in the library".to_string()
     } else {
-        let noun = if seeds == 1 { "seed" } else { "seeds" };
-        format!("{seeds} {noun} • {}", blend.label())
+        format!("{} • {}", Noun::SEED.count(seeds), blend.label())
     }
 }
 
@@ -933,7 +931,7 @@ pub(crate) fn build_harbour_rows(
                 .cloned()
                 .unwrap_or_default();
             SectionTeaser {
-                subtitle: format!("{} • {} albums", g.name, g.album_count),
+                subtitle: format!("{} • {}", g.name, Noun::ALBUM.count(g.album_count)),
                 art_album_id: album_ids.first().cloned(),
                 art_album_ids: album_ids,
                 custom_playlist_id: None,
@@ -960,7 +958,7 @@ pub(crate) fn build_harbour_rows(
                     .unwrap_or_default();
                 rows.push(HarbourRow::Item {
                     title: g.name.clone(),
-                    subtitle: format!("{} albums", g.album_count),
+                    subtitle: Noun::ALBUM.count(g.album_count),
                     art_album_id: album_ids.first().cloned(),
                     art_album_ids: album_ids,
                     play: PlayTarget::GenreRandom(g.name.clone()),
@@ -976,7 +974,7 @@ pub(crate) fn build_harbour_rows(
                 .cloned()
                 .unwrap_or_default();
             SectionTeaser {
-                subtitle: format!("{} • {} songs", p.name, p.song_count),
+                subtitle: format!("{} • {}", p.name, Noun::SONG.count(p.song_count)),
                 art_album_id: album_ids.first().cloned(),
                 art_album_ids: album_ids,
                 custom_playlist_id: Some(p.id.clone()),
@@ -1005,7 +1003,7 @@ pub(crate) fn build_harbour_rows(
                     .unwrap_or_default();
                 rows.push(HarbourRow::Item {
                     title: p.name.clone(),
-                    subtitle: format!("{} songs", p.song_count),
+                    subtitle: Noun::SONG.count(p.song_count),
                     art_album_id: album_ids.first().cloned(),
                     art_album_ids: album_ids,
                     play: PlayTarget::Item(BatchItem::Playlist(p.id.clone())),
@@ -1015,25 +1013,6 @@ pub(crate) fn build_harbour_rows(
     }
 
     rows
-}
-
-/// A `"N plays"` fact for the Most Played shelves (drops to `""`-suppressed via
-/// the caller when zero). Pluralises for readability.
-fn plays_label(n: u32) -> String {
-    format!("{n} {}", if n == 1 { "play" } else { "plays" })
-}
-
-/// A `"N albums"` fact (the Random Artist pick's teaser). Pluralises like
-/// [`plays_label`].
-fn albums_label(n: u32) -> String {
-    format!("{n} {}", if n == 1 { "album" } else { "albums" })
-}
-
-/// A `"N songs"` fact. Pluralises like [`plays_label`]; `usize` so the song-batch
-/// teaser (a `Vec` length) and the entity counts (`u32`) share one formatter
-/// instead of each hardcoding the plural.
-fn songs_label(n: usize) -> String {
-    format!("{n} {}", if n == 1 { "song" } else { "songs" })
 }
 
 /// The Random Genre pick's song fact — what one press actually plays. The draw is
@@ -1046,8 +1025,8 @@ fn genre_songs_fact(song_count: u32) -> Option<String> {
     let total = song_count as usize;
     match total {
         0 => None,
-        n if n <= RANDOM_SONGS_DRAW => Some(songs_label(n)),
-        n => Some(format!("{RANDOM_SONGS_DRAW} of {n} songs")),
+        n if n <= RANDOM_SONGS_DRAW => Some(Noun::SONG.count(n)),
+        n => Some(format!("{RANDOM_SONGS_DRAW} of {}", Noun::SONG.count(n))),
     }
 }
 
@@ -1100,7 +1079,7 @@ pub(crate) fn random_teaser(
                 .map_or_else(fallback, |a| RandomTeaser {
                     subtitle: join_facts(vec![
                         Some(a.name.clone()),
-                        a.album_count.map(albums_label),
+                        a.album_count.map(|n| Noun::ALBUM.count(n)),
                     ]),
                     art_album_id: Some(a.id.clone()),
                     art_album_ids: Vec::new(),
@@ -1113,7 +1092,7 @@ pub(crate) fn random_teaser(
                 subtitle: join_facts(vec![
                     Some(s.title.clone()),
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
-                    Some(songs_label(n)),
+                    Some(Noun::SONG.count(n)),
                 ]),
                 art_album_id: song_cover(s),
                 art_album_ids: song_cover(s).into_iter().collect(),
@@ -1144,7 +1123,7 @@ pub(crate) fn random_teaser(
                 .map_or_else(fallback, |p| RandomTeaser {
                     subtitle: join_facts(vec![
                         Some(p.name.clone()),
-                        Some(songs_label(p.song_count as usize)),
+                        Some(Noun::SONG.count(p.song_count as usize)),
                         Some(nokkvi_data::utils::formatters::format_duration_short(
                             p.duration as f64,
                         )),
@@ -1200,7 +1179,7 @@ fn push_song_section(
             .play_date
             .as_deref()
             .map(|d| format!("Played {}", format_relative_time(d))),
-        ShelfFlavor::MostPlayed => Some(plays_label(s.play_count.unwrap_or(0))),
+        ShelfFlavor::MostPlayed => Some(Noun::PLAY.count(s.play_count.unwrap_or(0))),
     };
     let count = songs.len().min(HOT_PICKS_PER_SECTION);
     if style == ShelfStyle::OnePress {
@@ -1213,7 +1192,7 @@ fn push_song_section(
                 subtitle: join_facts(vec![
                     Some(s.title.clone()),
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
-                    Some(songs_label(batch)),
+                    Some(Noun::SONG.count(batch)),
                 ]),
                 art_album_id: song_cover(s),
                 art_album_ids: song_cover(s).into_iter().collect(),
@@ -1277,7 +1256,7 @@ fn push_album_section(
             .created_at
             .as_deref()
             .map(|d| format!("Added {}", format_relative_time(d))),
-        ShelfFlavor::MostPlayed => Some(plays_label(a.play_count.unwrap_or(0))),
+        ShelfFlavor::MostPlayed => Some(Noun::PLAY.count(a.play_count.unwrap_or(0))),
     };
     let teaser = albums.first().map(|a| SectionTeaser {
         subtitle: join_facts(vec![
@@ -1338,7 +1317,7 @@ fn push_artist_section(
     let teaser = artists.first().map(|a| SectionTeaser {
         subtitle: join_facts(vec![
             Some(a.name.clone()),
-            Some(plays_label(a.play_count.unwrap_or(0))),
+            Some(Noun::PLAY.count(a.play_count.unwrap_or(0))),
         ]),
         art_album_id: Some(a.id.clone()),
         art_album_ids: Vec::new(),
@@ -1362,7 +1341,7 @@ fn push_artist_section(
         for a in artists.iter().take(HOT_PICKS_PER_SECTION) {
             rows.push(HarbourRow::Item {
                 title: a.name.clone(),
-                subtitle: plays_label(a.play_count.unwrap_or(0)),
+                subtitle: Noun::PLAY.count(a.play_count.unwrap_or(0)),
                 art_album_id: Some(a.id.clone()),
                 art_album_ids: Vec::new(),
                 play: PlayTarget::Item(BatchItem::Artist(a.id.clone())),
@@ -1398,10 +1377,7 @@ fn push_genre_section(
     // Shared facts line (teaser + item rows).
     let genre_facts = |g: &GenreUIViewData| {
         let n = g.song_count;
-        format!(
-            "{n} of your top {}",
-            if n == 1 { "track" } else { "tracks" }
-        )
+        format!("{n} of your top tracks")
     };
     let teaser = genres.first().map(|g| SectionTeaser {
         subtitle: format!("{} • {}", g.name, genre_facts(g)),
@@ -1600,7 +1576,7 @@ impl HarbourPage {
             search_query: &data.harbour.search_query,
             filtered_count: item_count,
             total_count: item_count,
-            item_type: "items",
+            item_type: Noun::ITEM,
             search_input_id: crate::views::HARBOUR_SEARCH_ID,
             on_view_selected: Box::new(|_| HarbourMessage::NoOp),
             show_search: true,
@@ -2471,14 +2447,14 @@ fn section_preview_panel<'a>(
         HarbourSectionId::MostPlayedTracks => harbour.most_played_songs.first().map(|s| {
             let meta = join_facts(vec![
                 (!s.artist.is_empty()).then(|| s.artist.clone()),
-                Some(plays_label(s.play_count.unwrap_or(0))),
+                Some(Noun::PLAY.count(s.play_count.unwrap_or(0))),
             ]);
             (shelf_title(id, data.shelf_style), s.title.clone(), meta)
         }),
         HarbourSectionId::MostPlayedAlbums => harbour.most_played_albums.first().map(|a| {
             let meta = join_facts(vec![
                 (!a.artist.is_empty()).then(|| a.artist.clone()),
-                Some(plays_label(a.play_count.unwrap_or(0))),
+                Some(Noun::PLAY.count(a.play_count.unwrap_or(0))),
             ]);
             (shelf_title(id, data.shelf_style), a.name.clone(), meta)
         }),
@@ -2486,15 +2462,12 @@ fn section_preview_panel<'a>(
             (
                 shelf_title(id, data.shelf_style),
                 a.name.clone(),
-                plays_label(a.play_count.unwrap_or(0)),
+                Noun::PLAY.count(a.play_count.unwrap_or(0)),
             )
         }),
         HarbourSectionId::MostPlayedGenres => harbour.most_played_genres.first().map(|first| {
             let n = first.song_count;
-            let meta = format!(
-                "{n} of your top {}",
-                if n == 1 { "track" } else { "tracks" }
-            );
+            let meta = format!("{n} of your top tracks");
             (
                 shelf_title(id, data.shelf_style),
                 format!("Featuring {}", first.name),

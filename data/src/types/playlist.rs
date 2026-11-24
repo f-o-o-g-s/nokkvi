@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::noun::Noun;
+
 /// Playlist model from Navidrome API
 /// Data from Native API (/api/playlist)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,7 +189,7 @@ impl Playlist {
 
 impl std::fmt::Display for Playlist {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({} songs)", self.name, self.song_count)
+        write!(f, "{} ({})", self.name, Noun::SONG.count(self.song_count))
     }
 }
 

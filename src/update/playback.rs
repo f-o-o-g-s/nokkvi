@@ -3,6 +3,7 @@
 use iced::Task;
 use nokkvi_data::{
     audio::StreamFacts, services::playback::StreamSession, types::queue::RepeatMode,
+    utils::noun::Noun,
 };
 use tracing::{debug, trace, warn};
 
@@ -2059,7 +2060,7 @@ impl Nokkvi {
             return Task::none();
         }
         if !self.settings.autoplay_enabled {
-            let noun = if removed == 1 { "song" } else { "songs" };
+            let noun = Noun::SONG.word(removed);
             self.toast.supersede(
                 "Autoplay: Off",
                 nokkvi_data::types::toast::Toast::new(

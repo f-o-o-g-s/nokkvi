@@ -13,7 +13,10 @@ use std::collections::HashSet;
 
 use rand::seq::SliceRandom;
 
-use crate::types::{batch::BatchItem, genre::GenreRef, song::Song};
+use crate::{
+    types::{batch::BatchItem, genre::GenreRef, song::Song},
+    utils::noun::Noun,
+};
 
 /// Sample cap applied to artist and genre seeds before blending. Albums,
 /// playlists and hand-picked songs go in whole — they are bounded and
@@ -408,13 +411,13 @@ impl TrawlSeed {
     /// A genre seed: its name over its album count.
     pub fn from_genre(genre: GenreRef, album_count: u32) -> Self {
         let name = genre.name.clone();
-        let sublabel = count_label(album_count, "album", "albums");
+        let sublabel = Noun::ALBUM.count(album_count);
         Self::new(BatchItem::Genre(genre), name, sublabel)
     }
 
     /// A playlist seed: its name over its song count.
     pub fn from_playlist(id: impl Into<String>, name: impl Into<String>, song_count: u32) -> Self {
-        let sublabel = count_label(song_count, "song", "songs");
+        let sublabel = Noun::SONG.count(song_count);
         Self::new(BatchItem::Playlist(id.into()), name, sublabel)
     }
 
@@ -422,11 +425,6 @@ impl TrawlSeed {
     pub fn key(&self) -> (TrawlSeedKind, &str) {
         batch_item_key(&self.item)
     }
-}
-
-/// `"1 album"` / `"3 albums"`.
-fn count_label(n: u32, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The persistent mix crate: seeds + blend + the tray filters.

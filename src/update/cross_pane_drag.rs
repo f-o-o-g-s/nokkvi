@@ -18,7 +18,7 @@
 //! no stored-vs-inline `slot_count` divergence.
 
 use iced::{Task, Widget as _};
-use nokkvi_data::{backend::queue::QueueSongUIViewData, types::song::SongCover};
+use nokkvi_data::{backend::queue::QueueSongUIViewData, types::song::SongCover, utils::noun::Noun};
 use tracing::debug;
 
 use crate::{
@@ -423,7 +423,7 @@ impl Nokkvi {
             artwork: minis.get(&a.id),
             title: a.name.clone(),
             subtitle: a.artist.clone(),
-            meta: format!("{} songs", a.song_count),
+            meta: Noun::SONG.count(a.song_count),
         };
         let song_row = |s: &'_ nokkvi_data::backend::songs::SongUIViewData| DragPreviewRow {
             artwork: s.cover_key(mode).and_then(|key| minis.get(key)),
@@ -455,8 +455,8 @@ impl Nokkvi {
                     SlotListEntry::Parent(artist) => DragPreviewRow {
                         artwork: minis.get(&artist.id),
                         title: artist.name.clone(),
-                        subtitle: format!("{} albums", artist.album_count),
-                        meta: format!("{} songs", artist.song_count),
+                        subtitle: Noun::ALBUM.count(artist.album_count),
+                        meta: Noun::SONG.count(artist.song_count),
                     },
                     SlotListEntry::Child(DiscographyRow::Album(album), _) => album_row(album),
                     // A header stands for its section's albums, as in every
@@ -470,7 +470,7 @@ impl Nokkvi {
                                 .find(|a| a.id == artist_id)
                                 .map(|a| a.name.clone())
                                 .unwrap_or_default(),
-                            meta: format!("{} albums", header.count),
+                            meta: Noun::ALBUM.count(header.count),
                         }
                     }
                 })
@@ -485,8 +485,8 @@ impl Nokkvi {
                     SlotListEntry::Parent(genre) => DragPreviewRow {
                         artwork: self.artwork.genre.mini.snapshot.get(&genre.id),
                         title: genre.name.clone(),
-                        subtitle: format!("{} albums", genre.album_count),
-                        meta: format!("{} songs", genre.song_count),
+                        subtitle: Noun::ALBUM.count(genre.album_count),
+                        meta: Noun::SONG.count(genre.song_count),
                     },
                     SlotListEntry::Child(album, _) => album_row(album),
                 })

@@ -11,6 +11,7 @@ pub mod formatters;
 pub mod fuzzy;
 pub mod html;
 pub mod http;
+pub mod noun;
 pub mod paths;
 pub mod redirects;
 pub mod reorder;

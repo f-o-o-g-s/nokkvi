@@ -9,7 +9,7 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{Row, container},
 };
-use nokkvi_data::utils::formatters;
+use nokkvi_data::utils::{formatters, noun::Noun};
 
 use super::{SongsMessage, SongsPage, SongsViewData};
 use crate::widgets::{
@@ -46,7 +46,7 @@ impl SongsPage {
             search_query: &self.common.search_query,
             filtered_count: data.songs.len(),
             total_count: data.total_song_count,
-            item_type: "songs",
+            item_type: Noun::SONG,
             search_input_id: crate::views::SONGS_SEARCH_ID,
             on_view_selected: Box::new(|m| {
                 SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SortModeSelected(m))
@@ -366,7 +366,7 @@ impl SongsPage {
                     // column with opposite alignments.
                     content_row = content_row.push(
                         container(slot_list_text(
-                            format!("{play_count} plays"),
+                            Noun::PLAY.count(play_count),
                             metadata_size,
                             style.subtext_color,
                         ))
