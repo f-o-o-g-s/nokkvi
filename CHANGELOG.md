@@ -8,11 +8,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- With Rounded Corners on, list rows are rounded cards with a small gap between them, in the Queue, library views, Harbour and the playlist editor.
-
 ### Fixed
 
 ### Removed
+
+## v0.32.1 — 2026-11-23
+
+### Changed
+
+- With Rounded Corners on, list rows are rounded cards with a small gap between them, in the Queue, library views, Harbour and the playlist editor.
 
 ## v0.32.0 — 2026-11-22
 
