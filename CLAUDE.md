@@ -100,7 +100,7 @@ CustomAudioEngine
 ├── AudioRenderer → RodioOutput (shared Mixer) → ActiveStream per track
 │   └── decoder → ActiveStream ring → StreamingSource (EQ · volume · fade · norm gain; visualizer tap) → AGC/limiter → Mixer → PipeWire
 ├── CrossfadePhase: Idle → Active → OutgoingFinished
-└── EqState — shared atomic gains, biquad filter bank per stream
+└── EqState — shared lock-free band list (graphic sliders or parametric bands), biquad chain per stream
 ```
 
 Critical invariants:

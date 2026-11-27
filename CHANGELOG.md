@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Playing music now uses a fraction of the CPU it did, since the seek bar and now-playing glow no longer redraw the whole window every frame.
 - The Harbour scene animates at 60 fps on high-refresh displays, which cuts its CPU use while music plays.
 - A boosting equalizer curve now lowers the overall level by its largest boost, so presets like Bass Boost play about 5 dB quieter.
+- Changing the equalizer while music plays now fades to the new curve over 20 ms instead of switching at once.
 
 ### Fixed
 

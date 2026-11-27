@@ -534,9 +534,11 @@ impl Iterator for StreamingSource {
         let viz_sample = sample;
 
         // Bit-perfect bypasses EQ entirely so the sample stays untouched.
+        // The processor reads the master switch itself (turning the EQ off
+        // fades its chain out) and returns the sample untouched while there
+        // is nothing to filter.
         if !self.bit_perfect
             && let Some(ref mut eq) = self.eq
-            && eq.is_enabled()
         {
             sample = eq.process_sample(sample);
         }
