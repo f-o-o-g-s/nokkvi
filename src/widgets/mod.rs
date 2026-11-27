@@ -10,6 +10,7 @@ pub(crate) mod badge_pip;
 pub(crate) mod base_slot_list_layout;
 pub(crate) mod boat;
 pub(crate) mod drag_column;
+pub(crate) mod eq_autoeq;
 pub(crate) mod eq_curve;
 pub(crate) mod eq_parametric;
 pub(crate) mod eq_slider;

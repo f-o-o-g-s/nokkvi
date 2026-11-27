@@ -803,6 +803,12 @@ impl Nokkvi {
         if let Some(table_key) = self.eq_table_key(&key, modifiers) {
             return Self::eq_table_key_task(table_key);
         }
+        // Its AutoEq panel moves the highlight on Up / Down from the search
+        // field (which captures the arrows), and takes an Enter no field
+        // took (`eq_autoeq_key`).
+        if let Some(panel_key) = self.eq_autoeq_key(&key, modifiers, status) {
+            return self.handle_eq_modal(crate::widgets::EqModalMessage::AutoEq(panel_key));
+        }
 
         // When a widget (e.g. text_input search bar) has captured the
         // key event, suppress hotkey dispatch to avoid triggering actions

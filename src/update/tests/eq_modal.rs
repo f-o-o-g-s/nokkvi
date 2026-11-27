@@ -1012,3 +1012,459 @@ fn settings_load_restores_the_profiles_and_logout_clears_them() {
     assert!(app.eq_modal.profiles.is_empty());
     assert!(app.eq_modal.imported.is_none());
 }
+
+// ----------------------------------------------------------------------------
+// The AutoEq panel: search the AutoEq list, load a headphone's profile.
+// Driven with canned results; nothing reaches the network (`test_app()` has
+// no `AppService`, so the requests are dropped).
+// ----------------------------------------------------------------------------
+
+mod autoeq {
+    use std::sync::Arc;
+
+    use iced::{
+        event::Status,
+        keyboard::{Key, Modifiers, key::Named},
+    };
+    use nokkvi_data::{
+        audio::eq::{EqBand, EqBandKind, EqMode},
+        services::autoeq::AutoEqEntry,
+        types::toast::ToastLevel,
+    };
+
+    use super::{bands, keys, last_toast, parametric_app, peak, three_bands};
+    use crate::{
+        Nokkvi,
+        update::modals::ActiveModal,
+        widgets::{
+            EqModalMessage as M,
+            eq_autoeq::{AutoEqList, AutoEqMessage as A, AutoEqStep},
+            eq_parametric::{BandField, FieldKey},
+        },
+    };
+
+    fn entry(name: &str, source: &str, rig: Option<&str>) -> AutoEqEntry {
+        AutoEqEntry {
+            name: name.to_owned(),
+            source: source.to_owned(),
+            rig: rig.map(str::to_owned),
+            path: format!("{source}/over-ear/{}", name.replace(' ', "%20")),
+        }
+    }
+
+    /// In the index's order (by name, then AutoEq's order of sources).
+    fn list() -> Arc<Vec<AutoEqEntry>> {
+        Arc::new(vec![
+            entry("AKG K371", "oratory1990", None),
+            entry("Sennheiser HD 600", "oratory1990", None),
+            entry("Sennheiser HD 600", "crinacle", Some("GRAS 43AG-7")),
+            entry("Sennheiser HD 650", "oratory1990", None),
+        ])
+    }
+
+    fn hd600_bands() -> Vec<EqBand> {
+        vec![
+            EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+            peak(220.0, -3.1, 0.85),
+        ]
+    }
+
+    fn generation(app: &Nokkvi) -> u64 {
+        app.eq_modal.autoeq_generation.current()
+    }
+
+    fn panel(app: &Nokkvi) -> &crate::widgets::eq_autoeq::AutoEqPanel {
+        app.eq_modal.autoeq.as_ref().expect("the panel is open")
+    }
+
+    fn send(app: &mut Nokkvi, msg: A) {
+        let _ = app.handle_eq_modal(M::AutoEq(msg));
+    }
+
+    /// The panel open over `three_bands()` with `list()` in it.
+    fn panel_app() -> Nokkvi {
+        let mut app = parametric_app(&three_bands());
+        send(&mut app, A::Open);
+        let generation = generation(&app);
+        send(
+            &mut app,
+            A::IndexLoaded {
+                generation,
+                result: Ok(list()),
+            },
+        );
+        app
+    }
+
+    fn shown_names(app: &Nokkvi) -> Vec<String> {
+        let panel = panel(app);
+        let AutoEqList::Ready(list) = &panel.list else {
+            panic!("the list is not ready");
+        };
+        panel
+            .matches
+            .shown
+            .iter()
+            .map(|&i| format!("{} / {}", list[i].name, list[i].by_line()))
+            .collect()
+    }
+
+    fn raw_key(app: &mut Nokkvi, key: Key, status: Status) {
+        let _ = app.update(crate::Message::RawKeyEvent(
+            key,
+            None,
+            Modifiers::empty(),
+            status,
+            false,
+        ));
+    }
+
+    #[test]
+    fn opening_the_panel_asks_for_the_list_and_bumps_the_generation() {
+        let mut app = parametric_app(&three_bands());
+        let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Gain, "5".into()));
+        let before = generation(&app);
+
+        send(&mut app, A::Open);
+
+        let panel = panel(&app);
+        assert!(matches!(panel.list, AutoEqList::Loading { refresh: false }));
+        assert!(panel.query.is_empty());
+        assert_eq!(generation(&app), before.wrapping_add(1));
+        assert_eq!(app.eq_modal.edit, None, "the press commits a typed field");
+        assert_eq!(bands(&app)[0].gain, 5.0, "the bands are left alone");
+    }
+
+    #[test]
+    fn the_panel_opens_only_in_the_parametric_view() {
+        let mut app = parametric_app(&three_bands());
+        let _ = app.handle_eq_modal(M::ModeSelected(EqMode::Graphic));
+        let before = generation(&app);
+        send(&mut app, A::Open);
+        assert!(app.eq_modal.autoeq.is_none());
+        assert_eq!(generation(&app), before, "nothing was asked");
+    }
+
+    #[test]
+    fn a_list_result_fills_the_panel_with_the_best_match_highlighted() {
+        let app = panel_app();
+        let panel = panel(&app);
+        assert!(matches!(&panel.list, AutoEqList::Ready(list) if list.len() == 4));
+        assert_eq!(panel.matches.matched, 4);
+        assert_eq!(panel.highlight, Some(0));
+        assert_eq!(panel.downloading, None);
+    }
+
+    #[test]
+    fn a_stale_list_result_is_dropped() {
+        let mut app = parametric_app(&three_bands());
+        send(&mut app, A::Open);
+        let first = generation(&app);
+        // Back and open again: the first open's answer is not this panel's.
+        send(&mut app, A::Back);
+        send(&mut app, A::Open);
+        send(
+            &mut app,
+            A::IndexLoaded {
+                generation: first,
+                result: Ok(list()),
+            },
+        );
+        assert!(matches!(panel(&app).list, AutoEqList::Loading { .. }));
+
+        // A result for a closed panel opens nothing.
+        let current = generation(&app);
+        send(&mut app, A::Back);
+        send(
+            &mut app,
+            A::IndexLoaded {
+                generation: current,
+                result: Ok(list()),
+            },
+        );
+        assert!(app.eq_modal.autoeq.is_none());
+    }
+
+    #[test]
+    fn typing_filters_the_list_at_once() {
+        let mut app = panel_app();
+        send(&mut app, A::SearchChanged("sennheiser HD 600".into()));
+        assert_eq!(
+            shown_names(&app),
+            [
+                "Sennheiser HD 600 / oratory1990",
+                "Sennheiser HD 600 / crinacle on GRAS 43AG-7",
+            ],
+            "every term, any case; equal names keep the list's order"
+        );
+        send(&mut app, A::SearchChanged("sennheiser".into()));
+        assert_eq!(panel(&app).matches.matched, 3);
+        assert_eq!(panel(&app).highlight, Some(0));
+
+        send(&mut app, A::SearchChanged("crinacle".into()));
+        assert_eq!(
+            shown_names(&app),
+            ["Sennheiser HD 600 / crinacle on GRAS 43AG-7"],
+            "a term may match the source"
+        );
+
+        send(&mut app, A::SearchChanged("zzz".into()));
+        assert!(panel(&app).matches.shown.is_empty(), "No match");
+        assert_eq!(panel(&app).highlight, None);
+        // Enter on no match loads nothing.
+        let before = generation(&app);
+        send(&mut app, A::Submit);
+        assert_eq!(generation(&app), before);
+    }
+
+    #[test]
+    fn up_and_down_move_the_highlight_and_enter_loads_it() {
+        let mut app = panel_app();
+        send(&mut app, A::Step(AutoEqStep::Down));
+        send(&mut app, A::Step(AutoEqStep::Down));
+        send(&mut app, A::Step(AutoEqStep::Up));
+        assert_eq!(panel(&app).highlight, Some(1));
+
+        let before = generation(&app);
+        send(&mut app, A::Submit);
+        assert_eq!(panel(&app).downloading, Some(1));
+        assert_eq!(generation(&app), before.wrapping_add(1));
+        // The same row again asks nothing more.
+        send(&mut app, A::Choose(1));
+        assert_eq!(generation(&app), before.wrapping_add(1));
+    }
+
+    #[test]
+    fn the_arrows_reach_the_panel_from_the_search_field() {
+        let mut app = panel_app();
+        // A focused search field captures the arrows.
+        raw_key(&mut app, Key::Named(Named::ArrowDown), Status::Captured);
+        assert_eq!(panel(&app).highlight, Some(1));
+        raw_key(&mut app, Key::Named(Named::ArrowUp), Status::Captured);
+        assert_eq!(panel(&app).highlight, Some(0));
+        // A letter typed there stays the field's.
+        raw_key(&mut app, Key::Character("x".into()), Status::Captured);
+        assert!(!app.modes.random);
+        assert!(app.eq_modal.autoeq.is_some());
+    }
+
+    #[test]
+    fn the_panel_takes_its_keys_and_the_band_table_stands_down() {
+        let mut app = panel_app();
+        let tab = Key::Named(Named::Tab);
+        let down = Key::Named(Named::ArrowDown);
+        let enter = Key::Named(Named::Enter);
+        assert_eq!(app.eq_table_key(&tab, Modifiers::empty()), None);
+        assert_eq!(app.eq_table_key(&down, Modifiers::empty()), None);
+        assert!(matches!(
+            app.eq_autoeq_key(&down, Modifiers::empty(), Status::Captured),
+            Some(A::Step(AutoEqStep::Down))
+        ));
+        assert!(
+            app.eq_autoeq_key(&down, Modifiers::SHIFT, Status::Captured)
+                .is_none()
+        );
+        // A focused field's Enter is its own submit; an Enter nothing took
+        // loads the highlighted row.
+        assert!(
+            app.eq_autoeq_key(&enter, Modifiers::empty(), Status::Captured)
+                .is_none()
+        );
+        assert!(matches!(
+            app.eq_autoeq_key(&enter, Modifiers::empty(), Status::Ignored),
+            Some(A::Submit)
+        ));
+
+        // Under another modal the panel takes nothing.
+        app.text_input_dialog.visible = true;
+        assert!(
+            app.eq_autoeq_key(&down, Modifiers::empty(), Status::Captured)
+                .is_none()
+        );
+        app.text_input_dialog.visible = false;
+
+        // Back in the editor, the table has its keys again.
+        send(&mut app, A::Back);
+        assert!(
+            app.eq_autoeq_key(&down, Modifiers::empty(), Status::Captured)
+                .is_none()
+        );
+        assert_eq!(
+            app.eq_table_key(&tab, Modifiers::empty()),
+            Some(FieldKey::Next)
+        );
+    }
+
+    #[test]
+    fn a_chosen_profile_goes_in_like_an_import_and_returns_to_the_editor() {
+        let mut app = panel_app();
+        assert!(!app.playback.eq_state.is_enabled());
+        app.eq_modal.selected = Some(1);
+        let hd600 = list()[2].clone();
+        send(&mut app, A::Choose(2));
+        let generation = generation(&app);
+
+        send(
+            &mut app,
+            A::ProfileLoaded {
+                generation,
+                entry: hd600,
+                result: Ok(hd600_bands()),
+            },
+        );
+
+        assert_eq!(bands(&app), hd600_bands());
+        assert_eq!(app.playback.eq_state.mode(), EqMode::Parametric);
+        assert!(app.playback.eq_state.is_enabled());
+        assert!(app.eq_modal.autoeq.is_none(), "back to the editor");
+        assert_eq!(app.eq_modal.selected, None);
+        assert_eq!(app.eq_modal.edit, None);
+        assert!(!app.eq_modal.bands_unsaved, "persisted at once");
+        assert!(
+            keys(&app).iter().flatten().all(|&key| key != 0),
+            "the table's fields are keyed for the new list"
+        );
+        // The next profile Save starts from the headphone's name.
+        let _ = app.handle_eq_modal(M::SavePreset);
+        assert_eq!(app.eq_modal.save_name, "Sennheiser HD 600");
+    }
+
+    #[test]
+    fn a_failed_profile_keeps_the_panel_and_says_why() {
+        let mut app = panel_app();
+        send(&mut app, A::Choose(3));
+        let generation = generation(&app);
+        send(
+            &mut app,
+            A::ProfileLoaded {
+                generation,
+                entry: list()[3].clone(),
+                result: Err("GitHub answered HTTP 404".into()),
+            },
+        );
+        assert_eq!(bands(&app), three_bands(), "nothing changed");
+        assert!(!app.playback.eq_state.is_enabled());
+        let panel = panel(&app);
+        assert_eq!(panel.downloading, None, "the row can be tried again");
+        assert!(matches!(panel.list, AutoEqList::Ready(_)));
+        assert_eq!(
+            last_toast(&app),
+            Some((
+                ToastLevel::Error,
+                "Couldn't load Sennheiser HD 650: GitHub answered HTTP 404".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_stale_profile_result_is_dropped() {
+        let mut app = panel_app();
+        send(&mut app, A::Choose(1));
+        let first = generation(&app);
+        send(&mut app, A::Choose(3));
+        let second = generation(&app);
+
+        // The first press was superseded by the second.
+        send(
+            &mut app,
+            A::ProfileLoaded {
+                generation: first,
+                entry: list()[1].clone(),
+                result: Ok(hd600_bands()),
+            },
+        );
+        assert_eq!(bands(&app), three_bands());
+        assert_eq!(panel(&app).downloading, Some(3));
+
+        // A panel closed meanwhile takes nothing, the current answer neither.
+        send(&mut app, A::Back);
+        send(
+            &mut app,
+            A::ProfileLoaded {
+                generation: second,
+                entry: list()[3].clone(),
+                result: Ok(hd600_bands()),
+            },
+        );
+        assert_eq!(bands(&app), three_bands());
+        assert!(!app.playback.eq_state.is_enabled());
+    }
+
+    #[test]
+    fn a_failed_list_offers_retry_the_way_it_was_asked() {
+        let mut app = panel_app();
+        send(&mut app, A::Refresh);
+        assert!(matches!(
+            panel(&app).list,
+            AutoEqList::Loading { refresh: true }
+        ));
+        assert!(panel(&app).matches.shown.is_empty());
+        let generation = generation(&app);
+        send(
+            &mut app,
+            A::IndexLoaded {
+                generation,
+                result: Err("couldn't reach GitHub (error sending request)".into()),
+            },
+        );
+        assert!(matches!(
+            &panel(&app).list,
+            AutoEqList::Failed { refresh: true, why } if why.contains("couldn't reach GitHub")
+        ));
+        let before = self::generation(&app);
+        send(&mut app, A::Retry);
+        assert!(matches!(
+            panel(&app).list,
+            AutoEqList::Loading { refresh: true }
+        ));
+        assert_eq!(self::generation(&app), before.wrapping_add(1));
+        assert!(app.eq_modal.autoeq.is_some(), "the panel stays");
+    }
+
+    #[test]
+    fn escape_backs_out_of_the_panel_then_closes_the_modal() {
+        let mut app = panel_app();
+        raw_key(&mut app, Key::Named(Named::Escape), Status::Captured);
+        assert!(app.eq_modal.open, "one level a press");
+        assert!(app.eq_modal.autoeq.is_none());
+        raw_key(&mut app, Key::Named(Named::Escape), Status::Ignored);
+        assert!(!app.eq_modal.open);
+    }
+
+    #[test]
+    fn closing_the_modal_or_switching_to_graphic_drops_the_panel() {
+        let mut app = panel_app();
+        let _ = app.handle_eq_modal(M::Close);
+        assert!(app.eq_modal.autoeq.is_none());
+        let _ = app.handle_eq_modal(M::Open);
+        assert!(app.eq_modal.autoeq.is_none(), "it reopens on the editor");
+
+        send(&mut app, A::Open);
+        let _ = app.handle_eq_modal(M::ModeSelected(EqMode::Graphic));
+        assert!(app.eq_modal.autoeq.is_none());
+        let _ = app.handle_eq_modal(M::ModeSelected(EqMode::Parametric));
+        assert!(app.eq_modal.autoeq.is_none());
+
+        send(&mut app, A::Open);
+        let _ = app.handle_eq_modal(M::Toggle);
+        assert!(!app.eq_modal.open);
+        assert!(app.eq_modal.autoeq.is_none());
+    }
+
+    #[test]
+    fn logout_clears_the_panel_and_carries_the_generation_forward() {
+        let mut app = panel_app();
+        send(&mut app, A::Choose(1));
+        let in_flight = generation(&app);
+
+        app.discard_modal(ActiveModal::Eq);
+
+        assert!(app.eq_modal.autoeq.is_none());
+        assert!(!app.eq_modal.open);
+        assert!(
+            !app.eq_modal.autoeq_generation.accepts(in_flight),
+            "a pre-logout answer can't match the next session"
+        );
+        assert_eq!(generation(&app), in_flight.wrapping_add(1));
+    }
+}

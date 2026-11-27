@@ -51,6 +51,7 @@ mod default_playlist_picker;
 mod discord;
 mod dynamic_accent;
 mod editor;
+mod eq_autoeq;
 mod eq_modal;
 mod frame;
 pub(crate) use frame::{AMBIENT_FRAME, FrameDemand};

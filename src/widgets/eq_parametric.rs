@@ -481,7 +481,12 @@ pub(crate) fn parametric_body<'a>(data: &EqModalViewData<'a>) -> Element<'a, EqM
         .boxed()
 }
 
-/// `Preamp -5.4 dB   6 of 32 bands          [Add band] [Import…] [Export…]`
+/// AutoEq…: open the headphone search panel (`widgets/eq_autoeq.rs`).
+const AUTOEQ_OPEN: EqModalMessage =
+    EqModalMessage::AutoEq(crate::widgets::eq_autoeq::AutoEqMessage::Open);
+const AUTOEQ_TOOLTIP: &str = "Search headphone profiles (downloads the list from GitHub)";
+
+/// `Preamp -5.4 dB   6 of 32 bands   [Add band] [Import…] [AutoEq…] [Export…]`
 fn status_line<'a>(preamp: f64, count: usize, enabled: bool) -> Element<'a, EqModalMessage> {
     let value_color = if enabled { theme::fg1() } else { theme::fg3() };
     let info = row![
@@ -508,6 +513,7 @@ fn status_line<'a>(preamp: f64, count: usize, enabled: bool) -> Element<'a, EqMo
             action_button("Import…", EqModalMessage::Import),
             "Load an Equalizer APO or AutoEq ParametricEQ.txt",
         ),
+        with_tooltip(action_button("AutoEq…", AUTOEQ_OPEN), AUTOEQ_TOOLTIP),
         with_tooltip(
             action_button("Export…", EqModalMessage::Export),
             "Save the bands as an Equalizer APO text file",
@@ -539,6 +545,7 @@ fn empty_table<'a>() -> Element<'a, EqModalMessage> {
             action_button("Add band", EqModalMessage::AddBand),
             action_button("Copy from Graphic", EqModalMessage::CopyFromGraphic),
             action_button("Import…", EqModalMessage::Import),
+            with_tooltip(action_button("AutoEq…", AUTOEQ_OPEN), AUTOEQ_TOOLTIP),
         ]
         .spacing(8),
     ]
@@ -760,7 +767,7 @@ fn tip<'a>(content: &'static str) -> Element<'a, EqModalMessage> {
         .boxed()
 }
 
-fn with_tooltip<'a>(
+pub(crate) fn with_tooltip<'a>(
     content: Element<'a, EqModalMessage>,
     hint: &'static str,
 ) -> Element<'a, EqModalMessage> {

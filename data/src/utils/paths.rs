@@ -435,10 +435,18 @@ pub fn get_lyrics_dir() -> Result<PathBuf> {
 /// Get the cache directory (`~/.cache/nokkvi`).
 ///
 /// Holds data nokkvi can always rebuild: the Waveform seek bar's per-song
-/// envelopes. Per the XDG Base Directory Specification this is
-/// `$XDG_CACHE_HOME`; deleting it costs only a re-scan.
+/// envelopes and the AutoEq downloads. Per the XDG Base Directory
+/// Specification this is `$XDG_CACHE_HOME`; deleting it costs only a re-scan
+/// or a download.
 pub fn get_cache_dir() -> Result<PathBuf> {
     Ok(root_dir(Root::Cache)?.join(APP_NAME))
+}
+
+/// Get the AutoEq cache directory (`~/.cache/nokkvi/autoeq`): the headphone
+/// list and the profiles picked from it (`services::autoeq`). Not created
+/// here; the first write creates it.
+pub fn get_autoeq_dir() -> Result<PathBuf> {
+    Ok(get_cache_dir()?.join("autoeq"))
 }
 
 /// Get the credentials config file path (`~/.config/nokkvi/config.toml`,
@@ -689,6 +697,7 @@ mod tests {
             get_state_dir().unwrap(),
             get_data_dir().unwrap(),
             get_cache_dir().unwrap(),
+            get_autoeq_dir().unwrap(),
         ] {
             assert!(
                 dir.starts_with(&root),

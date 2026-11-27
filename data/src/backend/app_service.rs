@@ -110,6 +110,10 @@ pub struct AppService {
     /// session's scans. `Arc` so the per-`shell_task` clones share one
     /// "scanning stopped" flag.
     waveforms: Arc<crate::services::waveform::WaveformService>,
+    /// The EQ modal's AutoEq headphone list (this session's copy once read)
+    /// and its on-disk cache. `Arc` so the per-`shell_task` clones share the
+    /// session's copy.
+    autoeq: Arc<crate::services::autoeq::AutoEqService>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -250,6 +254,7 @@ impl AppService {
             radio_scrobble_http,
             lyrics_cache: Arc::new(crate::services::lyrics_source::LyricsSessionCache::default()),
             waveforms,
+            autoeq: Arc::new(crate::services::autoeq::AutoEqService::new()),
         })
     }
 
@@ -1351,6 +1356,38 @@ impl AppService {
         let qm = self.queue_service.queue_manager();
         let qm = qm.lock().await;
         qm.get_song(song_id).cloned()
+    }
+
+    /// The AutoEq headphone list for the EQ modal's search panel: this
+    /// session's copy once read, else the cached list while it is fresh, else
+    /// a download from GitHub (`services::autoeq::load_index`).
+    /// `force_refresh` downloads it again. `app_version` goes into the
+    /// request's user agent (`nokkvi/<version>`), the one thing it sends.
+    /// Called only when the user opens the panel or asks for a refresh.
+    pub async fn autoeq_index(
+        &self,
+        force_refresh: bool,
+        app_version: &str,
+    ) -> Result<Arc<Vec<crate::services::autoeq::AutoEqEntry>>> {
+        self.autoeq.index(force_refresh, app_version).await
+    }
+
+    /// The AutoEq list this session already read, so the panel's next open
+    /// shows it without waiting for a task.
+    pub fn autoeq_session_index(&self) -> Option<Arc<Vec<crate::services::autoeq::AutoEqEntry>>> {
+        self.autoeq.session_index()
+    }
+
+    /// One headphone's AutoEq bands: the cached profile, else a download
+    /// from GitHub, parsed with `apo::parse` (a profile that doesn't parse is
+    /// an error with its reason and is not cached). Called only when the user
+    /// picks the headphone.
+    pub async fn autoeq_profile(
+        &self,
+        entry: &crate::services::autoeq::AutoEqEntry,
+        app_version: &str,
+    ) -> Result<Vec<crate::audio::eq::EqBand>> {
+        self.autoeq.profile(entry, app_version).await
     }
 
     /// Shared session cache for `resolve_lyrics`. The UI drops entries from it

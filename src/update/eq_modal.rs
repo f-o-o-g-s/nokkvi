@@ -49,6 +49,8 @@ impl Nokkvi {
         use iced::keyboard::{Key, key::Named};
         if !self.modal_is_top(ActiveModal::Eq)
             || self.playback.eq_state.mode() != EqMode::Parametric
+            // The AutoEq panel hides the table and takes the arrows itself.
+            || self.eq_modal.autoeq.is_some()
             || modifiers.control()
             || modifiers.alt()
             || modifiers.logo()
@@ -139,7 +141,7 @@ impl Nokkvi {
     /// End the field being typed into. Its text already played whenever it
     /// parsed, so committing only lets the field show the stored value again
     /// (text that never parsed is dropped) and writes what is unsaved.
-    fn commit_eq_field(&mut self) -> Task<Message> {
+    pub(super) fn commit_eq_field(&mut self) -> Task<Message> {
         self.eq_modal.edit = None;
         self.flush_eq_bands()
     }
@@ -345,19 +347,40 @@ impl Nokkvi {
                 return Task::none();
             }
         };
+        self.load_eq_profile(
+            &bands,
+            profile_name_of(&name),
+            "save the imported equalizer profile",
+            move |count| format!("Imported {} from {name}", Noun::FILTER.count(count)),
+        )
+    }
+
+    /// Put a loaded profile in (an imported file, an AutoEq download): it
+    /// replaces the band list, the Parametric layout plays, the equalizer
+    /// turns on, all persisted; the next profile Save starts from
+    /// `save_name` while the list is still this one. `success(count)` is the
+    /// toast once it is saved.
+    pub(super) fn load_eq_profile(
+        &mut self,
+        bands: &[EqBand],
+        save_name: String,
+        error_ctx: &'static str,
+        success: impl FnOnce(usize) -> String,
+    ) -> Task<Message> {
         let eq = &self.playback.eq_state;
-        eq.set_parametric_bands(&bands);
+        eq.set_parametric_bands(bands);
         eq.set_mode(EqMode::Parametric);
         eq.set_enabled(true);
         let count = eq.parametric_bands().len();
-        // The file replaces the list: nothing typed or selected carries over.
+        // The profile replaces the list: nothing typed or selected carries
+        // over.
         self.eq_modal.edit = None;
         self.eq_modal.selected = None;
         self.eq_modal.save_mode = false;
-        // The next profile Save starts from the file's name, while the list
-        // is still the file's.
+        // The next profile Save starts from the profile's name, while the
+        // list is still the profile's.
         self.eq_modal.imported = Some(ImportedProfile {
-            name: profile_name_of(&name),
+            name: save_name,
             bands: eq.parametric_bands().to_vec(),
         });
         let save_bands = self.persist_eq_bands();
@@ -367,11 +390,8 @@ impl Nokkvi {
                 settings.set_eq_mode(EqMode::Parametric).await?;
                 settings.set_eq_enabled(true).await
             },
-            Some(format!(
-                "Imported {} from {name}",
-                Noun::FILTER.count(count)
-            )),
-            "save the imported equalizer profile",
+            Some(success(count)),
+            error_ctx,
         );
         Task::batch([save_bands, save_layout])
     }
@@ -510,6 +530,7 @@ impl Nokkvi {
             EqModalMessage::Close => {
                 self.eq_modal.open = false;
                 self.eq_modal.save_mode = false;
+                self.eq_modal.autoeq = None;
                 self.finish_eq_edits()
             }
             EqModalMessage::Toggle => {
@@ -518,6 +539,7 @@ impl Nokkvi {
                     Task::none()
                 } else {
                     self.eq_modal.save_mode = false;
+                    self.eq_modal.autoeq = None;
                     self.finish_eq_edits()
                 }
             }
@@ -722,6 +744,8 @@ impl Nokkvi {
                 // The name prompt is one layout's (a preset or a profile).
                 self.eq_modal.save_mode = false;
                 self.eq_modal.save_name.clear();
+                // So is the AutoEq panel (Parametric's).
+                self.eq_modal.autoeq = None;
                 self.playback.eq_state.set_mode(mode);
                 let persist = self.persist_eq(
                     move |shell| async move { shell.settings().set_eq_mode(mode).await },
@@ -809,6 +833,7 @@ impl Nokkvi {
                 self.toast_error(why);
                 Task::none()
             }
+            EqModalMessage::AutoEq(msg) => self.handle_eq_autoeq(msg),
         }
     }
 }

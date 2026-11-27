@@ -7,6 +7,7 @@
 pub mod api;
 pub mod api_key;
 pub mod auth;
+pub mod autoeq;
 pub mod deezer_similar;
 pub mod discord_rpc;
 pub mod font_discovery;

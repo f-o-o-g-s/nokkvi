@@ -18,6 +18,7 @@ pub(crate) use crate::widgets::eq_parametric::{BandField, FieldEdit, FieldKey};
 use crate::{
     theme,
     widgets::{
+        eq_autoeq::{self, AutoEqMessage, AutoEqPanel},
         eq_parametric::{self, FieldMounts, PreampMemo},
         eq_slider::eq_slider,
         hover_overlay::HoverOverlay,
@@ -68,6 +69,13 @@ pub struct EqModalState {
     /// The band table's text fields: what each was last handed and the key
     /// its widget state is mounted under.
     pub(crate) mounts: FieldMounts,
+    /// Parametric view: the AutoEq search panel, shown in place of the
+    /// editor while open (`widgets/eq_autoeq.rs`).
+    pub(crate) autoeq: Option<AutoEqPanel>,
+    /// Stamps every AutoEq request, so a result for a panel since closed,
+    /// reopened or asked again is dropped. Beside the panel, not in it: it
+    /// must outlive a close and reopen (gotchas/async-state.md).
+    pub(crate) autoeq_generation: crate::state::StaleDropGen,
 }
 
 /// An imported file's name (extension dropped) and the band list it put in.
@@ -78,6 +86,16 @@ pub(crate) struct ImportedProfile {
 }
 
 impl EqModalState {
+    /// Logout: everything goes back to its default except the AutoEq
+    /// stale-drop counter, which is carried forward (a request from the old
+    /// session must not match the next one's).
+    pub(crate) fn reset_for_session(&mut self) {
+        *self = Self {
+            autoeq_generation: self.autoeq_generation.carried_forward(),
+            ..Self::default()
+        };
+    }
+
     /// The automatic preamp `bands` take (dB, never above 0).
     pub(crate) fn preamp_for(&self, bands: &[EqBand]) -> f64 {
         self.preamp.get(bands)
@@ -174,6 +192,8 @@ pub enum EqModalMessage {
     Export,
     /// The export finished: `(file name, filters written)`, or why not.
     ExportWritten(Result<(String, usize), String>),
+    /// The AutoEq search panel (`widgets/eq_autoeq.rs`).
+    AutoEq(AutoEqMessage),
 }
 
 /// Unified preset choice for the pick_list — can be builtin or custom.
@@ -620,7 +640,11 @@ pub(crate) fn eq_modal_overlay<'a>(
         .align_y(Alignment::Center);
 
     let body: Element<'_, EqModalMessage> = if parametric {
-        eq_parametric::parametric_body(&data)
+        // The AutoEq panel takes the editor's place while it is open.
+        match state.autoeq.as_ref() {
+            Some(panel) => eq_autoeq::autoeq_panel(panel),
+            None => eq_parametric::parametric_body(&data),
+        }
     } else {
         container(eq_row)
             .width(Length::Fill)

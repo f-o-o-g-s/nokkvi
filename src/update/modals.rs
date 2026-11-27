@@ -181,6 +181,10 @@ impl Nokkvi {
             ActiveModal::TextInputDialog => {
                 self.handle_text_input_dialog(TextInputDialogMessage::Cancel)
             }
+            // Escape backs out of the AutoEq panel first, one level a press.
+            ActiveModal::Eq if self.eq_modal.autoeq.is_some() => self.handle_eq_modal(
+                EqModalMessage::AutoEq(crate::widgets::eq_autoeq::AutoEqMessage::Back),
+            ),
             ActiveModal::Eq => self.handle_eq_modal(EqModalMessage::Close),
             ActiveModal::About => self.handle_about_modal(AboutModalMessage::Close),
             ActiveModal::Info => self.handle_info_modal(InfoModalMessage::Close),
@@ -209,7 +213,8 @@ impl Nokkvi {
                 self.text_input_dialog =
                     crate::widgets::text_input_dialog::TextInputDialogState::default();
             }
-            ActiveModal::Eq => self.eq_modal = crate::widgets::eq_modal::EqModalState::default(),
+            // Its AutoEq stale-drop counter is carried forward, not zeroed.
+            ActiveModal::Eq => self.eq_modal.reset_for_session(),
             ActiveModal::About => {
                 self.about_modal = crate::widgets::about_modal::AboutModalState::default();
             }

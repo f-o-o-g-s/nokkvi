@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 - Every parametric band value can be typed, with Tab and Shift+Tab moving between the fields.
 - The Parametric view imports and exports Equalizer APO and AutoEq ParametricEQ.txt profiles.
 - Parametric band lists can be saved as named profiles and switched from the equalizer's header.
+- The Parametric view has an AutoEq search that finds your headphones and loads their profile.
+- The AutoEq headphone list is downloaded from GitHub only when you open that search.
 
 ### Changed
 
