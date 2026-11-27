@@ -1,12 +1,13 @@
 //! The equalizer modal's Parametric view: the view switch, the band list
-//! edits, the typed fields, import and the modal's teardown.
+//! edits, the typed fields (and their widget remounts), import, saved
+//! profiles and the modal's teardown.
 //!
 //! Assertions target observable state only: `app.playback.eq_state` (the one
 //! runtime copy of the equalizer) and `app.eq_modal` (`test_app()` has no
 //! `AppService`, so the persists are dropped).
 
 use nokkvi_data::audio::eq::{
-    EQ_DEFAULT_Q, EQ_FREQ_MAX, EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, graphic_bands,
+    EQ_DEFAULT_Q, EQ_FREQ_MAX, EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, EqProfile, graphic_bands,
 };
 
 use crate::{
@@ -562,4 +563,452 @@ fn logout_clears_the_editor_state() {
     assert_eq!(app.eq_modal.selected, None);
     assert_eq!(app.eq_modal.edit, None);
     assert!(!app.eq_modal.bands_unsaved);
+}
+
+// ----------------------------------------------------------------------------
+// Field remounts: a value set from outside a field gives it a fresh widget
+// state (iced's text_input redraws an outside value in the fallback font
+// while its state is kept; `FieldMounts`)
+// ----------------------------------------------------------------------------
+
+/// Every field's mount key, band by band (Freq, Gain, Q).
+fn keys(app: &Nokkvi) -> Vec<[u64; 3]> {
+    (0..bands(app).len())
+        .map(|band| BandField::ALL.map(|field| app.eq_modal.mounts.key(band, field)))
+        .collect()
+}
+
+fn key(app: &Nokkvi, band: usize, field: BandField) -> u64 {
+    app.eq_modal.mounts.key(band, field)
+}
+
+/// The fields whose key moved between two snapshots, as (band, field).
+fn rekeyed(before: &[[u64; 3]], after: &[[u64; 3]]) -> Vec<(usize, BandField)> {
+    after
+        .iter()
+        .enumerate()
+        .flat_map(|(band, fields)| {
+            BandField::ALL
+                .into_iter()
+                .enumerate()
+                .filter(move |&(i, _)| before.get(band).is_none_or(|old| old[i] != fields[i]))
+                .map(move |(_, field)| (band, field))
+        })
+        .collect()
+}
+
+#[test]
+fn a_freshly_opened_modal_starts_in_sync() {
+    let app = parametric_app(&three_bands());
+    let before = keys(&app);
+    assert!(
+        before.iter().flatten().all(|&k| k != 0),
+        "every field was keyed at Open: {before:?}"
+    );
+    let mut app = app;
+    app.sync_eq_fields();
+    assert_eq!(keys(&app), before, "a second sync changes nothing");
+}
+
+#[test]
+fn a_curve_drag_and_a_wheel_step_rekey_the_fields_they_change() {
+    let mut app = parametric_app(&three_bands());
+    let before = keys(&app);
+    let _ = app.handle_eq_modal(M::BandDragged(1, 1_200.0, 5.5));
+    let dragged = keys(&app);
+    assert_eq!(
+        rekeyed(&before, &dragged),
+        [(1, BandField::Freq), (1, BandField::Gain)]
+    );
+
+    let _ = app.handle_eq_modal(M::BandQStepped(0, 2.24));
+    assert_eq!(rekeyed(&dragged, &keys(&app)), [(0, BandField::Q)]);
+}
+
+#[test]
+fn a_nudge_rekeys_the_focused_field_and_hands_its_focus_back() {
+    let mut app = parametric_app(&three_bands());
+    let before = keys(&app);
+    let task = app.handle_eq_modal(M::FieldKey(
+        Some(field_id(1, BandField::Freq)),
+        FieldKey::Up,
+    ));
+    assert_eq!(rekeyed(&before, &keys(&app)), [(1, BandField::Freq)]);
+    assert!(task.units() > 0, "the re-keyed field is focused again");
+
+    // At a limit nothing changes: no re-key, no focus task.
+    let top = peak(EQ_FREQ_MAX, 0.0, 1.0);
+    let mut app = parametric_app(&[top]);
+    let before = keys(&app);
+    let task = app.handle_eq_modal(M::FieldKey(
+        Some(field_id(0, BandField::Freq)),
+        FieldKey::Up,
+    ));
+    assert_eq!(keys(&app), before);
+    assert_eq!(task.units(), 0);
+}
+
+#[test]
+fn typing_keeps_the_fields_key_and_committing_a_different_text_rekeys_it() {
+    let mut app = parametric_app(&three_bands());
+    let typed_into = key(&app, 0, BandField::Freq);
+
+    // The first keystroke and every one after it: the widget holds the text.
+    for typed in ["2", "25", "250", "2500"] {
+        let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Freq, typed.into()));
+        assert_eq!(key(&app, 0, BandField::Freq), typed_into, "{typed}");
+    }
+    assert_eq!(bands(&app)[0].freq, 2_500.0, "the value plays as typed");
+
+    // Enter normalizes `2500` to `2.5k`: a new text from outside the field.
+    let _ = app.handle_eq_modal(M::FieldSubmit(0, BandField::Freq));
+    assert_ne!(key(&app, 0, BandField::Freq), typed_into);
+
+    // A commit that shows exactly what was typed changes nothing.
+    let _ = app.handle_eq_modal(M::FieldInput(1, BandField::Q, "1.41".into()));
+    let q = key(&app, 1, BandField::Q);
+    let _ = app.handle_eq_modal(M::FieldSubmit(1, BandField::Q));
+    assert_eq!(key(&app, 1, BandField::Q), q);
+}
+
+#[test]
+fn typing_into_another_field_rekeys_only_the_one_left_behind() {
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Gain, "-4".into()));
+    let before = keys(&app);
+    // Field A (the first band's gain) still shows `-4`; typing into field B
+    // commits it, so A now shows `-4.0`. B keeps its widget, focus and caret.
+    let _ = app.handle_eq_modal(M::FieldInput(2, BandField::Q, "1".into()));
+    assert_eq!(rekeyed(&before, &keys(&app)), [(0, BandField::Gain)]);
+}
+
+#[test]
+fn reset_rekeys_the_gains_it_zeroes() {
+    let mut list = three_bands().to_vec();
+    list.push(peak(4_000.0, 0.0, 2.0));
+    let mut app = parametric_app(&list);
+    let before = keys(&app);
+    let _ = app.handle_eq_modal(M::ResetAll);
+    assert_eq!(
+        rekeyed(&before, &keys(&app)),
+        [
+            (0, BandField::Gain),
+            (1, BandField::Gain),
+            (2, BandField::Gain)
+        ],
+        "the flat band's `0.0` stays as it was"
+    );
+}
+
+#[test]
+fn a_band_removed_above_rekeys_the_rows_that_slid_up() {
+    let mut app = parametric_app(&three_bands());
+    let before = keys(&app);
+    let _ = app.handle_eq_modal(M::RemoveBand(0));
+    let after = keys(&app);
+    assert_eq!(after.len(), 2);
+    // Every field of the two rows now shows the next band's values.
+    assert_eq!(rekeyed(&before, &after).len(), 6, "{before:?} -> {after:?}");
+
+    // A band added at the end shifts nothing.
+    let _ = app.handle_eq_modal(M::AddBand);
+    assert_eq!(&keys(&app)[..2], &after[..]);
+}
+
+#[test]
+fn an_import_a_type_change_and_a_settings_reload_rekey_what_they_change() {
+    let mut app = parametric_app(&three_bands());
+    let before = keys(&app);
+    let imported = vec![
+        EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+        peak(1_000.0, -2.0, 1.41),
+    ];
+    let _ = app.handle_eq_modal(M::ImportLoaded(Ok(("HD 650.txt".into(), imported))));
+    // The second band is the same as before in every field.
+    assert_eq!(
+        rekeyed(&before, &keys(&app)),
+        [
+            (0, BandField::Freq),
+            (0, BandField::Gain),
+            (0, BandField::Q)
+        ]
+    );
+
+    let before = keys(&app);
+    let _ = app.handle_eq_modal(M::BandKindSelected(1, EqBandKind::LowPass));
+    assert_eq!(
+        rekeyed(&before, &keys(&app)),
+        [(1, BandField::Gain)],
+        "a pass filter's gain field goes blank"
+    );
+
+    // A config.toml reload replaces the list outside the modal's handler.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let before = keys(&app);
+    let _ = app.handle_player_settings_loaded(
+        nokkvi_data::types::player_settings::LivePlayerSettings {
+            eq_mode: EqMode::Parametric,
+            eq_bands: vec![
+                EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+                peak(1_000.0, -2.0, 2.0),
+            ],
+            ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
+        },
+    );
+    assert_eq!(
+        rekeyed(&before, &keys(&app)),
+        [(1, BandField::Gain), (1, BandField::Q)]
+    );
+}
+
+#[test]
+fn a_settings_reload_keeps_the_key_of_the_field_being_typed_into() {
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(M::FieldInput(1, BandField::Gain, "-6".into()));
+    let typed_into = key(&app, 1, BandField::Gain);
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let _ = app.handle_player_settings_loaded(
+        nokkvi_data::types::player_settings::LivePlayerSettings {
+            eq_mode: EqMode::Parametric,
+            eq_bands: vec![peak(90.0, 1.0, 1.0), peak(900.0, 2.0, 1.0)],
+            ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
+        },
+    );
+    assert_eq!(key(&app, 1, BandField::Gain), typed_into);
+}
+
+// ----------------------------------------------------------------------------
+// Saved profiles
+// ----------------------------------------------------------------------------
+
+fn profile(name: &str, bands: &[EqBand]) -> EqProfile {
+    EqProfile {
+        name: name.to_owned(),
+        bands: bands.to_vec(),
+    }
+}
+
+fn speakers() -> Vec<EqBand> {
+    vec![
+        EqBand::new(EqBandKind::HighPass, 45.0, 0.0, 0.5),
+        peak(120.0, -4.0, 2.0),
+    ]
+}
+
+fn last_toast(app: &Nokkvi) -> Option<(nokkvi_data::types::toast::ToastLevel, String)> {
+    app.toast
+        .toasts
+        .back()
+        .map(|toast| (toast.level, toast.message.clone()))
+}
+
+#[test]
+fn selecting_a_profile_plays_its_bands_and_turns_the_eq_on() {
+    let mut app = parametric_app(&three_bands());
+    app.eq_modal.profiles = vec![
+        profile("Headphones", &three_bands()),
+        profile("Speakers", &speakers()),
+    ];
+    let _ = app.handle_eq_modal(M::SelectBand(1));
+    let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Gain, "-".into()));
+    assert!(!app.playback.eq_state.is_enabled());
+
+    let _ = app.handle_eq_modal(M::ProfileSelected(1));
+
+    assert_eq!(bands(&app), speakers());
+    assert!(app.playback.eq_state.is_enabled());
+    assert_eq!(app.playback.eq_state.mode(), EqMode::Parametric);
+    assert_eq!(app.eq_modal.selected, None);
+    assert_eq!(app.eq_modal.edit, None);
+    assert!(!app.eq_modal.bands_unsaved, "persisted at once");
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(1));
+
+    // A stale index changes nothing.
+    let _ = app.handle_eq_modal(M::ProfileSelected(9));
+    assert_eq!(bands(&app), speakers());
+}
+
+#[test]
+fn a_profile_save_refuses_an_empty_or_taken_name() {
+    let mut app = parametric_app(&three_bands());
+    app.eq_modal.profiles = vec![profile("Speakers", &speakers())];
+
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert!(app.eq_modal.save_mode);
+    assert!(app.eq_modal.save_name.is_empty());
+
+    let _ = app.handle_eq_modal(M::SavePresetNameChanged("   ".into()));
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+    assert_eq!(
+        last_toast(&app),
+        Some((
+            nokkvi_data::types::toast::ToastLevel::Warning,
+            "Profile name cannot be empty".to_owned()
+        ))
+    );
+    assert!(app.eq_modal.save_mode, "the prompt stays for another try");
+
+    let _ = app.handle_eq_modal(M::SavePresetNameChanged("SPEAKERS".into()));
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+    assert_eq!(
+        last_toast(&app),
+        Some((
+            nokkvi_data::types::toast::ToastLevel::Warning,
+            "A profile named 'SPEAKERS' already exists".to_owned()
+        ))
+    );
+    assert_eq!(app.eq_modal.profiles.len(), 1);
+    assert!(app.eq_modal.save_mode);
+
+    // A built-in Graphic preset's name is free for a profile.
+    let _ = app.handle_eq_modal(M::SavePresetNameChanged("Rock".into()));
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+    assert_eq!(app.eq_modal.profiles.len(), 2);
+}
+
+#[test]
+fn an_empty_band_list_is_not_saved_as_a_profile() {
+    let mut app = parametric_app(&[]);
+    let toasts = app.toast.toasts.len();
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert!(!app.eq_modal.save_mode, "no prompt for nothing to save");
+    assert_eq!(app.toast.toasts.len(), toasts + 1);
+    assert_eq!(
+        last_toast(&app),
+        Some((
+            nokkvi_data::types::toast::ToastLevel::Warning,
+            "No bands to save".to_owned()
+        ))
+    );
+
+    // The list emptied under an open prompt: refused at OK too.
+    let mut app = parametric_app(&speakers());
+    let _ = app.handle_eq_modal(M::SavePreset);
+    app.playback.eq_state.set_parametric_bands(&[]);
+    let _ = app.handle_eq_modal(M::SavePresetNameChanged("Nothing".into()));
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+    assert!(app.eq_modal.profiles.is_empty());
+}
+
+#[test]
+fn a_saved_profile_joins_the_list_and_shows_as_selected() {
+    let mut app = parametric_app(&speakers());
+    let _ = app.handle_eq_modal(M::FieldInput(1, BandField::Gain, "-5".into()));
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert_eq!(app.eq_modal.edit, None, "the Save press commits the field");
+    let _ = app.handle_eq_modal(M::SavePresetNameChanged("  Desk speakers ".into()));
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+
+    assert!(!app.eq_modal.save_mode);
+    assert!(app.eq_modal.save_name.is_empty());
+    assert_eq!(app.eq_modal.profiles.len(), 1);
+    let saved = &app.eq_modal.profiles[0];
+    assert_eq!(saved.name, "Desk speakers", "trimmed");
+    assert_eq!(saved.bands[1].gain, -5.0, "the list as it plays");
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(0));
+
+    // An edit leaves the profile: the picker shows `Custom` again.
+    let _ = app.handle_eq_modal(M::BandDragged(1, 130.0, -5.0));
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), None);
+    // The Graphic layout's presets are untouched.
+    assert!(app.eq_modal.custom_presets.is_empty());
+}
+
+#[test]
+fn deleting_a_profile_keeps_the_band_list() {
+    let mut app = parametric_app(&speakers());
+    app.eq_modal.profiles = vec![
+        profile("Headphones", &three_bands()),
+        profile("Speakers", &speakers()),
+    ];
+    let _ = app.handle_eq_modal(M::ToggleEnabled);
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(1));
+
+    let _ = app.handle_eq_modal(M::DeleteProfile(1));
+
+    assert_eq!(
+        app.eq_modal.profiles,
+        [profile("Headphones", &three_bands())]
+    );
+    assert_eq!(bands(&app), speakers(), "the bands play on");
+    assert!(app.playback.eq_state.is_enabled());
+
+    let _ = app.handle_eq_modal(M::DeleteProfile(5));
+    assert_eq!(
+        app.eq_modal.profiles.len(),
+        1,
+        "a stale index deletes nothing"
+    );
+}
+
+#[test]
+fn an_import_names_the_next_profile_save_until_the_list_changes() {
+    let imported = vec![
+        EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+        peak(220.0, -3.1, 0.85),
+    ];
+    let import = || M::ImportLoaded(Ok(("HD 650 ParametricEQ.txt".into(), imported.clone())));
+
+    // Import, Save: the name field starts with the file's name.
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(import());
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert_eq!(app.eq_modal.save_name, "HD 650 ParametricEQ");
+    // Cancelled, it is still offered.
+    let _ = app.handle_eq_modal(M::CancelSave);
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert_eq!(app.eq_modal.save_name, "HD 650 ParametricEQ");
+    // Saved, it has served.
+    let _ = app.handle_eq_modal(M::SavePresetConfirm);
+    assert_eq!(app.eq_modal.profiles.len(), 1);
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert!(app.eq_modal.save_name.is_empty());
+    let _ = app.handle_eq_modal(M::CancelSave);
+
+    // An edit drops it, and editing back doesn't bring it back.
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(import());
+    let _ = app.handle_eq_modal(M::ToggleBand(0));
+    assert!(app.eq_modal.imported.is_none());
+    let _ = app.handle_eq_modal(M::ToggleBand(0));
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert!(app.eq_modal.save_name.is_empty());
+
+    // Selecting a profile drops it.
+    let mut app = parametric_app(&three_bands());
+    app.eq_modal.profiles = vec![profile("Speakers", &speakers())];
+    let _ = app.handle_eq_modal(import());
+    let _ = app.handle_eq_modal(M::ProfileSelected(0));
+    assert!(app.eq_modal.imported.is_none());
+
+    // The Graphic view's preset Save never takes it.
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(import());
+    let _ = app.handle_eq_modal(M::ModeSelected(EqMode::Graphic));
+    let _ = app.handle_eq_modal(M::SavePreset);
+    assert!(app.eq_modal.save_name.is_empty());
+}
+
+#[test]
+fn settings_load_restores_the_profiles_and_logout_clears_them() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = parametric_app(&three_bands());
+    let saved = vec![
+        profile("Headphones", &three_bands()),
+        profile("Speakers", &speakers()),
+    ];
+    let _ = app.handle_player_settings_loaded(
+        nokkvi_data::types::player_settings::LivePlayerSettings {
+            eq_mode: EqMode::Parametric,
+            eq_bands: three_bands().to_vec(),
+            eq_profiles: saved.clone(),
+            ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
+        },
+    );
+    assert_eq!(app.eq_modal.profiles, saved);
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(0));
+
+    app.discard_modal(ActiveModal::Eq);
+    assert!(app.eq_modal.profiles.is_empty());
+    assert!(app.eq_modal.imported.is_none());
 }

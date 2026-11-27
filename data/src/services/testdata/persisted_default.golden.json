@@ -106,6 +106,7 @@
   "custom_eq_presets": [],
   "eq_mode": "graphic",
   "eq_bands": [],
+  "eq_profiles": [],
   "verbose_config": "clean",
   "library_page_size": "default",
   "artwork_resolution": "default",

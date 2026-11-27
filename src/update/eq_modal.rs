@@ -10,7 +10,7 @@ use std::path::Path;
 
 use iced::Task;
 use nokkvi_data::{
-    audio::eq::{EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, apo, graphic_bands},
+    audio::eq::{EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, EqProfile, apo, graphic_bands},
     utils::noun::Noun,
 };
 use tracing::{error, info};
@@ -20,6 +20,7 @@ use crate::{
     update::{components::session_expired_message, modals::ActiveModal},
     widgets::{
         EqModalMessage,
+        eq_modal::ImportedProfile,
         eq_parametric::{
             BandField, FieldEdit, FieldKey, adjacent_field, field_at, field_enabled, focus_field,
             nudged, parse_value, reveal_row, with_value,
@@ -241,12 +242,19 @@ impl Nokkvi {
                 }
                 // Typed text is dropped: the nudge starts from what plays.
                 self.eq_modal.edit = None;
-                bands[index] = nudged(bands[index], field, key == FieldKey::Up);
+                let before = bands[index];
+                bands[index] = nudged(before, field, key == FieldKey::Up);
                 self.eq_modal.selected = Some(index);
+                if bands[index] == before {
+                    // At a limit: nothing changes, the field keeps its state.
+                    return Task::none();
+                }
                 // Live only: a held key repeats ~25 times a second. The
                 // next commit or Close writes it.
                 self.set_eq_bands_live(&bands);
-                Task::none()
+                // The new value re-keys the field (`FieldMounts`), and the
+                // fresh widget has no focus: hand it back.
+                focus_field(index, field)
             }
         }
     }
@@ -346,6 +354,12 @@ impl Nokkvi {
         self.eq_modal.edit = None;
         self.eq_modal.selected = None;
         self.eq_modal.save_mode = false;
+        // The next profile Save starts from the file's name, while the list
+        // is still the file's.
+        self.eq_modal.imported = Some(ImportedProfile {
+            name: profile_name_of(&name),
+            bands: eq.parametric_bands().to_vec(),
+        });
         let save_bands = self.persist_eq_bands();
         let save_layout = self.persist_eq(
             move |shell| async move {
@@ -360,6 +374,100 @@ impl Nokkvi {
             "save the imported equalizer profile",
         );
         Task::batch([save_bands, save_layout])
+    }
+
+    /// Save in the Parametric view: the name prompt, starting from the last
+    /// imported file's name while the list is still that file's. An empty
+    /// list has nothing to save.
+    fn start_saving_eq_profile(&mut self) -> Task<Message> {
+        // The press took focus from a typed field: commit it first.
+        let commit = self.commit_eq_field();
+        if self.playback.eq_state.parametric_bands().is_empty() {
+            self.toast_warn("No bands to save");
+            return commit;
+        }
+        self.eq_modal.save_mode = true;
+        self.eq_modal.save_name = self
+            .eq_modal
+            .imported
+            .as_ref()
+            .map(|imported| imported.name.clone())
+            .unwrap_or_default();
+        Task::batch([commit, focus_save_name()])
+    }
+
+    /// The Parametric prompt's OK: the name must be new among the saved
+    /// profiles (any case); the band list that plays is saved under it.
+    fn confirm_eq_profile_save(&mut self) -> Task<Message> {
+        let name = self.eq_modal.save_name.trim().to_string();
+        if name.is_empty() {
+            self.toast_warn("Profile name cannot be empty");
+            return Task::none();
+        }
+        let name_lower = name.to_lowercase();
+        if self
+            .eq_modal
+            .profiles
+            .iter()
+            .any(|profile| profile.name.to_lowercase() == name_lower)
+        {
+            self.toast_warn(format!("A profile named '{name}' already exists"));
+            return Task::none();
+        }
+        let bands = self.eq_bands();
+        if bands.is_empty() {
+            self.toast_warn("No bands to save");
+            return Task::none();
+        }
+        self.eq_modal.profiles.push(EqProfile {
+            name: name.clone(),
+            bands: bands.clone(),
+        });
+        self.eq_modal.save_mode = false;
+        self.eq_modal.save_name.clear();
+        // The import's name has served.
+        self.eq_modal.imported = None;
+        self.persist_eq(
+            move |shell| async move { shell.settings().save_eq_profile(name, bands).await },
+            Some("Profile saved".to_owned()),
+            "save the equalizer profile",
+        )
+    }
+
+    /// A saved profile picked: its bands replace the list and play (the
+    /// equalizer turns on, as a preset does), nothing typed or selected
+    /// carries over.
+    fn select_eq_profile(&mut self, index: usize) -> Task<Message> {
+        let Some(profile) = self.eq_modal.profiles.get(index).cloned() else {
+            return Task::none();
+        };
+        self.eq_modal.edit = None;
+        self.eq_modal.selected = None;
+        self.eq_modal.imported = None;
+        let eq = &self.playback.eq_state;
+        eq.set_parametric_bands(&profile.bands);
+        eq.set_enabled(true);
+        let save_bands = self.persist_eq_bands();
+        let save_enabled = self.persist_eq(
+            |shell| async move { shell.settings().set_eq_enabled(true).await },
+            Some(format!("Profile: {}", profile.name)),
+            "save the equalizer profile choice",
+        );
+        Task::batch([save_bands, save_enabled])
+    }
+
+    /// Delete a saved profile. The band list stays as it is and keeps
+    /// playing (the Graphic preset delete flattens the sliders; this doesn't).
+    fn delete_eq_profile(&mut self, index: usize) -> Task<Message> {
+        if index >= self.eq_modal.profiles.len() {
+            return Task::none();
+        }
+        let name = self.eq_modal.profiles.remove(index).name;
+        self.persist_eq(
+            move |shell| async move { shell.settings().delete_eq_profile(index).await },
+            Some(format!("Deleted profile '{name}'")),
+            "delete the equalizer profile",
+        )
     }
 
     fn handle_eq_export(&mut self) -> Task<Message> {
@@ -377,7 +485,23 @@ impl Nokkvi {
         Task::batch([commit, export])
     }
 
+    /// Handle one EQ modal message, then bring the band table's text fields
+    /// up to date with what it changed (`sync_eq_fields`).
     pub(crate) fn handle_eq_modal(&mut self, msg: EqModalMessage) -> Task<Message> {
+        let task = self.handle_eq_modal_message(msg);
+        self.sync_eq_fields();
+        task
+    }
+
+    /// Re-key every band-table field whose text changed from outside it (see
+    /// `FieldMounts`). Call it wherever the band list or the field being
+    /// typed into changes outside `handle_eq_modal`.
+    pub(crate) fn sync_eq_fields(&mut self) {
+        let bands = self.playback.eq_state.parametric_bands();
+        self.eq_modal.sync_fields(&bands);
+    }
+
+    fn handle_eq_modal_message(&mut self, msg: EqModalMessage) -> Task<Message> {
         match msg {
             EqModalMessage::Open => {
                 self.eq_modal.open = true;
@@ -407,7 +531,7 @@ impl Nokkvi {
                 self.shell_fire_and_forget_task(
                     move |shell| async move { shell.settings().set_eq_enabled(enabled).await },
                     msg.to_string(),
-                    "Failed to save EQ state",
+                    "save the equalizer state",
                 )
             }
             EqModalMessage::GainChanged(band, gain) => {
@@ -423,7 +547,7 @@ impl Nokkvi {
                     self.shell_fire_and_forget_task(
                         move |shell| async move { shell.settings().set_eq_gains(gains).await },
                         String::new(), // Silent
-                        "Failed to save EQ gains",
+                        "save the equalizer gains",
                     )
                 } else {
                     Task::none()
@@ -456,7 +580,7 @@ impl Nokkvi {
                             shell.settings().set_eq_enabled(true).await
                         },
                         format!("Preset: {preset_name}"),
-                        "Failed to save EQ preset",
+                        "save the equalizer preset",
                     )
                 } else {
                     Task::none()
@@ -489,17 +613,25 @@ impl Nokkvi {
                 self.shell_fire_and_forget_task(
                     move |shell| async move { shell.settings().set_eq_gains(gains).await },
                     "EQ Reset".to_string(),
-                    "Failed to save EQ reset",
+                    "save the equalizer reset",
                 )
+            }
+            EqModalMessage::SavePreset if self.playback.eq_state.mode() == EqMode::Parametric => {
+                self.start_saving_eq_profile()
             }
             EqModalMessage::SavePreset => {
                 self.eq_modal.save_mode = true;
                 self.eq_modal.save_name.clear();
-                Task::none()
+                focus_save_name()
             }
             EqModalMessage::SavePresetNameChanged(name) => {
                 self.eq_modal.save_name = name;
                 Task::none()
+            }
+            EqModalMessage::SavePresetConfirm
+                if self.playback.eq_state.mode() == EqMode::Parametric =>
+            {
+                self.confirm_eq_profile_save()
             }
             EqModalMessage::SavePresetConfirm => {
                 let name = self.eq_modal.save_name.trim().to_string();
@@ -546,7 +678,7 @@ impl Nokkvi {
                         shell.settings().save_custom_eq_preset(name, gains).await
                     },
                     "Preset saved".to_string(),
-                    "Failed to save custom preset",
+                    "save the custom preset",
                 )
             }
             EqModalMessage::CancelSave => {
@@ -577,15 +709,17 @@ impl Nokkvi {
                         shell.settings().set_eq_gains(gains).await
                     },
                     format!("Deleted preset '{name}'"),
-                    "Failed to delete custom preset",
+                    "delete the custom preset",
                 )
             }
+            EqModalMessage::ProfileSelected(index) => self.select_eq_profile(index),
+            EqModalMessage::DeleteProfile(index) => self.delete_eq_profile(index),
             EqModalMessage::ModeSelected(mode) => {
                 if mode == self.playback.eq_state.mode() {
                     return Task::none();
                 }
                 let commit = self.commit_eq_field();
-                // The preset prompt is the Graphic layout's.
+                // The name prompt is one layout's (a preset or a profile).
                 self.eq_modal.save_mode = false;
                 self.eq_modal.save_name.clear();
                 self.playback.eq_state.set_mode(mode);
@@ -679,11 +813,25 @@ impl Nokkvi {
     }
 }
 
+/// Put the caret in the save prompt's name field as the prompt opens.
+fn focus_save_name() -> Task<Message> {
+    crate::widgets::focus_text_input(crate::widgets::eq_modal::SAVE_NAME_INPUT_ID)
+}
+
 /// The file name `path` ends in, for a toast.
 fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),
         |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// The name an imported file offers its profile: the file name without its
+/// extension (`HD 650 ParametricEQ.txt` -> `HD 650 ParametricEQ`).
+pub(crate) fn profile_name_of(file_name: &str) -> String {
+    Path::new(file_name).file_stem().map_or_else(
+        || file_name.to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
     )
 }
 
@@ -763,7 +911,18 @@ async fn export_eq_profile(text: String, count: usize) -> Option<Result<(String,
 
 #[cfg(test)]
 mod tests {
-    use super::profile_from_text;
+    use super::{profile_from_text, profile_name_of};
+
+    #[test]
+    fn an_imported_file_offers_its_name_without_the_extension() {
+        assert_eq!(
+            profile_name_of("HD 650 ParametricEQ.txt"),
+            "HD 650 ParametricEQ"
+        );
+        assert_eq!(profile_name_of("speakers.TXT"), "speakers");
+        assert_eq!(profile_name_of("v1.2 tuning.txt"), "v1.2 tuning");
+        assert_eq!(profile_name_of("no extension"), "no extension");
+    }
 
     #[test]
     fn a_profile_text_imports_whole_or_says_why_with_the_file_name() {

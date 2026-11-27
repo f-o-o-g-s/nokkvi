@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
-    audio::eq::{CustomEqPreset, EQ_BAND_COUNT, EqBand, EqMode},
+    audio::eq::{CustomEqPreset, EQ_BAND_COUNT, EqBand, EqMode, EqProfile},
     types::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
@@ -293,6 +293,11 @@ pub struct TomlSettings {
     /// with tidy numbers; read with `EqBand`'s own serde.
     #[serde(serialize_with = "tidy_eq_bands")]
     pub eq_bands: Vec<EqBand>,
+    /// Saved Parametric profiles: `[[settings.eq_profiles]]` with a `name`
+    /// and its `[[settings.eq_profiles.bands]]`, the bands as tidy as
+    /// `eq_bands`'.
+    #[serde(serialize_with = "tidy_eq_profiles")]
+    pub eq_profiles: Vec<EqProfile>,
 
     // -- System tray --
     #[serde(default)]
@@ -356,6 +361,21 @@ fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
 /// changes nothing, so a re-save never drifts.
 fn tidy_eq_bands<S: Serializer>(bands: &[EqBand], s: S) -> Result<S::Ok, S::Error> {
     s.collect_seq(bands.iter().map(|band| crate::audio::eq::tidied(*band)))
+}
+
+/// Write each saved profile with its bands at the same text precision as
+/// `eq_bands` (see [`tidy_eq_bands`]).
+fn tidy_eq_profiles<S: Serializer>(profiles: &[EqProfile], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(profiles.iter().map(|profile| {
+        EqProfile {
+            name: profile.name.clone(),
+            bands: profile
+                .bands
+                .iter()
+                .map(|band| crate::audio::eq::tidied(*band))
+                .collect(),
+        }
+    }))
 }
 /// Serialize an f32 array with each element rounded to 4 decimal places.
 fn round_f32_array<S: Serializer, const N: usize>(arr: &[f32; N], s: S) -> Result<S::Ok, S::Error> {
@@ -482,6 +502,7 @@ impl Default for TomlSettings {
             custom_eq_presets: Vec::new(),
             eq_mode: EqMode::Graphic,
             eq_bands: Vec::new(),
+            eq_profiles: Vec::new(),
             show_tray_icon: false,
             close_to_tray: false,
             rating_reminder_enabled: false,
@@ -966,5 +987,94 @@ q = 0.7
                 EqBand::new(EqBandKind::HighPass, 30.0, 0.0, 0.7),
             ]
         );
+    }
+
+    fn profile_settings() -> TomlSettings {
+        use crate::audio::eq::EqBandKind;
+        TomlSettings {
+            eq_profiles: vec![
+                EqProfile {
+                    name: "HD 650".to_string(),
+                    bands: vec![
+                        EqBand::new(
+                            EqBandKind::LowShelf,
+                            105.123_456,
+                            6.504,
+                            std::f64::consts::FRAC_1_SQRT_2,
+                        ),
+                        EqBand {
+                            enabled: false,
+                            ..EqBand::new(EqBandKind::Peak, 2263.0, -3.1, 0.85)
+                        },
+                    ],
+                },
+                EqProfile {
+                    name: "Desk speakers".to_string(),
+                    bands: vec![EqBand::new(EqBandKind::HighPass, 45.0, 0.0, 0.5)],
+                },
+            ],
+            ..TomlSettings::default()
+        }
+    }
+
+    /// Saved profiles in `[settings]`: text -> struct -> text keeps every
+    /// name and band, writes the bands as tidy as `eq_bands` (hundredths of
+    /// a hertz and a decibel, thousandths of Q), and a second save of what
+    /// was read is the same text, so re-saving never drifts.
+    #[test]
+    fn eq_profiles_round_trip_through_toml_without_drift() {
+        let settings = profile_settings();
+        let first = toml::to_string_pretty(&settings).expect("serialize");
+        for needle in [
+            "[[eq_profiles]]",
+            "name = \"HD 650\"",
+            "[[eq_profiles.bands]]",
+            "kind = \"low_shelf\"",
+            "freq = 105.12\n",
+            "gain = 6.5\n",
+            "q = 0.707\n",
+            "enabled = false\n",
+            "name = \"Desk speakers\"",
+            "kind = \"high_pass\"",
+        ] {
+            assert!(first.contains(needle), "missing {needle:?} in:\n{first}");
+        }
+
+        let read: TomlSettings = toml::from_str(&first).expect("deserialize");
+        assert_eq!(read.eq_profiles.len(), 2);
+        for (wrote, got) in settings.eq_profiles.iter().zip(&read.eq_profiles) {
+            assert_eq!(wrote.name, got.name);
+            assert_eq!(wrote.bands.len(), got.bands.len());
+            for (wrote, got) in wrote.bands.iter().zip(&got.bands) {
+                assert_eq!(*got, crate::audio::eq::tidied(*wrote));
+            }
+        }
+
+        let second = toml::to_string_pretty(&read).expect("re-serialize");
+        assert_eq!(first, second, "re-saving what was read must not drift");
+        let third: TomlSettings = toml::from_str(&second).expect("deserialize again");
+        assert_eq!(
+            toml::to_string_pretty(&third).expect("serialize again"),
+            second
+        );
+    }
+
+    /// A hand-written profile may leave its bands out: it reads as an empty
+    /// list, and the rest of `[settings]` still loads.
+    #[test]
+    fn a_hand_written_profile_without_bands_loads_empty() {
+        let ts: TomlSettings = toml::from_str(
+            r#"
+eq_enabled = true
+
+[[eq_profiles]]
+name = "Empty"
+"#,
+        )
+        .expect("parses");
+        assert!(ts.eq_enabled);
+        assert_eq!(ts.eq_profiles.len(), 1);
+        assert_eq!(ts.eq_profiles[0].name, "Empty");
+        assert!(ts.eq_profiles[0].bands.is_empty());
     }
 }

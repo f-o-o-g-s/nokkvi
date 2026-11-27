@@ -672,4 +672,93 @@ volume_normalization = true
         .expect("insert");
         assert_eq!(again.to_string(), text, "a re-save is the same text");
     }
+
+    fn profile_settings() -> crate::types::toml_settings::TomlSettings {
+        use crate::audio::eq::{EqBand, EqBandKind, EqProfile};
+        crate::types::toml_settings::TomlSettings {
+            eq_profiles: vec![EqProfile {
+                name: "HD 650".to_string(),
+                bands: vec![
+                    EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+                    EqBand::new(EqBandKind::Peak, 2263.0, -3.1, 0.85),
+                ],
+            }],
+            ..crate::types::toml_settings::TomlSettings::default()
+        }
+    }
+
+    /// The sparse writer drops an empty profile list like any other default
+    /// key and keeps a saved one whole.
+    #[test]
+    fn sparse_settings_prunes_an_empty_profile_list() {
+        use crate::types::toml_settings::TomlSettings;
+        let v = super::settings_value(&TomlSettings::default(), false).expect("settings_value");
+        let tbl = v.as_table().expect("table");
+        assert!(
+            !tbl.contains_key("eq_profiles"),
+            "empty profile list pruned"
+        );
+
+        let s = profile_settings();
+        let sparse = super::settings_value(&s, false).expect("sparse");
+        let tbl = sparse.as_table().expect("table");
+        let profiles = tbl
+            .get("eq_profiles")
+            .and_then(toml::Value::as_array)
+            .expect("saved profiles kept");
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(
+            profiles[0]
+                .get("bands")
+                .and_then(toml::Value::as_array)
+                .map(Vec::len),
+            Some(2),
+            "every band kept"
+        );
+        let back: TomlSettings = sparse.try_into().expect("deserialize sparse");
+        assert_eq!(back.eq_profiles, s.eq_profiles);
+    }
+
+    /// The config.toml shape: one `[[settings.eq_profiles]]` table per
+    /// profile with its `[[settings.eq_profiles.bands]]`, read back by the
+    /// real section loader, and written again unchanged.
+    #[test]
+    fn eq_profiles_write_as_nested_arrays_of_tables_under_settings() {
+        use toml_edit::DocumentMut;
+        let s = profile_settings();
+        let mut doc = DocumentMut::new();
+        super::insert_section(
+            &mut doc,
+            "settings",
+            &super::settings_value(&s, false).expect("value"),
+        )
+        .expect("insert");
+        let text = doc.to_string();
+        assert_eq!(
+            text.matches("[[settings.eq_profiles]]").count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("[[settings.eq_profiles.bands]]").count(),
+            2,
+            "{text}"
+        );
+        assert!(text.contains("name = \"HD 650\""), "{text}");
+
+        let parsed: toml::Value = toml::from_str(&text).expect("parse file");
+        let sections = super::sections_from_value(&parsed);
+        assert!(sections.malformed.is_empty());
+        let back = sections.settings.expect("[settings] read");
+        assert_eq!(back.eq_profiles, s.eq_profiles);
+
+        let mut again = DocumentMut::new();
+        super::insert_section(
+            &mut again,
+            "settings",
+            &super::settings_value(&back, false).expect("value"),
+        )
+        .expect("insert");
+        assert_eq!(again.to_string(), text, "a re-save is the same text");
+    }
 }

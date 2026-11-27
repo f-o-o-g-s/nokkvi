@@ -383,6 +383,10 @@ crate::player_settings_schema! {
     /// The Parametric layout's band list, at most `EQ_MAX_BANDS` bands.
     #[serde(default)]
     same eq_bands: Vec<EqBand> = Vec::new(),
+    /// Saved, named Parametric band lists (the Parametric view's profile
+    /// picker), each held to the band limits like `eq_bands`.
+    #[serde(default)]
+    same eq_profiles: Vec<crate::audio::eq::EqProfile> = Vec::new(),
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool records load via the compat shim (`true` → On, `false` → Off).
     #[serde( default, deserialize_with = "deserialize_verbose_config_with_bool_compat" )]
@@ -598,6 +602,9 @@ impl PersistedPlayerSettings {
             *gain = crate::audio::eq::clamp_gain(*gain);
         }
         crate::audio::eq::clamp_bands(&mut self.eq_bands);
+        for profile in &mut self.eq_profiles {
+            crate::audio::eq::clamp_bands(&mut profile.bands);
+        }
         // `stream_max_bitrate` needs nothing here: a hand-written number
         // snaps to a listed rate as it deserializes (`StreamMaxBitrate::at_most`).
     }

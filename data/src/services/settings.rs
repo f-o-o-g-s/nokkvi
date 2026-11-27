@@ -1275,6 +1275,32 @@ impl SettingsManager {
         self.save()
     }
 
+    /// Save a Parametric band list as a named profile, appended to the
+    /// saved ones: every band clamped, the list cut at `EQ_MAX_BANDS` (the
+    /// hold `validate` puts on a load).
+    pub fn save_eq_profile(
+        &mut self,
+        name: String,
+        mut bands: Vec<crate::audio::eq::EqBand>,
+    ) -> Result<()> {
+        crate::audio::eq::clamp_bands(&mut bands);
+        self.settings
+            .player
+            .eq_profiles
+            .push(crate::audio::eq::EqProfile { name, bands });
+        self.save()
+    }
+
+    /// Delete the saved profile at `index` (nothing, past the list).
+    pub fn delete_eq_profile(&mut self, index: usize) -> Result<()> {
+        if index < self.settings.player.eq_profiles.len() {
+            self.settings.player.eq_profiles.remove(index);
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn delete_custom_eq_preset(&mut self, index: usize) -> Result<()> {
         if index < self.settings.player.custom_eq_presets.len() {
             self.settings.player.custom_eq_presets.remove(index);
@@ -1561,7 +1587,7 @@ mod sentinel_roundtrip_tests {
 
     use super::*;
     use crate::{
-        audio::eq::{CustomEqPreset, EqBand, EqBandKind, EqMode},
+        audio::eq::{CustomEqPreset, EqBand, EqBandKind, EqMode, EqProfile},
         types::{
             player_settings::{
                 ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CrossfadeCurve,
@@ -1725,6 +1751,15 @@ mod sentinel_roundtrip_tests {
             // sits on config.toml's written precision (`tidied`), so the TOML
             // round trips compare exactly.
             eq_bands: sentinel_eq_bands(),
+            // default empty. One profile, two bands of different kinds, on
+            // the written precision like `eq_bands`.
+            eq_profiles: vec![EqProfile {
+                name: "Sentinel Profile".to_string(),
+                bands: vec![
+                    EqBand::new(EqBandKind::HighShelf, 9500.5, -2.25, 0.85),
+                    EqBand::new(EqBandKind::LowPass, 18_000.0, 0.0, 0.707),
+                ],
+            }],
 
             // Verbose / library
             verbose_config: crate::types::player_settings::VerboseConfig::On, // default Clean
@@ -2075,6 +2110,7 @@ mod sentinel_roundtrip_tests {
         }
         assert_eq!(ui_ps1.eq_mode, ui_ps2.eq_mode, "eq_mode");
         assert_eq!(ui_ps1.eq_bands, ui_ps2.eq_bands, "eq_bands");
+        assert_eq!(ui_ps1.eq_profiles, ui_ps2.eq_profiles, "eq_profiles");
 
         // Library / verbose
         assert_eq!(ui_ps1.verbose_config, ui_ps2.verbose_config);
@@ -2656,6 +2692,10 @@ name = "sentinel preset"
         assert_eq!(lhs.eq_mode, rhs.eq_mode, "eq_mode");
         assert_eq!(lhs.eq_bands, rhs.eq_bands, "eq_bands Vec<EqBand>");
         assert_eq!(
+            lhs.eq_profiles, rhs.eq_profiles,
+            "eq_profiles Vec<EqProfile>"
+        );
+        assert_eq!(
             lhs.view_columns.queue_show_genre, rhs.view_columns.queue_show_genre,
             "queue_show_genre (the silent-drop sentinel)"
         );
@@ -2961,6 +3001,7 @@ gains = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
         apply_toml_settings_to_internal(&ts, &mut internal);
         assert_eq!(internal.eq_mode, EqMode::Graphic);
         assert!(internal.eq_bands.is_empty());
+        assert!(internal.eq_profiles.is_empty(), "no saved profiles");
         assert!(internal.eq_enabled);
         assert_eq!(
             internal.eq_gains,
@@ -2997,6 +3038,40 @@ gains = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
             Some("parametric")
         );
         assert!(table.get("eq_bands").is_some_and(toml::Value::is_array));
+        // The profiles ride on a key of their own: every preset entry keeps
+        // the `gains` a released nokkvi requires of it.
+        assert!(table.get("eq_profiles").is_some_and(toml::Value::is_array));
+        let presets = table
+            .get("custom_eq_presets")
+            .and_then(toml::Value::as_array)
+            .expect("presets");
+        assert!(
+            presets
+                .iter()
+                .all(|preset| preset.get("gains").is_some() && preset.get("bands").is_none())
+        );
+    }
+
+    /// A `[settings]` table from the Parametric layout's first release (a
+    /// band list, no saved profiles) loads with no profiles.
+    #[test]
+    fn a_settings_table_without_eq_profiles_loads_none() {
+        let ts: TomlSettings = toml::from_str(
+            r#"
+eq_mode = "parametric"
+
+[[eq_bands]]
+kind = "peak"
+freq = 1000
+gain = -3
+q = 2
+"#,
+        )
+        .expect("a [settings] table without eq_profiles parses");
+        let mut internal = build_exhaustive_persisted_player_settings();
+        apply_toml_settings_to_internal(&ts, &mut internal);
+        assert!(internal.eq_profiles.is_empty());
+        assert_eq!(internal.eq_bands.len(), 1);
     }
 
     /// A config.toml written while Lyrics was a bool loads as the mode it
@@ -3072,6 +3147,7 @@ gains = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
             "playback.custom_eq_presets",
             "playback.eq_mode",
             "playback.eq_bands",
+            "playback.eq_profiles",
         ];
 
         let registry: Vec<&str> = TAB_INTERFACE_COPY_ONLY_KEYS
@@ -3183,6 +3259,9 @@ gains = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
         // 10. eq_bands (Vec<EqBand>, Playback). The sentinel's values sit on
         // the written precision, so they come back exactly.
         assert_eq!(out.eq_bands, src.eq_bands, "eq_bands residual");
+        // 11. eq_profiles (Vec<EqProfile>, Playback), on the written
+        // precision too.
+        assert_eq!(out.eq_profiles, src.eq_profiles, "eq_profiles residual");
 
         // Bool residuals in BOTH polarities: the exhaustive builder flips
         // each bool from its Persisted default, but a flipped value can
@@ -3633,6 +3712,55 @@ mod load_clamp_tests {
         assert_eq!(p.eq_bands[2].gain, EQ_BAND_GAIN_DB_MAX);
         assert_eq!(p.eq_bands[2].q, EQ_DEFAULT_Q);
     }
+
+    /// Saved profiles are arrays of tables too: every hand-written band in
+    /// every profile is clamped and each list is cut at `EQ_MAX_BANDS`.
+    #[test]
+    fn eq_profiles_are_clamped_on_load() {
+        use crate::audio::eq::{
+            EQ_BAND_GAIN_DB_MAX, EQ_FREQ_MAX, EQ_MAX_BANDS, EQ_Q_MIN, EqBand, EqBandKind, EqProfile,
+        };
+
+        let fine = EqBand::new(EqBandKind::Peak, 250.0, -2.5, 1.2);
+        let wild = EqBand::new(EqBandKind::Peak, 1.0e9, f64::NAN, -5.0);
+        let loud = EqBand::new(EqBandKind::LowShelf, 80.0, 99.0, 0.7);
+        let profiles = [
+            EqProfile {
+                name: "wild".to_string(),
+                bands: vec![fine, wild, loud],
+            },
+            EqProfile {
+                name: "long".to_string(),
+                bands: vec![fine; 40],
+            },
+        ];
+        let probe: Vec<toml::Value> = profiles
+            .iter()
+            .map(|profile| toml::Value::try_from(profile).expect("profile serializes"))
+            .collect();
+        let mut table = default_settings_table();
+        table
+            .as_table_mut()
+            .expect("table")
+            .insert("eq_profiles".to_string(), toml::Value::Array(probe));
+        let ts: TomlSettings = table.try_into().expect("eq_profiles probe deserializes");
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts, &mut p);
+
+        assert_eq!(p.eq_profiles.len(), 2, "every profile kept");
+        let wild = &p.eq_profiles[0];
+        assert_eq!(wild.name, "wild");
+        assert_eq!(wild.bands[0], fine, "in-range bands are left alone");
+        assert_eq!(wild.bands[1].freq, EQ_FREQ_MAX);
+        assert_eq!(wild.bands[1].gain, 0.0, "NaN must not survive the load");
+        assert_eq!(wild.bands[1].q, EQ_Q_MIN);
+        assert_eq!(wild.bands[2].gain, EQ_BAND_GAIN_DB_MAX);
+        assert_eq!(
+            p.eq_profiles[1].bands.len(),
+            EQ_MAX_BANDS,
+            "40 bands cut at the limit"
+        );
+    }
 }
 
 /// The Parametric layout's setters: what the EQ modal writes is clamped and
@@ -3670,6 +3798,52 @@ mod eq_setter_tests {
         assert_eq!(live.eq_bands.len(), EQ_MAX_BANDS);
         assert!(live.eq_bands.iter().all(|band| *band == wild.clamped()));
         assert_eq!(stored(&sm).player.eq_bands, live.eq_bands);
+    }
+
+    #[test]
+    fn save_eq_profile_clamps_caps_and_persists() {
+        let (mut sm, _tmp) = manager();
+        let fine = EqBand::new(EqBandKind::HighShelf, 8_000.0, 3.0, 0.7);
+        let wild = EqBand::new(EqBandKind::Peak, 1.0e9, f64::NAN, 0.0);
+        sm.save_eq_profile("Speakers".to_string(), vec![fine])
+            .expect("save_eq_profile");
+        sm.save_eq_profile("HD 650".to_string(), vec![wild; EQ_MAX_BANDS + 8])
+            .expect("save_eq_profile");
+
+        let live = sm.get_player_settings();
+        assert_eq!(live.eq_profiles.len(), 2, "appended in order");
+        assert_eq!(live.eq_profiles[0].name, "Speakers");
+        assert_eq!(live.eq_profiles[0].bands, [fine]);
+        assert_eq!(live.eq_profiles[1].name, "HD 650");
+        assert_eq!(live.eq_profiles[1].bands.len(), EQ_MAX_BANDS);
+        assert!(
+            live.eq_profiles[1]
+                .bands
+                .iter()
+                .all(|band| *band == wild.clamped())
+        );
+        assert_eq!(stored(&sm).player.eq_profiles, live.eq_profiles);
+    }
+
+    #[test]
+    fn delete_eq_profile_removes_one_and_ignores_a_stale_index() {
+        let (mut sm, _tmp) = manager();
+        let band = EqBand::new(EqBandKind::Peak, 1_000.0, -3.0, 1.0);
+        for name in ["A", "B", "C"] {
+            sm.save_eq_profile(name.to_string(), vec![band])
+                .expect("save_eq_profile");
+        }
+        sm.delete_eq_profile(1).expect("delete_eq_profile");
+        let names: Vec<String> = sm
+            .get_player_settings()
+            .eq_profiles
+            .into_iter()
+            .map(|profile| profile.name)
+            .collect();
+        assert_eq!(names, ["A", "C"]);
+        sm.delete_eq_profile(7).expect("a stale index is a no-op");
+        assert_eq!(sm.get_player_settings().eq_profiles.len(), 2);
+        assert_eq!(stored(&sm).player.eq_profiles.len(), 2);
     }
 
     #[test]

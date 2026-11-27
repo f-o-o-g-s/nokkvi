@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Parametric bands are points on a response curve that can be dragged, with the wheel setting a band's width.
 - Every parametric band value can be typed, with Tab and Shift+Tab moving between the fields.
 - The Parametric view imports and exports Equalizer APO and AutoEq ParametricEQ.txt profiles.
+- Parametric band lists can be saved as named profiles and switched from the equalizer's header.
 
 ### Changed
 
@@ -27,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Harbour's Most Played genres read 1 of your top tracks instead of 1 of your top track.
 - Leaving the Harbour view with the visualizer off now stops the background audio analysis it had started.
 - Equalizer boosts no longer distort loud music.
+- An equalizer setting that fails to save now says Failed to save once, not twice.
 
 ### Removed
 

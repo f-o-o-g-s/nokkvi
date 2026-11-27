@@ -12,13 +12,13 @@ use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{button, column, container, mouse_area, pick_list, row, space, svg, text, tooltip},
 };
-use nokkvi_data::audio::eq::{EQ_BAND_COUNT, EqBand, EqBandKind, EqMode};
+use nokkvi_data::audio::eq::{EQ_BAND_COUNT, EqBand, EqBandKind, EqMode, EqProfile, bands_match};
 
 pub(crate) use crate::widgets::eq_parametric::{BandField, FieldEdit, FieldKey};
 use crate::{
     theme,
     widgets::{
-        eq_parametric::{self, PreampMemo},
+        eq_parametric::{self, FieldMounts, PreampMemo},
         eq_slider::eq_slider,
         hover_overlay::HoverOverlay,
         pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
@@ -39,12 +39,21 @@ use crate::{
 pub struct EqModalState {
     /// Whether the EQ modal overlay is currently visible.
     pub open: bool,
-    /// Whether the modal is in "save preset" mode (showing name input).
+    /// Whether the modal is in "save" mode (showing the name input): a
+    /// preset in the Graphic view, a profile in the Parametric view.
     pub save_mode: bool,
-    /// Text input content for the preset name being saved.
+    /// Text input content for the preset or profile name being saved.
     pub save_name: String,
     /// Cached custom EQ presets (loaded from redb, kept in sync on save/delete).
     pub custom_presets: Vec<nokkvi_data::audio::eq::CustomEqPreset>,
+    /// Saved Parametric profiles (restored from the settings on load, kept in
+    /// sync on save/delete).
+    pub profiles: Vec<EqProfile>,
+    /// The name the next profile Save starts with: the last imported file's
+    /// name without its extension, kept while the band list is still the one
+    /// that import put in (dropped by the first edit, a profile selected or
+    /// saved).
+    pub(crate) imported: Option<ImportedProfile>,
     /// Parametric view: the band whose point and table row are highlighted.
     /// An index into `EqState::parametric_bands`; one past the end (the list
     /// shrank under it, a config.toml reload) highlights nothing.
@@ -56,12 +65,45 @@ pub struct EqModalState {
     pub bands_unsaved: bool,
     /// The preamp the status line shows, memoized per band list.
     pub(crate) preamp: PreampMemo,
+    /// The band table's text fields: what each was last handed and the key
+    /// its widget state is mounted under.
+    pub(crate) mounts: FieldMounts,
+}
+
+/// An imported file's name (extension dropped) and the band list it put in.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ImportedProfile {
+    pub name: String,
+    pub bands: Vec<EqBand>,
 }
 
 impl EqModalState {
     /// The automatic preamp `bands` take (dB, never above 0).
     pub(crate) fn preamp_for(&self, bands: &[EqBand]) -> f64 {
         self.preamp.get(bands)
+    }
+
+    /// Bring the band table's mount keys up to date with `bands` (what
+    /// plays) and drop an import name the list has moved away from. Runs
+    /// after every EQ modal message and wherever the band list is replaced
+    /// outside the modal.
+    pub(crate) fn sync_fields(&mut self, bands: &[EqBand]) {
+        self.mounts.sync(bands, self.edit.as_ref());
+        if self
+            .imported
+            .as_ref()
+            .is_some_and(|imported| imported.bands != bands)
+        {
+            self.imported = None;
+        }
+    }
+
+    /// The saved profile the band list is, compared at the stored precision
+    /// (a reload reads back rounded values).
+    pub(crate) fn matching_profile(&self, bands: &[EqBand]) -> Option<usize> {
+        self.profiles
+            .iter()
+            .position(|profile| bands_match(&profile.bands, bands))
     }
 }
 
@@ -76,7 +118,8 @@ pub enum EqModalMessage {
     /// Graphic: every slider to 0 dB. Parametric: every band's gain to 0 dB,
     /// the bands kept.
     ResetAll,
-    /// Enter save mode — show inline name input
+    /// Enter save mode — show inline name input (a preset in the Graphic
+    /// view, a profile in the Parametric view)
     SavePreset,
     /// Text input changed while saving
     SavePresetNameChanged(String),
@@ -86,6 +129,10 @@ pub enum EqModalMessage {
     CancelSave,
     /// Delete a custom preset by its index in the custom list
     DeletePreset(usize),
+    /// Parametric: a saved profile picked (its index in the list).
+    ProfileSelected(usize),
+    /// Parametric: delete the saved profile at this index (the bands stay).
+    DeleteProfile(usize),
     /// The view switch: the layout that plays (and that the modal shows).
     ModeSelected(EqMode),
     /// A band's table row was pressed.
@@ -156,6 +203,14 @@ impl std::fmt::Display for PresetChoice {
 // =============================================================================
 
 const MODAL_WIDTH: f32 = 640.0;
+
+/// Id of the save prompt's name field, so opening the prompt can focus it
+/// (Save, type or accept the prefilled name, Enter).
+pub(crate) const SAVE_NAME_INPUT_ID: &str = "eq_modal_save_name";
+/// Widest the Parametric header's profile picker grows: with the delete
+/// button showing, the title, Enabled and four icon buttons leave about
+/// 210 px of the modal's 592 px content row.
+const PROFILE_PICKER_MAX_WIDTH: f32 = 200.0;
 const BAND_FREQS: [&str; 10] = [
     "32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K",
 ];
@@ -192,9 +247,17 @@ pub(crate) fn eq_modal_overlay<'a>(
     let eq_gains = data.gains;
     let custom_presets = state.custom_presets.as_slice();
     let parametric = data.mode == EqMode::Parametric;
-    // The preset prompt belongs to the Graphic layout.
-    let save_mode = state.save_mode && !parametric;
+    // A preset in the Graphic view, a profile in the Parametric view (the
+    // view switch ends the prompt).
+    let save_mode = state.save_mode;
     let save_name = state.save_name.as_str();
+    // What the Graphic view calls a preset, the Parametric view calls a
+    // profile.
+    let save_title = if parametric {
+        "Save Profile"
+    } else {
+        "Save Preset"
+    };
 
     // ── Header ──────────────────────────────────────────────────
     let title_text = text("Equalizer")
@@ -283,7 +346,7 @@ pub(crate) fn eq_modal_overlay<'a>(
             28.0,
             EqModalMessage::SavePreset,
         ),
-        container(text("Save Preset").size(11.0).font(theme::ui_font())).padding(4),
+        container(text(save_title).size(11.0).font(theme::ui_font())).padding(4),
         tooltip::Position::Bottom,
     )
     .gap(4)
@@ -364,34 +427,8 @@ pub(crate) fn eq_modal_overlay<'a>(
     .text_size(14.0)
     .placeholder(if eq_enabled { "Custom" } else { "EQ Off" })
     .padding([4, 8])
-    .style(move |_theme, status| pick_list::Style {
-        text_color: theme::fg1(),
-        background: theme::bg0_hard().into(),
-        border: iced::Border {
-            color: match status {
-                pick_list::Status::Active | pick_list::Status::Disabled => theme::bg0_hard(),
-                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
-                    theme::accent_bright()
-                }
-            },
-            width: 1.0,
-            radius: theme::ui_border_radius(),
-        },
-        placeholder_color: theme::fg3(),
-        handle_color: theme::fg3(),
-    })
-    .menu_style(move |_theme| iced::widget::overlay::menu::Style {
-        text_color: theme::fg0(),
-        background: theme::bg1().into(),
-        border: iced::Border {
-            color: theme::accent_bright(),
-            width: 1.0,
-            radius: theme::ui_border_radius(),
-        },
-        selected_text_color: theme::on_accent_fill(),
-        selected_background: theme::accent_fill().into(),
-        shadow: iced::Shadow::default(),
-    });
+    .style(header_pick_style)
+    .menu_style(header_menu_style);
 
     // Delete button — only visible when a custom preset is currently active
     let delete_button: Option<Element<'_, EqModalMessage>> = current_choice
@@ -412,10 +449,66 @@ pub(crate) fn eq_modal_overlay<'a>(
             )
         });
 
+    // ── Profile Picker (Parametric) ─────────────────────────────
+    // The Graphic picker's twin over the saved band lists: a profile shows
+    // as selected while the equalizer is on and the band list is that
+    // profile's (at the stored precision).
+    let current_profile = if eq_enabled {
+        state.matching_profile(&data.bands)
+    } else {
+        None
+    };
+    let profile_names: Vec<String> = state
+        .profiles
+        .iter()
+        .map(|profile| profile_label(&profile.name))
+        .collect();
+    let profile_placeholder = if !eq_enabled {
+        "EQ Off"
+    } else if profile_names.is_empty() {
+        "No profiles"
+    } else {
+        "Custom"
+    };
+    let profile_picker = container(
+        pick_list(
+            current_profile,
+            (0..profile_names.len()).collect::<Vec<usize>>(),
+            move |index: &usize| profile_names.get(*index).cloned().unwrap_or_default(),
+        )
+        .on_select(EqModalMessage::ProfileSelected)
+        .font(theme::ui_font())
+        .text_size(14.0)
+        .placeholder(profile_placeholder)
+        .padding([4, 8])
+        .style(header_pick_style)
+        .menu_style(header_menu_style),
+    )
+    // A profile is often named after a long file name ("Sennheiser HD 650
+    // ParametricEQ"): the labels are cut short (`profile_label`) and the
+    // picker capped, so the header's buttons keep their place in the 640 px
+    // modal. A bounded width on the pick_list itself would lose its
+    // measured width (it measures its labels only under `Shrink`).
+    .width(Length::Shrink.max(PROFILE_PICKER_MAX_WIDTH));
+    let delete_profile_button: Option<Element<'_, EqModalMessage>> = current_profile.map(|idx| {
+        svg_btn(
+            "assets/icons/trash-2.svg",
+            theme::fg3(),
+            28.0,
+            EqModalMessage::DeleteProfile(idx),
+        )
+    });
+
     // Build header row — two modes: normal vs save
     let header: Element<'_, EqModalMessage> = if save_mode {
         // Save mode: name input + OK + Cancel
-        let name_input = iced::widget::text_input("Preset name...", save_name)
+        let name_placeholder = if parametric {
+            "Profile name..."
+        } else {
+            "Preset name..."
+        };
+        let name_input = iced::widget::text_input(name_placeholder, save_name)
+            .id(SAVE_NAME_INPUT_ID)
             .on_input(EqModalMessage::SavePresetNameChanged)
             .on_submit(EqModalMessage::SavePresetConfirm)
             .size(14.0)
@@ -439,7 +532,7 @@ pub(crate) fn eq_modal_overlay<'a>(
         let cancel_button = text_btn("Cancel", theme::fg4(), EqModalMessage::CancelSave);
 
         row![
-            text("Save Preset")
+            text(save_title)
                 .size(16.0)
                 .color(theme::accent_bright())
                 .font(theme::weighted_ui_font(iced::font::Weight::Bold)),
@@ -451,21 +544,23 @@ pub(crate) fn eq_modal_overlay<'a>(
         .align_y(Alignment::Center)
         .boxed()
     } else {
-        // Normal mode: title + preset picker + buttons. The picker and Save
-        // Preset are the Graphic layout's; the Parametric view drops them and
-        // keeps the rest where they stand.
+        // Normal mode: title + picker + buttons, the same row in both views:
+        // the Graphic view picks presets, the Parametric view profiles.
         let mut header_items: Vec<Element<'_, EqModalMessage>> =
             vec![title_text.boxed(), space::horizontal().boxed()];
-        if !parametric {
+        if parametric {
+            header_items.push(profile_picker.boxed());
+            if let Some(del_btn) = delete_profile_button {
+                header_items.push(del_btn);
+            }
+        } else {
             header_items.push(preset_picker.boxed());
             if let Some(del_btn) = delete_button {
                 header_items.push(del_btn);
             }
         }
         header_items.push(enable_button);
-        if !parametric {
-            header_items.push(save_button);
-        }
+        header_items.push(save_button);
         header_items.push(reset_button);
         header_items.push(close_button);
 
@@ -552,6 +647,58 @@ pub(crate) fn eq_modal_overlay<'a>(
     ))
 }
 
+/// Most characters a profile name shows in the picker before it is cut
+/// with an ellipsis: about 180 px at 14 px, clear of the picker's arrow.
+const PROFILE_LABEL_MAX_CHARS: usize = 24;
+
+/// A saved profile's name as the picker lists it.
+fn profile_label(name: &str) -> String {
+    if name.chars().count() <= PROFILE_LABEL_MAX_CHARS {
+        name.to_owned()
+    } else {
+        let mut label: String = name.chars().take(PROFILE_LABEL_MAX_CHARS - 1).collect();
+        label.push('…');
+        label
+    }
+}
+
+/// The header pickers' look (presets and profiles alike): flat `bg0_hard`,
+/// an `accent_bright` border under the cursor or while open.
+fn header_pick_style(_theme: &iced::Theme, status: pick_list::Status) -> pick_list::Style {
+    pick_list::Style {
+        text_color: theme::fg1(),
+        background: theme::bg0_hard().into(),
+        border: iced::Border {
+            color: match status {
+                pick_list::Status::Active | pick_list::Status::Disabled => theme::bg0_hard(),
+                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+                    theme::accent_bright()
+                }
+            },
+            width: 1.0,
+            radius: theme::ui_border_radius(),
+        },
+        placeholder_color: theme::fg3(),
+        handle_color: theme::fg3(),
+    }
+}
+
+/// The header pickers' open menu.
+fn header_menu_style(_theme: &iced::Theme) -> iced::widget::overlay::menu::Style {
+    iced::widget::overlay::menu::Style {
+        text_color: theme::fg0(),
+        background: theme::bg1().into(),
+        border: iced::Border {
+            color: theme::accent_bright(),
+            width: 1.0,
+            radius: theme::ui_border_radius(),
+        },
+        selected_text_color: theme::on_accent_fill(),
+        selected_background: theme::accent_fill().into(),
+        shadow: iced::Shadow::default(),
+    }
+}
+
 /// The `GRAPHIC | PARAMETRIC` switch: the Settings pill chips (accent fill on
 /// the layout that plays).
 fn mode_switch<'a>(mode: EqMode) -> Element<'a, EqModalMessage> {
@@ -597,7 +744,20 @@ fn gains_match(a: &[f32; 10], b: &[f32; 10]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{BAND_FREQS, gains_match};
+    use super::{BAND_FREQS, PROFILE_LABEL_MAX_CHARS, gains_match, profile_label};
+
+    #[test]
+    fn long_profile_names_are_cut_with_an_ellipsis() {
+        assert_eq!(profile_label("HD 650"), "HD 650");
+        let exact = "x".repeat(PROFILE_LABEL_MAX_CHARS);
+        assert_eq!(profile_label(&exact), exact);
+        let cut = profile_label("Sennheiser HD 650 ParametricEQ");
+        assert_eq!(cut, "Sennheiser HD 650 Param…");
+        assert_eq!(cut.chars().count(), PROFILE_LABEL_MAX_CHARS);
+        // Cut on characters, never inside one.
+        let wide = profile_label(&"ø".repeat(30));
+        assert_eq!(wide.chars().count(), PROFILE_LABEL_MAX_CHARS);
+    }
 
     /// Pins each visible band label to its DSP center frequency, encoding the
     /// intentional ISO-rounding divergences (label `32` for the 31 Hz band,

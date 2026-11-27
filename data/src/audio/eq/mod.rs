@@ -54,6 +54,13 @@ pub(crate) fn tidied(band: EqBand) -> EqBand {
     }
 }
 
+/// Whether two band lists are the same at the precision they are written
+/// with ([`tidied`]): a list read back from config.toml matches the one that
+/// was saved. The EQ modal shows a saved profile as selected by it.
+pub fn bands_match(a: &[EqBand], b: &[EqBand]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| tidied(*a) == tidied(*b))
+}
+
 /// Hold a band list to the band limits: every band clamped, the list cut at
 /// [`EQ_MAX_BANDS`]. The settings setter and the load-time `validate` share
 /// it (settings files are user input).
@@ -102,6 +109,25 @@ pub struct CustomEqPreset {
 }
 
 impl std::fmt::Display for CustomEqPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+/// A saved, named band list for the Parametric layout (headphones, speakers).
+/// Persisted with the settings as `eq_profiles` in config.toml, a key of its
+/// own: a released nokkvi requires `gains` on every `custom_eq_presets` entry
+/// and would refuse the whole `[settings]` section over a band list there.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EqProfile {
+    pub name: String,
+    /// At most [`EQ_MAX_BANDS`] bands (`clamp_bands` on save and load). A
+    /// hand-written profile without any reads as an empty list.
+    #[serde(default)]
+    pub bands: Vec<EqBand>,
+}
+
+impl std::fmt::Display for EqProfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -161,3 +187,34 @@ pub const BUILTIN_PRESETS: &[EqPreset] = &[
         gains: [-2.0, -1.0, 1.5, 0.0, -1.0, 1.0, 1.5, 1.0, 0.5, 0.0],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{EqBand, EqBandKind, bands_match};
+
+    #[test]
+    fn band_lists_match_at_the_written_precision() {
+        let saved = [
+            EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
+            EqBand::new(EqBandKind::Peak, 2263.0, -3.1, 0.85),
+        ];
+        // What a reload reads back: the same values off by rounding noise.
+        let reloaded = [
+            EqBand::new(EqBandKind::LowShelf, 105.000_4, 6.500_2, 0.700_1),
+            EqBand::new(EqBandKind::Peak, 2263.001, -3.100_3, 0.850_2),
+        ];
+        assert!(bands_match(&saved, &reloaded));
+        assert!(bands_match(&[], &[]));
+
+        let mut nudged = saved;
+        nudged[1].gain = -3.11;
+        assert!(!bands_match(&saved, &nudged), "a hundredth of a dB counts");
+        let mut off = saved;
+        off[0].enabled = false;
+        assert!(!bands_match(&saved, &off), "a switched-off band counts");
+        let mut kind = saved;
+        kind[0].kind = EqBandKind::HighShelf;
+        assert!(!bands_match(&saved, &kind));
+        assert!(!bands_match(&saved, &saved[..1]), "so does the length");
+    }
+}

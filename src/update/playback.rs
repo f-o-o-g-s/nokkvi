@@ -2908,8 +2908,12 @@ impl Nokkvi {
         self.playback.eq_state.set_mode(settings.eq_mode);
         self.playback.eq_state.set_enabled(settings.eq_enabled);
 
-        // Load custom EQ presets into UI cache
+        // Load custom EQ presets and the saved Parametric profiles into the
+        // modal, then re-key the band table's fields the new list changed
+        // (an open modal would otherwise redraw them in the fallback font).
         self.eq_modal.custom_presets = settings.custom_eq_presets.clone();
+        self.eq_modal.profiles = settings.eq_profiles.clone();
+        self.sync_eq_fields();
 
         debug!(
             "⚙️ [SETTINGS LOADED] crossfade_enabled={}, crossfade_duration_secs={}, volume_normalization={}, normalization_level={:?}",

@@ -144,6 +144,27 @@
       "enabled": true
     }
   ],
+  "eq_profiles": [
+    {
+      "name": "Sentinel Profile",
+      "bands": [
+        {
+          "kind": "high_shelf",
+          "freq": 9500.5,
+          "gain": -2.25,
+          "q": 0.85,
+          "enabled": true
+        },
+        {
+          "kind": "low_pass",
+          "freq": 18000.0,
+          "gain": 0.0,
+          "q": 0.707,
+          "enabled": true
+        }
+      ]
+    }
+  ],
   "verbose_config": "on",
   "library_page_size": "massive",
   "artwork_resolution": "original",

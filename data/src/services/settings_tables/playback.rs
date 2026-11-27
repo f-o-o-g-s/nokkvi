@@ -1073,6 +1073,14 @@ define_settings! {
             read: |src, out| out.eq_bands = src.eq_bands.clone(),
             write: |ps, ts| ts.eq_bands = ps.eq_bands.clone(),
         },
+        // Vec<EqProfile> (the Parametric view's saved profiles) — .clone()
+        // in all three directions; TOML emit rounds via tidy_eq_profiles.
+        EqProfiles {
+            key: "playback.eq_profiles",
+            toml_apply: |ts, p| p.eq_profiles = ts.eq_profiles.clone(),
+            read: |src, out| out.eq_profiles = src.eq_profiles.clone(),
+            write: |ps, ts| ts.eq_profiles = ps.eq_profiles.clone(),
+        },
     ]
 }
 

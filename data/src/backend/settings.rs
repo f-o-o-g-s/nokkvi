@@ -203,6 +203,12 @@ impl SettingsService {
         Vec<EqBand>
     );
     delegate_setter!(delete_custom_eq_preset, usize);
+    delegate_setter!(
+        /// Delete the saved Parametric profile at an index (nothing, past the
+        /// list)
+        delete_eq_profile,
+        usize
+    );
     delegate_setter!(set_crossfade_enabled, bool);
     delegate_setter!(
         /// Toggle Autoplay outside the Settings tab (player bar, hotkey, CLI)
@@ -245,6 +251,13 @@ impl SettingsService {
     ) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.save_custom_eq_preset(name, gains)
+    }
+
+    /// Save a Parametric band list as a named profile (clamped, at most
+    /// `EQ_MAX_BANDS` bands kept)
+    pub async fn save_eq_profile(&self, name: String, bands: Vec<EqBand>) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.save_eq_profile(name, bands)
     }
 
     /// Set default playlist for quick-add and persist
