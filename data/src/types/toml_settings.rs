@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
-    audio::eq::{CustomEqPreset, EQ_BAND_COUNT},
+    audio::eq::{CustomEqPreset, EQ_BAND_COUNT, EqBand, EqMode},
     types::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
@@ -286,6 +286,13 @@ pub struct TomlSettings {
     #[serde(serialize_with = "round_f32_array")]
     pub eq_gains: [f32; EQ_BAND_COUNT],
     pub custom_eq_presets: Vec<CustomEqPreset>,
+    /// The layout that plays: `eq_mode = "parametric"` or `"graphic"`.
+    pub eq_mode: EqMode,
+    /// The Parametric layout's band list, written as an array of tables
+    /// (`[[settings.eq_bands]]` with `kind`, `freq`, `gain`, `q`, `enabled`)
+    /// with tidy numbers; read with `EqBand`'s own serde.
+    #[serde(serialize_with = "tidy_eq_bands")]
+    pub eq_bands: Vec<EqBand>,
 
     // -- System tray --
     #[serde(default)]
@@ -344,6 +351,12 @@ fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_f64(rounded)
 }
 
+/// Write each band at the text precision (`tidied`: hundredths of a hertz and
+/// a decibel, thousandths of Q). Rounding a value read back from that text
+/// changes nothing, so a re-save never drifts.
+fn tidy_eq_bands<S: Serializer>(bands: &[EqBand], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(bands.iter().map(|band| crate::audio::eq::tidied(*band)))
+}
 /// Serialize an f32 array with each element rounded to 4 decimal places.
 fn round_f32_array<S: Serializer, const N: usize>(arr: &[f32; N], s: S) -> Result<S::Ok, S::Error> {
     use serde::ser::SerializeSeq;
@@ -467,6 +480,8 @@ impl Default for TomlSettings {
             eq_enabled: false,
             eq_gains: [0.0; EQ_BAND_COUNT],
             custom_eq_presets: Vec::new(),
+            eq_mode: EqMode::Graphic,
+            eq_bands: Vec::new(),
             show_tray_icon: false,
             close_to_tray: false,
             rating_reminder_enabled: false,
@@ -856,6 +871,100 @@ mod tests {
         assert!(
             !ts.light_mode,
             "None must preserve the struct default — no on-disk source means no override",
+        );
+    }
+
+    fn parametric_settings() -> TomlSettings {
+        use crate::audio::eq::EqBandKind;
+        TomlSettings {
+            eq_mode: EqMode::Parametric,
+            eq_bands: vec![
+                EqBand::new(
+                    EqBandKind::LowShelf,
+                    105.123_456,
+                    5.556,
+                    std::f64::consts::FRAC_1_SQRT_2,
+                ),
+                EqBand {
+                    enabled: false,
+                    ..EqBand::new(EqBandKind::Peak, 3158.0, -1.8, 3.67)
+                },
+                EqBand::new(EqBandKind::HighPass, 25.0, 0.0, 0.5),
+            ],
+            ..TomlSettings::default()
+        }
+    }
+
+    /// A Parametric layout in `[settings]`: text → struct → text keeps the
+    /// mode and every band, writes tidy numbers (hundredths of a hertz and a
+    /// decibel, thousandths of Q), and a second save of what was read is the
+    /// same text, so re-saving never drifts.
+    #[test]
+    fn parametric_eq_round_trips_through_toml_without_drift() {
+        let settings = parametric_settings();
+        let first = toml::to_string_pretty(&settings).expect("serialize");
+        for needle in [
+            "eq_mode = \"parametric\"",
+            "[[eq_bands]]",
+            "kind = \"low_shelf\"",
+            "freq = 105.12\n",
+            "gain = 5.56\n",
+            "q = 0.707\n",
+            "enabled = false\n",
+            "kind = \"high_pass\"",
+        ] {
+            assert!(first.contains(needle), "missing {needle:?} in:\n{first}");
+        }
+
+        let read: TomlSettings = toml::from_str(&first).expect("deserialize");
+        assert_eq!(read.eq_mode, EqMode::Parametric);
+        assert_eq!(read.eq_bands.len(), settings.eq_bands.len());
+        for (wrote, got) in settings.eq_bands.iter().zip(&read.eq_bands) {
+            assert_eq!(wrote.kind, got.kind);
+            assert_eq!(wrote.enabled, got.enabled);
+            assert!(
+                (wrote.freq - got.freq).abs() <= 0.005,
+                "{wrote:?} / {got:?}"
+            );
+            assert!(
+                (wrote.gain - got.gain).abs() <= 0.005,
+                "{wrote:?} / {got:?}"
+            );
+            assert!((wrote.q - got.q).abs() <= 0.0005, "{wrote:?} / {got:?}");
+        }
+
+        let second = toml::to_string_pretty(&read).expect("re-serialize");
+        assert_eq!(first, second, "re-saving what was read must not drift");
+    }
+
+    /// `[[settings.eq_bands]]` is hand-editable: whole numbers read as
+    /// numbers, and `gain` / `enabled` may be left out (a pass filter has no
+    /// gain; a band is on unless it says otherwise).
+    #[test]
+    fn hand_written_eq_bands_load() {
+        use crate::audio::eq::EqBandKind;
+        let text = r#"
+eq_mode = "parametric"
+
+[[eq_bands]]
+kind = "peak"
+freq = 1000
+gain = -3
+q = 2
+
+[[eq_bands]]
+kind = "high_pass"
+freq = 30
+q = 0.7
+"#;
+        let ts: TomlSettings = toml::from_str(text).expect("hand-written bands parse");
+        assert_eq!(ts.eq_mode, EqMode::Parametric);
+        assert_eq!(
+            ts.eq_bands,
+            vec![
+                EqBand::new(EqBandKind::Peak, 1000.0, -3.0, 2.0),
+                EqBand::new(EqBandKind::HighPass, 30.0, 0.0, 0.7),
+            ]
         );
     }
 }

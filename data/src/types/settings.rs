@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    audio::eq::EQ_BAND_COUNT,
+    audio::eq::{EQ_BAND_COUNT, EqBand, EqMode},
     types::{
         hotkey_config::HotkeyConfig,
         player_settings::{
@@ -376,6 +376,13 @@ crate::player_settings_schema! {
     /// User-created custom EQ presets.
     #[serde(default)]
     same custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset> = Vec::new(),
+    /// Which equalizer layout plays: the ten sliders (`graphic`) or the band
+    /// list (`parametric`). Both keep their values while the other plays.
+    #[serde(default)]
+    same eq_mode: EqMode = EqMode::Graphic,
+    /// The Parametric layout's band list, at most `EQ_MAX_BANDS` bands.
+    #[serde(default)]
+    same eq_bands: Vec<EqBand> = Vec::new(),
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool records load via the compat shim (`true` → On, `false` → Off).
     #[serde( default, deserialize_with = "deserialize_verbose_config_with_bool_compat" )]
@@ -590,6 +597,7 @@ impl PersistedPlayerSettings {
         for gain in &mut self.eq_gains {
             *gain = crate::audio::eq::clamp_gain(*gain);
         }
+        crate::audio::eq::clamp_bands(&mut self.eq_bands);
         // `stream_max_bitrate` needs nothing here: a hand-written number
         // snaps to a listed rate as it deserializes (`StreamMaxBitrate::at_most`).
     }

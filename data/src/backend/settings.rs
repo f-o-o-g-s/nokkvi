@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
+    audio::eq::{EqBand, EqMode},
     services::settings::{ColumnPersist, SettingsManager},
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
@@ -190,6 +191,17 @@ impl SettingsService {
     delegate_setter!(set_discord_app_id, String);
     delegate_setter!(set_eq_enabled, bool);
     delegate_setter!(set_eq_gains, [f32; 10]);
+    delegate_setter!(
+        /// Pick the equalizer layout that plays (Graphic / Parametric)
+        set_eq_mode,
+        EqMode
+    );
+    delegate_setter!(
+        /// Replace the Parametric layout's band list (clamped, at most
+        /// `EQ_MAX_BANDS` kept)
+        set_eq_bands,
+        Vec<EqBand>
+    );
     delegate_setter!(delete_custom_eq_preset, usize);
     delegate_setter!(set_crossfade_enabled, bool);
     delegate_setter!(

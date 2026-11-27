@@ -120,6 +120,30 @@
       ]
     }
   ],
+  "eq_mode": "parametric",
+  "eq_bands": [
+    {
+      "kind": "low_shelf",
+      "freq": 105.0,
+      "gain": 5.5,
+      "q": 0.7,
+      "enabled": true
+    },
+    {
+      "kind": "peak",
+      "freq": 3158.25,
+      "gain": -1.75,
+      "q": 3.675,
+      "enabled": false
+    },
+    {
+      "kind": "high_pass",
+      "freq": 25.0,
+      "gain": 0.0,
+      "q": 0.5,
+      "enabled": true
+    }
+  ],
   "verbose_config": "on",
   "library_page_size": "massive",
   "artwork_resolution": "original",

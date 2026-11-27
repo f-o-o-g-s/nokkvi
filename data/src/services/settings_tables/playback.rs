@@ -1058,6 +1058,21 @@ define_settings! {
             read: |src, out| out.custom_eq_presets = src.custom_eq_presets.clone(),
             write: |ps, ts| ts.custom_eq_presets = ps.custom_eq_presets.clone(),
         },
+        // The Parametric layout: which layout plays (Copy enum) and its band
+        // list (Vec<EqBand>, .clone() in all three directions; TOML emit
+        // rounds via tidy_eq_bands). Written from the EQ modal's own path.
+        EqModeResidual {
+            key: "playback.eq_mode",
+            toml_apply: |ts, p| p.eq_mode = ts.eq_mode,
+            read: |src, out| out.eq_mode = src.eq_mode,
+            write: |ps, ts| ts.eq_mode = ps.eq_mode,
+        },
+        EqBands {
+            key: "playback.eq_bands",
+            toml_apply: |ts, p| p.eq_bands = ts.eq_bands.clone(),
+            read: |src, out| out.eq_bands = src.eq_bands.clone(),
+            write: |ps, ts| ts.eq_bands = ps.eq_bands.clone(),
+        },
     ]
 }
 

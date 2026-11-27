@@ -174,6 +174,52 @@ fn handle_player_settings_loaded_replaces_settings_substruct() {
     assert_eq!(app.settings.artwork_resolution, ArtworkResolution::High);
 }
 
+/// A load hands the whole equalizer to `eq_state`, the one runtime copy the
+/// streams read: the master switch, the layout that plays, the ten sliders
+/// and the Parametric band list.
+#[test]
+fn settings_load_pushes_the_equalizer_layouts_into_eq_state() {
+    use nokkvi_data::audio::eq::{EqBand, EqBandKind, EqMode};
+
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = test_app();
+    let bands = vec![
+        EqBand::new(EqBandKind::LowShelf, 105.0, 5.5, 0.7),
+        EqBand {
+            enabled: false,
+            ..EqBand::new(EqBandKind::Peak, 3158.0, -1.8, 3.67)
+        },
+    ];
+    let gains = [4.0, 3.5, 1.5, 0.0, -1.5, -0.5, 0.5, 2.0, 3.5, 4.0];
+    let settings = LivePlayerSettings {
+        eq_enabled: true,
+        eq_mode: EqMode::Parametric,
+        eq_bands: bands.clone(),
+        eq_gains: gains,
+        ..LivePlayerSettings::default()
+    };
+
+    let _ = app.handle_player_settings_loaded(settings);
+
+    let eq = &app.playback.eq_state;
+    assert!(eq.is_enabled());
+    assert_eq!(eq.mode(), EqMode::Parametric);
+    assert_eq!(*eq.parametric_bands(), bands);
+    assert_eq!(eq.graphic_gains(), gains, "the sliders keep their values");
+    assert_eq!(eq.active_bands(), bands, "the band list is what plays");
+
+    // A later load back to the sliders (an older config) switches the layout
+    // and empties the band list.
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
+        eq_gains: gains,
+        ..LivePlayerSettings::default()
+    });
+    let eq = &app.playback.eq_state;
+    assert_eq!(eq.mode(), EqMode::Graphic);
+    assert!(eq.parametric_bands().is_empty());
+    assert!(!eq.is_enabled());
+}
+
 #[test]
 fn build_settings_view_data_reads_from_substruct() {
     let mut app = test_app();

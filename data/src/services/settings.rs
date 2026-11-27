@@ -1253,6 +1253,20 @@ impl SettingsManager {
         self.save()
     }
 
+    /// Which equalizer layout plays.
+    pub fn set_eq_mode(&mut self, mode: crate::audio::eq::EqMode) -> Result<()> {
+        self.settings.player.eq_mode = mode;
+        self.save()
+    }
+
+    /// Replace the Parametric layout's band list: every band clamped, the
+    /// list cut at `EQ_MAX_BANDS` (the same hold `validate` puts on a load).
+    pub fn set_eq_bands(&mut self, mut bands: Vec<crate::audio::eq::EqBand>) -> Result<()> {
+        crate::audio::eq::clamp_bands(&mut bands);
+        self.settings.player.eq_bands = bands;
+        self.save()
+    }
+
     pub fn save_custom_eq_preset(&mut self, name: String, gains: [f32; 10]) -> Result<()> {
         self.settings
             .player
@@ -1547,7 +1561,7 @@ mod sentinel_roundtrip_tests {
 
     use super::*;
     use crate::{
-        audio::eq::CustomEqPreset,
+        audio::eq::{CustomEqPreset, EqBand, EqBandKind, EqMode},
         types::{
             player_settings::{
                 ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CrossfadeCurve,
@@ -1567,6 +1581,18 @@ mod sentinel_roundtrip_tests {
         let path = tmp.path().join("test_settings.redb");
         let storage = StateStorage::new(path).expect("StateStorage::new");
         (SettingsManager::for_test_with_player(storage, player), tmp)
+    }
+
+    /// The sentinel's Parametric band list.
+    fn sentinel_eq_bands() -> Vec<EqBand> {
+        vec![
+            EqBand::new(EqBandKind::LowShelf, 105.0, 5.5, 0.7),
+            EqBand {
+                enabled: false,
+                ..EqBand::new(EqBandKind::Peak, 3158.25, -1.75, 3.675)
+            },
+            EqBand::new(EqBandKind::HighPass, 25.0, 0.0, 0.5),
+        ]
     }
 
     /// Exhaustive `PersistedPlayerSettings` with every persisted field set to
@@ -1694,6 +1720,11 @@ mod sentinel_roundtrip_tests {
                 name: "Sentinel Preset".to_string(),
                 gains: [0.0, -3.5, 8.5, -8.25, 5.875, 0.0, 1.5, 3.0, 4.0, 5.0],
             }],
+            eq_mode: EqMode::Parametric, // default Graphic
+            // default empty. Three kinds, one band switched off; every value
+            // sits on config.toml's written precision (`tidied`), so the TOML
+            // round trips compare exactly.
+            eq_bands: sentinel_eq_bands(),
 
             // Verbose / library
             verbose_config: crate::types::player_settings::VerboseConfig::On, // default Clean
@@ -2042,6 +2073,8 @@ mod sentinel_roundtrip_tests {
                 );
             }
         }
+        assert_eq!(ui_ps1.eq_mode, ui_ps2.eq_mode, "eq_mode");
+        assert_eq!(ui_ps1.eq_bands, ui_ps2.eq_bands, "eq_bands");
 
         // Library / verbose
         assert_eq!(ui_ps1.verbose_config, ui_ps2.verbose_config);
@@ -2620,6 +2653,8 @@ name = "sentinel preset"
             lhs.custom_eq_presets[0].name, rhs.custom_eq_presets[0].name,
             "custom_eq_presets[0].name"
         );
+        assert_eq!(lhs.eq_mode, rhs.eq_mode, "eq_mode");
+        assert_eq!(lhs.eq_bands, rhs.eq_bands, "eq_bands Vec<EqBand>");
         assert_eq!(
             lhs.view_columns.queue_show_genre, rhs.view_columns.queue_show_genre,
             "queue_show_genre (the silent-drop sentinel)"
@@ -2901,6 +2936,67 @@ name = "sentinel preset"
         assert_eq!(parsed.font_family, d.font_family);
         assert_eq!(parsed.eq_gains, d.eq_gains);
         assert!(!parsed.light_mode);
+        // A store from before the Parametric layout plays the sliders.
+        assert_eq!(parsed.eq_mode, EqMode::Graphic);
+        assert!(parsed.eq_bands.is_empty());
+    }
+
+    /// A `[settings]` table written before the Parametric layout (only the
+    /// graphic EQ keys) loads as the Graphic layout with no bands, its sliders
+    /// and presets intact.
+    #[test]
+    fn a_settings_table_with_only_the_old_eq_keys_loads_the_graphic_layout() {
+        let ts: TomlSettings = toml::from_str(
+            r#"
+eq_enabled = true
+eq_gains = [4.0, 3.5, 1.5, 0.0, -1.5, -0.5, 0.5, 2.0, 3.5, 4.0]
+
+[[custom_eq_presets]]
+name = "Mine"
+gains = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
+"#,
+        )
+        .expect("an old [settings] table parses");
+        let mut internal = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts, &mut internal);
+        assert_eq!(internal.eq_mode, EqMode::Graphic);
+        assert!(internal.eq_bands.is_empty());
+        assert!(internal.eq_enabled);
+        assert_eq!(
+            internal.eq_gains,
+            [4.0, 3.5, 1.5, 0.0, -1.5, -0.5, 0.5, 2.0, 3.5, 4.0]
+        );
+        assert_eq!(internal.custom_eq_presets.len(), 1);
+    }
+
+    /// The graphic EQ keys keep their names and shapes and are still written
+    /// next to the Parametric ones, so a released nokkvi (which knows only
+    /// those three) reads a `[settings]` this build wrote.
+    #[test]
+    fn the_graphic_eq_keys_are_still_written_beside_the_parametric_ones() {
+        let (sm, _tmp) =
+            make_test_manager_with_player(build_exhaustive_persisted_player_settings());
+        let ts = TomlSettings::from_player_settings_with_existing(&sm.get_player_settings(), None);
+        let table = toml::Value::try_from(&ts).expect("serialize [settings]");
+        let table = table.as_table().expect("table");
+        assert!(table.get("eq_enabled").is_some_and(toml::Value::is_bool));
+        assert_eq!(
+            table
+                .get("eq_gains")
+                .and_then(toml::Value::as_array)
+                .map(Vec::len),
+            Some(crate::audio::eq::EQ_BAND_COUNT)
+        );
+        assert!(
+            table
+                .get("custom_eq_presets")
+                .is_some_and(toml::Value::is_array)
+        );
+        assert_eq!(
+            table.get("eq_mode").and_then(toml::Value::as_str),
+            Some("parametric")
+        );
+        assert!(table.get("eq_bands").is_some_and(toml::Value::is_array));
     }
 
     /// A config.toml written while Lyrics was a bool loads as the mode it
@@ -2974,6 +3070,8 @@ name = "sentinel preset"
             "playback.eq_enabled",
             "playback.eq_gains",
             "playback.custom_eq_presets",
+            "playback.eq_mode",
+            "playback.eq_bands",
         ];
 
         let registry: Vec<&str> = TAB_INTERFACE_COPY_ONLY_KEYS
@@ -3005,11 +3103,11 @@ name = "sentinel preset"
         assert_eq!(
             registry.len(),
             RESIDUAL_KEYS.len(),
-            "copy-only registries must contain exactly the 8 residual keys"
+            "copy-only registries must contain exactly the residual keys listed here"
         );
     }
 
-    /// M2 behavioral sentinel (Part B): the 8 residual fields survive the
+    /// M2 behavioral sentinel (Part B): the residual fields survive the
     /// FULL orchestrator round-trip, asserted against the SOURCE sentinel
     /// values — NOT pipeline-vs-pipeline (a copy-step deleted from both dump
     /// passes would make ui_ps1 == ui_ps2 vacuously equal; anchoring on the
@@ -3080,6 +3178,11 @@ name = "sentinel preset"
                 );
             }
         }
+        // 9. eq_mode (Copy enum, Playback).
+        assert_eq!(out.eq_mode, src.eq_mode, "eq_mode residual");
+        // 10. eq_bands (Vec<EqBand>, Playback). The sentinel's values sit on
+        // the written precision, so they come back exactly.
+        assert_eq!(out.eq_bands, src.eq_bands, "eq_bands residual");
 
         // Bool residuals in BOTH polarities: the exhaustive builder flips
         // each bool from its Persisted default, but a flipped value can
@@ -3488,6 +3591,93 @@ mod load_clamp_tests {
         assert_eq!(p.eq_gains[1], EQ_GAIN_DB_MIN);
         assert!(p.eq_gains[2].is_finite(), "NaN must not survive the load");
         assert_eq!(p.eq_gains[3], 3.5, "in-range gains are left alone");
+    }
+
+    /// The Parametric band list is an array of tables, so the scalar sweep
+    /// skips it too: every hand-written band is clamped and the list is cut at
+    /// `EQ_MAX_BANDS`.
+    #[test]
+    fn eq_bands_are_clamped_on_load() {
+        use crate::audio::eq::{
+            EQ_BAND_GAIN_DB_MAX, EQ_DEFAULT_Q, EQ_FREQ_MAX, EQ_MAX_BANDS, EQ_Q_MIN, EqBand,
+            EqBandKind,
+        };
+
+        let fine = EqBand::new(EqBandKind::LowShelf, 105.0, 5.5, 0.7);
+        let wild = [
+            EqBand::new(EqBandKind::Peak, 1.0e9, f64::NAN, -5.0),
+            EqBand::new(EqBandKind::HighShelf, f64::NAN, 99.0, f64::NAN),
+        ];
+        let probe: Vec<toml::Value> = [fine]
+            .into_iter()
+            .chain(wild)
+            .chain(std::iter::repeat(fine))
+            .take(40)
+            .map(|band| toml::Value::try_from(band).expect("band serializes"))
+            .collect();
+        let mut table = default_settings_table();
+        table
+            .as_table_mut()
+            .expect("table")
+            .insert("eq_bands".to_string(), toml::Value::Array(probe));
+        let ts: TomlSettings = table.try_into().expect("eq_bands probe deserializes");
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts, &mut p);
+
+        assert_eq!(p.eq_bands.len(), EQ_MAX_BANDS, "40 bands cut at the limit");
+        assert_eq!(p.eq_bands[0], fine, "in-range bands are left alone");
+        assert_eq!(p.eq_bands[1].freq, EQ_FREQ_MAX);
+        assert_eq!(p.eq_bands[1].gain, 0.0, "NaN must not survive the load");
+        assert_eq!(p.eq_bands[1].q, EQ_Q_MIN);
+        assert!(p.eq_bands[2].freq.is_finite());
+        assert_eq!(p.eq_bands[2].gain, EQ_BAND_GAIN_DB_MAX);
+        assert_eq!(p.eq_bands[2].q, EQ_DEFAULT_Q);
+    }
+}
+
+/// The Parametric layout's setters: what the EQ modal writes is clamped and
+/// capped like a load, and lands in redb and the live settings.
+#[cfg(test)]
+mod eq_setter_tests {
+    use super::SettingsManager;
+    use crate::{
+        audio::eq::{EQ_MAX_BANDS, EqBand, EqBandKind, EqMode},
+        services::state_storage::StateStorage,
+        types::settings::UserSettings,
+    };
+
+    fn manager() -> (SettingsManager, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let storage = StateStorage::new(tmp.path().join("eq.redb")).expect("StateStorage::new");
+        (SettingsManager::for_test(storage), tmp)
+    }
+
+    fn stored(sm: &SettingsManager) -> UserSettings {
+        sm.storage
+            .load(crate::services::storage_keys::USER_SETTINGS)
+            .expect("load")
+            .expect("settings saved")
+    }
+
+    #[test]
+    fn set_eq_bands_clamps_caps_and_persists() {
+        let (mut sm, _tmp) = manager();
+        let wild = EqBand::new(EqBandKind::Peak, 1.0e9, f64::NAN, 0.0);
+        sm.set_eq_bands(vec![wild; EQ_MAX_BANDS + 8])
+            .expect("set_eq_bands");
+
+        let live = sm.get_player_settings();
+        assert_eq!(live.eq_bands.len(), EQ_MAX_BANDS);
+        assert!(live.eq_bands.iter().all(|band| *band == wild.clamped()));
+        assert_eq!(stored(&sm).player.eq_bands, live.eq_bands);
+    }
+
+    #[test]
+    fn set_eq_mode_persists() {
+        let (mut sm, _tmp) = manager();
+        sm.set_eq_mode(EqMode::Parametric).expect("set_eq_mode");
+        assert_eq!(sm.get_player_settings().eq_mode, EqMode::Parametric);
+        assert_eq!(stored(&sm).player.eq_mode, EqMode::Parametric);
     }
 }
 

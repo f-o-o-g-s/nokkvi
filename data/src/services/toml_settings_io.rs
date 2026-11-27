@@ -590,4 +590,86 @@ volume_normalization = true
         let roundtrip: TomlSettings = toml::from_str(&toml_str).unwrap();
         assert_eq!(roundtrip.verbose_config, VerboseConfig::On);
     }
+
+    fn parametric_settings() -> crate::types::toml_settings::TomlSettings {
+        use crate::audio::eq::{EqBand, EqBandKind, EqMode};
+        crate::types::toml_settings::TomlSettings {
+            eq_mode: EqMode::Parametric,
+            eq_bands: vec![
+                EqBand::new(EqBandKind::Peak, 1000.0, -3.25, 2.0),
+                EqBand {
+                    enabled: false,
+                    ..EqBand::new(EqBandKind::HighShelf, 10_000.0, 2.5, 0.707)
+                },
+            ],
+            ..crate::types::toml_settings::TomlSettings::default()
+        }
+    }
+
+    /// The sparse writer drops a default layout (Graphic, no bands) like any
+    /// other default key, and keeps a Parametric one whole.
+    #[test]
+    fn sparse_settings_prunes_a_default_eq_mode_and_empty_band_list() {
+        use crate::types::toml_settings::TomlSettings;
+        let v = super::settings_value(&TomlSettings::default(), false).expect("settings_value");
+        let tbl = v.as_table().expect("table");
+        assert!(!tbl.contains_key("eq_mode"), "default mode pruned");
+        assert!(!tbl.contains_key("eq_bands"), "empty band list pruned");
+
+        let s = parametric_settings();
+        let sparse = super::settings_value(&s, false).expect("sparse");
+        let tbl = sparse.as_table().expect("table");
+        assert!(tbl.contains_key("eq_mode"), "non-default mode kept");
+        assert_eq!(
+            tbl.get("eq_bands")
+                .and_then(toml::Value::as_array)
+                .map(Vec::len),
+            Some(2),
+            "every band kept"
+        );
+        assert!(
+            !tbl.contains_key("eq_gains"),
+            "the default sliders stay pruned"
+        );
+        let back: TomlSettings = sparse.try_into().expect("deserialize sparse");
+        assert_eq!(back.eq_mode, s.eq_mode);
+        assert_eq!(back.eq_bands, s.eq_bands);
+    }
+
+    /// The config.toml shape: `eq_mode = "parametric"` plus one
+    /// `[[settings.eq_bands]]` table per band, read back by the real section
+    /// loader, and written again unchanged.
+    #[test]
+    fn parametric_eq_writes_as_an_array_of_tables_under_settings() {
+        use toml_edit::DocumentMut;
+        let s = parametric_settings();
+        let mut doc = DocumentMut::new();
+        super::insert_section(
+            &mut doc,
+            "settings",
+            &super::settings_value(&s, false).expect("value"),
+        )
+        .expect("insert");
+        let text = doc.to_string();
+        assert!(text.contains("eq_mode = \"parametric\""), "{text}");
+        assert_eq!(text.matches("[[settings.eq_bands]]").count(), 2, "{text}");
+        assert!(text.contains("kind = \"peak\""), "{text}");
+        assert!(text.contains("kind = \"high_shelf\""), "{text}");
+
+        let parsed: toml::Value = toml::from_str(&text).expect("parse file");
+        let sections = super::sections_from_value(&parsed);
+        assert!(sections.malformed.is_empty());
+        let back = sections.settings.expect("[settings] read");
+        assert_eq!(back.eq_mode, s.eq_mode);
+        assert_eq!(back.eq_bands, s.eq_bands);
+
+        let mut again = DocumentMut::new();
+        super::insert_section(
+            &mut again,
+            "settings",
+            &super::settings_value(&back, false).expect("value"),
+        )
+        .expect("insert");
+        assert_eq!(again.to_string(), text, "a re-save is the same text");
+    }
 }

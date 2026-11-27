@@ -54,6 +54,16 @@ pub(crate) fn tidied(band: EqBand) -> EqBand {
     }
 }
 
+/// Hold a band list to the band limits: every band clamped, the list cut at
+/// [`EQ_MAX_BANDS`]. The settings setter and the load-time `validate` share
+/// it (settings files are user input).
+pub(crate) fn clamp_bands(bands: &mut Vec<EqBand>) {
+    bands.truncate(EQ_MAX_BANDS);
+    for band in bands.iter_mut() {
+        *band = band.clamped();
+    }
+}
+
 /// Number of graphic-EQ bands — single source of truth for every gain-array
 /// width on the audio and settings/types sides. The 10-element `EQ_BANDS_HZ`
 /// literal below compile-pins the value (its declared type uses this const).

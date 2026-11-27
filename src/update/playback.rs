@@ -2898,11 +2898,15 @@ impl Nokkvi {
                 Ok(())
             });
         }
-        // Apply EQ settings
+        // Apply EQ settings: both layouts' values first, then the layout that
+        // plays and the master switch, so a stream reading `eq_state` midway
+        // never runs a new mode on the old values.
+        self.playback.eq_state.set_all_gains(&settings.eq_gains);
+        self.playback
+            .eq_state
+            .set_parametric_bands(&settings.eq_bands);
+        self.playback.eq_state.set_mode(settings.eq_mode);
         self.playback.eq_state.set_enabled(settings.eq_enabled);
-        for (i, &gain) in settings.eq_gains.iter().enumerate() {
-            self.playback.eq_state.set_band_gain(i, gain);
-        }
 
         // Load custom EQ presets into UI cache
         self.eq_modal.custom_presets = settings.custom_eq_presets.clone();
