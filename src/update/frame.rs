@@ -161,16 +161,20 @@ impl Nokkvi {
         }
     }
 
-    /// A matched lyric sheet follows a running transport: its word-level
-    /// highlight reads the per-frame clock. Nothing else needs a view rebuild
-    /// per frame just because music plays: the seek bar, the marquee and the
-    /// now-playing glow pace their own redraws, the visualizer and the
-    /// Harbour scene have their own terms, and the Lines boat rides the
+    /// A matched lyric sheet follows a running transport where it is drawn
+    /// (the Queue cover or Theater Mode, with the layer shown): its word-level
+    /// highlight reads the per-frame clock. Off that surface nothing reads
+    /// it, and the clock is a function of the position tick's anchor, so it
+    /// is right again on the first frame back. Nothing else needs a view
+    /// rebuild per frame just because music plays: the seek bar, the marquee
+    /// and the now-playing glow pace their own redraws, the visualizer and
+    /// the Harbour scene have their own terms, and the Lines boat rides the
     /// visualizer's.
     fn lyric_clock_running(&self) -> bool {
         self.transport_running()
-            && self.settings.lyrics_mode.is_active()
             && self.lyrics.matched_song_id.is_some()
+            && self.lyrics_surface_visible()
+            && self.lyrics_layer_wanted()
     }
 
     /// The transport is playing (not paused, not stopped).
@@ -261,7 +265,9 @@ impl Nokkvi {
     /// paused with the visualizer off its one frame comes from here (the sheet
     /// held the old line through every paused seek until playback resumed).
     fn lyrics_in_motion(&self, now: Instant) -> bool {
-        if !self.settings.lyrics_mode.is_active() {
+        // Off the surface nothing draws the column: a glide or snap that
+        // happens there lands on the first frame back.
+        if !self.settings.lyrics_mode.is_active() || !self.lyrics_surface_visible() {
             return false;
         }
         if self.lyrics.outgoing.is_some() {

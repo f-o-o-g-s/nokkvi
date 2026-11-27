@@ -68,6 +68,63 @@ fn plain_playback_wants_no_frames_and_a_lyric_sheet_does() {
 }
 
 #[test]
+fn a_lyric_sheet_wants_frames_only_where_it_is_drawn() {
+    // `frames_wanted` compares the lyrics target with the published center,
+    // a process-global the lyrics motion tests write.
+    let _guard = super::lyrics::LYRICS_MOTION_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let mut app = idle_app();
+    app.playback.playing = true;
+    app.settings.lyrics_mode = LyricsMode::On;
+    app.lyrics.matched_song_id = Some("s1".into());
+    app.lyrics.doc.synced = true;
+    assert!(app.frames_wanted(), "on the Queue cover the clock runs");
+
+    app.current_view = View::Albums;
+    assert!(
+        !app.frames_wanted(),
+        "off the Queue and out of Theater Mode nothing draws the sheet"
+    );
+
+    app.playback.paused = true;
+    app.lyrics.anim_duration_ms = 500;
+    app.lyrics.anim_start = Some(Instant::now());
+    assert!(
+        !app.frames_wanted(),
+        "a glide off screen lands on the next frame back"
+    );
+    app.lyrics.scroll_to = 3.0;
+    assert!(
+        !app.frames_wanted(),
+        "a snap off screen waits for the surface"
+    );
+    app.current_view = View::Queue;
+    assert!(app.frames_wanted(), "back on the Queue it lands");
+}
+
+#[test]
+fn a_hidden_lyrics_layer_wants_no_clock_frames() {
+    let _guard = super::lyrics::LYRICS_MOTION_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let mut app = idle_app();
+    app.playback.playing = true;
+    // Auto with no verdict for the playing song: the layer stays hidden.
+    app.settings.lyrics_mode = LyricsMode::Auto;
+    app.scrobble.current_song_id = Some("s1".into());
+    app.lyrics.matched_song_id = Some("s1".into());
+    app.lyrics.doc.synced = true;
+    assert!(!app.lyrics_layer_wanted());
+    assert!(
+        !app.frames_wanted(),
+        "a sheet nobody sees needs no frame clock"
+    );
+}
+
+#[test]
 fn a_paused_visualizer_wants_frames_only_while_its_bars_settle() {
     let mut app = idle_app();
     app.playback.playing = true;
