@@ -4,11 +4,13 @@
 //! - `filter.rs`: RBJ biquad design, the response a UI draws, the automatic preamp.
 //! - `state.rs`: `EqState`, the lock-free transport from the UI to the audio thread.
 //! - `processor.rs`: `EqProcessor`, the per-stream filter chain.
+//! - `apo.rs`: Equalizer APO / AutoEq text (`ParametricEQ.txt`) in and out.
 //!
 //! The ten sliders are the Graphic layout of the band list (ten peaks at the
 //! ISO centres); the Parametric layout is a free list of up to
 //! [`EQ_MAX_BANDS`] bands.
 
+pub mod apo;
 mod band;
 mod filter;
 mod processor;
@@ -32,6 +34,24 @@ pub const EQ_GAIN_DB_MAX: f32 = 12.0;
 /// low bound so it never reaches the filter bank.
 pub(crate) fn clamp_gain(gain_db: f32) -> f32 {
     crate::utils::clamp::finite_clamp32(gain_db, EQ_GAIN_DB_MIN, EQ_GAIN_DB_MAX)
+}
+
+/// A band rounded to the precision it is written with as text (config.toml's
+/// `[[settings.eq_bands]]` and an exported `ParametricEQ.txt`): hundredths of
+/// a hertz and a decibel, thousandths of Q. One precision for both, so a
+/// saved band exported and imported again comes back the same, and rounding
+/// what was read back changes nothing (re-saving never drifts).
+pub(crate) fn tidied(band: EqBand) -> EqBand {
+    fn round(value: f64, scale: f64) -> f64 {
+        // `+ 0.0` turns a rounded -0.0 into 0.0, which prints without a sign.
+        (value * scale).round() / scale + 0.0
+    }
+    EqBand {
+        freq: round(band.freq, 100.0),
+        gain: round(band.gain, 100.0),
+        q: round(band.q, 1000.0),
+        ..band
+    }
 }
 
 /// Number of graphic-EQ bands — single source of truth for every gain-array
