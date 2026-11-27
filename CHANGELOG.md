@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Equalizer boosts no longer distort loud music.
 - An equalizer setting that fails to save now says Failed to save once, not twice.
 - Dragging an equalizer slider no longer shows an empty notification box above the player bar.
+- Text typed into a search box after clearing it with its X button keeps the app's font.
 
 ### Removed
 

@@ -32,7 +32,7 @@ use crate::{
         queue::QueueContextEntry,
         song_list_pane::{SongListPaneParams, SongListRowEvent, song_list_pane},
     },
-    widgets::{self, hover_overlay::HoverOverlay},
+    widgets::{self, hover_overlay::HoverOverlay, text_field::text_field},
 };
 
 /// Height of the editor's edit-bar header (eyebrow over the name + comment
@@ -335,42 +335,54 @@ impl PlaylistEditorState {
             .color(accent)
             .wrapping(iced::widget::text::Wrapping::None);
 
-        let name_input = iced::widget::text_input("Playlist name", data.name.clone())
-            .id(EDITOR_NAME_INPUT_ID)
-            .on_input(EditorMessage::NameChanged)
-            .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
-            .size(14)
-            .width(Length::Fill)
-            .padding([2, 4])
-            .style(|_theme, _status| iced::widget::text_input::Style {
-                background: iced::Background::Color(iced::Color::TRANSPARENT),
-                border: iced::Border {
-                    color: crate::theme::bg3(),
-                    width: 0.0,
-                    radius: crate::theme::ui_border_radius(),
-                },
-                placeholder: crate::theme::fg2(),
-                value: crate::theme::fg0(),
-                selection: crate::theme::selection_color(),
-            });
+        let name_input = text_field(
+            "Playlist name",
+            data.name.clone(),
+            crate::theme::weighted_ui_font(iced::font::Weight::Bold),
+            |input| {
+                input
+                    .id(EDITOR_NAME_INPUT_ID)
+                    .on_input(EditorMessage::NameChanged)
+                    .size(14)
+                    .width(Length::Fill)
+                    .padding([2, 4])
+                    .style(|_theme, _status| iced::widget::text_input::Style {
+                        background: iced::Background::Color(iced::Color::TRANSPARENT),
+                        border: iced::Border {
+                            color: crate::theme::bg3(),
+                            width: 0.0,
+                            radius: crate::theme::ui_border_radius(),
+                        },
+                        placeholder: crate::theme::fg2(),
+                        value: crate::theme::fg0(),
+                        selection: crate::theme::selection_color(),
+                    })
+            },
+        );
 
-        let comment_input = iced::widget::text_input("Comment", data.comment.clone())
-            .on_input(EditorMessage::CommentChanged)
-            .font(crate::theme::ui_font())
-            .size(11)
-            .width(Length::Fill)
-            .padding([2, 4])
-            .style(|_theme, _status| iced::widget::text_input::Style {
-                background: iced::Background::Color(iced::Color::TRANSPARENT),
-                border: iced::Border {
-                    color: crate::theme::bg3(),
-                    width: 0.0,
-                    radius: crate::theme::ui_border_radius(),
-                },
-                placeholder: crate::theme::fg2(),
-                value: crate::theme::fg2(),
-                selection: crate::theme::selection_color(),
-            });
+        let comment_input = text_field(
+            "Comment",
+            data.comment.clone(),
+            crate::theme::ui_font(),
+            |input| {
+                input
+                    .on_input(EditorMessage::CommentChanged)
+                    .size(11)
+                    .width(Length::Fill)
+                    .padding([2, 4])
+                    .style(|_theme, _status| iced::widget::text_input::Style {
+                        background: iced::Background::Color(iced::Color::TRANSPARENT),
+                        border: iced::Border {
+                            color: crate::theme::bg3(),
+                            width: 0.0,
+                            radius: crate::theme::ui_border_radius(),
+                        },
+                        placeholder: crate::theme::fg2(),
+                        value: crate::theme::fg2(),
+                        selection: crate::theme::selection_color(),
+                    })
+            },
+        );
 
         // Icon-only action button (mouse_area + HoverOverlay) — matches the
         // queue edit bar's `icon_btn` so the press scale fires.

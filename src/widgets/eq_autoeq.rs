@@ -26,7 +26,7 @@ use crate::{
     theme,
     widgets::{
         eq_modal::EqModalMessage, eq_parametric::action_button, format_count_with_commas,
-        hover_overlay::HoverOverlay,
+        hover_overlay::HoverOverlay, text_field::text_field,
     },
 };
 
@@ -206,15 +206,21 @@ pub(crate) fn autoeq_panel(panel: &AutoEqPanel) -> Element<'_, EqModalMessage> {
         theme::fg3(),
     );
 
-    let search = text_input("Search headphones…", &panel.query)
-        .id(SEARCH_INPUT_ID)
-        .on_input(|typed| EqModalMessage::AutoEq(AutoEqMessage::SearchChanged(typed)))
-        .on_submit(EqModalMessage::AutoEq(AutoEqMessage::Submit))
-        .size(14.0)
-        .padding([6, 10])
-        .width(Length::Fill)
-        .font(theme::ui_font())
-        .style(search_style);
+    let search = text_field(
+        "Search headphones…",
+        &panel.query,
+        theme::ui_font(),
+        |input| {
+            input
+                .id(SEARCH_INPUT_ID)
+                .on_input(|typed| EqModalMessage::AutoEq(AutoEqMessage::SearchChanged(typed)))
+                .on_submit(EqModalMessage::AutoEq(AutoEqMessage::Submit))
+                .size(14.0)
+                .padding([6, 10])
+                .width(Length::Fill)
+                .style(search_style)
+        },
+    );
 
     let count = label(count_text(panel), theme::fg3());
 

@@ -14,7 +14,7 @@ use iced::{
 };
 use nokkvi_data::utils::{dedupe::without_present, noun::Noun};
 
-use crate::theme;
+use crate::{theme, widgets::text_field::text_field};
 
 /// What action should happen when the dialog is submitted.
 #[derive(Debug, Clone)]
@@ -680,16 +680,22 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         }
     } else if !is_overwrite {
         // Text input — shown when creating a new playlist (not overwriting) or for non-playlist flows
-        let input = text_input(&state.placeholder, &state.value)
-            .id(DIALOG_INPUT_ID)
-            .on_input(TextInputDialogMessage::ValueChanged)
-            .on_submit(TextInputDialogMessage::Submit)
-            .secure(state.secure)
-            .padding(8)
-            .size(14)
-            .font(theme::ui_font())
-            .width(Length::Fill)
-            .style(dialog_input_style);
+        let input = text_field(
+            &state.placeholder,
+            &state.value,
+            theme::ui_font(),
+            |input| {
+                input
+                    .id(DIALOG_INPUT_ID)
+                    .on_input(TextInputDialogMessage::ValueChanged)
+                    .on_submit(TextInputDialogMessage::Submit)
+                    .secure(state.secure)
+                    .padding(8)
+                    .size(14)
+                    .width(Length::Fill)
+                    .style(dialog_input_style)
+            },
+        );
         // In any playlist-creation flow, prefix the input with a pencil glyph.
         // For save-as-playlist this aligns with the combo_box's leading icon;
         // for the standalone Create-New-Playlist flow it just signals intent.
@@ -721,15 +727,21 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         }
 
         if let Some(sec_val) = &state.secondary_value {
-            let input2 = text_input(&state.secondary_placeholder, sec_val)
-                .on_input(TextInputDialogMessage::SecondaryValueChanged)
-                .on_submit(TextInputDialogMessage::Submit)
-                .secure(state.secure)
-                .padding(8)
-                .size(14)
-                .font(theme::ui_font())
-                .width(Length::Fill)
-                .style(dialog_input_style);
+            let input2 = text_field(
+                &state.secondary_placeholder,
+                sec_val,
+                theme::ui_font(),
+                |input| {
+                    input
+                        .on_input(TextInputDialogMessage::SecondaryValueChanged)
+                        .on_submit(TextInputDialogMessage::Submit)
+                        .secure(state.secure)
+                        .padding(8)
+                        .size(14)
+                        .width(Length::Fill)
+                        .style(dialog_input_style)
+                },
+            );
             content = content.push(input2.boxed());
         }
     }

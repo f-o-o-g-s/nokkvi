@@ -4,7 +4,7 @@ use iced::{
     widget::{container, mouse_area, stack, text_input},
 };
 
-use crate::theme;
+use crate::{theme, widgets::text_field::text_field};
 
 /// Default text-input style used by the view-header search bar (flat
 /// redesign). Flat mode: 1 px `theme::border()` outline, `theme::bg0_soft()`
@@ -58,19 +58,25 @@ pub(crate) fn search_bar<'a, Message: Clone + 'a>(
 
     // We manually increase L and R padding to give the overlay icons breathing room.
     // Standard padding is 8px. 32px leaves 24px for the icon + spacing.
-    let input = text_input(placeholder, query)
-        .id(input_id)
-        .on_input(on_change)
-        .width(Length::Fill)
-        .padding(iced::Padding {
-            top: 8.0,
-            right: 32.0,
-            bottom: 8.0,
-            left: 32.0,
-        })
-        .size(12.0)
-        .font(theme::weighted_ui_font(Weight::Medium))
-        .style(style.unwrap_or(flat_search_input_style));
+    let input = text_field(
+        placeholder,
+        query,
+        theme::weighted_ui_font(Weight::Medium),
+        |input| {
+            input
+                .id(input_id)
+                .on_input(on_change)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    top: 8.0,
+                    right: 32.0,
+                    bottom: 8.0,
+                    left: 32.0,
+                })
+                .size(12.0)
+                .style(style.unwrap_or(flat_search_input_style))
+        },
+    );
 
     // Left magnifying glass icon
     let search_icon = crate::embedded_svg::svg_widget("assets/icons/search.svg")

@@ -31,6 +31,7 @@ use crate::{
         eq_modal::{EqModalMessage, EqModalViewData},
         hover_overlay::HoverOverlay,
         remount::remount,
+        text_field::text_field,
     },
 };
 
@@ -669,24 +670,27 @@ fn band_row<'a>(
 
     let value_field = |field: BandField, width: f32| {
         let enabled = field_enabled(band, field);
-        let input = text_input(
+        let input = text_field(
             if enabled { "" } else { "—" },
             field_text(i, band, field, edit),
-        )
-        .id(field_id(i, field))
-        .size(FIELD_TEXT)
-        .padding([3.0, FIELD_PAD_X])
-        .width(Length::Fixed(width))
-        .font(theme::ui_font())
-        .align_x(Alignment::End)
-        .style(field_style(band.enabled));
-        let input = if enabled {
-            input
-                .on_input(move |typed| EqModalMessage::FieldInput(i, field, typed))
-                .on_submit(EqModalMessage::FieldSubmit(i, field))
-        } else {
-            input
-        };
+            theme::ui_font(),
+            |input| {
+                let input = input
+                    .id(field_id(i, field))
+                    .size(FIELD_TEXT)
+                    .padding([3.0, FIELD_PAD_X])
+                    .width(Length::Fixed(width))
+                    .align_x(Alignment::End)
+                    .style(field_style(band.enabled));
+                if enabled {
+                    input
+                        .on_input(move |typed| EqModalMessage::FieldInput(i, field, typed))
+                        .on_submit(EqModalMessage::FieldSubmit(i, field))
+                } else {
+                    input
+                }
+            },
+        );
         // Keep this key: iced's text_input redraws a value replaced from
         // outside the field (`Editor::overwrite` sets default attributes, and
         // the font is re-applied only when the font changes) in the system

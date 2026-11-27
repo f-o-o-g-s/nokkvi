@@ -47,6 +47,7 @@ pub(crate) mod sizes;
 pub(crate) mod slider_drag;
 pub(crate) mod slot_list;
 pub(crate) mod slot_list_page;
+pub(crate) mod text_field;
 pub(crate) mod theater_corner;
 pub(crate) mod track_info_strip;
 pub(crate) mod visualizer;

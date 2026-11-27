@@ -17,7 +17,7 @@
 
 use iced::{
     Alignment, Element, Length, Widget as _,
-    widget::{Space, column, container, mouse_area, row, text, text_input},
+    widget::{Space, column, container, mouse_area, row, text},
 };
 use nokkvi_data::{
     types::{
@@ -36,7 +36,7 @@ use crate::{
         RulesPane, RulesSessionUi,
     },
     theme,
-    widgets::hover_overlay::HoverOverlay,
+    widgets::{hover_overlay::HoverOverlay, text_field::text_field},
 };
 
 /// Fixed band height for form rows (the settings detail-pane vocabulary).
@@ -212,30 +212,42 @@ impl PlaylistEditorState {
             // rather than a boxed, full-width field.
             cell_ring(FormCell::Name) && cursor_mode,
             edit_bar_field(
-                text_input("Playlist name", &self.edit.playlist_name)
-                    .id(RULES_NAME_INPUT_ID)
-                    .on_input(|s| Message::Editor(EditorMessage::NameChanged(s)))
-                    .font(theme::weighted_ui_font(iced::font::Weight::Bold))
-                    .size(14)
-                    .width(Length::Fill)
-                    .padding([2, 4])
-                    .style(bar_input_style)
-                    .boxed(),
+                text_field(
+                    "Playlist name",
+                    &self.edit.playlist_name,
+                    theme::weighted_ui_font(iced::font::Weight::Bold),
+                    |input| {
+                        input
+                            .id(RULES_NAME_INPUT_ID)
+                            .on_input(|s| Message::Editor(EditorMessage::NameChanged(s)))
+                            .size(14)
+                            .width(Length::Fill)
+                            .padding([2, 4])
+                            .style(bar_input_style)
+                    },
+                )
+                .boxed(),
                 cell_ring(FormCell::Name) && cursor_mode,
             ),
         );
         let comment_input = ring_wrap(
             cell_ring(FormCell::Comment) && cursor_mode,
             edit_bar_field(
-                text_input("Comment", &self.edit.playlist_comment)
-                    .id(RULES_COMMENT_INPUT_ID)
-                    .on_input(|s| Message::Editor(EditorMessage::CommentChanged(s)))
-                    .font(theme::ui_font())
-                    .size(11)
-                    .width(Length::Fill)
-                    .padding([2, 4])
-                    .style(bar_input_style)
-                    .boxed(),
+                text_field(
+                    "Comment",
+                    &self.edit.playlist_comment,
+                    theme::ui_font(),
+                    |input| {
+                        input
+                            .id(RULES_COMMENT_INPUT_ID)
+                            .on_input(|s| Message::Editor(EditorMessage::CommentChanged(s)))
+                            .size(11)
+                            .width(Length::Fill)
+                            .padding([2, 4])
+                            .style(bar_input_style)
+                    },
+                )
+                .boxed(),
                 cell_ring(FormCell::Comment) && cursor_mode,
             ),
         );
@@ -1220,15 +1232,21 @@ fn sub_picker_overlay<'a>(
     // The Nokkvi-side entries builder lives on the root impl; rebuild here
     // from the same inputs (pure).
     let entries = crate::update::rules_editor::rules_picker_entries(session, picker);
-    let search = text_input("Type to filter…", &picker.query)
-        .on_input(|s| Message::RulesEditor(RulesEditorMessage::SubPickerQuery(s)))
-        .on_submit(Message::RulesEditor(RulesEditorMessage::SubPickerCommit))
-        .id(RULES_SUB_PICKER_INPUT_ID)
-        .size(13)
-        .font(theme::ui_font())
-        .padding(8)
-        .width(Length::Fill)
-        .style(value_input_style);
+    let search = text_field(
+        "Type to filter…",
+        &picker.query,
+        theme::ui_font(),
+        |input| {
+            input
+                .on_input(|s| Message::RulesEditor(RulesEditorMessage::SubPickerQuery(s)))
+                .on_submit(Message::RulesEditor(RulesEditorMessage::SubPickerCommit))
+                .id(RULES_SUB_PICKER_INPUT_ID)
+                .size(13)
+                .padding(8)
+                .width(Length::Fill)
+                .style(value_input_style)
+        },
+    );
 
     let mut rows_col = column![].spacing(0);
     for (i, (value, label)) in entries.iter().enumerate().take(RULES_PICKER_RENDER_CAP) {
@@ -1811,16 +1829,17 @@ fn value_cell<'a>(
             .as_ref()
             .map(|e| e.buffer.clone())
             .unwrap_or_default();
-        text_input(placeholder, buffer)
-            .on_input(|s| Message::RulesEditor(RulesEditorMessage::EditingInput(s)))
-            .on_submit(Message::RulesEditor(RulesEditorMessage::CommitEditing))
-            .id(RULES_VALUE_INPUT_ID)
-            .size(12)
-            .font(theme::ui_font())
-            .padding([3, 6])
-            .width(Length::Fixed(110.0))
-            .style(value_input_style)
-            .boxed()
+        text_field(placeholder, buffer, theme::ui_font(), |input| {
+            input
+                .on_input(|s| Message::RulesEditor(RulesEditorMessage::EditingInput(s)))
+                .on_submit(Message::RulesEditor(RulesEditorMessage::CommitEditing))
+                .id(RULES_VALUE_INPUT_ID)
+                .size(12)
+                .padding([3, 6])
+                .width(Length::Fixed(110.0))
+                .style(value_input_style)
+        })
+        .boxed()
     } else {
         let shown = if committed.is_empty() {
             placeholder.to_owned()

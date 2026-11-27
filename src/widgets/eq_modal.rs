@@ -23,6 +23,7 @@ use crate::{
         eq_slider::eq_slider,
         hover_overlay::HoverOverlay,
         pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
+        text_field::text_field,
     },
 };
 
@@ -534,25 +535,26 @@ pub(crate) fn eq_modal_overlay<'a>(
         } else {
             "Preset name..."
         };
-        let name_input = iced::widget::text_input(name_placeholder, save_name)
-            .id(SAVE_NAME_INPUT_ID)
-            .on_input(EqModalMessage::SavePresetNameChanged)
-            .on_submit(EqModalMessage::SavePresetConfirm)
-            .size(14.0)
-            .padding([4, 8])
-            .width(Length::Fixed(200.0))
-            .font(theme::ui_font())
-            .style(move |_theme, _status| iced::widget::text_input::Style {
-                background: theme::bg0_hard().into(),
-                border: iced::Border {
-                    color: theme::accent_bright(),
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                placeholder: theme::fg4(),
-                value: theme::fg0(),
-                selection: theme::selection_color(),
-            });
+        let name_input = text_field(name_placeholder, save_name, theme::ui_font(), |input| {
+            input
+                .id(SAVE_NAME_INPUT_ID)
+                .on_input(EqModalMessage::SavePresetNameChanged)
+                .on_submit(EqModalMessage::SavePresetConfirm)
+                .size(14.0)
+                .padding([4, 8])
+                .width(Length::Fixed(200.0))
+                .style(move |_theme, _status| iced::widget::text_input::Style {
+                    background: theme::bg0_hard().into(),
+                    border: iced::Border {
+                        color: theme::accent_bright(),
+                        width: 1.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                    placeholder: theme::fg4(),
+                    value: theme::fg0(),
+                    selection: theme::selection_color(),
+                })
+        });
 
         let ok_button = text_btn("OK", theme::success(), EqModalMessage::SavePresetConfirm);
 

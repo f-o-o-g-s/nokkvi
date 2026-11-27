@@ -7,7 +7,7 @@
 use iced::{
     Alignment, Border, Color, Element, Length, Padding, Widget as _,
     font::{Font, Weight},
-    widget::{Row, Space, button, column, container, row, svg, text, text::Wrapping, text_input},
+    widget::{Row, Space, button, column, container, row, svg, text, text::Wrapping},
 };
 
 use super::{
@@ -19,6 +19,7 @@ use crate::{
     widgets::{
         pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
         slot_list,
+        text_field::text_field,
     },
 };
 
@@ -181,13 +182,19 @@ fn render_hex_editor<'a>(
     font_size: f32,
     swatch_size: f32,
 ) -> Element<'a, SettingsMessage> {
-    let input = text_input("e.g. #458588", hex_input.to_owned())
-        .id(super::HEX_EDITOR_INPUT_ID)
-        .on_input(SettingsMessage::HexInputChanged)
-        .on_submit(SettingsMessage::HexInputSubmit)
-        .size(font_size)
-        .width(Length::Fill)
-        .font(theme::weighted_ui_font(Weight::Medium));
+    let input = text_field(
+        "e.g. #458588",
+        hex_input.to_owned(),
+        theme::weighted_ui_font(Weight::Medium),
+        |input| {
+            input
+                .id(super::HEX_EDITOR_INPUT_ID)
+                .on_input(SettingsMessage::HexInputChanged)
+                .on_submit(SettingsMessage::HexInputSubmit)
+                .size(font_size)
+                .width(Length::Fill)
+        },
+    );
 
     let preview_color = crate::theme_config::parse_hex_color(hex_input).unwrap_or_else(theme::fg4);
     let preview_swatch = container(Space::new())

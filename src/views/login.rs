@@ -21,7 +21,7 @@ use iced::{
 
 use crate::{
     theme,
-    widgets::{focus_adjacent_text_input, focus_text_input},
+    widgets::{focus_adjacent_text_input, focus_text_input, text_field::text_field},
 };
 
 // ============================================================================
@@ -396,15 +396,16 @@ fn input_field<'a>(
             .size(13)
             .font(theme::ui_font())
             .color(theme::fg1()),
-        text_input(placeholder, value)
-            .id(id)
-            .on_input(on_input)
-            .on_submit(LoginMessage::LoginPressed)
-            .secure(secure)
-            .padding(12)
-            .width(Length::Fill)
-            .font(theme::ui_font())
-            .style(move |_theme, status| login_input_appearance(status, error)),
+        text_field(placeholder, value, theme::ui_font(), |input| {
+            input
+                .id(id)
+                .on_input(on_input)
+                .on_submit(LoginMessage::LoginPressed)
+                .secure(secure)
+                .padding(12)
+                .width(Length::Fill)
+                .style(move |_theme, status| login_input_appearance(status, error))
+        }),
     ]
     .spacing(5)
 }
