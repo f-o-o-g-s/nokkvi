@@ -64,6 +64,9 @@ pub struct EqModalState {
     /// The band list changed live (a drag, typing, a nudge) since it was last
     /// persisted; the next commit, drag release or Close writes it.
     pub bands_unsaved: bool,
+    /// A Graphic slider moved since the gains were last persisted; the drag's
+    /// release, the wheel step's commit or Close writes them.
+    pub gains_unsaved: bool,
     /// The preamp the status line shows, memoized per band list.
     pub(crate) preamp: PreampMemo,
     /// The band table's text fields: what each was last handed and the key
@@ -131,7 +134,11 @@ pub enum EqModalMessage {
     Close,
     Toggle,
     ToggleEnabled,
+    /// Graphic: slider `band` moved to this gain (dB). Plays at once; the
+    /// write waits for `GainCommitted`.
     GainChanged(usize, f32),
+    /// Graphic: a slider drag ended, or a wheel step landed: write the gains.
+    GainCommitted,
     PresetSelected(PresetChoice),
     /// Graphic: every slider to 0 dB. Parametric: every band's gain to 0 dB,
     /// the bands kept.
@@ -600,7 +607,11 @@ pub(crate) fn eq_modal_overlay<'a>(
     let mut sliders = Vec::new();
     for (i, &gain) in eq_gains.iter().enumerate() {
         // Slider
-        let slider = eq_slider(gain, move |val| EqModalMessage::GainChanged(i, val));
+        let slider = eq_slider(
+            gain,
+            move |val| EqModalMessage::GainChanged(i, val),
+            EqModalMessage::GainCommitted,
+        );
 
         // Value label (+X.X dB)
         let val_text = if gain > 0.0 {

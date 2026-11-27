@@ -10,7 +10,9 @@ use std::path::Path;
 
 use iced::Task;
 use nokkvi_data::{
-    audio::eq::{EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, EqProfile, apo, graphic_bands},
+    audio::eq::{
+        EQ_BAND_COUNT, EQ_MAX_BANDS, EqBand, EqBandKind, EqMode, EqProfile, apo, graphic_bands,
+    },
     utils::noun::Noun,
 };
 use tracing::{error, info};
@@ -138,6 +140,30 @@ impl Nokkvi {
         }
     }
 
+    /// Write the ten Graphic gains, silently. The task reads them when it
+    /// runs, as the band write does.
+    fn persist_eq_gains(&mut self) -> Task<Message> {
+        self.eq_modal.gains_unsaved = false;
+        let eq = self.playback.eq_state.clone();
+        self.persist_eq(
+            move |shell| async move {
+                let gains = std::array::from_fn(|band| eq.get_band_gain(band));
+                shell.settings().set_eq_gains(gains).await
+            },
+            None,
+            "save the equalizer gains",
+        )
+    }
+
+    /// Write the gains if a slider step left them unsaved.
+    fn flush_eq_gains(&mut self) -> Task<Message> {
+        if self.eq_modal.gains_unsaved {
+            self.persist_eq_gains()
+        } else {
+            Task::none()
+        }
+    }
+
     /// End the field being typed into. Its text already played whenever it
     /// parsed, so committing only lets the field show the stored value again
     /// (text that never parsed is dropped) and writes what is unsaved.
@@ -211,10 +237,13 @@ impl Nokkvi {
         commit
     }
 
-    /// The typed field and unsaved bands of the Parametric view, written out
-    /// as the modal closes.
+    /// Whatever a live edit left unsaved, written out as the modal closes:
+    /// the Parametric view's typed field and bands, and a Graphic slider step
+    /// whose release never arrived.
     fn finish_eq_edits(&mut self) -> Task<Message> {
-        self.commit_eq_field()
+        let bands = self.commit_eq_field();
+        let gains = self.flush_eq_gains();
+        Task::batch([bands, gains])
     }
 
     fn handle_eq_field_key(
@@ -550,31 +579,24 @@ impl Nokkvi {
                 // Persist to storage
                 let enabled = !current;
                 let msg = if enabled { "EQ Enabled" } else { "EQ Disabled" };
-                self.shell_fire_and_forget_task(
+                self.persist_eq(
                     move |shell| async move { shell.settings().set_eq_enabled(enabled).await },
-                    msg.to_string(),
+                    Some(msg.to_string()),
                     "save the equalizer state",
                 )
             }
             EqModalMessage::GainChanged(band, gain) => {
-                if band < 10 {
+                // Plays at once. The write waits for `GainCommitted` (the
+                // drag's release, a wheel step) or Close: written per step, a
+                // drag rewrote config.toml and the database, reloaded the
+                // queue and pushed an empty toast once per 0.1 dB.
+                if band < EQ_BAND_COUNT {
                     self.playback.eq_state.set_band_gain(band, gain);
-
-                    // Read back all gains for persistence
-                    let mut gains = [0.0; 10];
-                    for (i, g) in gains.iter_mut().enumerate() {
-                        *g = self.playback.eq_state.get_band_gain(i);
-                    }
-
-                    self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.settings().set_eq_gains(gains).await },
-                        String::new(), // Silent
-                        "save the equalizer gains",
-                    )
-                } else {
-                    Task::none()
+                    self.eq_modal.gains_unsaved = true;
                 }
+                Task::none()
             }
+            EqModalMessage::GainCommitted => self.flush_eq_gains(),
             EqModalMessage::PresetSelected(choice) => {
                 let (gains, preset_name) = match &choice {
                     crate::widgets::PresetChoice::Builtin(idx) => {
@@ -596,12 +618,13 @@ impl Nokkvi {
                 if let Some(gains) = gains {
                     self.playback.eq_state.set_all_gains(&gains);
                     self.playback.eq_state.set_enabled(true);
-                    self.shell_fire_and_forget_task(
+                    self.eq_modal.gains_unsaved = false;
+                    self.persist_eq(
                         move |shell| async move {
                             shell.settings().set_eq_gains(gains).await?;
                             shell.settings().set_eq_enabled(true).await
                         },
-                        format!("Preset: {preset_name}"),
+                        Some(format!("Preset: {preset_name}")),
                         "save the equalizer preset",
                     )
                 } else {
@@ -631,10 +654,11 @@ impl Nokkvi {
             EqModalMessage::ResetAll => {
                 let gains = nokkvi_data::audio::eq::PRESET_FLAT;
                 self.playback.eq_state.set_all_gains(&gains);
+                self.eq_modal.gains_unsaved = false;
 
-                self.shell_fire_and_forget_task(
+                self.persist_eq(
                     move |shell| async move { shell.settings().set_eq_gains(gains).await },
-                    "EQ Reset".to_string(),
+                    Some("EQ Reset".to_string()),
                     "save the equalizer reset",
                 )
             }
@@ -695,11 +719,11 @@ impl Nokkvi {
                 self.eq_modal.save_mode = false;
                 self.eq_modal.save_name.clear();
 
-                self.shell_fire_and_forget_task(
+                self.persist_eq(
                     move |shell| async move {
                         shell.settings().save_custom_eq_preset(name, gains).await
                     },
-                    "Preset saved".to_string(),
+                    Some("Preset saved".to_string()),
                     "save the custom preset",
                 )
             }
@@ -724,13 +748,14 @@ impl Nokkvi {
                 // Reset gains to flat after deleting the active preset
                 let gains = nokkvi_data::audio::eq::PRESET_FLAT;
                 self.playback.eq_state.set_all_gains(&gains);
+                self.eq_modal.gains_unsaved = false;
 
-                self.shell_fire_and_forget_task(
+                self.persist_eq(
                     move |shell| async move {
                         shell.settings().delete_custom_eq_preset(idx).await?;
                         shell.settings().set_eq_gains(gains).await
                     },
-                    format!("Deleted preset '{name}'"),
+                    Some(format!("Deleted preset '{name}'")),
                     "delete the custom preset",
                 )
             }

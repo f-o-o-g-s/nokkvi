@@ -566,6 +566,81 @@ fn logout_clears_the_editor_state() {
 }
 
 // ----------------------------------------------------------------------------
+// Graphic sliders: a drag plays every step and writes once
+// ----------------------------------------------------------------------------
+
+/// An app with the EQ modal open on the Graphic view.
+fn graphic_app() -> Nokkvi {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = crate::View::Queue;
+    let _ = app.handle_eq_modal(M::Open);
+    app
+}
+
+/// Every drag step used to write config.toml and the database, reload the
+/// queue and push an empty toast (nine of each for one short drag).
+#[test]
+fn a_slider_drag_plays_each_step_and_writes_at_its_end() {
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainChanged(2, 1.5));
+    let _ = app.handle_eq_modal(M::GainChanged(2, 4.0));
+    assert_eq!(app.playback.eq_state.get_band_gain(2), 4.0);
+    assert!(app.eq_modal.gains_unsaved, "a step waits for the release");
+    assert!(app.toast.toasts.is_empty(), "a step says nothing");
+
+    let _ = app.handle_eq_modal(M::GainCommitted);
+    assert!(!app.eq_modal.gains_unsaved, "the release writes the gains");
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn a_commit_with_nothing_moved_writes_nothing() {
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainCommitted);
+    assert!(!app.eq_modal.gains_unsaved);
+}
+
+/// A release the window never saw (the pointer let go over another app)
+/// leaves the last step unsaved: closing the modal writes it.
+#[test]
+fn close_writes_a_slider_drag_whose_release_was_missed() {
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainChanged(0, -3.0));
+    let _ = app.handle_eq_modal(M::Close);
+    assert!(!app.eq_modal.open);
+    assert!(!app.eq_modal.gains_unsaved);
+
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainChanged(0, -3.0));
+    let _ = app.handle_eq_modal(M::Toggle);
+    assert!(!app.eq_modal.open);
+    assert!(!app.eq_modal.gains_unsaved);
+}
+
+/// A preset and Reset write all ten gains themselves, so they also settle a
+/// drag left unsaved.
+#[test]
+fn a_preset_and_reset_leave_no_slider_step_unsaved() {
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainChanged(5, 2.0));
+    let _ = app.handle_eq_modal(M::PresetSelected(crate::widgets::PresetChoice::Builtin(0)));
+    assert!(!app.eq_modal.gains_unsaved);
+
+    let _ = app.handle_eq_modal(M::GainChanged(5, 2.0));
+    let _ = app.handle_eq_modal(M::ResetAll);
+    assert!(!app.eq_modal.gains_unsaved);
+    assert_eq!(app.playback.eq_state.get_band_gain(5), 0.0);
+}
+
+#[test]
+fn a_slider_past_the_tenth_band_changes_nothing() {
+    let mut app = graphic_app();
+    let _ = app.handle_eq_modal(M::GainChanged(10, 6.0));
+    assert!(!app.eq_modal.gains_unsaved);
+}
+
+// ----------------------------------------------------------------------------
 // Field remounts: a value set from outside a field gives it a fresh widget
 // state (iced's text_input redraws an outside value in the fallback font
 // while its state is kept; `FieldMounts`)

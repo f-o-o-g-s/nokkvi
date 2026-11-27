@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - Leaving the Harbour view with the visualizer off now stops the background audio analysis it had started.
 - Equalizer boosts no longer distort loud music.
 - An equalizer setting that fails to save now says Failed to save once, not twice.
+- Dragging an equalizer slider no longer shows an empty notification box above the player bar.
 
 ### Removed
 

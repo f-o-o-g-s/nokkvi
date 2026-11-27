@@ -32,19 +32,24 @@ pub(crate) struct State {
 
 pub(crate) struct EqSlider<'a, Message> {
     gain: f32,
+    /// Published for every visible step of a drag and for a wheel notch.
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
+    /// Published once the value has settled: at a drag's release and after a
+    /// wheel notch. The owner saves here, never per step.
+    on_commit: Message,
     width: f32,
     height: f32,
 }
 
 impl<'a, Message> EqSlider<'a, Message> {
-    pub(crate) fn new<F>(gain: f32, on_change: F) -> Self
+    pub(crate) fn new<F>(gain: f32, on_change: F, on_commit: Message) -> Self
     where
         F: 'a + Fn(f32) -> Message,
     {
         Self {
             gain: gain.clamp(MIN_DB, MAX_DB),
             on_change: Box::new(on_change),
+            on_commit,
             width: SLIDER_WIDTH,
             height: SLIDER_HEIGHT,
         }
@@ -122,6 +127,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
                 if let Some(trailing) = state.drag.release(0.01) {
                     shell.publish((self.on_change)(trailing));
                 }
+                shell.publish(self.on_commit.clone());
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
@@ -146,6 +152,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
                 let raw_gain = (self.gain + scroll_delta).clamp(MIN_DB, MAX_DB);
                 let new_gain = if raw_gain.abs() < 0.25 { 0.0 } else { raw_gain };
                 shell.publish((self.on_change)(new_gain));
+                shell.publish(self.on_commit.clone());
                 shell.capture_event();
                 shell.request_redraw();
             }
@@ -258,8 +265,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
 pub(crate) fn eq_slider<'a, Message: Clone + 'a>(
     gain: f32,
     on_change: impl Fn(f32) -> Message + 'a,
+    on_commit: Message,
 ) -> EqSlider<'a, Message> {
-    EqSlider::new(gain, on_change)
+    EqSlider::new(gain, on_change, on_commit)
 }
 
 #[cfg(test)]
@@ -273,7 +281,7 @@ mod tests {
     /// the cursor kept going.
     #[test]
     fn slider_range_matches_the_engine_gain_range() {
-        assert_eq!(EqSlider::new(99.0, |g| g).gain, EQ_GAIN_DB_MAX);
-        assert_eq!(EqSlider::new(-99.0, |g| g).gain, EQ_GAIN_DB_MIN);
+        assert_eq!(EqSlider::new(99.0, |g| g, 0.0).gain, EQ_GAIN_DB_MAX);
+        assert_eq!(EqSlider::new(-99.0, |g| g, 0.0).gain, EQ_GAIN_DB_MIN);
     }
 }
