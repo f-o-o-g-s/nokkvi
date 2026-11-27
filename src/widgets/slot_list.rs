@@ -2652,6 +2652,8 @@ mod tests {
         assert!((0.0..1.0).contains(&phase));
     }
 
+    use iced::widget::Space;
+
     use super::*;
 
     /// Stars and hearts follow the cover accent, and on a loud-fill row

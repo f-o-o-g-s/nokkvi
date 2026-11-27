@@ -41,7 +41,15 @@ fn an_idle_app_wants_no_frames() {
 
 #[test]
 fn plain_playback_wants_no_frames_and_a_lyric_sheet_does() {
+    // `frames_wanted` compares the lyrics target with the published center,
+    // a process-global the lyrics motion tests write: publish the sheet's
+    // resting line so only the clock term is under test.
+    let _guard = super::lyrics::LYRICS_MOTION_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
     let mut app = idle_app();
+    app.lyrics.doc.synced = true;
     app.playback.playing = true;
     assert!(
         !app.frames_wanted(),
