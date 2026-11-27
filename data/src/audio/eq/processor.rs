@@ -39,8 +39,8 @@ use super::{
 const MAX_CHANNELS: usize = 8;
 /// Frames between two looks at the shared state (~11 ms at 48 kHz).
 const CHECK_INTERVAL_FRAMES: u32 = 512;
-/// Length of the crossfade from the old chain to the new one, in seconds.
-/// Switching coefficients under a running filter clicks.
+/// Length of the crossfade from the old chain to the new one, in seconds
+/// (smoothstep-shaped). Switching coefficients under a running filter clicks.
 const FADE_SECS: f64 = 0.02;
 /// Filter state under this is zeroed: decaying state turns denormal in long
 /// silence, which is slow on x86.
@@ -247,7 +247,10 @@ impl EqProcessor {
     fn begin_frame(&mut self) {
         if self.fade_left > 0 {
             self.fade_left -= 1;
-            self.mix = 1.0 - f64::from(self.fade_left) / f64::from(self.fade_frames);
+            // Smoothstep: the weight leaves 0 and arrives at 1 with no slope,
+            // so the fade's ends put no kink into the waveform.
+            let t = 1.0 - f64::from(self.fade_left) / f64::from(self.fade_frames);
+            self.mix = t * t * (3.0 - 2.0 * t);
             return;
         }
         self.mix = 1.0;
@@ -497,6 +500,12 @@ mod tests {
         // A hard switch between these curves steps by up to ~0.7.
         let step = largest_step(&out);
         assert!(step < 0.03, "largest step {step}");
+        // No kink either: the curvature stays near a 100 Hz tone's own
+        // (1.7e-4 at full scale). A linear fade's ends reach ~2e-3.
+        let kink = out
+            .windows(3)
+            .fold(0.0f32, |m, w| m.max((w[2] - 2.0 * w[1] + w[0]).abs()));
+        assert!(kink < 6e-4, "largest second difference {kink}");
         assert!(peak_of(&out) <= 1.0 + 1e-3);
     }
 
