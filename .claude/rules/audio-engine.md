@@ -116,7 +116,8 @@ The renderer resolves a `NormalizationConfig` per track from `volume_normalizati
 
 - 10-band graphic EQ: `EqState.gains: Arc<[AtomicU32; EQ_BAND_COUNT]>` (`eq.rs::EQ_BAND_COUNT = 10` is the single source of truth for every gain-array width, including the `eq_gains` fields on the settings/types side), `EqProcessor` per-stream biquad bank
 - Bands: 31 Hz–16 kHz (ISO standard center frequencies), ±12 dB clamp (`EQ_GAIN_DB_MIN` / `EQ_GAIN_DB_MAX`, shared with the EQ sliders and the settings load-time `validate`; NaN-safe via `clamp_gain`).
-- Headroom: −1 dB applied only when the max boost > 0 dB.
+- Automatic preamp: minus the response peak (`eq/filter.rs::preamp_db` over `Response::peak_db`: a 1/48-octave grid from 10 Hz to 0.49 × the rate plus each band's centre), so the curve never boosts and a full-scale tone stays unclipped; eased over ~5 ms. Neighbouring boosts stack (Hip-Hop peaks +6.2 dB), which the old fixed −1 dB missed. `process_sample` never clamps: it sits before volume, ReplayGain and the chain's limiter, and a clamp there flattens overs the limiter never sees.
+- `eq/band.rs` (`EqBand`, `EqBandKind`, limits, `graphic_bands`) and `eq/filter.rs` (RBJ cookbook `Coefficients::design`, `Response`) are ported from Pawse (MIT; the notice stays in both files).
 
 ## Crossfade
 

@@ -13,12 +13,14 @@ All notable changes to this project will be documented in this file.
 - While paused, long now-playing titles rest at their start instead of scrolling; hovering one scrolls it.
 - Playing music now uses a fraction of the CPU it did, since the seek bar and now-playing glow no longer redraw the whole window every frame.
 - The Harbour scene animates at 60 fps on high-refresh displays, which cuts its CPU use while music plays.
+- A boosting equalizer curve now lowers the overall level by its largest boost, so presets like Bass Boost play about 5 dB quieter.
 
 ### Fixed
 
 - A count of one reads singular, like 1 song, 1 album or 1 play, instead of 1 songs.
 - Harbour's Most Played genres read 1 of your top tracks instead of 1 of your top track.
 - Leaving the Harbour view with the visualizer off now stops the background audio analysis it had started.
+- Equalizer boosts no longer distort loud music.
 
 ### Removed
 

@@ -529,7 +529,7 @@ impl Iterator for StreamingSource {
         }
 
         // Capture the raw sample for the visualizer BEFORE the EQ stage. The
-        // spectrum should reflect the SOURCE track, not the user's EQ/headroom
+        // spectrum should reflect the SOURCE track, not the user's EQ/preamp
         // post-processing chain (matches the volume-independent invariant).
         let viz_sample = sample;
 
@@ -982,14 +982,14 @@ mod tests {
 
     /// N15 / N18: the visualizer tap must read the RAW (pre-EQ, pre-volume)
     /// sample. With EQ enabled and a band boosted, the post-EQ `sample` differs
-    /// from raw by at least the -1 dB headroom factor (0.891254) plus band
-    /// shaping; the tap must still report `raw * 32767`, not the EQ'd value.
+    /// from raw by the automatic preamp plus band shaping; the tap must still
+    /// report `raw * 32767`, not the EQ'd value.
     #[test]
     fn visualizer_tap_is_pre_eq() {
         const RAW: f32 = 0.5;
         let eq = super::super::eq::EqState::new();
         eq.set_enabled(true);
-        eq.set_band_gain(5, 12.0); // boost 1 kHz band — forces headroom + shaping
+        eq.set_band_gain(5, 12.0); // boost 1 kHz band — forces preamp + shaping
 
         // 3 full viz batches' worth of samples so the callback fires.
         let (mut source, observed) = make_constant_source(RAW, 2048 * 3, Some(eq));

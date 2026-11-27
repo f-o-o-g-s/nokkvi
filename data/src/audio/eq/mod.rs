@@ -3,7 +3,16 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
-use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type as FilterType};
+use biquad::{Biquad, DirectForm1};
+
+mod band;
+mod filter;
+
+pub use band::{
+    EQ_BAND_GAIN_DB_MAX, EQ_DEFAULT_Q, EQ_FREQ_MAX, EQ_FREQ_MIN, EQ_GRAPHIC_Q, EQ_MAX_BANDS,
+    EQ_Q_MAX, EQ_Q_MIN, EqBand, EqBandKind, graphic_bands,
+};
+pub use filter::{Coefficients, Response, preamp_db};
 
 /// Per-band gain bounds, in dB. Single source shared by the engine clamps
 /// (`set_band_gain` / `set_all_gains`), the EQ modal sliders' travel, and the
@@ -88,14 +97,12 @@ pub const EQ_BANDS_HZ: [f32; EQ_BAND_COUNT] = [
     31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 
-/// Q factor — 1.41 gives approximately 1-octave bandwidth per band.
-const EQ_Q: f32 = 1.41;
-
 /// Check for gain changes every 1024 samples (~23ms at 44.1kHz stereo).
 const EQ_CHECK_INTERVAL: usize = 1024;
 
-/// -1dB headroom: 10^(-1/20) ≈ 0.891. Applied only when max boost > 0dB.
-const HEADROOM_LINEAR: f32 = 0.891_254;
+/// Time constant of the preamp's glide to a new value, in seconds: a gain
+/// that stepped under a running waveform would click.
+const PREAMP_GLIDE_SECS: f32 = 0.005;
 
 /// Flat EQ preset (all bands at 0 dB).
 pub const PRESET_FLAT: [f32; EQ_BAND_COUNT] = [0.0; EQ_BAND_COUNT];
@@ -112,7 +119,8 @@ impl std::fmt::Display for EqPreset {
     }
 }
 
-/// User-created EQ preset with owned name. Persisted in redb.
+/// User-created EQ preset with owned name. Persisted with the settings
+/// (`custom_eq_presets` in config.toml).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CustomEqPreset {
     pub name: String,
@@ -196,43 +204,35 @@ pub struct EqProcessor {
     channel_idx: usize,
     /// Samples since last coefficient check.
     sample_counter: usize,
-    /// Whether any band has positive gain (headroom needed).
-    needs_headroom: bool,
+    /// The automatic preamp for the current gains, linear: minus the
+    /// response peak, so no frequency ends above full scale.
+    preamp_target: f32,
+    /// `preamp_target` eased per frame, so a gain change never steps.
+    preamp: f32,
+    /// Per-frame easing coefficient of `preamp`.
+    preamp_glide: f32,
 }
 
 impl EqProcessor {
     /// Create a new processor with flat (0dB) coefficients.
     pub fn new(state: EqState, sample_rate: u32, channels: u16) -> Self {
-        let filters = std::array::from_fn(|band| {
-            let freq = EQ_BANDS_HZ[band].clamp(20.0, (sample_rate as f32 / 2.0) - 100.0);
-            std::array::from_fn(|_| {
-                let coeffs = Coefficients::<f32>::from_params(
-                    FilterType::PeakingEQ(0.0),
-                    (sample_rate as f32).hz(),
-                    freq.hz(),
-                    EQ_Q,
-                )
-                .unwrap_or_else(|_| {
-                    Coefficients::<f32>::from_params(
-                        FilterType::PeakingEQ(0.0),
-                        (sample_rate as f32).hz(),
-                        1000.0f32.hz(),
-                        EQ_Q,
-                    )
-                    .expect("fallback coefficient generation must succeed")
-                });
-                DirectForm1::<f32>::new(coeffs)
-            })
-        });
+        let flat = to_biquad(&Coefficients::IDENTITY);
+        let glide_frames = PREAMP_GLIDE_SECS * sample_rate as f32;
         Self {
-            filters,
+            filters: [[DirectForm1::<f32>::new(flat); 2]; EQ_BAND_COUNT],
             state,
             sample_rate,
             channels,
             current_gains: [0.0; EQ_BAND_COUNT],
             channel_idx: 0,
             sample_counter: 0,
-            needs_headroom: false,
+            preamp_target: 1.0,
+            preamp: 1.0,
+            preamp_glide: if glide_frames > 0.0 {
+                1.0 - (-1.0 / glide_frames).exp()
+            } else {
+                1.0
+            },
         }
     }
 
@@ -253,6 +253,10 @@ impl EqProcessor {
 
         // Channel routing: stereo uses ch 0/1, mono uses ch 0, >2ch clamps to 1
         let ch = self.channel_idx.min(1);
+        if self.channel_idx == 0 {
+            // Once per frame, so every channel of a frame takes one preamp.
+            self.preamp += self.preamp_glide * (self.preamp_target - self.preamp);
+        }
         self.channel_idx = (self.channel_idx + 1) % self.channels as usize;
 
         // Cascade through all 10 bands
@@ -261,36 +265,50 @@ impl EqProcessor {
             s = band_filters[ch].run(s);
         }
 
-        // Apply headroom if any band is boosting
-        if self.needs_headroom {
-            s *= HEADROOM_LINEAR;
-        }
-
-        s.clamp(-1.0, 1.0)
+        // No clamp here: this stage sits before volume, ReplayGain and the
+        // chain's limiter, and a clamp would flatten an over before the
+        // limiter could see it. The preamp keeps the curve at or under 0 dB.
+        s * self.preamp
     }
 
-    /// Dirty-check gains and recalculate coefficients for changed bands.
+    /// Dirty-check gains, redesign the filters of changed bands and retarget
+    /// the preamp.
     fn refresh_if_needed(&mut self) {
-        let mut max_gain = 0.0f32;
-        for (band, &freq) in EQ_BANDS_HZ.iter().enumerate() {
+        let mut changed = false;
+        for band in 0..EQ_BAND_COUNT {
             let gain_db = f32::from_bits(self.state.gains[band].load(Ordering::Relaxed));
-            max_gain = max_gain.max(gain_db);
             if (gain_db - self.current_gains[band]).abs() > 0.01 {
                 self.current_gains[band] = gain_db;
-                let freq = freq.clamp(20.0, (self.sample_rate as f32 / 2.0) - 100.0);
-                if let Ok(coeffs) = Coefficients::<f32>::from_params(
-                    FilterType::PeakingEQ(gain_db),
-                    (self.sample_rate as f32).hz(),
-                    freq.hz(),
-                    EQ_Q,
-                ) {
-                    for filter in &mut self.filters[band] {
-                        filter.update_coefficients(coeffs);
-                    }
-                }
+                changed = true;
             }
         }
-        self.needs_headroom = max_gain > 0.0;
+        if !changed {
+            return;
+        }
+        let rate = f64::from(self.sample_rate);
+        let bands = graphic_bands(&self.current_gains);
+        for (band, filters) in bands.iter().zip(&mut self.filters) {
+            let coeffs = to_biquad(&Coefficients::design(band, rate));
+            for filter in filters {
+                filter.update_coefficients(coeffs);
+            }
+        }
+        self.preamp_target = 10f64.powf(preamp_db(&bands, rate) / 20.0) as f32;
+        if self.sample_counter == 0 {
+            // The stream's first samples: nothing is playing to glide under.
+            self.preamp = self.preamp_target;
+        }
+    }
+}
+
+/// The designed coefficients in the `biquad` crate's shape.
+fn to_biquad(c: &Coefficients) -> biquad::Coefficients<f32> {
+    biquad::Coefficients {
+        a1: c.a1 as f32,
+        a2: c.a2 as f32,
+        b0: c.b0 as f32,
+        b1: c.b1 as f32,
+        b2: c.b2 as f32,
     }
 }
 
@@ -344,5 +362,65 @@ mod tests {
         let state = EqState::new();
         let mut eq = EqProcessor::new(state, 32000, 2); // 16KHz band requires clamping
         eq.process_sample(0.0);
+    }
+
+    /// Run a full-scale stereo sine through an enabled processor set to
+    /// `gains` and return the left channel after the filters have settled.
+    fn settled_sine(gains: &[f32; EQ_BAND_COUNT], freq_hz: f32, rate: u32) -> Vec<f32> {
+        let state = EqState::new();
+        state.set_all_gains(gains);
+        state.set_enabled(true);
+        let mut eq = EqProcessor::new(state, rate, 2);
+        let frames = rate as usize * 2;
+        let mut left = Vec::with_capacity(frames);
+        for n in 0..frames {
+            let x = (std::f32::consts::TAU * freq_hz * n as f32 / rate as f32).sin();
+            left.push(eq.process_sample(x));
+            eq.process_sample(x);
+        }
+        left.split_off(frames / 4)
+    }
+
+    /// Longest run of bit-identical consecutive samples above half scale: a
+    /// sine never repeats a value three times, a clipped one sits on the rail.
+    fn longest_flat_run(samples: &[f32]) -> usize {
+        let mut longest = 1;
+        let mut run = 1;
+        for pair in samples.windows(2) {
+            if pair[0] == pair[1] && pair[0].abs() > 0.5 {
+                run += 1;
+                longest = longest.max(run);
+            } else {
+                run = 1;
+            }
+        }
+        longest
+    }
+
+    /// A boosting preset must leave a full-scale bass tone unclipped: the
+    /// preamp takes the response peak off, so the loudest tone comes out at
+    /// full scale at most, and nothing is flattened against a clamp.
+    #[test]
+    fn boosting_presets_do_not_clip_a_full_scale_bass_sine() {
+        for name in ["Hip-Hop", "Bass Boost"] {
+            let preset = BUILTIN_PRESETS
+                .iter()
+                .find(|p| p.name == name)
+                .expect("built-in preset");
+            for rate in [44_100, 48_000, 96_000] {
+                let out = settled_sine(&preset.gains, 50.0, rate);
+                let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                assert!(
+                    peak <= 1.0,
+                    "{name} at {rate} Hz: a full-scale 50 Hz sine peaks at {peak}"
+                );
+                assert!(peak > 0.5, "{name} at {rate} Hz: the tone is still there");
+                let flat = longest_flat_run(&out);
+                assert!(
+                    flat < 3,
+                    "{name} at {rate} Hz: {flat} identical samples in a row (flat-topped)"
+                );
+            }
+        }
     }
 }
