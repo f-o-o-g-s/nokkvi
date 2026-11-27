@@ -18,8 +18,9 @@ All notable changes to this project will be documented in this file.
 
 - A paused or stopped visualizer now holds still once its bars have fallen, so an idle nokkvi uses almost no CPU.
 - The Harbour sea pauses while nothing plays and the window is unfocused or untouched for a minute, and resumes where it stopped.
-- While paused, long now-playing titles rest at their start instead of scrolling; hovering one scrolls it.
-- Playing music now uses a fraction of the CPU it did, since the seek bar and now-playing glow no longer redraw the whole window every frame.
+- While paused, long now-playing titles rest at their start instead of scrolling.
+- Hovering a resting now-playing title scrolls it.
+- Playing music now uses a fraction of the CPU it did.
 - The Harbour scene animates at 60 fps on high-refresh displays, which cuts its CPU use while music plays.
 - A boosting equalizer curve now lowers the overall level by its largest boost, so presets like Bass Boost play about 5 dB quieter.
 - Changing the equalizer while music plays now fades to the new curve over 20 ms instead of switching at once.
