@@ -1,16 +1,28 @@
 //! Equalizer Modal Widget
 //!
-//! A modal overlay displaying the 10-band graphic equalizer.
+//! A modal overlay with the equalizer's two layouts: the 10-band Graphic
+//! sliders and the Parametric band editor (`eq_parametric.rs`), switched by
+//! the segmented control under the title. The switch picks the layout that
+//! plays (`EqState::set_mode`).
 //! Triggered via hotkey [Q] or from the player bar EQ button.
+
+use std::sync::Arc;
 
 use iced::{
     Alignment, Element, Length, Widget as _,
     widget::{button, column, container, mouse_area, pick_list, row, space, svg, text, tooltip},
 };
+use nokkvi_data::audio::eq::{EQ_BAND_COUNT, EqBand, EqBandKind, EqMode};
 
+pub(crate) use crate::widgets::eq_parametric::{BandField, FieldEdit, FieldKey};
 use crate::{
     theme,
-    widgets::{eq_slider::eq_slider, hover_overlay::HoverOverlay},
+    widgets::{
+        eq_parametric::{self, PreampMemo},
+        eq_slider::eq_slider,
+        hover_overlay::HoverOverlay,
+        pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
+    },
 };
 
 // =============================================================================
@@ -33,6 +45,24 @@ pub struct EqModalState {
     pub save_name: String,
     /// Cached custom EQ presets (loaded from redb, kept in sync on save/delete).
     pub custom_presets: Vec<nokkvi_data::audio::eq::CustomEqPreset>,
+    /// Parametric view: the band whose point and table row are highlighted.
+    /// An index into `EqState::parametric_bands`; one past the end (the list
+    /// shrank under it, a config.toml reload) highlights nothing.
+    pub selected: Option<usize>,
+    /// Parametric view: the field being typed into, with its text as typed.
+    pub edit: Option<FieldEdit>,
+    /// The band list changed live (a drag, typing, a nudge) since it was last
+    /// persisted; the next commit, drag release or Close writes it.
+    pub bands_unsaved: bool,
+    /// The preamp the status line shows, memoized per band list.
+    pub(crate) preamp: PreampMemo,
+}
+
+impl EqModalState {
+    /// The automatic preamp `bands` take (dB, never above 0).
+    pub(crate) fn preamp_for(&self, bands: &[EqBand]) -> f64 {
+        self.preamp.get(bands)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +73,8 @@ pub enum EqModalMessage {
     ToggleEnabled,
     GainChanged(usize, f32),
     PresetSelected(PresetChoice),
+    /// Graphic: every slider to 0 dB. Parametric: every band's gain to 0 dB,
+    /// the bands kept.
     ResetAll,
     /// Enter save mode — show inline name input
     SavePreset,
@@ -54,6 +86,47 @@ pub enum EqModalMessage {
     CancelSave,
     /// Delete a custom preset by its index in the custom list
     DeletePreset(usize),
+    /// The view switch: the layout that plays (and that the modal shows).
+    ModeSelected(EqMode),
+    /// A band's table row was pressed.
+    SelectBand(usize),
+    /// A band's curve point was pressed: selected, its row scrolled into
+    /// view.
+    PointPressed(usize),
+    /// A curve drag moved band `.0` to `(freq Hz, gain dB)`: plays at once,
+    /// persisted at the drag's end.
+    BandDragged(usize, f64, f64),
+    /// A curve drag that moved a band ended.
+    BandDragEnded,
+    /// The wheel over a curve point: band `.0`'s new Q.
+    BandQStepped(usize, f64),
+    /// Add band: a peak at 1 kHz, 0 dB, Q 1.0.
+    AddBand,
+    /// A double-click on empty curve space: a peak at `(freq Hz, gain dB)`.
+    AddBandAt(f64, f64),
+    RemoveBand(usize),
+    /// A band's on/off box.
+    ToggleBand(usize),
+    BandKindSelected(usize, EqBandKind),
+    /// Text typed into band `.0`'s `.1` field.
+    FieldInput(usize, BandField, String),
+    /// Enter in band `.0`'s `.1` field.
+    FieldSubmit(usize, BandField),
+    /// Tab / Shift+Tab / Up / Down while the band table shows, with the
+    /// widget that had focus (`None`: nothing did).
+    FieldKey(Option<iced::widget::Id>, FieldKey),
+    /// Fill the empty band list with the ten Graphic sliders.
+    CopyFromGraphic,
+    /// Import…: pick an Equalizer APO / AutoEq text.
+    Import,
+    /// The picked file, read and parsed off the UI thread: `(file name,
+    /// bands)`, or the toast that says why not. A cancelled dialog sends
+    /// nothing.
+    ImportLoaded(Result<(String, Vec<EqBand>), String>),
+    /// Export…: write the bands as an Equalizer APO text.
+    Export,
+    /// The export finished: `(file name, filters written)`, or why not.
+    ExportWritten(Result<(String, usize), String>),
 }
 
 /// Unified preset choice for the pick_list — can be builtin or custom.
@@ -95,17 +168,33 @@ const _: () = assert!(
     "EQ label array length must match DSP band-frequency array length",
 );
 
+/// What the modal draws, read from the app state each render.
+pub(crate) struct EqModalViewData<'a> {
+    pub state: &'a EqModalState,
+    /// The master switch.
+    pub enabled: bool,
+    /// The layout that plays, which is the view the modal shows.
+    pub mode: EqMode,
+    /// The Graphic sliders as shown: 0 dB while the equalizer is off.
+    pub gains: [f32; EQ_BAND_COUNT],
+    /// The Parametric layout's band list, shown as it is (dimmed while off).
+    pub bands: Arc<Vec<EqBand>>,
+}
+
 pub(crate) fn eq_modal_overlay<'a>(
-    visible: bool,
-    eq_enabled: bool,
-    eq_gains: [f32; 10],
-    custom_presets: &[nokkvi_data::audio::eq::CustomEqPreset],
-    save_mode: bool,
-    save_name: &'a str,
+    data: EqModalViewData<'a>,
 ) -> Option<Element<'a, EqModalMessage>> {
-    if !visible {
+    let state = data.state;
+    if !state.open {
         return None;
     }
+    let eq_enabled = data.enabled;
+    let eq_gains = data.gains;
+    let custom_presets = state.custom_presets.as_slice();
+    let parametric = data.mode == EqMode::Parametric;
+    // The preset prompt belongs to the Graphic layout.
+    let save_mode = state.save_mode && !parametric;
+    let save_name = state.save_name.as_str();
 
     // ── Header ──────────────────────────────────────────────────
     let title_text = text("Equalizer")
@@ -201,6 +290,11 @@ pub(crate) fn eq_modal_overlay<'a>(
     .style(theme::container_tooltip)
     .boxed();
 
+    let reset_tip = if parametric {
+        "Reset gains: every band to 0 dB, the bands kept"
+    } else {
+        "Reset"
+    };
     let reset_button: Element<'_, EqModalMessage> = tooltip(
         svg_btn(
             "assets/icons/rotate-ccw.svg",
@@ -208,7 +302,7 @@ pub(crate) fn eq_modal_overlay<'a>(
             28.0,
             EqModalMessage::ResetAll,
         ),
-        container(text("Reset").size(11.0).font(theme::ui_font())).padding(4),
+        container(text(reset_tip).size(11.0).font(theme::ui_font())).padding(4),
         tooltip::Position::Bottom,
     )
     .gap(4)
@@ -357,17 +451,21 @@ pub(crate) fn eq_modal_overlay<'a>(
         .align_y(Alignment::Center)
         .boxed()
     } else {
-        // Normal mode: title + preset picker + buttons
-        let mut header_items: Vec<Element<'_, EqModalMessage>> = vec![
-            title_text.boxed(),
-            space::horizontal().boxed(),
-            preset_picker.boxed(),
-        ];
-        if let Some(del_btn) = delete_button {
-            header_items.push(del_btn);
+        // Normal mode: title + preset picker + buttons. The picker and Save
+        // Preset are the Graphic layout's; the Parametric view drops them and
+        // keeps the rest where they stand.
+        let mut header_items: Vec<Element<'_, EqModalMessage>> =
+            vec![title_text.boxed(), space::horizontal().boxed()];
+        if !parametric {
+            header_items.push(preset_picker.boxed());
+            if let Some(del_btn) = delete_button {
+                header_items.push(del_btn);
+            }
         }
         header_items.push(enable_button);
-        header_items.push(save_button);
+        if !parametric {
+            header_items.push(save_button);
+        }
         header_items.push(reset_button);
         header_items.push(close_button);
 
@@ -376,6 +474,10 @@ pub(crate) fn eq_modal_overlay<'a>(
             .align_y(Alignment::Center)
             .boxed()
     };
+
+    // The view switch sits under the title, on a line of its own: beside the
+    // Graphic header's picker and buttons it would not fit the 640 px modal.
+    let header = column![header, mode_switch(data.mode)].spacing(12);
 
     let header_sep = theme::modal_header_separator();
 
@@ -422,16 +524,19 @@ pub(crate) fn eq_modal_overlay<'a>(
         .spacing(8)
         .align_y(Alignment::Center);
 
-    let content = column![
-        header,
-        header_sep,
+    let body: Element<'_, EqModalMessage> = if parametric {
+        eq_parametric::parametric_body(&data)
+    } else {
         container(eq_row)
             .width(Length::Fill)
-            .align_x(Alignment::Center),
-    ]
-    .spacing(24)
-    .padding(24)
-    .width(Length::Fixed(MODAL_WIDTH));
+            .align_x(Alignment::Center)
+            .boxed()
+    };
+
+    let content = column![header, header_sep, body]
+        .spacing(24)
+        .padding(24)
+        .width(Length::Fixed(MODAL_WIDTH));
 
     // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
     // ui_radius_lg corners. Five overlay modals route through this helper.
@@ -445,6 +550,36 @@ pub(crate) fn eq_modal_overlay<'a>(
         EqModalMessage::Close,
         theme::MODAL_BACKDROP_ALPHA,
     ))
+}
+
+/// The `GRAPHIC | PARAMETRIC` switch: the Settings pill chips (accent fill on
+/// the layout that plays).
+fn mode_switch<'a>(mode: EqMode) -> Element<'a, EqModalMessage> {
+    let options: Vec<PillOption> = EqMode::ALL
+        .into_iter()
+        .map(|option| PillOption {
+            display: option.label().to_owned(),
+            key: option.label().to_owned(),
+            on: option == mode,
+        })
+        .collect();
+    pill_segmented_button(
+        &options,
+        PillVariant::Single,
+        PillRowParams {
+            font_size: 11.0,
+            is_center: true,
+            opacity: 1.0,
+        },
+        |key: String| {
+            EqModalMessage::ModeSelected(
+                EqMode::ALL
+                    .into_iter()
+                    .find(|mode| mode.label() == key)
+                    .unwrap_or_default(),
+            )
+        },
+    )
 }
 
 /// Compare two 10-band EQ gain arrays with a 1e-3 dB epsilon.

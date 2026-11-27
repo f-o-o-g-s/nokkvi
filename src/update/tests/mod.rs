@@ -29,6 +29,7 @@ mod discography;
 mod discord;
 mod dynamic_accent;
 mod editor;
+mod eq_modal;
 mod focused_row;
 mod frame;
 mod general;

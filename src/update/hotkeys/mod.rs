@@ -795,6 +795,15 @@ impl Nokkvi {
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
         );
 
+        // The EQ modal's band table (Parametric view, modal on top) moves
+        // between its fields on Tab / Shift+Tab and nudges the focused one on
+        // Up / Down. Ahead of the text-field guard below, because a focused
+        // field captures the arrows. The table asks which field has focus:
+        // with none, Tab lands on the first field and the arrows do nothing.
+        if let Some(table_key) = self.eq_table_key(&key, modifiers) {
+            return Self::eq_table_key_task(table_key);
+        }
+
         // When a widget (e.g. text_input search bar) has captured the
         // key event, suppress hotkey dispatch to avoid triggering actions
         // while the user is typing. Exceptions:

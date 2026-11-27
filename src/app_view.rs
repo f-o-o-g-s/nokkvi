@@ -1410,27 +1410,24 @@ impl Nokkvi {
                 .map(|overlay| overlay.map(Message::TextInputDialog).boxed())
             }
             ActiveModal::Eq => {
+                let eq = &self.playback.eq_state;
+                let enabled = eq.is_enabled();
                 // When EQ is disabled, show flat gains in the UI so sliders read 0 —
                 // avoids the misleading appearance of active boosts. Real gains are
-                // preserved in EqState and restore visually when re-enabled.
-                let eq_enabled = self.playback.eq_state.is_enabled();
-                let eq_gains = if eq_enabled {
-                    let mut gains = [0.0; 10];
-                    for (i, g) in gains.iter_mut().enumerate() {
-                        *g = self.playback.eq_state.get_band_gain(i);
-                    }
-                    gains
+                // preserved in EqState and restore visually when re-enabled. The
+                // Parametric view shows its real bands while off, dimmed.
+                let gains = if enabled {
+                    eq.graphic_gains()
                 } else {
-                    [0.0; 10]
+                    [0.0; nokkvi_data::audio::eq::EQ_BAND_COUNT]
                 };
-                crate::widgets::eq_modal_overlay(
-                    self.eq_modal.open,
-                    eq_enabled,
-                    eq_gains,
-                    &self.eq_modal.custom_presets,
-                    self.eq_modal.save_mode,
-                    &self.eq_modal.save_name,
-                )
+                crate::widgets::eq_modal_overlay(crate::widgets::EqModalViewData {
+                    state: &self.eq_modal,
+                    enabled,
+                    mode: eq.mode(),
+                    gains,
+                    bands: eq.parametric_bands(),
+                })
                 .map(|overlay| overlay.map(Message::EqModal).boxed())
             }
             ActiveModal::About => crate::widgets::about_modal::about_modal_overlay(

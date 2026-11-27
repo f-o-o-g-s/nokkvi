@@ -18,21 +18,22 @@
 //! - **Points**: every band, switched-off ones muted, numbered 1.. so they map
 //!   to the rows of a band table. A pass filter sits on the 0 dB line.
 //! - **Input**: press a point to select it and start a drag (`on_select`,
-//!   then `on_move` once the cursor passes [`DRAG_SLOP`]); the wheel over a
-//!   point, or during a drag, steps its Q (`on_q`); a double-click on empty
-//!   space adds a band there (`on_add`). Every event it acts on is captured.
-//!   With no callbacks it is a read-only display and captures nothing.
+//!   then `on_move` once the cursor passes [`DRAG_SLOP`], and `on_release`
+//!   when a drag that moved the band ends); the wheel over a point, or during
+//!   a drag, steps its Q (`on_q`); a double-click on empty space adds a band
+//!   there (`on_add`). Every event it acts on is captured. With no callbacks
+//!   it is a read-only display and captures nothing.
 //! - **Caching**: three `canvas::Cache` layers (panel + grid, curve, points),
 //!   each cleared when a hash of what it draws changes (bands, range,
 //!   selection, hover, dimming, theme generation, font, corner radius). The
 //!   content range is memoized per band list, since `draw` runs on every
 //!   window frame while anything else on screen animates.
 
-#![expect(dead_code, reason = "wired into the EQ modal by the editor lane")]
-
 use std::{
     cell::Cell,
     hash::{DefaultHasher, Hash, Hasher},
+    ops::Deref,
+    sync::Arc,
 };
 
 use iced::{
@@ -132,10 +133,47 @@ type OnSelect<'a, Message> = Box<dyn Fn(usize) -> Message + 'a>;
 type OnMove<'a, Message> = Box<dyn Fn(usize, f64, f64) -> Message + 'a>;
 type OnQ<'a, Message> = Box<dyn Fn(usize, f64) -> Message + 'a>;
 type OnAdd<'a, Message> = Box<dyn Fn(f64, f64) -> Message + 'a>;
+type OnRelease<'a, Message> = Box<dyn Fn(usize) -> Message + 'a>;
+
+/// The band list a curve draws: borrowed, or the equalizer's own shared list
+/// (`EqState::parametric_bands`), which a view holds no borrow of.
+pub(crate) enum CurveBands<'a> {
+    Borrowed(&'a [EqBand]),
+    Shared(Arc<Vec<EqBand>>),
+}
+
+impl Deref for CurveBands<'_> {
+    type Target = [EqBand];
+
+    fn deref(&self) -> &[EqBand] {
+        match self {
+            Self::Borrowed(bands) => bands,
+            Self::Shared(bands) => bands,
+        }
+    }
+}
+
+impl<'a> From<&'a [EqBand]> for CurveBands<'a> {
+    fn from(bands: &'a [EqBand]) -> Self {
+        Self::Borrowed(bands)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [EqBand; N]> for CurveBands<'a> {
+    fn from(bands: &'a [EqBand; N]) -> Self {
+        Self::Borrowed(bands)
+    }
+}
+
+impl From<Arc<Vec<EqBand>>> for CurveBands<'_> {
+    fn from(bands: Arc<Vec<EqBand>>) -> Self {
+        Self::Shared(bands)
+    }
+}
 
 /// The response curve with its band points. Build with [`eq_curve`].
 pub(crate) struct EqCurve<'a, Message> {
-    bands: &'a [EqBand],
+    bands: CurveBands<'a>,
     selected: Option<usize>,
     dimmed: bool,
     width: Length,
@@ -144,12 +182,15 @@ pub(crate) struct EqCurve<'a, Message> {
     on_move: Option<OnMove<'a, Message>>,
     on_q: Option<OnQ<'a, Message>>,
     on_add: Option<OnAdd<'a, Message>>,
+    on_release: Option<OnRelease<'a, Message>>,
 }
 
 /// The response curve of `bands`, read-only until callbacks are set.
-pub(crate) fn eq_curve<'a, Message: Clone + 'a>(bands: &'a [EqBand]) -> EqCurve<'a, Message> {
+pub(crate) fn eq_curve<'a, Message: Clone + 'a>(
+    bands: impl Into<CurveBands<'a>>,
+) -> EqCurve<'a, Message> {
     EqCurve {
-        bands,
+        bands: bands.into(),
         selected: None,
         dimmed: false,
         width: Length::Fill,
@@ -158,6 +199,7 @@ pub(crate) fn eq_curve<'a, Message: Clone + 'a>(bands: &'a [EqBand]) -> EqCurve<
         on_move: None,
         on_q: None,
         on_add: None,
+        on_release: None,
     }
 }
 
@@ -208,6 +250,14 @@ impl<'a, Message: Clone + 'a> EqCurve<'a, Message> {
         self.on_add = Some(Box::new(f));
         self
     }
+
+    /// A drag that moved its band ended (the button came up): `(band)`. A
+    /// press that only selected publishes nothing here, so the caller can
+    /// persist once per drag instead of on every `on_move`.
+    pub(crate) fn on_release(mut self, f: impl Fn(usize) -> Message + 'a) -> Self {
+        self.on_release = Some(Box::new(f));
+        self
+    }
 }
 
 impl<'a, Message: Clone + 'a> From<EqCurve<'a, Message>> for Element<'a, Message> {
@@ -247,7 +297,7 @@ impl<Message> EqCurve<'_, Message> {
     /// The gain range on screen: the content's, held at least at the drag's
     /// start range while a drag runs.
     fn display_range(&self, state: &State, bands_key: u64) -> f64 {
-        let content = state.content_range(self.bands, bands_key);
+        let content = state.content_range(&self.bands, bands_key);
         state.drag.map_or(content, |drag| content.max(drag.range))
     }
 
@@ -369,7 +419,7 @@ impl<Message: Clone> canvas::Program<Message> for EqCurve<'_, Message> {
             return None;
         };
         let plot = plot_rect(bounds.size());
-        let range = self.display_range(state, bands_key(self.bands));
+        let range = self.display_range(state, bands_key(&self.bands));
         match *event {
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 // A drag whose release never arrived ends at the next press,
@@ -380,10 +430,16 @@ impl<Message: Clone> canvas::Program<Message> for EqCurve<'_, Message> {
                     None => stale_drag.then(Action::request_redraw),
                 }
             }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => state
-                .drag
-                .take()
-                .map(|_| Action::request_redraw().and_capture()),
+            mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                state.drag.take().map(|drag| {
+                    match (&self.on_release, drag.last) {
+                        // It moved the band: one message for the whole drag.
+                        (Some(on_release), Some(_)) => Action::publish(on_release(drag.band)),
+                        (Some(_), None) | (None, _) => Action::request_redraw(),
+                    }
+                    .and_capture()
+                })
+            }
             mouse::Event::CursorMoved { .. } | mouse::Event::CursorLeft => {
                 self.cursor_moved(state, cursor, bounds, plot, range)
             }
@@ -407,7 +463,7 @@ impl<Message: Clone> canvas::Program<Message> for EqCurve<'_, Message> {
     ) -> Vec<Geometry> {
         let size = bounds.size();
         let plot = plot_rect(size);
-        let bands = bands_key(self.bands);
+        let bands = bands_key(&self.bands);
         let range = self.display_range(state, bands);
         let style = style_key(range, self.dimmed);
         let selected = self.selected_index();
@@ -423,13 +479,13 @@ impl<Message: Clone> canvas::Program<Message> for EqCurve<'_, Message> {
         let curve = state
             .curve
             .draw(renderer, size, key_of(&(style, bands)), |frame| {
-                draw_curve(frame, self.bands, plot, range, &Palette::current(dimmed));
+                draw_curve(frame, &self.bands, plot, range, &Palette::current(dimmed));
             });
         let points_key = key_of(&(style, bands, selected, hovered));
         let points = state.points.draw(renderer, size, points_key, |frame| {
             draw_points(
                 frame,
-                self.bands,
+                &self.bands,
                 plot,
                 range,
                 selected,
@@ -450,7 +506,7 @@ impl<Message: Clone> canvas::Program<Message> for EqCurve<'_, Message> {
             return mouse::Interaction::Grabbing;
         }
         let plot = plot_rect(bounds.size());
-        let range = self.display_range(state, bands_key(self.bands));
+        let range = self.display_range(state, bands_key(&self.bands));
         if self
             .hover_at(cursor.position_in(bounds), plot, range)
             .is_none()
@@ -849,8 +905,9 @@ fn key_of(value: &impl Hash) -> u64 {
     hasher.finish()
 }
 
-/// Everything the band list contributes to a drawing.
-fn bands_key(bands: &[EqBand]) -> u64 {
+/// Everything the band list contributes to a drawing (also the EQ modal's
+/// preamp memo key).
+pub(crate) fn bands_key(bands: &[EqBand]) -> u64 {
     let mut hasher = DefaultHasher::new();
     bands.len().hash(&mut hasher);
     for band in bands {
@@ -1451,6 +1508,7 @@ mod tests {
         Move(usize, f64, f64),
         Q(usize, f64),
         Add(f64, f64),
+        Release(usize),
     }
 
     /// Off the window origin, so a canvas-relative / absolute mix-up shows.
@@ -1467,6 +1525,7 @@ mod tests {
             .on_move(Msg::Move)
             .on_q(Msg::Q)
             .on_add(Msg::Add)
+            .on_release(Msg::Release)
     }
 
     /// One mouse event with the cursor at canvas-relative `at`: the message
@@ -1549,13 +1608,62 @@ mod tests {
             send(&curve, &mut state, MOVE, outside),
             Some((Some(Msg::Move(1, 20.0, 12.0)), true))
         );
+        // The release of a drag that moved names its band, once.
         assert_eq!(
             send(&curve, &mut state, RELEASE, outside),
-            Some((None, true))
+            Some((Some(Msg::Release(1)), true))
         );
         // Released: moving again does nothing, and a release passes through.
         assert_eq!(send(&curve, &mut state, MOVE, up), None);
         assert_eq!(send(&curve, &mut state, RELEASE, up), None);
+    }
+
+    #[test]
+    fn a_press_that_only_selects_publishes_no_release() {
+        let bands = two_bands();
+        let curve = editable(&bands);
+        let mut state = State::default();
+        let on_point = center_of(&bands, 0);
+        assert_eq!(
+            send(&curve, &mut state, PRESS, on_point),
+            Some((Some(Msg::Select(0)), true))
+        );
+        // A jitter inside the slop moves nothing, so the release has nothing
+        // to persist: it ends the drag without a message.
+        let jitter = Point::new(on_point.x + 1.0, on_point.y + 1.0);
+        assert_eq!(send(&curve, &mut state, MOVE, jitter), Some((None, true)));
+        assert_eq!(
+            send(&curve, &mut state, RELEASE, jitter),
+            Some((None, true))
+        );
+    }
+
+    #[test]
+    fn a_drag_without_a_release_callback_ends_silently() {
+        let bands = two_bands();
+        let curve = eq_curve(&bands[..])
+            .on_select(Msg::Select)
+            .on_move(Msg::Move);
+        let mut state = State::default();
+        let on_point = center_of(&bands, 0);
+        assert!(send(&curve, &mut state, PRESS, on_point).is_some());
+        let plot = plot_rect(BOUNDS.size());
+        let up = Point::new(on_point.x, gain_to_y(9.0, 12.0, plot));
+        assert!(matches!(
+            send(&curve, &mut state, MOVE, up),
+            Some((Some(Msg::Move(0, _, _)), true))
+        ));
+        assert_eq!(send(&curve, &mut state, RELEASE, up), Some((None, true)));
+    }
+
+    #[test]
+    fn a_shared_band_list_draws_like_a_borrowed_one() {
+        let bands = two_bands();
+        let shared = Arc::new(bands.to_vec());
+        let borrowed = eq_curve::<Msg>(&bands).selected(Some(1));
+        let owned = eq_curve::<Msg>(Arc::clone(&shared)).selected(Some(1));
+        assert_eq!(bands_key(&borrowed.bands), bands_key(&owned.bands));
+        assert_eq!(owned.selected_index(), Some(1));
     }
 
     #[test]

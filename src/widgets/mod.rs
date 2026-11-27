@@ -11,6 +11,7 @@ pub(crate) mod base_slot_list_layout;
 pub(crate) mod boat;
 pub(crate) mod drag_column;
 pub(crate) mod eq_curve;
+pub(crate) mod eq_parametric;
 pub(crate) mod eq_slider;
 pub(crate) mod fit_row;
 pub(crate) mod format_info;
@@ -66,7 +67,7 @@ pub(crate) mod view_header;
 pub(crate) mod volume_slider;
 
 // Re-export commonly used items
-pub(crate) use eq_modal::{EqModalMessage, PresetChoice, eq_modal_overlay};
+pub(crate) use eq_modal::{EqModalMessage, EqModalViewData, PresetChoice, eq_modal_overlay};
 use iced::Widget as _;
 pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
 pub(crate) use player_bar::{PlayerBarMessage, PlayerBarStrip, PlayerBarViewData, player_bar};
@@ -104,6 +105,48 @@ pub(crate) fn focus_adjacent_text_input<M: Send + 'static>(forward: bool) -> ice
         )
         .then(iced::widget::operation::text_input::move_cursor_to_end),
     )
+}
+
+/// Focus the text input `id` with its caret at the end: [`focus_text_input`]
+/// for an id built at runtime (the EQ band table's per-row fields).
+pub(crate) fn focus_text_input_id<M: Send + 'static>(id: iced::widget::Id) -> iced::Task<M> {
+    iced::widget::operation::focus(id.clone())
+        .chain(iced::widget::operation::text_input::move_cursor_to_end(id))
+}
+
+/// The id of the widget that has keyboard focus, `None` when nothing with an
+/// id has it. Unlike iced's `find_focused`, it always answers, so a caller
+/// can act on "nothing focused" too (Tab into the EQ band table).
+pub(crate) fn focused_widget_id() -> iced::Task<Option<iced::widget::Id>> {
+    use iced::advanced::widget::{
+        Id, Operation,
+        operation::{Focusable, Outcome},
+    };
+
+    struct FocusedId(Option<Id>);
+
+    impl Operation<Option<Id>> for FocusedId {
+        fn focusable(
+            &mut self,
+            id: Option<&Id>,
+            _bounds: iced::Rectangle,
+            state: &mut dyn Focusable,
+        ) {
+            if state.is_focused() {
+                self.0 = id.cloned();
+            }
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<Id>>)) {
+            operate(self);
+        }
+
+        fn finish(&self) -> Outcome<Option<Id>> {
+            Outcome::Some(self.0.clone())
+        }
+    }
+
+    iced::advanced::widget::operate(FocusedId(None))
 }
 
 /// Format an integer with comma thousands separators ("13627" → "13,627").

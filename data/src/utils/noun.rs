@@ -15,6 +15,7 @@ pub struct Noun {
 impl Noun {
     pub const ALBUM: Self = Self::new("album", "albums");
     pub const ARTIST: Self = Self::new("artist", "artists");
+    pub const BAND: Self = Self::new("band", "bands");
     pub const DUPLICATE: Self = Self::new("duplicate", "duplicates");
     pub const FILTER: Self = Self::new("filter", "filters");
     pub const GENRE: Self = Self::new("genre", "genres");

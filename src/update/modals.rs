@@ -31,7 +31,7 @@ use crate::{
 pub(crate) enum ActiveModal {
     /// Name / comment edits and confirmations.
     TextInputDialog,
-    /// The 10-band equalizer.
+    /// The equalizer: the Graphic sliders and the Parametric band editor.
     Eq,
     About,
     /// Get Info.
@@ -74,7 +74,9 @@ impl ActiveModal {
     /// Trawl takes them too, plus Ctrl+Enter (`ShufflePlay`, which plays the
     /// mix), `/` and [`TRAWL_TRAY_ACTIONS`]; they are admitted for Trawl only,
     /// on purpose: the other modals must keep swallowing the same keys. EQ and
-    /// Get Info take the key that opened them, which closes them again. The
+    /// Get Info take the key that opened them, which closes them again (EQ's
+    /// Parametric band table also takes Tab / Shift+Tab and the bare Up /
+    /// Down arrows, read ahead of this gate by `Nokkvi::eq_table_key`). The
     /// pickers and Similar Artists also take the bare Up/Down arrows (`EditUp`
     /// / `EditDown`), which move lists outside Settings (a TV remote's D-pad
     /// scrolls with them). Trawl doesn't: its list keys leave its search field

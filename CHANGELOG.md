@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The equalizer has a Parametric view beside the ten sliders: up to 32 bands of peak, shelf and pass filters.
+- Parametric bands are points on a response curve that can be dragged, with the wheel setting a band's width.
+- Every parametric band value can be typed, with Tab and Shift+Tab moving between the fields.
+- The Parametric view imports and exports Equalizer APO and AutoEq ParametricEQ.txt profiles.
+
 ### Changed
 
 - A paused or stopped visualizer now holds still once its bars have fallen, so an idle nokkvi uses almost no CPU.
