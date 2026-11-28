@@ -22,7 +22,6 @@ use crate::{
     update::{components::session_expired_message, modals::ActiveModal},
     widgets::{
         EqModalMessage,
-        eq_modal::ImportedProfile,
         eq_parametric::{
             BandField, FieldEdit, FieldKey, adjacent_field, field_at, field_enabled, focus_field,
             nudged, parse_value, reveal_row, with_value,
@@ -386,13 +385,14 @@ impl Nokkvi {
 
     /// Put a loaded profile in (an imported file, an AutoEq download): it
     /// replaces the band list, the Parametric layout plays, the equalizer
-    /// turns on, all persisted; the next profile Save starts from
-    /// `save_name` while the list is still this one. `success(count)` is the
-    /// toast once it is saved.
+    /// turns on, and it joins the saved profiles under `name` (in place of
+    /// one of that name, `EqProfile::put`), so the picker shows it and a
+    /// later load doesn't lose it. All persisted; `success(count)` is the
+    /// toast once it is saved. A blank `name` loads without saving a profile.
     pub(super) fn load_eq_profile(
         &mut self,
         bands: &[EqBand],
-        save_name: String,
+        name: String,
         error_ctx: &'static str,
         success: impl FnOnce(usize) -> String,
     ) -> Task<Message> {
@@ -400,34 +400,37 @@ impl Nokkvi {
         eq.set_parametric_bands(bands);
         eq.set_mode(EqMode::Parametric);
         eq.set_enabled(true);
-        let count = eq.parametric_bands().len();
+        let loaded = eq.parametric_bands().to_vec();
+        let count = loaded.len();
         // The profile replaces the list: nothing typed or selected carries
         // over.
         self.eq_modal.edit = None;
         self.eq_modal.selected = None;
         self.eq_modal.save_mode = false;
-        // The next profile Save starts from the profile's name, while the
-        // list is still the profile's.
-        self.eq_modal.imported = Some(ImportedProfile {
-            name: save_name,
-            bands: eq.parametric_bands().to_vec(),
+        let name = name.trim().to_owned();
+        let profile = (!name.is_empty() && !loaded.is_empty()).then(|| {
+            EqProfile::put(&mut self.eq_modal.profiles, name.clone(), loaded.clone());
+            (name, loaded)
         });
         let save_bands = self.persist_eq_bands();
-        let save_layout = self.persist_eq(
+        let save_rest = self.persist_eq(
             move |shell| async move {
                 let settings = shell.settings();
                 settings.set_eq_mode(EqMode::Parametric).await?;
-                settings.set_eq_enabled(true).await
+                settings.set_eq_enabled(true).await?;
+                match profile {
+                    Some((name, bands)) => settings.put_eq_profile(name, bands).await,
+                    None => Ok(()),
+                }
             },
             Some(success(count)),
             error_ctx,
         );
-        Task::batch([save_bands, save_layout])
+        Task::batch([save_bands, save_rest])
     }
 
-    /// Save in the Parametric view: the name prompt, starting from the last
-    /// imported file's name while the list is still that file's. An empty
-    /// list has nothing to save.
+    /// Save in the Parametric view: the name prompt. An empty list has
+    /// nothing to save.
     fn start_saving_eq_profile(&mut self) -> Task<Message> {
         // The press took focus from a typed field: commit it first.
         let commit = self.commit_eq_field();
@@ -436,12 +439,7 @@ impl Nokkvi {
             return commit;
         }
         self.eq_modal.save_mode = true;
-        self.eq_modal.save_name = self
-            .eq_modal
-            .imported
-            .as_ref()
-            .map(|imported| imported.name.clone())
-            .unwrap_or_default();
+        self.eq_modal.save_name.clear();
         Task::batch([commit, focus_save_name()])
     }
 
@@ -474,8 +472,6 @@ impl Nokkvi {
         });
         self.eq_modal.save_mode = false;
         self.eq_modal.save_name.clear();
-        // The import's name has served.
-        self.eq_modal.imported = None;
         self.persist_eq(
             move |shell| async move { shell.settings().save_eq_profile(name, bands).await },
             Some("Profile saved".to_owned()),
@@ -492,7 +488,6 @@ impl Nokkvi {
         };
         self.eq_modal.edit = None;
         self.eq_modal.selected = None;
-        self.eq_modal.imported = None;
         let eq = &self.playback.eq_state;
         eq.set_parametric_bands(&profile.bands);
         eq.set_enabled(true);
@@ -534,23 +529,7 @@ impl Nokkvi {
         Task::batch([commit, export])
     }
 
-    /// Handle one EQ modal message, then forget an import name the band list
-    /// it left behind no longer matches (`drop_moved_eq_import`).
     pub(crate) fn handle_eq_modal(&mut self, msg: EqModalMessage) -> Task<Message> {
-        let task = self.handle_eq_modal_message(msg);
-        self.drop_moved_eq_import();
-        task
-    }
-
-    /// Forget the imported file's name once the band list is no longer the
-    /// one that import put in. Call it wherever the band list changes outside
-    /// `handle_eq_modal`.
-    pub(crate) fn drop_moved_eq_import(&mut self) {
-        let bands = self.playback.eq_state.parametric_bands();
-        self.eq_modal.drop_moved_import(&bands);
-    }
-
-    fn handle_eq_modal_message(&mut self, msg: EqModalMessage) -> Task<Message> {
         match msg {
             EqModalMessage::Open => {
                 self.eq_modal.open = true;
@@ -876,13 +855,20 @@ fn file_name(path: &Path) -> String {
     )
 }
 
-/// The name an imported file offers its profile: the file name without its
-/// extension (`HD 650 ParametricEQ.txt` -> `HD 650 ParametricEQ`).
+/// The name an imported file's profile is saved under: the file name without
+/// its extension, and without the ` ParametricEQ` AutoEq ends its own files'
+/// names with (`HD 650 ParametricEQ.txt` -> `HD 650`).
 pub(crate) fn profile_name_of(file_name: &str) -> String {
-    Path::new(file_name).file_stem().map_or_else(
+    const AUTOEQ_SUFFIX: &str = " parametriceq";
+    let stem = Path::new(file_name).file_stem().map_or_else(
         || file_name.to_owned(),
         |stem| stem.to_string_lossy().into_owned(),
-    )
+    );
+    let cut = stem.len().saturating_sub(AUTOEQ_SUFFIX.len());
+    match stem.get(cut..) {
+        Some(tail) if cut > 0 && tail.eq_ignore_ascii_case(AUTOEQ_SUFFIX) => stem[..cut].to_owned(),
+        _ => stem,
+    }
 }
 
 /// The bands of a profile file's `text` (or why it can't be read), named for
@@ -965,10 +951,9 @@ mod tests {
 
     #[test]
     fn an_imported_file_offers_its_name_without_the_extension() {
-        assert_eq!(
-            profile_name_of("HD 650 ParametricEQ.txt"),
-            "HD 650 ParametricEQ"
-        );
+        assert_eq!(profile_name_of("HD 650 ParametricEQ.txt"), "HD 650");
+        assert_eq!(profile_name_of("hd 650 parametriceq.TXT"), "hd 650");
+        assert_eq!(profile_name_of("ParametricEQ.txt"), "ParametricEQ");
         assert_eq!(profile_name_of("speakers.TXT"), "speakers");
         assert_eq!(profile_name_of("v1.2 tuning.txt"), "v1.2 tuning");
         assert_eq!(profile_name_of("no extension"), "no extension");

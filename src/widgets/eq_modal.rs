@@ -51,11 +51,6 @@ pub struct EqModalState {
     /// Saved Parametric profiles (restored from the settings on load, kept in
     /// sync on save/delete).
     pub profiles: Vec<EqProfile>,
-    /// The name the next profile Save starts with: the last imported file's
-    /// name without its extension, kept while the band list is still the one
-    /// that import put in (dropped by the first edit, a profile selected or
-    /// saved).
-    pub(crate) imported: Option<ImportedProfile>,
     /// Parametric view: the band whose point and table row are highlighted.
     /// An index into `EqState::parametric_bands`; one past the end (the list
     /// shrank under it, a config.toml reload) highlights nothing.
@@ -79,13 +74,6 @@ pub struct EqModalState {
     pub(crate) autoeq_generation: crate::state::StaleDropGen,
 }
 
-/// An imported file's name (extension dropped) and the band list it put in.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ImportedProfile {
-    pub name: String,
-    pub bands: Vec<EqBand>,
-}
-
 impl EqModalState {
     /// Logout: everything goes back to its default except the AutoEq
     /// stale-drop counter, which is carried forward (a request from the old
@@ -100,19 +88,6 @@ impl EqModalState {
     /// The automatic preamp `bands` take (dB, never above 0).
     pub(crate) fn preamp_for(&self, bands: &[EqBand]) -> f64 {
         self.preamp.get(bands)
-    }
-
-    /// Drop an import name `bands` (what plays) has moved away from. Runs
-    /// after every EQ modal message and wherever the band list is replaced
-    /// outside the modal.
-    pub(crate) fn drop_moved_import(&mut self, bands: &[EqBand]) {
-        if self
-            .imported
-            .as_ref()
-            .is_some_and(|imported| imported.bands != bands)
-        {
-            self.imported = None;
-        }
     }
 
     /// The saved profile the band list is, compared at the stored precision
@@ -489,7 +464,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     let profile_placeholder = if !eq_enabled {
         "EQ Off"
     } else if profile_names.is_empty() {
-        "No profiles"
+        "No saved profiles"
     } else {
         "Custom"
     };
@@ -680,18 +655,28 @@ pub(crate) fn eq_modal_overlay<'a>(
 }
 
 /// Most characters a profile name shows in the picker before it is cut
-/// with an ellipsis: about 180 px at 14 px, clear of the picker's arrow.
-const PROFILE_LABEL_MAX_CHARS: usize = 24;
+/// with an ellipsis: about 180 px at 14 px in a wide monospace (9 px a
+/// character, measured with Maple Mono), clear of the picker's arrow. At 24
+/// the picker cut the label a second time at its own edge.
+const PROFILE_LABEL_MAX_CHARS: usize = 20;
 
-/// A saved profile's name as the picker lists it.
+/// A saved profile's name as the picker lists it. A long one keeps its
+/// start and, at more length, its end around an ellipsis: profiles loaded
+/// from files or from AutoEq share their beginnings and differ at the end
+/// (`Momentum 5 ANC on - neutral` / `- fuller bass`, `Sennheiser Momentum 3
+/// Wireless` / `4 Wireless`).
 fn profile_label(name: &str) -> String {
-    if name.chars().count() <= PROFILE_LABEL_MAX_CHARS {
-        name.to_owned()
-    } else {
-        let mut label: String = name.chars().take(PROFILE_LABEL_MAX_CHARS - 1).collect();
-        label.push('…');
-        label
+    let count = name.chars().count();
+    if count <= PROFILE_LABEL_MAX_CHARS {
+        return name.to_owned();
     }
+    let tail = PROFILE_LABEL_MAX_CHARS * 3 / 5;
+    let head = PROFILE_LABEL_MAX_CHARS - tail - 1;
+    name.chars()
+        .take(head)
+        .chain(std::iter::once('…'))
+        .chain(name.chars().skip(count - tail))
+        .collect()
 }
 
 /// The header pickers' look (presets and profiles alike): flat `bg0_hard`,
@@ -778,17 +763,27 @@ fn gains_match(a: &[f32; 10], b: &[f32; 10]) -> bool {
 mod tests {
     use super::{BAND_FREQS, PROFILE_LABEL_MAX_CHARS, gains_match, profile_label};
 
+    /// Profiles of one family differ at the end of their names: cut at the
+    /// end, two of them read the same in the picker (seen live: `Momentum 5
+    /// ANC on - …` twice).
     #[test]
-    fn long_profile_names_are_cut_with_an_ellipsis() {
+    fn long_profile_names_keep_both_ends() {
         assert_eq!(profile_label("HD 650"), "HD 650");
         let exact = "x".repeat(PROFILE_LABEL_MAX_CHARS);
         assert_eq!(profile_label(&exact), exact);
-        let cut = profile_label("Sennheiser HD 650 ParametricEQ");
-        assert_eq!(cut, "Sennheiser HD 650 Param…");
-        assert_eq!(cut.chars().count(), PROFILE_LABEL_MAX_CHARS);
+        let neutral = profile_label("Momentum 5 ANC on - neutral");
+        let fuller = profile_label("Momentum 5 ANC on - fuller bass");
+        assert_eq!(neutral, "Momentu…on - neutral");
+        assert_eq!(fuller, "Momentu… fuller bass");
+        assert_eq!(
+            profile_label("Sennheiser Momentum 4 Wireless"),
+            "Sennhei…m 4 Wireless"
+        );
         // Cut on characters, never inside one.
         let wide = profile_label(&"ø".repeat(30));
-        assert_eq!(wide.chars().count(), PROFILE_LABEL_MAX_CHARS);
+        for label in [&neutral, &fuller, &wide] {
+            assert_eq!(label.chars().count(), PROFILE_LABEL_MAX_CHARS);
+        }
     }
 
     /// Pins each visible band label to its DSP center frequency, encoding the

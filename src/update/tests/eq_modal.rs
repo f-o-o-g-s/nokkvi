@@ -804,52 +804,68 @@ fn deleting_a_profile_keeps_the_band_list() {
     );
 }
 
+/// A loaded profile used to stay only as the band list: switching to another
+/// one lost it unless it was saved by hand first.
 #[test]
-fn an_import_names_the_next_profile_save_until_the_list_changes() {
+fn an_import_is_saved_as_a_profile_under_its_files_name() {
     let imported = vec![
         EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
         peak(220.0, -3.1, 0.85),
     ];
-    let import = || M::ImportLoaded(Ok(("HD 650 ParametricEQ.txt".into(), imported.clone())));
-
-    // Import, Save: the name field starts with the file's name.
-    let mut app = parametric_app(&three_bands());
-    let _ = app.handle_eq_modal(import());
-    let _ = app.handle_eq_modal(M::SavePreset);
-    assert_eq!(app.eq_modal.save_name, "HD 650 ParametricEQ");
-    // Cancelled, it is still offered.
-    let _ = app.handle_eq_modal(M::CancelSave);
-    let _ = app.handle_eq_modal(M::SavePreset);
-    assert_eq!(app.eq_modal.save_name, "HD 650 ParametricEQ");
-    // Saved, it has served.
-    let _ = app.handle_eq_modal(M::SavePresetConfirm);
-    assert_eq!(app.eq_modal.profiles.len(), 1);
-    let _ = app.handle_eq_modal(M::SavePreset);
-    assert!(app.eq_modal.save_name.is_empty());
-    let _ = app.handle_eq_modal(M::CancelSave);
-
-    // An edit drops it, and editing back doesn't bring it back.
-    let mut app = parametric_app(&three_bands());
-    let _ = app.handle_eq_modal(import());
-    let _ = app.handle_eq_modal(M::ToggleBand(0));
-    assert!(app.eq_modal.imported.is_none());
-    let _ = app.handle_eq_modal(M::ToggleBand(0));
-    let _ = app.handle_eq_modal(M::SavePreset);
-    assert!(app.eq_modal.save_name.is_empty());
-
-    // Selecting a profile drops it.
     let mut app = parametric_app(&three_bands());
     app.eq_modal.profiles = vec![profile("Speakers", &speakers())];
-    let _ = app.handle_eq_modal(import());
-    let _ = app.handle_eq_modal(M::ProfileSelected(0));
-    assert!(app.eq_modal.imported.is_none());
 
-    // The Graphic view's preset Save never takes it.
-    let mut app = parametric_app(&three_bands());
-    let _ = app.handle_eq_modal(import());
-    let _ = app.handle_eq_modal(M::ModeSelected(EqMode::Graphic));
+    let _ = app.handle_eq_modal(M::ImportLoaded(Ok((
+        "HD 650 ParametricEQ.txt".into(),
+        imported.clone(),
+    ))));
+
+    assert_eq!(
+        app.eq_modal.profiles,
+        [
+            profile("Speakers", &speakers()),
+            profile("HD 650", &imported)
+        ]
+    );
+    assert_eq!(
+        app.eq_modal.matching_profile(&bands(&app)),
+        Some(1),
+        "the picker shows it"
+    );
+    // Nothing is left to name: the Save prompt starts empty.
     let _ = app.handle_eq_modal(M::SavePreset);
     assert!(app.eq_modal.save_name.is_empty());
+}
+
+#[test]
+fn importing_a_file_again_replaces_its_profile_where_it_sits() {
+    let newer = vec![peak(1_000.0, -2.0, 1.0)];
+    let mut app = parametric_app(&three_bands());
+    app.eq_modal.profiles = vec![
+        profile("Headphones", &three_bands()),
+        profile("hd 650", &speakers()),
+        profile("Speakers", &speakers()),
+    ];
+
+    let _ = app.handle_eq_modal(M::ImportLoaded(Ok(("HD 650.txt".into(), newer.clone()))));
+
+    assert_eq!(
+        app.eq_modal.profiles,
+        [
+            profile("Headphones", &three_bands()),
+            profile("HD 650", &newer),
+            profile("Speakers", &speakers()),
+        ]
+    );
+    assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(1));
+}
+
+#[test]
+fn a_refused_import_saves_no_profile() {
+    let mut app = parametric_app(&three_bands());
+    let _ = app.handle_eq_modal(M::ImportLoaded(Err("Couldn't import x.txt: why".into())));
+    assert!(app.eq_modal.profiles.is_empty());
+    assert_eq!(bands(&app), three_bands());
 }
 
 #[test]
@@ -873,7 +889,6 @@ fn settings_load_restores_the_profiles_and_logout_clears_them() {
 
     app.discard_modal(ActiveModal::Eq);
     assert!(app.eq_modal.profiles.is_empty());
-    assert!(app.eq_modal.imported.is_none());
 }
 
 // ----------------------------------------------------------------------------
@@ -1183,9 +1198,12 @@ mod autoeq {
         assert_eq!(app.eq_modal.selected, None);
         assert_eq!(app.eq_modal.edit, None);
         assert!(!app.eq_modal.bands_unsaved, "persisted at once");
-        // The next profile Save starts from the headphone's name.
-        let _ = app.handle_eq_modal(M::SavePreset);
-        assert_eq!(app.eq_modal.save_name, "Sennheiser HD 600");
+        // It is in the profile list under the headphone's name, and shown.
+        assert_eq!(
+            app.eq_modal.profiles,
+            [super::profile("Sennheiser HD 600", &hd600_bands())]
+        );
+        assert_eq!(app.eq_modal.matching_profile(&bands(&app)), Some(0));
     }
 
     #[test]

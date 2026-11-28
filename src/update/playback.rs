@@ -2909,11 +2909,9 @@ impl Nokkvi {
         self.playback.eq_state.set_enabled(settings.eq_enabled);
 
         // Load custom EQ presets and the saved Parametric profiles into the
-        // modal, and forget an import name the reloaded band list no longer
-        // matches.
+        // modal.
         self.eq_modal.custom_presets = settings.custom_eq_presets.clone();
         self.eq_modal.profiles = settings.eq_profiles.clone();
-        self.drop_moved_eq_import();
 
         debug!(
             "⚙️ [SETTINGS LOADED] crossfade_enabled={}, crossfade_duration_secs={}, volume_normalization={}, normalization_level={:?}",

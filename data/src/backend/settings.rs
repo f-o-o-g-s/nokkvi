@@ -260,6 +260,13 @@ impl SettingsService {
         sm.save_eq_profile(name, bands)
     }
 
+    /// Keep a loaded profile (an imported file, an AutoEq download) under
+    /// `name`, in place of a saved profile of that name
+    pub async fn put_eq_profile(&self, name: String, bands: Vec<EqBand>) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.put_eq_profile(name, bands)
+    }
+
     /// Set default playlist for quick-add and persist
     pub async fn set_default_playlist(
         &self,

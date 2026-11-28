@@ -1291,6 +1291,18 @@ impl SettingsManager {
         self.save()
     }
 
+    /// Keep a loaded profile (an imported file, an AutoEq download) under
+    /// `name`: in place of the saved profile of that name, else appended
+    /// (`EqProfile::put`).
+    pub fn put_eq_profile(
+        &mut self,
+        name: String,
+        bands: Vec<crate::audio::eq::EqBand>,
+    ) -> Result<()> {
+        crate::audio::eq::EqProfile::put(&mut self.settings.player.eq_profiles, name, bands);
+        self.save()
+    }
+
     /// Delete the saved profile at `index` (nothing, past the list).
     pub fn delete_eq_profile(&mut self, index: usize) -> Result<()> {
         if index < self.settings.player.eq_profiles.len() {
@@ -3818,6 +3830,39 @@ mod eq_setter_tests {
         assert_eq!(live.eq_profiles[1].bands.len(), EQ_MAX_BANDS);
         assert!(
             live.eq_profiles[1]
+                .bands
+                .iter()
+                .all(|band| *band == wild.clamped())
+        );
+        assert_eq!(stored(&sm).player.eq_profiles, live.eq_profiles);
+    }
+
+    /// A loaded profile takes the place of the one saved under its name
+    /// (any case), where that one sits: the UI deletes by index, so the
+    /// order here and in its own list must stay the same.
+    #[test]
+    fn put_eq_profile_replaces_its_namesake_in_place_or_appends() {
+        let (mut sm, _tmp) = manager();
+        let old = EqBand::new(EqBandKind::Peak, 1_000.0, -3.0, 1.0);
+        let new = EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7);
+        let wild = EqBand::new(EqBandKind::Peak, 1.0e9, f64::NAN, 0.0);
+        for name in ["Speakers", "hd 650", "Desk"] {
+            sm.save_eq_profile(name.to_string(), vec![old])
+                .expect("save_eq_profile");
+        }
+
+        sm.put_eq_profile("HD 650".to_string(), vec![new])
+            .expect("put_eq_profile");
+        sm.put_eq_profile("Momentum 5".to_string(), vec![wild; EQ_MAX_BANDS + 8])
+            .expect("put_eq_profile");
+
+        let live = sm.get_player_settings();
+        let names: Vec<&str> = live.eq_profiles.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Speakers", "HD 650", "Desk", "Momentum 5"]);
+        assert_eq!(live.eq_profiles[1].bands, [new]);
+        assert_eq!(live.eq_profiles[3].bands.len(), EQ_MAX_BANDS);
+        assert!(
+            live.eq_profiles[3]
                 .bands
                 .iter()
                 .all(|band| *band == wild.clamped())

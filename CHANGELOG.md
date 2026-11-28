@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Parametric band lists can be saved as named profiles and switched from the equalizer's header.
 - The Parametric view has an AutoEq search that finds your headphones and loads their profile.
 - The AutoEq headphone list is downloaded from GitHub only when you open that search.
+- An imported profile file or an AutoEq headphone is added to the saved profiles under its own name.
 
 ### Changed
 

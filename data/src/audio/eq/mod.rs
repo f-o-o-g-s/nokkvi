@@ -127,6 +127,34 @@ pub struct EqProfile {
     pub bands: Vec<EqBand>,
 }
 
+impl EqProfile {
+    /// Keep a loaded profile (an imported file, an AutoEq download) in
+    /// `profiles` under `name`: in place of the one saved under that name
+    /// (any case; the new spelling is kept), where that one sits, else at
+    /// the end. Bands are held to the band limits. Returns its index.
+    ///
+    /// The settings and the EQ modal's own list both go through this, so
+    /// their order stays the same (the modal deletes by index).
+    pub fn put(profiles: &mut Vec<Self>, name: String, mut bands: Vec<EqBand>) -> usize {
+        clamp_bands(&mut bands);
+        let wanted = name.to_lowercase();
+        let profile = Self { name, bands };
+        match profiles
+            .iter()
+            .position(|saved| saved.name.to_lowercase() == wanted)
+        {
+            Some(index) => {
+                profiles[index] = profile;
+                index
+            }
+            None => {
+                profiles.push(profile);
+                profiles.len() - 1
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for EqProfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
