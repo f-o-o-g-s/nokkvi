@@ -30,7 +30,6 @@ use crate::{
         eq_curve::{bands_key, eq_curve},
         eq_modal::{EqModalMessage, EqModalViewData},
         hover_overlay::HoverOverlay,
-        remount::remount,
         text_field::text_field,
     },
 };
@@ -56,15 +55,6 @@ impl BandField {
             Self::Freq => "freq",
             Self::Gain => "gain",
             Self::Q => "q",
-        }
-    }
-
-    /// Its place in [`Self::ALL`].
-    fn index(self) -> usize {
-        match self {
-            Self::Freq => 0,
-            Self::Gain => 1,
-            Self::Q => 2,
         }
     }
 }
@@ -102,58 +92,6 @@ pub(crate) fn field_text(
     match edit {
         Some(edit) if (edit.band, edit.field) == (index, field) => edit.text.clone(),
         _ => format_value(field, band),
-    }
-}
-
-/// What each band field's text field was last handed, and the key its
-/// widget state is mounted under (`widgets::remount`).
-///
-/// iced's `text_input` redraws a value replaced from outside the field in
-/// the system sans-serif while it stays mounted, so every field whose text
-/// changes for any reason but its own typing gets a new key, which gives it
-/// a fresh widget state. [`Self::sync`] runs after every message the EQ
-/// modal handles and wherever the band list is replaced outside it.
-#[derive(Debug, Default)]
-pub(crate) struct FieldMounts {
-    /// Per band, per field in [`BandField::ALL`] order: `(text, key)`.
-    fields: Vec<[(String, u64); 3]>,
-    /// The last key handed out; keys never repeat within a session, so a
-    /// row that comes back can't meet a key its old widget held.
-    last_key: u64,
-}
-
-impl FieldMounts {
-    /// The key band `band`'s `field` is mounted under (0 before its first
-    /// sync).
-    pub(crate) fn key(&self, band: usize, field: BandField) -> u64 {
-        self.fields
-            .get(band)
-            .map_or(0, |fields| fields[field.index()].1)
-    }
-
-    /// Record the text each field of `bands` will show and re-key every field
-    /// whose text changed, except the one `edit` names: the user is typing
-    /// there and its widget already holds that text (a re-key would drop
-    /// its focus and caret).
-    pub(crate) fn sync(&mut self, bands: &[EqBand], edit: Option<&FieldEdit>) {
-        self.fields.truncate(bands.len());
-        for (index, band) in bands.iter().enumerate() {
-            if index == self.fields.len() {
-                self.fields.push(Default::default());
-            }
-            for field in BandField::ALL {
-                let text = field_text(index, band, field, edit);
-                let typing = edit.is_some_and(|edit| (edit.band, edit.field) == (index, field));
-                let slot = &mut self.fields[index][field.index()];
-                if slot.0 != text {
-                    slot.0 = text;
-                    if !typing {
-                        self.last_key += 1;
-                        slot.1 = self.last_key;
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -473,7 +411,7 @@ pub(crate) fn parametric_body<'a>(data: &EqModalViewData<'a>) -> Element<'a, EqM
     let table: Element<'a, EqModalMessage> = if bands.is_empty() {
         empty_table()
     } else {
-        band_table(bands, selected, state.edit.as_ref(), &state.mounts)
+        band_table(bands, selected, state.edit.as_ref())
     };
 
     column![curve, status, table]
@@ -566,7 +504,6 @@ fn band_table<'a>(
     bands: &[EqBand],
     selected: Option<usize>,
     edit: Option<&FieldEdit>,
-    mounts: &FieldMounts,
 ) -> Element<'a, EqModalMessage> {
     let header = row![
         header_cell("#", NUMBER_WIDTH, Alignment::End),
@@ -585,7 +522,7 @@ fn band_table<'a>(
         bands
             .iter()
             .enumerate()
-            .map(|(i, band)| band_row(i, band, selected == Some(i), edit, mounts)),
+            .map(|(i, band)| band_row(i, band, selected == Some(i), edit)),
     )
     .width(Length::Fill);
 
@@ -614,7 +551,6 @@ fn band_row<'a>(
     band: &EqBand,
     is_selected: bool,
     edit: Option<&FieldEdit>,
-    mounts: &FieldMounts,
 ) -> Element<'a, EqModalMessage> {
     let number_color = if is_selected {
         theme::accent_bright()
@@ -670,7 +606,7 @@ fn band_row<'a>(
 
     let value_field = |field: BandField, width: f32| {
         let enabled = field_enabled(band, field);
-        let input = text_field(
+        text_field(
             if enabled { "" } else { "—" },
             field_text(i, band, field, edit),
             theme::ui_font(),
@@ -690,13 +626,7 @@ fn band_row<'a>(
                     input
                 }
             },
-        );
-        // Keep this key: iced's text_input redraws a value replaced from
-        // outside the field (`Editor::overwrite` sets default attributes, and
-        // the font is re-applied only when the font changes) in the system
-        // sans-serif while its state is kept. `FieldMounts` re-keys a field
-        // at every outside change, so it gets a fresh state.
-        remount(mounts.key(i, field), input)
+        )
     };
 
     let remove = tooltip(
@@ -1127,53 +1057,6 @@ mod tests {
         );
         let cut = EqBand::new(EqBandKind::LowPass, 15_000.0, 0.0, EQ_DEFAULT_Q);
         assert_eq!(field_text(0, &cut, BandField::Gain, None), "");
-    }
-
-    #[test]
-    fn mounts_rekey_changed_fields_except_the_one_typed_into() {
-        let mut mounts = FieldMounts::default();
-        let mut bands = vec![peak(100.0, 3.0, 1.0), peak(1_000.0, -2.0, 1.41)];
-        mounts.sync(&bands, None);
-        let first: Vec<u64> = (0..2)
-            .flat_map(|band| BandField::ALL.map(|field| mounts.key(band, field)))
-            .collect();
-        assert!(first.iter().all(|&key| key != 0));
-        let mut unique = first.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), first.len(), "every field its own key");
-
-        // Nothing changed: nothing re-keyed.
-        mounts.sync(&bands, None);
-        assert_eq!(mounts.key(1, BandField::Q), first[5]);
-
-        // A value from outside: that field only.
-        bands[1].gain = -2.5;
-        mounts.sync(&bands, None);
-        assert_ne!(mounts.key(1, BandField::Gain), first[4]);
-        assert_eq!(mounts.key(1, BandField::Freq), first[3]);
-
-        // Typed text: the field's own widget holds it, no re-key; its value
-        // changing under the typing doesn't re-key it either.
-        let typing = FieldEdit {
-            band: 0,
-            field: BandField::Q,
-            text: "2".to_owned(),
-        };
-        mounts.sync(&bands, Some(&typing));
-        bands[0].q = 2.0;
-        mounts.sync(&bands, Some(&typing));
-        assert_eq!(mounts.key(0, BandField::Q), first[2]);
-        // The commit shows `2.0`, not the `2` typed: re-keyed.
-        mounts.sync(&bands, None);
-        assert_ne!(mounts.key(0, BandField::Q), first[2]);
-
-        // The list shrinks and grows back: the returning row takes new keys.
-        let last = mounts.key(1, BandField::Freq);
-        mounts.sync(&bands[..1], None);
-        assert_eq!(mounts.key(1, BandField::Freq), 0, "gone");
-        mounts.sync(&bands, None);
-        assert!(mounts.key(1, BandField::Freq) > last);
     }
 
     #[test]

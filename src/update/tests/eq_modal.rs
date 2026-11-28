@@ -1,6 +1,6 @@
-//! The equalizer modal's Parametric view: the view switch, the band list
-//! edits, the typed fields (and their widget remounts), import, saved
-//! profiles and the modal's teardown.
+//! The equalizer modal: the view switch, the Graphic sliders' save, the
+//! Parametric band list edits, the typed fields, import, saved profiles and
+//! the modal's teardown.
 //!
 //! Assertions target observable state only: `app.playback.eq_state` (the one
 //! runtime copy of the equalizer) and `app.eq_modal` (`test_app()` has no
@@ -641,218 +641,6 @@ fn a_slider_past_the_tenth_band_changes_nothing() {
 }
 
 // ----------------------------------------------------------------------------
-// Field remounts: a value set from outside a field gives it a fresh widget
-// state (iced's text_input redraws an outside value in the fallback font
-// while its state is kept; `FieldMounts`)
-// ----------------------------------------------------------------------------
-
-/// Every field's mount key, band by band (Freq, Gain, Q).
-fn keys(app: &Nokkvi) -> Vec<[u64; 3]> {
-    (0..bands(app).len())
-        .map(|band| BandField::ALL.map(|field| app.eq_modal.mounts.key(band, field)))
-        .collect()
-}
-
-fn key(app: &Nokkvi, band: usize, field: BandField) -> u64 {
-    app.eq_modal.mounts.key(band, field)
-}
-
-/// The fields whose key moved between two snapshots, as (band, field).
-fn rekeyed(before: &[[u64; 3]], after: &[[u64; 3]]) -> Vec<(usize, BandField)> {
-    after
-        .iter()
-        .enumerate()
-        .flat_map(|(band, fields)| {
-            BandField::ALL
-                .into_iter()
-                .enumerate()
-                .filter(move |&(i, _)| before.get(band).is_none_or(|old| old[i] != fields[i]))
-                .map(move |(_, field)| (band, field))
-        })
-        .collect()
-}
-
-#[test]
-fn a_freshly_opened_modal_starts_in_sync() {
-    let app = parametric_app(&three_bands());
-    let before = keys(&app);
-    assert!(
-        before.iter().flatten().all(|&k| k != 0),
-        "every field was keyed at Open: {before:?}"
-    );
-    let mut app = app;
-    app.sync_eq_fields();
-    assert_eq!(keys(&app), before, "a second sync changes nothing");
-}
-
-#[test]
-fn a_curve_drag_and_a_wheel_step_rekey_the_fields_they_change() {
-    let mut app = parametric_app(&three_bands());
-    let before = keys(&app);
-    let _ = app.handle_eq_modal(M::BandDragged(1, 1_200.0, 5.5));
-    let dragged = keys(&app);
-    assert_eq!(
-        rekeyed(&before, &dragged),
-        [(1, BandField::Freq), (1, BandField::Gain)]
-    );
-
-    let _ = app.handle_eq_modal(M::BandQStepped(0, 2.24));
-    assert_eq!(rekeyed(&dragged, &keys(&app)), [(0, BandField::Q)]);
-}
-
-#[test]
-fn a_nudge_rekeys_the_focused_field_and_hands_its_focus_back() {
-    let mut app = parametric_app(&three_bands());
-    let before = keys(&app);
-    let task = app.handle_eq_modal(M::FieldKey(
-        Some(field_id(1, BandField::Freq)),
-        FieldKey::Up,
-    ));
-    assert_eq!(rekeyed(&before, &keys(&app)), [(1, BandField::Freq)]);
-    assert!(task.units() > 0, "the re-keyed field is focused again");
-
-    // At a limit nothing changes: no re-key, no focus task.
-    let top = peak(EQ_FREQ_MAX, 0.0, 1.0);
-    let mut app = parametric_app(&[top]);
-    let before = keys(&app);
-    let task = app.handle_eq_modal(M::FieldKey(
-        Some(field_id(0, BandField::Freq)),
-        FieldKey::Up,
-    ));
-    assert_eq!(keys(&app), before);
-    assert_eq!(task.units(), 0);
-}
-
-#[test]
-fn typing_keeps_the_fields_key_and_committing_a_different_text_rekeys_it() {
-    let mut app = parametric_app(&three_bands());
-    let typed_into = key(&app, 0, BandField::Freq);
-
-    // The first keystroke and every one after it: the widget holds the text.
-    for typed in ["2", "25", "250", "2500"] {
-        let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Freq, typed.into()));
-        assert_eq!(key(&app, 0, BandField::Freq), typed_into, "{typed}");
-    }
-    assert_eq!(bands(&app)[0].freq, 2_500.0, "the value plays as typed");
-
-    // Enter normalizes `2500` to `2.5k`: a new text from outside the field.
-    let _ = app.handle_eq_modal(M::FieldSubmit(0, BandField::Freq));
-    assert_ne!(key(&app, 0, BandField::Freq), typed_into);
-
-    // A commit that shows exactly what was typed changes nothing.
-    let _ = app.handle_eq_modal(M::FieldInput(1, BandField::Q, "1.41".into()));
-    let q = key(&app, 1, BandField::Q);
-    let _ = app.handle_eq_modal(M::FieldSubmit(1, BandField::Q));
-    assert_eq!(key(&app, 1, BandField::Q), q);
-}
-
-#[test]
-fn typing_into_another_field_rekeys_only_the_one_left_behind() {
-    let mut app = parametric_app(&three_bands());
-    let _ = app.handle_eq_modal(M::FieldInput(0, BandField::Gain, "-4".into()));
-    let before = keys(&app);
-    // Field A (the first band's gain) still shows `-4`; typing into field B
-    // commits it, so A now shows `-4.0`. B keeps its widget, focus and caret.
-    let _ = app.handle_eq_modal(M::FieldInput(2, BandField::Q, "1".into()));
-    assert_eq!(rekeyed(&before, &keys(&app)), [(0, BandField::Gain)]);
-}
-
-#[test]
-fn reset_rekeys_the_gains_it_zeroes() {
-    let mut list = three_bands().to_vec();
-    list.push(peak(4_000.0, 0.0, 2.0));
-    let mut app = parametric_app(&list);
-    let before = keys(&app);
-    let _ = app.handle_eq_modal(M::ResetAll);
-    assert_eq!(
-        rekeyed(&before, &keys(&app)),
-        [
-            (0, BandField::Gain),
-            (1, BandField::Gain),
-            (2, BandField::Gain)
-        ],
-        "the flat band's `0.0` stays as it was"
-    );
-}
-
-#[test]
-fn a_band_removed_above_rekeys_the_rows_that_slid_up() {
-    let mut app = parametric_app(&three_bands());
-    let before = keys(&app);
-    let _ = app.handle_eq_modal(M::RemoveBand(0));
-    let after = keys(&app);
-    assert_eq!(after.len(), 2);
-    // Every field of the two rows now shows the next band's values.
-    assert_eq!(rekeyed(&before, &after).len(), 6, "{before:?} -> {after:?}");
-
-    // A band added at the end shifts nothing.
-    let _ = app.handle_eq_modal(M::AddBand);
-    assert_eq!(&keys(&app)[..2], &after[..]);
-}
-
-#[test]
-fn an_import_a_type_change_and_a_settings_reload_rekey_what_they_change() {
-    let mut app = parametric_app(&three_bands());
-    let before = keys(&app);
-    let imported = vec![
-        EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
-        peak(1_000.0, -2.0, 1.41),
-    ];
-    let _ = app.handle_eq_modal(M::ImportLoaded(Ok(("HD 650.txt".into(), imported))));
-    // The second band is the same as before in every field.
-    assert_eq!(
-        rekeyed(&before, &keys(&app)),
-        [
-            (0, BandField::Freq),
-            (0, BandField::Gain),
-            (0, BandField::Q)
-        ]
-    );
-
-    let before = keys(&app);
-    let _ = app.handle_eq_modal(M::BandKindSelected(1, EqBandKind::LowPass));
-    assert_eq!(
-        rekeyed(&before, &keys(&app)),
-        [(1, BandField::Gain)],
-        "a pass filter's gain field goes blank"
-    );
-
-    // A config.toml reload replaces the list outside the modal's handler.
-    let _guard = crate::theme::THEME_MODE_LOCK.lock();
-    let before = keys(&app);
-    let _ = app.handle_player_settings_loaded(
-        nokkvi_data::types::player_settings::LivePlayerSettings {
-            eq_mode: EqMode::Parametric,
-            eq_bands: vec![
-                EqBand::new(EqBandKind::LowShelf, 105.0, 6.5, 0.7),
-                peak(1_000.0, -2.0, 2.0),
-            ],
-            ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
-        },
-    );
-    assert_eq!(
-        rekeyed(&before, &keys(&app)),
-        [(1, BandField::Gain), (1, BandField::Q)]
-    );
-}
-
-#[test]
-fn a_settings_reload_keeps_the_key_of_the_field_being_typed_into() {
-    let mut app = parametric_app(&three_bands());
-    let _ = app.handle_eq_modal(M::FieldInput(1, BandField::Gain, "-6".into()));
-    let typed_into = key(&app, 1, BandField::Gain);
-    let _guard = crate::theme::THEME_MODE_LOCK.lock();
-    let _ = app.handle_player_settings_loaded(
-        nokkvi_data::types::player_settings::LivePlayerSettings {
-            eq_mode: EqMode::Parametric,
-            eq_bands: vec![peak(90.0, 1.0, 1.0), peak(900.0, 2.0, 1.0)],
-            ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
-        },
-    );
-    assert_eq!(key(&app, 1, BandField::Gain), typed_into);
-}
-
-// ----------------------------------------------------------------------------
 // Saved profiles
 // ----------------------------------------------------------------------------
 
@@ -1107,7 +895,7 @@ mod autoeq {
         types::toast::ToastLevel,
     };
 
-    use super::{bands, keys, last_toast, parametric_app, peak, three_bands};
+    use super::{bands, last_toast, parametric_app, peak, three_bands};
     use crate::{
         Nokkvi,
         update::modals::ActiveModal,
@@ -1395,10 +1183,6 @@ mod autoeq {
         assert_eq!(app.eq_modal.selected, None);
         assert_eq!(app.eq_modal.edit, None);
         assert!(!app.eq_modal.bands_unsaved, "persisted at once");
-        assert!(
-            keys(&app).iter().flatten().all(|&key| key != 0),
-            "the table's fields are keyed for the new list"
-        );
         // The next profile Save starts from the headphone's name.
         let _ = app.handle_eq_modal(M::SavePreset);
         assert_eq!(app.eq_modal.save_name, "Sennheiser HD 600");

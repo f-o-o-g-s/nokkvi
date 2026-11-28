@@ -19,7 +19,7 @@ use crate::{
     theme,
     widgets::{
         eq_autoeq::{self, AutoEqMessage, AutoEqPanel},
-        eq_parametric::{self, FieldMounts, PreampMemo},
+        eq_parametric::{self, PreampMemo},
         eq_slider::eq_slider,
         hover_overlay::HoverOverlay,
         pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
@@ -70,9 +70,6 @@ pub struct EqModalState {
     pub gains_unsaved: bool,
     /// The preamp the status line shows, memoized per band list.
     pub(crate) preamp: PreampMemo,
-    /// The band table's text fields: what each was last handed and the key
-    /// its widget state is mounted under.
-    pub(crate) mounts: FieldMounts,
     /// Parametric view: the AutoEq search panel, shown in place of the
     /// editor while open (`widgets/eq_autoeq.rs`).
     pub(crate) autoeq: Option<AutoEqPanel>,
@@ -105,12 +102,10 @@ impl EqModalState {
         self.preamp.get(bands)
     }
 
-    /// Bring the band table's mount keys up to date with `bands` (what
-    /// plays) and drop an import name the list has moved away from. Runs
+    /// Drop an import name `bands` (what plays) has moved away from. Runs
     /// after every EQ modal message and wherever the band list is replaced
     /// outside the modal.
-    pub(crate) fn sync_fields(&mut self, bands: &[EqBand]) {
-        self.mounts.sync(bands, self.edit.as_ref());
+    pub(crate) fn drop_moved_import(&mut self, bands: &[EqBand]) {
         if self
             .imported
             .as_ref()

@@ -283,8 +283,8 @@ impl Nokkvi {
                 // Live only: a held key repeats ~25 times a second. The
                 // next commit or Close writes it.
                 self.set_eq_bands_live(&bands);
-                // The new value re-keys the field (`FieldMounts`), and the
-                // fresh widget has no focus: hand it back.
+                // The text changed under the caret, which keeps its index:
+                // put it back at the end, where typing continues the value.
                 focus_field(index, field)
             }
         }
@@ -534,20 +534,20 @@ impl Nokkvi {
         Task::batch([commit, export])
     }
 
-    /// Handle one EQ modal message, then bring the band table's text fields
-    /// up to date with what it changed (`sync_eq_fields`).
+    /// Handle one EQ modal message, then forget an import name the band list
+    /// it left behind no longer matches (`drop_moved_eq_import`).
     pub(crate) fn handle_eq_modal(&mut self, msg: EqModalMessage) -> Task<Message> {
         let task = self.handle_eq_modal_message(msg);
-        self.sync_eq_fields();
+        self.drop_moved_eq_import();
         task
     }
 
-    /// Re-key every band-table field whose text changed from outside it (see
-    /// `FieldMounts`). Call it wherever the band list or the field being
-    /// typed into changes outside `handle_eq_modal`.
-    pub(crate) fn sync_eq_fields(&mut self) {
+    /// Forget the imported file's name once the band list is no longer the
+    /// one that import put in. Call it wherever the band list changes outside
+    /// `handle_eq_modal`.
+    pub(crate) fn drop_moved_eq_import(&mut self) {
         let bands = self.playback.eq_state.parametric_bands();
-        self.eq_modal.sync_fields(&bands);
+        self.eq_modal.drop_moved_import(&bands);
     }
 
     fn handle_eq_modal_message(&mut self, msg: EqModalMessage) -> Task<Message> {
